@@ -1,0 +1,85 @@
+<mxfile host="app.diagrams.net" agent="CumbresBI-Architecture-Docs" version="24.0.0" type="device">
+  <diagram id="flujo-oidc" name="Flujo de Autenticación">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="840" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="hOidc" value="Google Workspace OIDC (usuarios internos)" style="text;html=1;align=center;fontStyle=1;fontSize=13;fontColor=#1C75BC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="260" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hMl" value="Magic Link (usuarios externos)" style="text;html=1;align=center;fontStyle=1;fontSize=13;fontColor=#1C75BC;" vertex="1" parent="1">
+          <mxGeometry x="560" y="50" width="260" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="o1" value="1. Usuario hace clic 'Iniciar sesión con Google'&#10;Next.js redirige a /auth/google/start" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o2" value="2. iam-service arma Authorization Request&#10;(PKCE) y redirige a Google" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="165" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o3" value="3. Usuario se autentica en&#10;Google Workspace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="240" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o4" value="4. Google redirige a&#10;/auth/google/callback?code=..." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="315" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o5" value="5. iam-service intercambia code por tokens&#10;(valida code_verifier PKCE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="390" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o6" value="6. iam-service valida claim 'hd' contra&#10;dominios Workspace aprobados" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="465" width="260" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="o7" value="7. Crea/actualiza iam_identities + iam_users&#10;(email, hosted_domain, last_login_at)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="565" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="o8" value="8. iam-service emite JWT firmado (RS256)&#10;con claims de alcance, en cookie&#10;HttpOnly; Secure; SameSite=Lax" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="640" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="oReject" value="Rechazo: dominio no aprobado&#10;→ HTTP 403, sin sesión emitida" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="340" y="465" width="180" height="75" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a1" value="A1. Usuario externo recibe Magic Link&#10;por correo (token de un solo uso)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="90" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="A2. Usuario abre&#10;/magic-link/[token]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="165" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="A3. iam-service valida token: hash coincide,&#10;no expirado (7 días), uses_count &lt; max_uses,&#10;revoked_at IS NULL" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="240" width="260" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" value="A4. iam-service marca uso (first/last_used_at,&#10;uses_count++) y emite JWT de&#10;alcance externo limitado" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="345" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" value="A5. Next.js redirige a la vista pública&#10;correspondiente (ej. formulario KYC)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="430" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="aReject" value="Rechazo: token inválido/expirado&#10;→ error, opción de reenvío" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="340" y="255" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="merge" value="Sesión activa: JWT de alcance (cookie HttpOnly) validado por el API Gateway en cada request + AuthProvider (React Context) consulta /api/me" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="200" y="740" width="500" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eo1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="o1" target="o2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="o2" target="o3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="o3" target="o4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="o4" target="o5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="o5" target="o6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo6" value="válido" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="o6" target="o7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo7" value="no válido" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;strokeColor=#b85450;dashed=1;" edge="1" parent="1" source="o6" target="oReject"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="o7" target="o8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="o8" target="merge"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="ea1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a1" target="a2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a2" target="a3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea3" value="válido" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="a3" target="a4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea4" value="no válido" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;strokeColor=#b85450;dashed=1;" edge="1" parent="1" source="a3" target="aReject"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a4" target="a5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a5" target="merge"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

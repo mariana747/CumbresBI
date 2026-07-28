@@ -1,0 +1,52 @@
+<mxfile host="app.diagrams.net" agent="CumbresBI-Architecture-Docs" version="24.0.0" type="device">
+  <diagram id="flujo-auditoria-v2" name="Flujo de Auditoría (Outbox distribuido)">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1000" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="a1" value="Servicio de negocio (cualquiera de los 13)&#10;procesa una acción sensible" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="50" width="340" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="INSERT negocio + INSERT outbox_audit&#10;— misma transacción local" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="320" y="135" width="340" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="Relay/poller de outbox&#10;lee periódicamente la tabla local" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="220" width="340" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" value="Publica a Pub/Sub: audit.events&#10;(entrega at-least-once)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="305" width="340" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" value="audit-service consume&#10;deduplica por event_id (idempotente)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="320" y="410" width="340" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a6" value="INSERT append-only en bitacora_auditoria&#10;usuario runtime: SELECT+INSERT únicamente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="495" width="340" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a7" value="Visor de bitácora (iam-service/Admin):&#10;filtrable, exportable a CSV/PDF" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="580" width="340" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reject1" value="UPDATE/DELETE (incluso cuenta admin)&#10;→ trigger BEFORE UPDATE/DELETE aborta&#10;con SIGNAL SQLSTATE '45000'" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="740" y="490" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="reject2" value="TRUNCATE (DDL, no dispara triggers)&#10;→ rechazado: rol runtime sin&#10;privilegio DROP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="740" y="580" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="riesgo" value="Riesgo de cumplimiento introducido&#10;por el rediseño: ventana de&#10;consistencia eventual (segundos)&#10;entre el hecho y su aparición en&#10;la bitácora. Un relay caído es un&#10;hueco de auditoría silencioso si&#10;no se monitorea el backlog." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="40" y="220" width="240" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a1" target="a2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a2" target="a3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a3" target="a4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a4" target="a5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a5" target="a6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="a6" target="a7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="intento bloqueado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="1" source="a6" target="reject1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="1" source="a6" target="reject2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;" edge="1" parent="1" source="a3" target="riesgo"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,84 @@
+services:
+  iam-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${IAM_DB_NAME:-iam_service}
+      MYSQL_USER: ${IAM_DB_USER:-iam_app}
+      MYSQL_PASSWORD: ${IAM_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${IAM_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33061:3306"
+    volumes:
+      - iam_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${IAM_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  iam-service:
+    build:
+      context: ./services/iam-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      IAM_DB_HOST: iam-db
+    volumes:
+      - ./services/iam-service:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      iam-db:
+        condition: service_healthy
+
+  audit-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    # log_bin_trust_function_creators: bitacora_auditoria's append-only triggers
+    # (migration 0002) are created by the app DB user, not root/SUPER - MySQL
+    # requires this flag to allow trigger creation with binary logging on
+    # without granting SUPER to the low-privilege runtime user.
+    command: --log-bin-trust-function-creators=1
+    environment:
+      MYSQL_DATABASE: ${AUDIT_DB_NAME:-audit_service}
+      MYSQL_USER: ${AUDIT_DB_USER:-audit_app}
+      MYSQL_PASSWORD: ${AUDIT_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${AUDIT_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33062:3306"
+    volumes:
+      - audit_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${AUDIT_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  audit-service:
+    build:
+      context: ./services/audit-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AUDIT_DB_HOST: audit-db
+    volumes:
+      - ./services/audit-service:/app
+    ports:
+      - "8001:8001"
+    depends_on:
+      audit-db:
+        condition: service_healthy
+
+# Escalar: cada futuro microservicio (contrapartes-service, pld-compliance-service,
+# ventas-vivienda-service, tesoreria-service, etc. - ver docs/architecture/README.md
+# sec. 1.1) se agrega aqui como un bloque <servicio> + <servicio>-db aislado,
+# siguiendo exactamente este mismo patron: su propio Dockerfile bajo
+# services/<servicio>/, su propia base de datos con volumen y credenciales
+# propias, sin joins directos entre esquemas.
+
+volumes:
+  iam_db_data:
+  audit_db_data:

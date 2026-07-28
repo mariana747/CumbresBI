@@ -1,0 +1,49 @@
+<mxfile host="app.diagrams.net" agent="CumbresBI-Architecture-Docs" version="24.0.0" type="device">
+  <diagram id="comunicacion-v2" name="Comunicación entre Servicios (Microservicios)">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1040" pageHeight="560" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="usr" value="Usuario" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="20" y="230" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="web" value="Next.js" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="200" y="230" width="140" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="gw" value="API Gateway&#10;(valida JWT)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="400" y="230" width="140" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" value="Servicio A&#10;(ej. rentas-service)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="600" y="130" width="180" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="db1" value="Esquema BD&#10;Servicio A" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="130" width="150" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="bus" value="Pub/Sub" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="640" y="330" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" value="Servicio B&#10;(ej. tesoreria-service)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="600" y="440" width="180" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="db2" value="Esquema BD&#10;Servicio B" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="440" width="150" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="1. Interacción UI" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="usr" target="web"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" value="2. HTTPS + JWT (cookie)&#10;6. ← 202 Aceptado (PENDIENTE)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="web" target="gw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="3. valida JWT + reenvía claims&#10;5. ← 202 Aceptado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="gw" target="s1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="4. INSERT negocio + INSERT outbox&#10;(misma transacción)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="s1" target="db1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="7. relay publica evento&#10;(ej. renta.contrato.solicitado)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="s1" target="bus"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="8. consume evento" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="bus" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="9. crea registro relacionado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="s2" target="db2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" value="10. evento de confirmación/rechazo" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="s2" target="bus"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" value="11. consume → actualiza estado&#10;(ACTIVO/RECHAZADO)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="bus" target="s1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="note" value="El frontend solo habla con el API Gateway — ningún microservicio es alcanzable directamente desde el navegador. La respuesta inmediata (paso 6, 202 Aceptado) es distinta del resultado final de la saga, que llega después por evento — cambio de contrato de UX frente al monolito (ver README §11, riesgo #2)." style="text;html=1;align=left;fontStyle=2;fontSize=10;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="960" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

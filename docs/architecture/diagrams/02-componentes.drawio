@@ -1,0 +1,69 @@
+<mxfile host="app.diagrams.net" agent="CumbresBI-Architecture-Docs" version="24.0.0" type="device">
+  <diagram id="componentes-v2" name="Diagrama de Componentes (Microservicios)">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="iam" value="iam-service&#10;iam_*, general_sociedades" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="contras" value="contrapartes-service&#10;tesoreria_contrapartes(_relacion)&#10;(maestro de datos)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="280" y="40" width="220" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="pld" value="pld-compliance-service&#10;pld_*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="ventas" value="ventas-vivienda-service&#10;vivienda_* (+ Edificios)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="280" y="140" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="mats" value="materiales-service&#10;catálogo + presupuesto/conceptos" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="140" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="rentas" value="rentas-service&#10;rentas_*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="760" y="140" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="teso" value="tesoreria-service&#10;cuentas/bancos/contratos/flujos/saldos" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="280" y="240" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="cfdi" value="facturacion-cfdi-service&#10;factura_*, notas_credito, rec_nominas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="240" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="compras" value="compras-service&#10;proveedores, órdenes de compra" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="760" y="240" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="rrhh" value="rrhh-service&#10;rrhh_*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="340" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="tickets" value="tickets-service&#10;tickets_*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="280" y="340" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="docint" value="document-intelligence-service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="340" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="audits" value="audit-service&#10;bitacora_auditoria" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="760" y="340" width="200" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell name="e1" id="e1" value="consulta síncrona&#10;de existencia" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="pld" target="contras"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" value="consulta síncrona" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="ventas" target="contras"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="consulta síncrona" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="rentas" target="contras"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="evento: contraparte.*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="contras" target="pld"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="evento" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="contras" target="teso"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="evento: catálogo actualizado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="mats" target="compras"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="evento: cotización/factura" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="compras" target="teso"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" value="saga: renta.contrato.solicitado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="rentas" target="teso"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" value="saga: venta.expediente.creado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="ventas" target="teso"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="saga: contrato creado/rechazado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="teso" target="rentas"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" value="evento: cfdi.vinculado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="cfdi" target="ventas"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" value="síncrono" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="pld" target="docint"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" value="síncrono" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="compras" target="docint"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" value="síncrono" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="rrhh" target="docint"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="note" value="Todos los servicios (iam, contrapartes, pld, ventas, tesoreria,&#10;rentas, cfdi, compras, rrhh, document-intelligence) publican&#10;eventos de auditoría (audit.events) consumidos por audit-service&#10;— omitido del diagrama por claridad visual, ver README §9." style="text;html=1;align=left;fontStyle=2;fontSize=9;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="420" width="500" height="55" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

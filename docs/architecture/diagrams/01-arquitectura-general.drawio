@@ -1,0 +1,65 @@
+<mxfile host="app.diagrams.net" agent="CumbresBI-Architecture-Docs" version="24.0.0" type="device">
+  <diagram id="arq-general-v2" name="Arquitectura General (Microservicios)">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1000" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="u1" value="Usuarios internos&#10;(Google Workspace)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="220" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="u2" value="Usuarios externos&#10;(Magic Link)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="300" y="40" width="220" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="web" value="Next.js (Cloud Run)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=13;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="480" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gw" value="API Gateway (Cloud Endpoints ESPv2)&#10;valida JWT de alcance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="240" width="480" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="micro" value="Microservicios de negocio (Cloud Run) — 11 servicios&#10;iam, contrapartes, pld-compliance, ventas-vivienda,&#10;materiales, compras, tesoreria, facturacion-cfdi,&#10;rentas, rrhh, tickets — ver catálogo en README §1.1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=11;fontStyle=1;align=center" vertex="1" parent="1">
+          <mxGeometry x="40" y="340" width="480" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="docint" value="document-intelligence-service&#10;(síncrono)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="580" y="240" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="audits" value="audit-service&#10;(consumidor de eventos)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="580" y="440" width="200" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bus" value="Google Pub/Sub&#10;bus de eventos" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="220" y="460" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="db" value="Cloud SQL (MySQL)&#10;1 instancia — 1 esquema por servicio" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="470" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="sm" value="Google Secret Manager&#10;(1 cuenta de servicio por microservicio)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="560" width="380" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="oidc" value="Google Workspace OIDC" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="440" y="560" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="ext" value="Gemini API / Drive API /&#10;Firmenti / DocuSeal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="800" y="240" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="u1" target="web"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="u2" target="web"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="HTTPS + JWT (cookie HttpOnly)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="web" target="gw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="gw" target="micro"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="invocación síncrona" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="gw" target="docint"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="outbox → topic → consumidor" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=10;" edge="1" parent="1" source="micro" target="bus"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="audit.events" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=10;" edge="1" parent="1" source="bus" target="audits"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="micro" target="db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;" edge="1" parent="1" source="micro" target="sm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="Authorization Code + PKCE" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="micro" target="oidc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="docint" target="ext"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="audits" target="db"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

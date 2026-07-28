@@ -1,0 +1,62 @@
+<mxfile host="app.diagrams.net" agent="CumbresBI-Architecture-Docs" version="24.0.0" type="device">
+  <diagram id="motor-documental" name="Motor Inteligente de Procesamiento Documental">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1020" pageHeight="960" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="b1" value="1. Usuario carga un documento (PDF/imagen) en el servicio&#10;consumidor (pld-compliance, compras, rrhh) — streaming&#10;vía Google Drive API, sin disco local" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="60" width="360" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" value="2. El servicio consumidor arma un DocumentAnalysisRequest&#10;y llama SÍNCRONAMENTE (POST /analyze) a&#10;document-intelligence-service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="150" width="360" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" value="3. classifier.py: clasificación previa&#10;por nombre de archivo (heurística)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="230" width="360" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="b4" value="4. Selección del provider configurado&#10;→ GeminiProvider.analyze()&#10;(DocumentAIProvider como stub futuro, mismo contrato)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="320" y="310" width="360" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b5" value="5. Streaming del documento + prompt interno del tipo&#10;documental hacia Gemini API — el usuario nunca ve&#10;el prompt ni interactúa directamente con la IA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="400" width="360" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b6" value="6. Gemini API devuelve tipo detectado, confianza y&#10;JSON estructurado (dato ausente = null, nunca inferido)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="490" width="360" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="b7" value="7. validators.py: integridad del JSON, tipos,&#10;campos obligatorios, reglas de negocio propias&#10;del módulo consumidor" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="570" width="360" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b8" value="Inconsistencia detectada (ej. nombre de archivo&#10;≠ contenido real) → se detiene y solicita al usuario&#10;revisar o reemplazar el documento" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="740" y="570" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b9" value="9. DocumentAnalysisResult se presenta en Next.js&#10;para revisión, edición o rechazo por el usuario" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="680" width="360" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="b10" value="10. Usuario confirma explícitamente → el backend del&#10;servicio consumidor (nunca el motor) persiste en su&#10;propio esquema (ej. pld_contrapartes_docs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="320" y="760" width="360" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b11" value="11. document-intelligence-service publica evento de&#10;auditoría vía su propio outbox (asíncrono, no bloquea&#10;la respuesta al usuario) — consumido por audit-service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="850" width="360" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note1" value="document-intelligence-service nunca escribe&#10;en esquemas de otros servicios ni almacena&#10;archivos en disco — sin tablas de negocio&#10;propias, solo su propio log de solicitudes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="40" y="310" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="note2" value="Patrón adaptador (ABC):&#10;DocumentIntelligenceProvider permite&#10;cambiar Gemini ↔ Document AI sin&#10;romper DocumentAnalysisRequest/Result" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="40" y="420" width="220" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b1" target="b2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b2" target="b3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b3" target="b4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b4" target="b5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b5" target="b6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b6" target="b7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="válido" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;" edge="1" parent="1" source="b7" target="b9"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" value="inconsistente" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="1" source="b7" target="b8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b9" target="b10"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" parent="1" source="b10" target="b11"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
