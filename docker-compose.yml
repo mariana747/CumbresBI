@@ -19,7 +19,8 @@ services:
 
   iam-service:
     build:
-      context: ./services/iam-service
+      context: .
+      dockerfile: services/iam-service/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
@@ -58,7 +59,8 @@ services:
 
   audit-service:
     build:
-      context: ./services/audit-service
+      context: .
+      dockerfile: services/audit-service/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
@@ -72,13 +74,170 @@ services:
       audit-db:
         condition: service_healthy
 
-# Escalar: cada futuro microservicio (contrapartes-service, pld-compliance-service,
-# ventas-vivienda-service, tesoreria-service, etc. - ver docs/architecture/README.md
-# sec. 1.1) se agrega aqui como un bloque <servicio> + <servicio>-db aislado,
-# siguiendo exactamente este mismo patron: su propio Dockerfile bajo
-# services/<servicio>/, su propia base de datos con volumen y credenciales
-# propias, sin joins directos entre esquemas.
+  pld-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${PLD_DB_NAME:-pld_service}
+      MYSQL_USER: ${PLD_DB_USER:-pld_app}
+      MYSQL_PASSWORD: ${PLD_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${PLD_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33063:3306"
+    volumes:
+      - pld_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${PLD_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pld-service:
+    build:
+      context: .
+      dockerfile: services/pld-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PLD_DB_HOST: pld-service-db
+    volumes:
+      - ./services/pld-service:/app
+    ports:
+      - "8002:8002"
+    depends_on:
+      pld-service-db:
+        condition: service_healthy
+
+  vivienda-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${VIVIENDA_DB_NAME:-vivienda_service}
+      MYSQL_USER: ${VIVIENDA_DB_USER:-vivienda_app}
+      MYSQL_PASSWORD: ${VIVIENDA_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${VIVIENDA_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33064:3306"
+    volumes:
+      - vivienda_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${VIVIENDA_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  vivienda-service:
+    build:
+      context: .
+      dockerfile: services/vivienda-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VIVIENDA_DB_HOST: vivienda-service-db
+    volumes:
+      - ./services/vivienda-service:/app
+    ports:
+      - "8003:8003"
+    depends_on:
+      vivienda-service-db:
+        condition: service_healthy
+
+  compras-tesoreria-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${COMPRAS_TESORERIA_DB_NAME:-compras_tesoreria_service}
+      MYSQL_USER: ${COMPRAS_TESORERIA_DB_USER:-compras_tesoreria_app}
+      MYSQL_PASSWORD: ${COMPRAS_TESORERIA_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${COMPRAS_TESORERIA_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33065:3306"
+    volumes:
+      - compras_tesoreria_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${COMPRAS_TESORERIA_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  compras-tesoreria-service:
+    build:
+      context: .
+      dockerfile: services/compras-tesoreria-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      COMPRAS_TESORERIA_DB_HOST: compras-tesoreria-service-db
+    volumes:
+      - ./services/compras-tesoreria-service:/app
+    ports:
+      - "8004:8004"
+    depends_on:
+      compras-tesoreria-service-db:
+        condition: service_healthy
+
+  rrhh-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${RRHH_DB_NAME:-rrhh_service}
+      MYSQL_USER: ${RRHH_DB_USER:-rrhh_app}
+      MYSQL_PASSWORD: ${RRHH_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${RRHH_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33066:3306"
+    volumes:
+      - rrhh_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${RRHH_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rrhh-service:
+    build:
+      context: .
+      dockerfile: services/rrhh-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RRHH_DB_HOST: rrhh-service-db
+    volumes:
+      - ./services/rrhh-service:/app
+    ports:
+      - "8005:8005"
+    depends_on:
+      rrhh-service-db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+
+# Escalar: cada futuro microservicio (contrapartes-service, tesoreria-service
+# si se separa de compras, facturacion-cfdi-service, tickets-service, etc. -
+# ver docs/architecture/README.md sec. 1.1) se agrega aqui como un bloque
+# <servicio> + <servicio>-db aislado, siguiendo exactamente este mismo patron:
+# su propio Dockerfile bajo services/<servicio>/, su propia base de datos con
+# volumen y credenciales propias, sin joins directos entre esquemas.
 
 volumes:
+  frontend_node_modules:
   iam_db_data:
   audit_db_data:
+  pld_db_data:
+  vivienda_db_data:
+  compras_tesoreria_db_data:
+  rrhh_db_data:

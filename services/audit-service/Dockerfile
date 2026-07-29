@@ -1,3 +1,6 @@
+# Build context is the repo root (see docker-compose.yml) so this Dockerfile
+# can install the shared libs/cumbresbi-scope package - all paths below are
+# relative to the repo root, not to this service's folder.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,10 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY libs/cumbresbi-scope /libs/cumbresbi-scope
+COPY services/audit-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY services/audit-service/ .
 
 EXPOSE 8001
 

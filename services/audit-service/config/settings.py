@@ -30,7 +30,10 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
+
+CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env("CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", default=None)
 
 ROOT_URLCONF = "config.urls"
 

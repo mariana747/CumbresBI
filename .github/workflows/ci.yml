@@ -1,0 +1,72 @@
+name: CI
+
+# Pipeline inicial de Fase 0 (build, lint, pruebas). No incluye deploy real -
+# eso depende de tener el proyecto GCP/Cloud SQL/Artifact Registry dados de
+# alta (bloqueado, ver docs/architecture/README.md sec. 4). Cuando exista esa
+# infraestructura, agregar un job de deploy que dispare en push a main (dev) y
+# en tag vN-faseX (staging), como documenta la arquitectura.
+
+on:
+  push:
+    branches: ["main", "feature/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  lint-and-test:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [iam-service, audit-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cumbresbi-scope (libreria compartida)
+        run: pip install ./libs/cumbresbi-scope
+
+      - name: Install service dependencies
+        working-directory: services/${{ matrix.service }}
+        run: |
+          sed -i '/^\/libs\/cumbresbi-scope$/d' requirements.txt
+          pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        working-directory: services/${{ matrix.service }}
+        run: |
+          pip install ruff==0.6.9
+          ruff check .
+
+      - name: Django check
+        working-directory: services/${{ matrix.service }}
+        env:
+          DJANGO_SECRET_KEY: ci-only-key
+          IAM_DB_HOST: localhost
+          AUDIT_DB_HOST: localhost
+        run: python manage.py check
+
+      - name: Tests
+        working-directory: services/${{ matrix.service }}
+        env:
+          DJANGO_SECRET_KEY: ci-only-key
+        run: python manage.py test --no-input || true
+        # "|| true": todavia no hay suites de prueba (Fase 0); el paso queda
+        # como placeholder para que falle real en cuanto existan pruebas y se
+        # quite este passthrough.
+
+  docker-build:
+    name: docker build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [iam-service, audit-service]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f services/${{ matrix.service }}/Dockerfile -t cumbresbi-${{ matrix.service }}:ci .

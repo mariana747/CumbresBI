@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cumbresbi-scope"
+version = "0.1.0"
+description = "RLS compartido: EffectiveScope, ScopedManager/QuerySet y middleware DRF para todos los microservicios de CumbresBI."
+requires-python = ">=3.11"
+dependencies = [
+    "Django>=5.0",
+    "PyJWT>=2.8",
+]
+
+[tool.setuptools.packages.find]
+include = ["cumbresbi_scope*"]

@@ -19,7 +19,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "iam",
+    "rrhh",
 ]
 
 MIDDLEWARE = [
@@ -33,10 +33,6 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Clave publica RS256 para validar el JWT de alcance emitido por iam-service
-# (ver docs/architecture/README.md sec. 8). Vacio en dev local hasta Fase 1,
-# donde iam-service empiece a emitir JWTs reales - cumbresbi_scope cae a
-# X-Debug-Scope solo si DEBUG=True.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env("CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", default=None)
 
 ROOT_URLCONF = "config.urls"
@@ -62,11 +58,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": env("IAM_DB_NAME", default="iam_service"),
-        "USER": env("IAM_DB_USER", default="iam_app"),
-        "PASSWORD": env("IAM_DB_PASSWORD", default=""),
-        "HOST": env("IAM_DB_HOST", default="iam-db"),
-        "PORT": env("IAM_DB_PORT", default="3306"),
+        "NAME": env("RRHH_DB_NAME", default="rrhh_service"),
+        "USER": env("RRHH_DB_USER", default="rrhh_app"),
+        "PASSWORD": env("RRHH_DB_PASSWORD", default=""),
+        "HOST": env("RRHH_DB_HOST", default="rrhh-service-db"),
+        "PORT": env("RRHH_DB_PORT", default="3306"),
         "OPTIONS": {"charset": "utf8mb4"},
     }
 }

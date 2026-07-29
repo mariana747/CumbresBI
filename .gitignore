@@ -50,5 +50,12 @@ htmlcov/
 .pytest_cache/
 
 
-.docx
+docs/
 .md
+
+# --- Node / Next.js (frontend/) ---
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
