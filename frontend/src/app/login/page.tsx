@@ -24,7 +24,16 @@ export default function LoginPage() {
         p: 2,
       }}
     >
-      <Paper elevation={0} sx={{ p: 4, width: 380, border: "1px solid", borderColor: "divider" }}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 3, sm: 4 },
+          width: "100%",
+          maxWidth: 380,
+          border: "1px solid",
+          borderColor: "divider",
+        }}
+      >
         <Stack spacing={1} alignItems="center" sx={{ mb: 3 }}>
           <LayoutDashboard size={28} strokeWidth={1.5} color="#1C75BC" />
           <Typography variant="h6" fontWeight={600}>
