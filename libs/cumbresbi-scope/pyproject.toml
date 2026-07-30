@@ -12,5 +12,15 @@ dependencies = [
     "PyJWT>=2.8",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.8",
+]
+
 [tool.setuptools.packages.find]
 include = ["cumbresbi_scope*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+python_files = "test_*.py"
