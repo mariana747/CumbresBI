@@ -5,6 +5,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .classifier import classify_by_filename
 from .contracts import DocumentAnalysisRequest, DriveFileRef
 from .models import AnalysisRequestLog
 from .providers import get_provider
@@ -30,12 +31,22 @@ class AnalyzeView(APIView):
             return Response({"error": "campo 'file' requerido (modo dev sin Drive API)"}, status=400)
 
         expected_document_type = request.data.get("expected_document_type", "")
-        internal_prompt_key = request.data.get("internal_prompt_key", "generic")
         servicio_solicitante = request.data.get("servicio_solicitante", "desconocido")
         try:
             metadata = json.loads(request.data.get("metadata", "{}"))
         except json.JSONDecodeError:
             metadata = {}
+
+        # Clasificacion por nombre de archivo (Actividad 14): el llamador
+        # puede fijar internal_prompt_key explicitamente (gana siempre); si
+        # no lo manda, se infiere del nombre del archivo subido. Si el
+        # nombre no coincide con ninguna palabra clave conocida, se usa el
+        # prompt "generic" y se marca matched_by_filename=False para no
+        # presentar una adivinanza como una clasificacion confiable.
+        internal_prompt_key = request.data.get("internal_prompt_key")
+        matched_by_filename = None
+        if not internal_prompt_key:
+            internal_prompt_key, matched_by_filename = classify_by_filename(uploaded_file.name)
 
         analysis_request = DocumentAnalysisRequest(
             document_ref=DriveFileRef(file_id="dev-upload"),
@@ -50,6 +61,11 @@ class AnalyzeView(APIView):
             document_bytes=uploaded_file.read(),
             mime_type=uploaded_file.content_type or "application/octet-stream",
         )
+        if matched_by_filename is False:
+            result.warnings.append(
+                "No se reconocio el tipo de documento por el nombre del archivo; "
+                "se uso clasificacion generica (menos confiable)."
+            )
 
         AnalysisRequestLog.objects.create(
             servicio_solicitante=servicio_solicitante,
@@ -70,5 +86,7 @@ class AnalyzeView(APIView):
                 "extracted_data": result.extracted_data,
                 "validation_errors": result.validation_errors,
                 "warnings": result.warnings,
+                "internal_prompt_key_used": internal_prompt_key,
+                "matched_by_filename": matched_by_filename,
             }
         )
