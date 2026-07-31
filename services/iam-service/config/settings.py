@@ -19,8 +19,19 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_spectacular",
     "iam",
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "CumbresBI - iam-service",
+    "DESCRIPTION": "Identidad, roles, permisos y calculo del alcance efectivo (RLS).",
+    "VERSION": "0.1.0",
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
