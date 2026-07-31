@@ -226,6 +226,41 @@ services:
     ports:
       - "3000:3000"
 
+  document-intelligence-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DOCINT_DB_NAME:-docint_service}
+      MYSQL_USER: ${DOCINT_DB_USER:-docint_app}
+      MYSQL_PASSWORD: ${DOCINT_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${DOCINT_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33067:3306"
+    volumes:
+      - docint_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DOCINT_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  document-intelligence-service:
+    build:
+      context: .
+      dockerfile: services/document-intelligence-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DOCINT_DB_HOST: document-intelligence-service-db
+    volumes:
+      - ./services/document-intelligence-service:/app
+    ports:
+      - "8006:8006"
+    depends_on:
+      document-intelligence-service-db:
+        condition: service_healthy
+
 # Escalar: cada futuro microservicio (contrapartes-service, tesoreria-service
 # si se separa de compras, facturacion-cfdi-service, tickets-service, etc. -
 # ver docs/architecture/README.md sec. 1.1) se agrega aqui como un bloque
@@ -241,3 +276,4 @@ volumes:
   vivienda_db_data:
   compras_tesoreria_db_data:
   rrhh_db_data:
+  docint_db_data:
