@@ -18,9 +18,21 @@ def _short_id():
 
 
 class TesoreriaBanco(models.Model):
+    """created_at/created_by/updated_at/updated_by agregadas en la Actividad 10
+    de Fase 0 (docs/architecture/auditoria-esquema.md sec. 3) - las 3 tablas
+    heredadas de AppSheet que no traian columnas de auditoria. Tipo char(8)
+    para created_by/updated_by (coincide con iam_users.user_id), igual
+    criterio que tesoreria_cortes_edc - no el varchar(100) sobredimensionado
+    que la propia auditoria marca como inconsistencia en tablas legadas.
+    """
+
     id_banxico = models.CharField(max_length=5, primary_key=True)
     banco = models.CharField(max_length=50, blank=True, null=True)
     alias = models.CharField(max_length=5, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8, blank=True, null=True)
 
     class Meta:
         db_table = "tesoreria_bancos"
@@ -127,6 +139,11 @@ class TesoreriaCuenta(models.Model):
     activa = models.BooleanField(blank=True, null=True)
     apertura = models.DateField()
     cierre = models.DateField(blank=True, null=True)
+    # Ver docstring de TesoreriaBanco - misma correccion de Actividad 10.
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8, blank=True, null=True)
 
     class Meta:
         db_table = "tesoreria_cuentas"
@@ -784,6 +801,11 @@ class TesoreriaSaldo(models.Model):
     saldo = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     cambio_dinero = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True)
     cambio_porcentual = models.DecimalField(max_digits=8, decimal_places=4, blank=True, null=True)
+    # Ver docstring de TesoreriaBanco - misma correccion de Actividad 10.
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8, blank=True, null=True)
 
     class Meta:
         db_table = "tesoreria_saldos"
