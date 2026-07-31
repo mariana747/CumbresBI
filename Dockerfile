@@ -1,6 +1,10 @@
-# Build context is the repo root (see docker-compose.yml) so this Dockerfile
-# can install the shared libs/cumbresbi-scope package - all paths below are
-# relative to the repo root, not to this service's folder.
+# Dockerfile de iam-service en la RAIZ del repo, temporal para el primer
+# despliegue de prueba a Cloud Run (Fase 0, Actividad 1) - la UI de "Crear
+# servicio"/activadores de Cloud Build no dejaba guardar de forma confiable
+# un "Directorio de Dockerfile" distinto a la raiz (rama
+# feature/cloud-run-deploy, no se fusiona a develop). Es identico a
+# services/iam-service/Dockerfile - build context = raiz del repo en ambos
+# casos, por eso el contenido no cambia, solo la ubicacion del archivo.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
