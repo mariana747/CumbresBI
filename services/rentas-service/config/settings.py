@@ -19,13 +19,11 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "corsheaders",
-    "docint",
+    "rentas",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -36,14 +34,6 @@ MIDDLEWARE = [
 ]
 
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env("CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", default=None)
-
-# Fase 0: el frontend (Next.js, localhost:3000) llama a este servicio directo
-# desde el navegador, sin API Gateway todavia (docs/architecture/README.md
-# sec. 8, pendiente). CORS solo para orígenes de desarrollo local.
-CORS_ALLOWED_ORIGINS = env.list(
-    "DOCINT_CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:3000", "http://127.0.0.1:3000"],
-)
 
 ROOT_URLCONF = "config.urls"
 
@@ -68,11 +58,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": env("DOCINT_DB_NAME", default="docint_service"),
-        "USER": env("DOCINT_DB_USER", default="docint_app"),
-        "PASSWORD": env("DOCINT_DB_PASSWORD", default=""),
-        "HOST": env("DOCINT_DB_HOST", default="document-intelligence-service-db"),
-        "PORT": env("DOCINT_DB_PORT", default="3306"),
+        "NAME": env("RENTAS_DB_NAME", default="rentas_service"),
+        "USER": env("RENTAS_DB_USER", default="rentas_app"),
+        "PASSWORD": env("RENTAS_DB_PASSWORD", default=""),
+        "HOST": env("RENTAS_DB_HOST", default="rentas-service-db"),
+        "PORT": env("RENTAS_DB_PORT", default="3306"),
         "OPTIONS": {"charset": "utf8mb4"},
     }
 }
@@ -87,16 +77,3 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# --- Motor Inteligente de Procesamiento Documental ---
-# Plan acordado (ver conversacion de Fase 0): mientras no exista el proyecto
-# GCP (Actividad 1, bloqueada), se usa la clave gratuita de AI Studio
-# (DOCINT_USE_VERTEX=False) SOLO con documentos ficticios de prueba - nunca
-# datos reales de PLD/KYC, porque el tier gratuito de AI Studio puede usar
-# los prompts para entrenar modelos de Google. En cuanto exista el proyecto
-# GCP, cambiar DOCINT_USE_VERTEX=True (Vertex AI, no usa los datos para
-# entrenamiento) antes de procesar cualquier documento real.
-DOCINT_USE_VERTEX = env.bool("DOCINT_USE_VERTEX", default=False)
-GEMINI_API_KEY = env("GEMINI_API_KEY", default=None)  # solo si DOCINT_USE_VERTEX=False
-VERTEX_PROJECT_ID = env("VERTEX_PROJECT_ID", default=None)  # solo si DOCINT_USE_VERTEX=True
-VERTEX_LOCATION = env("VERTEX_LOCATION", default="us-central1")

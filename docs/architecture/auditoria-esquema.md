@@ -34,7 +34,7 @@ De las 110 relaciones en `fk_relationships.csv`, la gran mayoría cruzan lo que 
 - `tesoreria_bancos`
 - `tesoreria_saldos`
 
-**Estado:** corregido vía migración versionada (`compras_tesoreria/migrations/0001_add_columnas_auditoria.py`, rama `feature/modelos-servicios-restantes`) — `ALTER TABLE ADD COLUMN`, con `reverse_sql` para poder revertir. Verificado contra MySQL local que las columnas existen después de aplicar la migración.
+**Estado:** corregido vía migración versionada (`compras_tesoreria/migrations/0002_add_columnas_auditoria.py`, rama `feature/modelos-servicios-restantes`) — `AddField` autogenerado por `makemigrations` (reversible por default, Django genera el `ALTER TABLE` en ambas direcciones). Verificado contra MySQL real en contenedor: `migrate` aplicó la migración sobre la tabla ya existente y `DESCRIBE tesoreria_bancos` confirma las 4 columnas nuevas.
 
 ## 4. Inconsistencia de tipo en `created_by` / `updated_by`
 

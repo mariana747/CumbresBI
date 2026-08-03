@@ -261,12 +261,82 @@ services:
       document-intelligence-service-db:
         condition: service_healthy
 
-# Escalar: cada futuro microservicio (contrapartes-service, tesoreria-service
-# si se separa de compras, facturacion-cfdi-service, tickets-service, etc. -
-# ver docs/architecture/README.md sec. 1.1) se agrega aqui como un bloque
-# <servicio> + <servicio>-db aislado, siguiendo exactamente este mismo patron:
-# su propio Dockerfile bajo services/<servicio>/, su propia base de datos con
-# volumen y credenciales propias, sin joins directos entre esquemas.
+  tesoreria-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${TESORERIA_DB_NAME:-tesoreria_service}
+      MYSQL_USER: ${TESORERIA_DB_USER:-tesoreria_app}
+      MYSQL_PASSWORD: ${TESORERIA_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${TESORERIA_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33068:3306"
+    volumes:
+      - tesoreria_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${TESORERIA_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  tesoreria-service:
+    build:
+      context: .
+      dockerfile: services/tesoreria-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TESORERIA_DB_HOST: tesoreria-service-db
+    volumes:
+      - ./services/tesoreria-service:/app
+    ports:
+      - "8007:8007"
+    depends_on:
+      tesoreria-service-db:
+        condition: service_healthy
+
+  rentas-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${RENTAS_DB_NAME:-rentas_service}
+      MYSQL_USER: ${RENTAS_DB_USER:-rentas_app}
+      MYSQL_PASSWORD: ${RENTAS_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${RENTAS_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33069:3306"
+    volumes:
+      - rentas_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${RENTAS_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rentas-service:
+    build:
+      context: .
+      dockerfile: services/rentas-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RENTAS_DB_HOST: rentas-service-db
+    volumes:
+      - ./services/rentas-service:/app
+    ports:
+      - "8008:8008"
+    depends_on:
+      rentas-service-db:
+        condition: service_healthy
+
+# Escalar: cada futuro microservicio (contrapartes-service,
+# facturacion-cfdi-service, tickets-service, etc. - ver docs/architecture/
+# README.md sec. 1.1) se agrega aqui como un bloque <servicio> + <servicio>-db
+# aislado, siguiendo exactamente este mismo patron: su propio Dockerfile bajo
+# services/<servicio>/, su propia base de datos con volumen y credenciales
+# propias, sin joins directos entre esquemas.
 
 volumes:
   frontend_node_modules:
@@ -277,3 +347,5 @@ volumes:
   compras_tesoreria_db_data:
   rrhh_db_data:
   docint_db_data:
+  tesoreria_db_data:
+  rentas_db_data:

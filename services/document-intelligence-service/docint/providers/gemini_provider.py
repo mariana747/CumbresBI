@@ -43,15 +43,32 @@ class GeminiProvider(DocumentIntelligenceProvider):
         prompt = PROMPTS.get(request.internal_prompt_key, PROMPTS["generic"])
         prompt += f"\nTipo de documento esperado: {request.expected_document_type}"
 
+        from google.genai import errors, types
+
         try:
             response = self._client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-flash-latest",
                 contents=[
-                    {"mime_type": mime_type, "data": document_bytes},
+                    types.Part.from_bytes(data=document_bytes, mime_type=mime_type),
                     prompt,
                 ],
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
+            if not response.text:
+                finish_reason = None
+                if response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                raise ValueError(f"respuesta vacia del modelo (finish_reason={finish_reason})")
             payload = json.loads(response.text)
+        except errors.APIError as exc:
+            return DocumentAnalysisResult(
+                detected_document_type=None,
+                matches_expected_type=False,
+                confidence=0.0,
+                extracted_data={},
+                validation_errors=[f"Error de la API de Gemini: {exc}"],
+                warnings=[],
+            )
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             return DocumentAnalysisResult(
                 detected_document_type=None,
