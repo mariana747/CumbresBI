@@ -40,7 +40,7 @@ const DRAWER_WIDTH = 240;
 // deshabilitados como aqui.
 const NAV_ITEMS = [
   { label: "Panel", href: "/", icon: LayoutDashboard, enabled: true },
-  { label: "Admin (IAM)", href: "#", icon: ShieldCheck, enabled: false },
+  { label: "Admin (IAM)", href: "/admin/usuarios", icon: ShieldCheck, enabled: true },
   { label: "PLD / Cumplimiento", href: "#", icon: FileSearch, enabled: false },
   { label: "Ventas / Vivienda", href: "#", icon: Building2, enabled: false },
   { label: "Compras / Tesorería", href: "#", icon: Landmark, enabled: false },
