@@ -28,6 +28,7 @@ import {
   Users,
   UserRound,
   Bell,
+  ScrollText,
   Menu as MenuIcon,
 } from "lucide-react";
 import { isLoggedIn } from "@/lib/auth";
@@ -48,6 +49,7 @@ const FOOTER_HEIGHT = 32;
 const NAV_ITEMS = [
   { label: "Panel", href: "/", icon: LayoutDashboard, enabled: true },
   { label: "Admin (IAM)", href: "/admin/usuarios", icon: ShieldCheck, enabled: true },
+  { label: "Bitácora de auditoría", href: "/admin/auditoria", icon: ScrollText, enabled: true },
   { label: "PLD / Cumplimiento", href: "/pld", icon: FileSearch, enabled: true },
   { label: "Ventas / Vivienda", href: "#", icon: Building2, enabled: false },
   { label: "Compras / Tesorería", href: "#", icon: Landmark, enabled: false },
