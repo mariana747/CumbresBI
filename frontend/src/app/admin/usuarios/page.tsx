@@ -7,6 +7,7 @@ import {
   Chip,
   CircularProgress,
   FormControl,
+  IconButton,
   InputAdornment,
   InputLabel,
   MenuItem,
@@ -22,9 +23,10 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Search } from "lucide-react";
+import { Pencil, Search } from "lucide-react";
 import AppShell from "@/components/AppShell";
-import { IamRole, IamUser, listRoles, listUsers } from "@/lib/iam";
+import RoleAssignmentDialog from "@/components/RoleAssignmentDialog";
+import { IamGroup, IamRole, IamUser, listGroups, listRoles, listUsers } from "@/lib/iam";
 
 const STATUS_LABELS: Record<IamUser["status"], string> = {
   ACTIVE: "Activo",
@@ -39,34 +41,55 @@ const STATUS_COLORS: Record<IamUser["status"], "success" | "warning" | "default"
 };
 
 // Directorio de usuarios (Fase 1, docs/architecture/CumbresBI_V2_Plan_de_
-// Trabajo_y_Cronograma.md Semana 6): busqueda y filtro por estado sobre
-// iam_users. Desactivar/reactivar (escritura) sigue pendiente - el endpoint
-// de iam-service es solo lectura por ahora (ver iam/views.py).
+// Trabajo_y_Cronograma.md Semana 6): busqueda y filtro por estado/rol/
+// empresa sobre iam_users. "Empresa" = IamGroup (se nombra como la razon
+// social del colaborador, ej. "CUMBRES") - ver iam/views.py. El filtro de
+// holding (GeneralGrupo) se quito por ser redundante con este, confirmado
+// por el cliente.
+// Desactivar/reactivar (escritura) sigue pendiente - el endpoint de
+// iam-service es solo lectura para ese campo por ahora.
 export default function DirectorioUsuariosPage() {
   const [users, setUsers] = useState<IamUser[]>([]);
   const [roles, setRoles] = useState<IamRole[]>([]);
+  const [groups, setGroups] = useState<IamGroup[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [role, setRole] = useState("");
+  const [group, setGroup] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [managingUser, setManagingUser] = useState<IamUser | null>(null);
+
+  function refreshUsers() {
+    listUsers({
+      search: search || undefined,
+      status: status || undefined,
+      role: role || undefined,
+      group: group || undefined,
+    }).then(setUsers);
+  }
 
   useEffect(() => {
-    listRoles().catch(() => undefined /* filtro de rol es opcional, no bloquea el directorio */)
-      .then((data) => data && setRoles(data));
+    listRoles().catch(() => undefined /* filtros opcionales, no bloquean el directorio */).then((data) => data && setRoles(data));
+    listGroups().catch(() => undefined).then((data) => data && setGroups(data));
   }, []);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
       setLoading(true);
       setError(null);
-      listUsers({ search: search || undefined, status: status || undefined, role: role || undefined })
+      listUsers({
+        search: search || undefined,
+        status: status || undefined,
+        role: role || undefined,
+        group: group || undefined,
+      })
         .then(setUsers)
         .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timeout);
-  }, [search, status, role]);
+  }, [search, status, role, group]);
 
   return (
     <AppShell>
@@ -75,10 +98,10 @@ export default function DirectorioUsuariosPage() {
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Usuarios registrados en iam-service. Búsqueda por correo/nombre y
-        filtro por estado.
+        filtros por estado, rol y empresa.
       </Typography>
 
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }}>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
         <TextField
           size="small"
           placeholder="Buscar por correo o nombre..."
@@ -118,6 +141,17 @@ export default function DirectorioUsuariosPage() {
             ))}
           </Select>
         </FormControl>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="group-filter-label">Empresa</InputLabel>
+          <Select labelId="group-filter-label" label="Empresa" value={group} onChange={(e) => setGroup(e.target.value)}>
+            <MenuItem value="">Todas</MenuItem>
+            {groups.map((g) => (
+              <MenuItem key={g.group_id} value={g.group_id}>
+                {g.alias || g.nombre}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Stack>
 
       {error && (
@@ -135,8 +169,8 @@ export default function DirectorioUsuariosPage() {
                 <TableCell>Nombre</TableCell>
                 <TableCell>Correo</TableCell>
                 <TableCell>Estado</TableCell>
+                <TableCell>Empresa</TableCell>
                 <TableCell>Roles</TableCell>
-                <TableCell>Modo de acceso</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -168,7 +202,20 @@ export default function DirectorioUsuariosPage() {
                       <Chip size="small" label={STATUS_LABELS[user.status]} color={STATUS_COLORS[user.status]} />
                     </TableCell>
                     <TableCell>
-                      <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5}>
+                      {user.empresas.length > 0 ? (
+                        user.empresas.map((e) => (
+                          <Typography key={e.nombre} variant="body2">
+                            {e.nombre}
+                          </Typography>
+                        ))
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">
+                          Sin empresa
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
                         {user.roles.length > 0 ? (
                           user.roles.map((roleKey) => (
                             <Chip key={roleKey} size="small" variant="outlined" label={roleKey} />
@@ -178,9 +225,11 @@ export default function DirectorioUsuariosPage() {
                             Sin rol
                           </Typography>
                         )}
+                        <IconButton size="small" aria-label="Gestionar roles" onClick={() => setManagingUser(user)}>
+                          <Pencil size={13} strokeWidth={1.5} />
+                        </IconButton>
                       </Stack>
                     </TableCell>
-                    <TableCell>{user.access_mode === "STANDARD" ? "Estándar" : "Restringido"}</TableCell>
                   </TableRow>
                 ))
               )}
@@ -188,6 +237,17 @@ export default function DirectorioUsuariosPage() {
           </Table>
         </TableContainer>
       </Paper>
+
+      {managingUser && (
+        <RoleAssignmentDialog
+          open={!!managingUser}
+          onClose={() => setManagingUser(null)}
+          userId={managingUser.user_id}
+          userLabel={managingUser.display_name || managingUser.primary_email}
+          allRoles={roles}
+          onChanged={refreshUsers}
+        />
+      )}
     </AppShell>
   );
 }
