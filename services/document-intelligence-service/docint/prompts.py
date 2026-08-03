@@ -15,7 +15,14 @@ _REGLA_COMUN = (
     "Si un dato no esta presente o es ilegible en el documento, usa null en "
     "extracted_data para ese campo - nunca inventes ni infieras un valor. "
     "Si detectas que el documento no corresponde al tipo esperado, dilo en "
-    "detected_document_type y agrega un mensaje en warnings."
+    "detected_document_type y agrega un mensaje en warnings. "
+    "En extracted_data usa EXCLUSIVAMENTE los nombres de campo en espanol "
+    "que se piden explicitamente arriba - no agregues campos adicionales "
+    "aunque el documento tenga esa informacion, y nunca uses nombres de "
+    "campo ni valores en ingles. En cualquier campo de calle/direccion, "
+    "escribe SOLO el nombre de la calle sin abreviaturas ni prefijos como "
+    "'C.', 'CALLE', 'AV.', 'AVENIDA' - esos indicadores de tipo de via no "
+    "son parte del nombre."
 )
 
 PROMPTS = {
@@ -27,8 +34,18 @@ PROMPTS = {
         "persona fisica. Extrae en extracted_data: nombre_completo, curp, "
         "fecha_nacimiento (YYYY-MM-DD), domicilio (calle, numero, colonia, "
         "municipio_alcaldia, estado, cp), clave_elector, "
-        "numero_identificacion, vigencia (YYYY-MM-DD), tipo_identificacion "
-        "('INE'). " + _REGLA_COMUN
+        "numero_identificacion (el CIC/numero de identificacion del "
+        "ciudadano impreso junto a la fotografia, NO la clave de elector), "
+        "vigencia (YYYY-MM-DD), tipo_identificacion ('INE'). " + _REGLA_COMUN
+    ),
+    "pld.curp": (
+        "El documento es una constancia de CURP (Clave Unica de Registro de "
+        "Poblacion) emitida por RENAPO. Extrae en extracted_data unicamente: "
+        "nombre_completo, curp, entidad_registro (la entidad federativa que "
+        "registro la CURP, distinta de la entidad de nacimiento). No "
+        "incluyas fecha_nacimiento, sexo ni entidad_nacimiento - esos datos "
+        "van codificados en la propia CURP y no se piden como campos "
+        "separados. " + _REGLA_COMUN
     ),
     "pld.acta_nacimiento": (
         "El documento es un acta de nacimiento. Extrae en extracted_data: "
@@ -44,12 +61,14 @@ PROMPTS = {
     ),
     "pld.comprobante_domicilio": (
         "El documento es un comprobante de domicilio (recibo de luz, agua, "
-        "telefono, estado de cuenta bancario). Extrae en extracted_data: "
-        "dom_calle, dom_numero_ext, dom_numero_int, dom_colonia, "
+        "telefono, estado de cuenta bancario). Extrae en extracted_data "
+        "unicamente: dom_calle, dom_numero_ext, dom_numero_int, dom_colonia, "
         "dom_municipio_alcaldia, dom_estado, dom_cp, dom_pais, "
-        "fecha_comprobante (YYYY-MM-DD), nombre_titular. Agrega a warnings "
-        "si la fecha_comprobante tiene mas de 3 meses de antiguedad respecto "
-        "a hoy, porque suele invalidarse para KYC. " + _REGLA_COMUN
+        "fecha_comprobante (YYYY-MM-DD), nombre_titular. NO incluyas el "
+        "periodo de facturacion (billing period) ni el monto a pagar - no "
+        "son relevantes para validar domicilio. Agrega a warnings si la "
+        "fecha_comprobante tiene mas de 3 meses de antiguedad respecto a "
+        "hoy, porque suele invalidarse para KYC. " + _REGLA_COMUN
     ),
     "pld.constancia_fiscal": (
         "El documento es una Constancia de Situacion Fiscal (RFC) emitida "
