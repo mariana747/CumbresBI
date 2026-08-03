@@ -3,10 +3,11 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
-from iam.views import IamUserViewSet
+from iam.views import IamRoleViewSet, IamUserViewSet
 
 router = DefaultRouter()
 router.register("users", IamUserViewSet, basename="iamuser")
+router.register("roles", IamRoleViewSet, basename="iamrole")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

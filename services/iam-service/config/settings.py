@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
+    "corsheaders",
     "iam",
 ]
 
@@ -35,6 +36,7 @@ SPECTACULAR_SETTINGS = {
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -49,6 +51,14 @@ MIDDLEWARE = [
 # donde iam-service empiece a emitir JWTs reales - cumbresbi_scope cae a
 # X-Debug-Scope solo si DEBUG=True.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env("CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", default=None)
+
+# Fase 0: el frontend (Next.js, localhost:3000) llama a este servicio directo
+# desde el navegador, sin API Gateway todavia (docs/architecture/README.md
+# sec. 8, pendiente). CORS solo para orígenes de desarrollo local.
+CORS_ALLOWED_ORIGINS = env.list(
+    "IAM_CORS_ALLOWED_ORIGINS",
+    default=["http://localhost:3000", "http://127.0.0.1:3000"],
+)
 
 ROOT_URLCONF = "config.urls"
 

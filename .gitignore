@@ -61,15 +61,18 @@ next-env.d.ts
 # subiendo archivos reales (INE, comprobantes, etc.) directo a esa carpeta -
 # estos NUNCA deben llegar a git. Usa tu scratchpad de sesion, no el repo,
 # para guardar archivos de prueba con datos personales reales.
-services/document-intelligence-service/*.jpg
-services/document-intelligence-service/*.jpeg
-services/document-intelligence-service/*.png
-services/document-intelligence-service/*.pdf
-
 # Carpetas de prueba con documentos reales de personas (ej. nombre propio) -
 # mismo motivo que arriba, nunca deben llegar a git.
 services/document-intelligence-service/David/
 services/document-intelligence-service/Maria/
 
-
-docs/*.md
+# --- Imagenes y notas sueltas (nunca subir de forma automatica) ---
+# .md aqui es notas/planes de trabajo locales, no la documentacion versionada
+# de docs/architecture/ (esos 3 archivos ya estan trackeados y no se ven
+# afectados por esta regla - gitignore no oculta archivos ya en git).
+*.jpeg
+*.jpg
+*.png
+*.md
+*.pdf
+!docs/architecture/*.md
