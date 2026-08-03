@@ -65,3 +65,11 @@ services/document-intelligence-service/*.jpg
 services/document-intelligence-service/*.jpeg
 services/document-intelligence-service/*.png
 services/document-intelligence-service/*.pdf
+
+# Carpetas de prueba con documentos reales de personas (ej. nombre propio) -
+# mismo motivo que arriba, nunca deben llegar a git.
+services/document-intelligence-service/David/
+services/document-intelligence-service/Maria/
+
+
+docs/*.md

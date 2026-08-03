@@ -1,18 +1,45 @@
 "use client";
 
-import { Box, Button, Divider, Paper, Stack, TextField, Typography } from "@mui/material";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Box,
+  Button,
+  CircularProgress,
+  Divider,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
 import { LayoutDashboard, Chrome, Mail } from "lucide-react";
+import { isLoggedIn, login } from "@/lib/auth";
 
 // Pagina publica (sin AppShell / sidebar - el usuario aun no esta
 // autenticado). Cero contrasenas: dos vias de entrada, ver
 // docs/architecture/README.md sec. 6.
-//   - Interna: Google Workspace OIDC (boton, redirige a iam-service cuando
-//     exista - hoy sin backend real conectado, Fase 0).
-//   - Externa: Magic Link, el usuario pide que le llegue un enlace de un
-//     solo uso a su correo (formulario, sin envio real todavia).
-// Ninguno de los dos flujos hace una llamada real - es el shell visual de
-// la Actividad 1/7 de Semana 1, listo para conectarse a iam-service en Fase 1.
+//   - Interna: Google Workspace OIDC. HOY es un stub (ver src/lib/auth.ts) -
+//     simula la sesion en localStorage porque iam-service todavia no emite
+//     JWT real; el boton SI funciona end-to-end para poder construir el
+//     resto de la navegacion mientras se conecta el backend (Fase 1).
+//   - Externa: Magic Link, sigue deshabilitado - no hay flujo de invitados
+//     que probar todavia.
 export default function LoginPage() {
+  const router = useRouter();
+  const [signingIn, setSigningIn] = useState(false);
+
+  useEffect(() => {
+    if (isLoggedIn()) {
+      router.replace("/");
+    }
+  }, [router]);
+
+  function handleGoogleLogin() {
+    setSigningIn(true);
+    login();
+    router.replace("/");
+  }
+
   return (
     <Box
       sx={{
@@ -48,14 +75,20 @@ export default function LoginPage() {
           <Button
             variant="contained"
             fullWidth
-            startIcon={<Chrome size={18} strokeWidth={1.5} />}
-            disabled
+            startIcon={
+              signingIn ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : (
+                <Chrome size={18} strokeWidth={1.5} />
+              )
+            }
+            onClick={handleGoogleLogin}
+            disabled={signingIn}
           >
-            Iniciar sesión con Google
+            {signingIn ? "Iniciando sesión…" : "Iniciar sesión con Google"}
           </Button>
           <Typography variant="caption" color="text.secondary" textAlign="center">
-            Solo dominios de Google Workspace aprobados. Deshabilitado hasta que
-            `iam-service` emita el flujo OIDC real (Fase 1).
+            Solo dominios de Google Workspace aprobados.
           </Typography>
         </Stack>
 
