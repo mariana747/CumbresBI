@@ -1,7 +1,7 @@
-# Esqueleto de Fase 0 (Actividad 4). Sin modelos de negocio todavia: este
-# servicio es dueno de tablas reales del ERD heredado (ver
-# docs/architecture/README.md sec. 1.1) pero requiere conexion a la Cloud SQL
-# real (bloqueado - sin credenciales) para correr inspectdb + refinamiento
-# manual, tal como pide el plan de trabajo Semana 2. No inventar aqui
-# estructura de negocio sin esa fuente de verdad.
+# Esqueleto de Fase 0 (Actividad 4). Sin modelos de negocio todavia: compras
+# no tiene tablas propias en el ERD heredado (dominio nuevo de Fase 4, ver
+# Supuestos y puntos abiertos del doc de arquitectura) - lo unico que existia
+# aqui era Tesoreria/CFDI/Contrapartes, que ya se separo a tesoreria-service
+# (ver rama split-tesoreria-rentas-services / docs/architecture/README.md
+# sec. 1.1). No inventar aqui estructura de negocio sin una fuente de verdad.
 from django.db import models  # noqa: F401
