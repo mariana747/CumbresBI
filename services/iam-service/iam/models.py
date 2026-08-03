@@ -256,6 +256,12 @@ class IamGroup(ScopedAuditMixin):
         help_text="Holding empresarial al que pertenece este equipo, si aplica.",
     )
     nombre = models.CharField(max_length=150)
+    alias = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Nombre corto para mostrar en pantalla (ej. 'CUMBRES' para 'CONSULTORÍA Y PROYECTOS CUMBRES').",
+    )
     descripcion = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
