@@ -35,17 +35,22 @@ export async function listUsers({
   status,
   role,
   group,
+  sinRol,
 }: {
   search?: string;
   status?: string;
   role?: string;
   group?: string;
+  // Decision de producto: acceso de empleados nuevos via login libre, no
+  // invitacion formal - ver memoria de sesion "iam-invitacion-alcance-incierto".
+  sinRol?: boolean;
 } = {}): Promise<IamUser[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (status) params.set("status", status);
   if (role) params.set("role", role);
   if (group) params.set("group", group);
+  if (sinRol) params.set("sin_rol", "true");
 
   const response = await fetch(`${IAM_API_BASE_URL}/api/users/?${params.toString()}`);
   if (!response.ok) {

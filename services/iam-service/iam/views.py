@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
@@ -32,6 +33,11 @@ class IamUserViewSet(ReadOnlyModelViewSet):
     NULL) y filtro por empresa via ?group=<group_id> (IamGroup - membresia
     activa, removed_at IS NULL). Desactivar/reactivar (escritura) sigue
     pendiente - depende de permisos reales, no solo de exponer el campo.
+
+    ?sin_rol=true (decision de producto: acceso de empleados nuevos via
+    login libre, no invitacion formal - ver memoria de sesion
+    "iam-invitacion-alcance-incierto"): usuarios sin ningun rol activo, para
+    la lista/aviso de "falta asignar rol" en el frontend.
     """
 
     queryset = IamUser.objects.all().order_by("primary_email")
@@ -54,6 +60,16 @@ class IamUserViewSet(ReadOnlyModelViewSet):
             queryset = queryset.filter(
                 user_groups__group_id=group_param, user_groups__removed_at__isnull=True
             ).distinct()
+        if self.request.query_params.get("sin_rol") == "true":
+            # exclude(user_roles__revoked_at__isnull=True) NO sirve aqui: el
+            # LEFT OUTER JOIN implicito genera una fila con revoked_at=NULL
+            # para un usuario SIN ningun rol (por ausencia, no por dato
+            # real), y eso hace match falso con "IS NULL" - excluiria
+            # tambien a quien deberia aparecer. annotate(Count(...)) cuenta
+            # filas reales, sin ese falso positivo.
+            queryset = queryset.annotate(
+                roles_activos=Count("user_roles", filter=Q(user_roles__revoked_at__isnull=True))
+            ).filter(roles_activos=0)
         return queryset
 
 

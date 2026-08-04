@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Alert,
   Avatar,
@@ -25,7 +26,7 @@ import {
 } from "@mui/material";
 import { Pencil, Search } from "lucide-react";
 import AdminTabs from "@/components/AdminTabs";
-import AppShell from "@/components/AppShell";
+import AppShell, { notifySinRolChanged } from "@/components/AppShell";
 import RoleAssignmentDialog from "@/components/RoleAssignmentDialog";
 import { IamGroup, IamRole, IamUser, listGroups, listRoles, listUsers } from "@/lib/iam";
 
@@ -49,17 +50,39 @@ const STATUS_COLORS: Record<IamUser["status"], "success" | "warning" | "default"
 // por el cliente.
 // Desactivar/reactivar (escritura) sigue pendiente - el endpoint de
 // iam-service es solo lectura para ese campo por ahora.
+// Valor especial del selector de Rol para "sin rol asignado" - vive en el
+// mismo dropdown que los roles reales en vez de un filtro aparte (decision
+// de producto: acceso de empleados nuevos via login libre, no invitacion
+// formal - ver memoria de sesion "iam-invitacion-alcance-incierto").
+const SIN_ROL_VALUE = "__SIN_ROL__";
+
 export default function DirectorioUsuariosPage() {
+  const searchParams = useSearchParams();
   const [users, setUsers] = useState<IamUser[]>([]);
   const [roles, setRoles] = useState<IamRole[]>([]);
   const [groups, setGroups] = useState<IamGroup[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
-  const [role, setRole] = useState("");
+  // "" = todos, SIN_ROL_VALUE = sin rol asignado, o un role_key real.
+  const [roleFilter, setRoleFilter] = useState(
+    searchParams.get("sinRol") === "true" ? SIN_ROL_VALUE : ""
+  );
   const [group, setGroup] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managingUser, setManagingUser] = useState<IamUser | null>(null);
+
+  const sinRol = roleFilter === SIN_ROL_VALUE;
+  const role = sinRol ? "" : roleFilter;
+
+  // Si ya estamos en esta pantalla y se navega otra vez a
+  // /admin/usuarios?sinRol=true (ej. desde la campana en AppShell.tsx),
+  // Next.js no vuelve a montar el componente - el useState de arriba solo
+  // lee la URL una vez al montar. Este efecto sincroniza el filtro cada
+  // vez que cambian los parametros de la URL, sin depender del montaje.
+  useEffect(() => {
+    if (searchParams.get("sinRol") === "true") setRoleFilter(SIN_ROL_VALUE);
+  }, [searchParams]);
 
   function refreshUsers() {
     listUsers({
@@ -67,7 +90,11 @@ export default function DirectorioUsuariosPage() {
       status: status || undefined,
       role: role || undefined,
       group: group || undefined,
+      sinRol,
     }).then(setUsers);
+    // Asignar/revocar un rol puede cambiar quien aparece en "sin rol
+    // asignado" - se lo hacemos saber a la campana de AppShell.tsx.
+    notifySinRolChanged();
   }
 
   useEffect(() => {
@@ -84,13 +111,14 @@ export default function DirectorioUsuariosPage() {
         status: status || undefined,
         role: role || undefined,
         group: group || undefined,
+        sinRol,
       })
         .then(setUsers)
         .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timeout);
-  }, [search, status, role, group]);
+  }, [search, status, role, group, sinRol]);
 
   return (
     <AppShell>
@@ -134,8 +162,16 @@ export default function DirectorioUsuariosPage() {
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <InputLabel id="role-filter-label">Rol</InputLabel>
-          <Select labelId="role-filter-label" label="Rol" value={role} onChange={(e) => setRole(e.target.value)}>
+          <Select
+            labelId="role-filter-label"
+            label="Rol"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+          >
             <MenuItem value="">Todos</MenuItem>
+            <MenuItem value={SIN_ROL_VALUE}>
+              <em>Sin rol asignado</em>
+            </MenuItem>
             {roles.map((r) => (
               <MenuItem key={r.role_key} value={r.role_key}>
                 {r.role_name}
