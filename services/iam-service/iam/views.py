@@ -4,8 +4,14 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from .models import IamGroup, IamRole, IamUser, IamUserRole
-from .serializers import IamGroupSerializer, IamRoleSerializer, IamUserRoleSerializer, IamUserSerializer
+from .models import IamGroup, IamPermission, IamRole, IamUser, IamUserRole
+from .serializers import (
+    IamGroupSerializer,
+    IamPermissionSerializer,
+    IamRoleSerializer,
+    IamUserRoleSerializer,
+    IamUserSerializer,
+)
 
 
 class IamUserViewSet(ReadOnlyModelViewSet):
@@ -47,10 +53,21 @@ class IamUserViewSet(ReadOnlyModelViewSet):
 
 class IamRoleViewSet(ReadOnlyModelViewSet):
     """Solo lectura - catalogo de roles para poblar el filtro del directorio
-    de usuarios. La gestion de roles (crear/editar) sigue pendiente."""
+    de usuarios y, via el campo "permisos" del serializer, la matriz de
+    permisos roles x permisos (Fase 1, Semana 5). La gestion de roles
+    (crear/editar) sigue pendiente."""
 
     queryset = IamRole.objects.all().order_by("role_name")
     serializer_class = IamRoleSerializer
+
+
+class IamPermissionViewSet(ReadOnlyModelViewSet):
+    """Solo lectura - catalogo completo de permisos (Fase 1, Semana 5), para
+    que el frontend arme las columnas de la matriz de permisos combinando
+    esto con el campo "permisos" de cada IamRole."""
+
+    queryset = IamPermission.objects.all().order_by("perm_key")
+    serializer_class = IamPermissionSerializer
 
 
 class IamGroupViewSet(ReadOnlyModelViewSet):
@@ -73,6 +90,11 @@ class IamUserRoleViewSet(ModelViewSet):
     DELETE no esta permitido a proposito: una asignacion nunca se borra, se
     revoca (revoked_at) para conservar el historial - usa
     POST /api/user-roles/{id}/revoke/.
+
+    Reporte de historial de cambios de permisos (Fase 1, Semana 6): esta
+    misma lista, sin el filtro ?user=, ya es el historial completo
+    (otorgamientos y revocaciones, mas recientes primero) - no hace falta
+    un endpoint de reporte aparte.
     """
 
     http_method_names = ["get", "post", "head", "options"]

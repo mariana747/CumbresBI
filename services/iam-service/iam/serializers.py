@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import IamGroup, IamRole, IamUser, IamUserRole
+from .models import IamGroup, IamPermission, IamRole, IamUser, IamUserRole
 
 
 class IamUserSerializer(serializers.ModelSerializer):
@@ -11,6 +11,10 @@ class IamUserSerializer(serializers.ModelSerializer):
     # Empresa(s) activa(s) (IamGroup, removed_at IS NULL) y su holding
     # (GeneralGrupo), para el filtro de empresa/grupo del directorio.
     empresas = serializers.SerializerMethodField()
+    # Reporte de matriz de acceso (Fase 1, Semana 6): a diferencia de
+    # "roles" (solo claves), aqui va el detalle de alcance por asignacion
+    # activa, para poder armar la tabla usuario x rol x alcance.
+    accesos = serializers.SerializerMethodField()
 
     class Meta:
         model = IamUser
@@ -22,6 +26,7 @@ class IamUserSerializer(serializers.ModelSerializer):
             "access_mode",
             "roles",
             "empresas",
+            "accesos",
             "created_at",
             "updated_at",
         ]
@@ -39,12 +44,41 @@ class IamUserSerializer(serializers.ModelSerializer):
             for user_group in obj.user_groups.filter(removed_at__isnull=True).select_related("group")
         ]
 
+    def get_accesos(self, obj):
+        return [
+            {
+                "role_key": user_role.role.role_key,
+                "role_name": user_role.role.role_name,
+                "scope_type": user_role.scope_type,
+                "scope_id": user_role.scope_id,
+            }
+            for user_role in obj.user_roles.filter(revoked_at__isnull=True).select_related("role")
+        ]
+
+
+class IamPermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IamPermission
+        fields = ["permission_id", "perm_key", "description"]
+        read_only_fields = fields
+
 
 class IamRoleSerializer(serializers.ModelSerializer):
+    # Matriz de permisos (Fase 1, Semana 5): claves de permiso otorgadas a
+    # este rol, para que el frontend arme la tabla roles x permisos
+    # combinando esto con el catalogo completo de /api/permissions/.
+    permisos = serializers.SerializerMethodField()
+
     class Meta:
         model = IamRole
-        fields = ["role_id", "role_key", "role_name", "description"]
+        fields = ["role_id", "role_key", "role_name", "description", "permisos"]
         read_only_fields = fields
+
+    def get_permisos(self, obj):
+        return [
+            role_permission.permission.perm_key
+            for role_permission in obj.role_permissions.select_related("permission")
+        ]
 
 
 class IamUserRoleSerializer(serializers.ModelSerializer):
@@ -55,12 +89,17 @@ class IamUserRoleSerializer(serializers.ModelSerializer):
 
     role_key = serializers.CharField(source="role.role_key", read_only=True)
     role_name = serializers.CharField(source="role.role_name", read_only=True)
+    # Denormalizado para el reporte de historial de cambios de permisos
+    # (Fase 1, Semana 6) - sin esto habria que resolver cada user_id contra
+    # /api/users/ desde el frontend solo para mostrar el correo.
+    user_email = serializers.EmailField(source="user.primary_email", read_only=True)
 
     class Meta:
         model = IamUserRole
         fields = [
             "assignment_id",
             "user",
+            "user_email",
             "role",
             "role_key",
             "role_name",
@@ -69,7 +108,14 @@ class IamUserRoleSerializer(serializers.ModelSerializer):
             "granted_at",
             "revoked_at",
         ]
-        read_only_fields = ["assignment_id", "role_key", "role_name", "granted_at", "revoked_at"]
+        read_only_fields = [
+            "assignment_id",
+            "user_email",
+            "role_key",
+            "role_name",
+            "granted_at",
+            "revoked_at",
+        ]
 
 
 class IamGroupSerializer(serializers.ModelSerializer):
