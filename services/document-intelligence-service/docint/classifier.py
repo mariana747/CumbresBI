@@ -30,7 +30,6 @@ KEYWORD_TO_PROMPT_KEY = {
     "comprobantedomicilio": "pld.comprobante_domicilio",
     "domicilio": "pld.comprobante_domicilio",
     "cfe": "pld.comprobante_domicilio",
-    "recibolu": "pld.comprobante_domicilio",  # "recibo_luz" normalizado
     "recibo": "pld.comprobante_domicilio",
     "luz": "pld.comprobante_domicilio",
     "agua": "pld.comprobante_domicilio",
@@ -50,14 +49,35 @@ KEYWORD_TO_PROMPT_KEY = {
 FALLBACK_PROMPT_KEY = "generic"
 
 
-def _normalize(filename: str) -> str:
-    """minusculas, sin acentos, sin extension, sin separadores - para que
-    'INE_Juan-Perez.PDF', 'ine juan perez.pdf' e 'ine.juan.perez.pdf' se
-    traten igual."""
+def _tokens(filename: str) -> list[str]:
+    """minusculas, sin acentos, sin extension, partido en tokens por
+    separadores (_, -, espacio, punto...) - para que 'INE_Juan-Perez.PDF',
+    'ine juan perez.pdf' e 'ine.juan.perez.pdf' se traten igual, sin perder
+    la frontera entre palabras (ver _matches)."""
     name = filename.rsplit(".", 1)[0] if "." in filename else filename
     name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
     name = name.lower()
-    return re.sub(r"[^a-z0-9]", "", name)
+    return [t for t in re.split(r"[^a-z0-9]+", name) if t]
+
+
+def _matches(keyword: str, tokens: list[str]) -> bool:
+    """Una palabra clave coincide solo (a) como substring dentro de un mismo
+    token, o (b) como concatenacion exacta de una racha de tokens completos
+    consecutivos (para palabras clave compuestas como 'actanacimiento').
+
+    Nunca cruza a ciegas la frontera entre dos tokens con un match parcial:
+    'izzi_febrero.pdf' -> tokens ['izzi', 'febrero'] no debe coincidir con la
+    palabra clave 'ife' solo porque 'izz-IFE-brero' la contiene por
+    casualidad al concatenar todo el nombre sin limites."""
+    if any(keyword in token for token in tokens):
+        return True
+    for i in range(len(tokens)):
+        acc = ""
+        for j in range(i, len(tokens)):
+            acc += tokens[j]
+            if acc == keyword:
+                return True
+    return False
 
 
 def classify_by_filename(filename: str) -> tuple[str, bool]:
@@ -67,8 +87,8 @@ def classify_by_filename(filename: str) -> tuple[str, bool]:
     reconocer ninguna palabra clave en el nombre - el llamador debe tratar
     ese resultado como menos confiable, no como una clasificacion real.
     """
-    normalized = _normalize(filename or "")
+    tokens = _tokens(filename or "")
     for keyword, prompt_key in KEYWORD_TO_PROMPT_KEY.items():
-        if keyword in normalized:
+        if _matches(keyword, tokens):
             return prompt_key, True
     return FALLBACK_PROMPT_KEY, False
