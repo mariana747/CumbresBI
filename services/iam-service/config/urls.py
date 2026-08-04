@@ -3,11 +3,18 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
-from iam.views import IamGroupViewSet, IamRoleViewSet, IamUserRoleViewSet, IamUserViewSet
+from iam.views import (
+    IamGroupViewSet,
+    IamPermissionViewSet,
+    IamRoleViewSet,
+    IamUserRoleViewSet,
+    IamUserViewSet,
+)
 
 router = DefaultRouter()
 router.register("users", IamUserViewSet, basename="iamuser")
 router.register("roles", IamRoleViewSet, basename="iamrole")
+router.register("permissions", IamPermissionViewSet, basename="iampermission")
 router.register("user-roles", IamUserRoleViewSet, basename="iamuserrole")
 router.register("groups", IamGroupViewSet, basename="iamgroup")
 
