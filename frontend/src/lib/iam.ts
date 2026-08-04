@@ -117,3 +117,89 @@ export async function revokeRole(assignmentId: string): Promise<IamUserRole> {
   }
   return response.json();
 }
+
+// Magic Links (Fase 1, Semana 4). MODO DEV: sin envio de correo real
+// todavia (ver iam/views.py, IamMagicLinkViewSet) - crear() regresa el
+// token en claro y el link completo, algo que dejara de pasar en cuanto
+// exista el envio real desde Workspace.
+export interface IamMagicLink {
+  magic_link_id: string;
+  email: string;
+  recurso_tipo: string | null;
+  recurso_id: string | null;
+  issued_at: string;
+  issued_by: string | null;
+  expires_at: string;
+  max_uses: number;
+  uses_count: number;
+  first_used_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  token?: string;
+  magic_link_url?: string;
+}
+
+export async function listMagicLinks(): Promise<IamMagicLink[]> {
+  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+  }
+  return response.json();
+}
+
+export async function createMagicLink(params: {
+  email: string;
+  recursoTipo?: string;
+  recursoId?: string;
+}): Promise<IamMagicLink> {
+  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: params.email,
+      recurso_tipo: params.recursoTipo || null,
+      recurso_id: params.recursoId || null,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+  }
+  return response.json();
+}
+
+export async function validateMagicLink(token: string): Promise<{ magic_link: IamMagicLink; jwt: string }> {
+  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/validar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    // Esta funcion la consume tambien la pagina publica
+    // (app/magic-link/[token]/page.tsx) - el mensaje de error se le muestra
+    // directo a un usuario externo, asi que aqui si vale la pena extraer
+    // "detail" en vez del cuerpo crudo (a diferencia de los demas clientes
+    // de este archivo, de uso solo interno/admin).
+    const body = await response.text();
+    let detail: string | undefined;
+    try {
+      detail = JSON.parse(body).detail;
+    } catch {
+      // no era JSON - cae al mensaje generico de abajo
+    }
+    throw new Error(detail ?? `Error de iam-service (${response.status}): ${body}`);
+  }
+  return response.json();
+}
+
+export async function revokeMagicLink(magicLinkId: string): Promise<IamMagicLink> {
+  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/${magicLinkId}/revocar/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+  }
+  return response.json();
+}

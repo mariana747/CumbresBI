@@ -22,6 +22,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Download, Search } from "lucide-react";
+import AdminTabs from "@/components/AdminTabs";
 import AppShell from "@/components/AppShell";
 import {
   BitacoraEvento,
@@ -86,6 +87,7 @@ export default function VisorAuditoriaPage() {
 
   return (
     <AppShell>
+      <AdminTabs />
       <Typography variant="h5" gutterBottom>
         Bitácora de auditoría
       </Typography>

@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 
 from iam.views import (
     IamGroupViewSet,
+    IamMagicLinkViewSet,
     IamPermissionViewSet,
     IamRoleViewSet,
     IamUserRoleViewSet,
@@ -17,6 +18,7 @@ router.register("roles", IamRoleViewSet, basename="iamrole")
 router.register("permissions", IamPermissionViewSet, basename="iampermission")
 router.register("user-roles", IamUserRoleViewSet, basename="iamuserrole")
 router.register("groups", IamGroupViewSet, basename="iamgroup")
+router.register("magic-links", IamMagicLinkViewSet, basename="iammagiclink")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

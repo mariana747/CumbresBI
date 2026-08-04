@@ -52,6 +52,44 @@ MIDDLEWARE = [
 # X-Debug-Scope solo si DEBUG=True.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env("CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", default=None)
 
+# Llave privada RS256 para firmar los JWT de alcance externo emitidos al
+# validar un Magic Link (Fase 1, Semana 4; ver iam/magic_link_utils.py). El
+# default es un par de llaves de DESARROLLO generado solo para no bloquear
+# el trabajo local mientras Secret Manager no tenga la llave real (ver
+# tarea pendiente con Arturo) - NUNCA usar este default fuera de dev. La
+# llave publica correspondiente se distribuye a los servicios consumidores
+# como CUMBRESBI_SCOPE_JWT_PUBLIC_KEY cuando corresponda.
+_DEV_JWT_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC4A1KaoFrZyy7j
+w6YLaT2T+C2xVnKdKX8zvp+x2QbAvudUyHl6Ar9hghk7dxhY4y41xY1yGTENDY6O
+BMo2AbDMhwSDLL4YNbQIWWpJ0ZFaOcJBJu7EZBblBxrnDtIlPvmH59CM0aJwY/ra
+AujWT68W2c0aTltw/EQWFC1K7Jrb+t7WS8gYydRWT/X/XK1to3mmXfFqCFo19Vjp
+dJspQugaDToJzqv4M7bi1/vJzRmJq+NYBa/N3MR22lzViv1/vNB1UH7Zl7TAkVow
+t50rQCs/POTp7usOkJ/3VksHfBjkMxi0uad+StXu+i9aMpEw5HRoBxsjgxuIb4Ki
+39g2m01/AgMBAAECgf9GrlVhujaAxzWQ8esrIZba6iP4T5G2zI8Ppn5bfKwbXTjT
+rYL7sBJ9tyX6BsT+CkVgYixH/LqFSQUjiAjOtdeIuFQDZCxLIFWxifxJs+B2cmPV
++B5pUV4kmutlKqGNrPgsO97fjaaCL+UrLfLsXwSMwnGwqRMhUxopYOwE24f1oWpM
+GrtB1e5xqgvMG3Di3Zld6UCDJbgg/bZjCP9GYbUWd7ZNFzlt9rwNwjvns+EFOm9j
+Gcrh2AJYrYQTokiGXcXj+EBEpCwBMxIUZBVEgleBxqQxbLjY6eYgQqYL7ShUb73q
+wim0zIV7Hii0MRB82xAumjRdicqdqIyq+olaizkCgYEA8THcVWBSN8Q9sNqxjUS5
+GxGVhlEQSSEzK54vIac8y3CnMAuK3Ix3/oBkls+QthUbITbEdGGQCrdpO7MqfxCz
+3y8H1TywLz6hGHuKMaOyCM+rruwObpQKE9tzIRBcOqtvU2wW3EHiggPYs7vOWMCO
+egy6Ywh/N82soHROAj1oAksCgYEAw07n/zrlVK7kvJC+dvTq13evYHMMSoEek5P0
+ozkCr9UzXCsJKuutaIBoO1Sm0mLuKYf+z9xTFT04Npm+JYFNlzkRn3KpoVS2yTmd
+z1jjU9u8NvCwHFAVhsyA0mL4SSlVX7Lwr/4GirqbC0T2nRH0N981JmZQtxIa9+Uq
+51T6QR0CgYEA2gJMeqsehaOOc12pINyeR9ZEBe0dwEwO+Xz4cv272NMRez7jm+gn
+ydV5lks1LS+0nvfm6J8K2HTh3IFchw+s1a2n8djyEzIT4JJB3g5tLMOxFeHuRYrv
+9PTlglxMUQeGD6ximWG//+7EH+lAYT5jSfRZQIx8mQ8B2uJlZGbmrTMCgYAPI5ao
+GhCct9HTLAUXg3SQrx5RA5n4THnqRpW38TtcFdKdWlijkxEmAI4Ty0QDGtgLMBd4
+VUO7abtpwBEVJyi0iB/tlB3B+6cPgf/RirpUTbwRJicAitSgVknGBRXp1eJgQKaX
+fcFUD5LlFLtpAXNEwXCFQXkQN78PaBwjQlsDoQKBgQCj2mKaQ1ubiGLGf1H3c3VQ
+mSGUTD5E6RibA3XpBDecxSAEU4k8wieWtE+e201/7RnNpJIci9NmgU91euDdT/VX
+1/ehFeMGSuHDq0fvCfI50tIJ+agwFuotfQwHdas7GkybgfFjvT4T1zcBmQICSkk7
+KIYLz1XLfh9TeCisjfT5wQ==
+-----END PRIVATE KEY-----"""
+
+JWT_PRIVATE_KEY = env("JWT_PRIVATE_KEY", default=_DEV_JWT_PRIVATE_KEY)
+
 # Fase 0: el frontend (Next.js, localhost:3000) llama a este servicio directo
 # desde el navegador, sin API Gateway todavia (docs/architecture/README.md
 # sec. 8, pendiente). CORS solo para orígenes de desarrollo local.

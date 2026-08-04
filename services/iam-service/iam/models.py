@@ -279,3 +279,41 @@ class IamUserGroup(ScopedAuditMixin):
     class Meta:
         db_table = "iam_user_groups"
         unique_together = ("user", "group")
+
+
+class IamMagicLink(models.Model):
+    """Magic Link de un solo uso para usuarios externos (Fase 1, Semana 4;
+    docs/architecture/README.md sec. 6.2). Mismo patron que
+    pld_ticket_cliente (pld-service), pero generico a nivel iam-service para
+    cualquier modulo que necesite dar acceso externo sin contrasena.
+
+    token_hash: SHA-256 del token - el token en claro nunca se guarda, solo
+    viaja una vez en el link enviado (o, en modo dev sin envio de correo
+    real, en la respuesta del endpoint de generacion - ver views.py).
+
+    recurso_tipo/recurso_id: referencia laxa y generica a que da acceso este
+    link (ej. recurso_tipo="pld_kyc", recurso_id=<id_kyc>) - el modulo
+    consumidor interpreta estos campos, iam-service no los valida.
+    """
+
+    magic_link_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    email = models.EmailField(max_length=254)
+    recurso_tipo = models.CharField(max_length=50, blank=True, null=True)
+    recurso_id = models.CharField(max_length=255, blank=True, null=True)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    issued_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="magic_links_issued"
+    )
+    expires_at = models.DateTimeField()
+    max_uses = models.IntegerField(default=1)
+    uses_count = models.IntegerField(default=0)
+    first_used_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_magic_links"
+
+    def __str__(self):
+        return f"{self.magic_link_id} ({self.email})"
