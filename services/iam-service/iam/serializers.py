@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import IamGroup, IamPermission, IamRole, IamUser, IamUserRole
+from .models import IamGroup, IamMagicLink, IamPermission, IamRole, IamUser, IamUserRole
 
 
 class IamUserSerializer(serializers.ModelSerializer):
@@ -125,3 +125,41 @@ class IamGroupSerializer(serializers.ModelSerializer):
         model = IamGroup
         fields = ["group_id", "nombre", "alias"]
         read_only_fields = fields
+
+
+class IamMagicLinkSerializer(serializers.ModelSerializer):
+    """Magic Link (Fase 1, Semana 4). El token en claro NUNCA sale de este
+    serializer salvo en el momento de creacion (ver
+    IamMagicLinkViewSet.create, modo dev sin envio de correo real) - de ahi
+    en adelante solo existe su hash en la base de datos."""
+
+    class Meta:
+        model = IamMagicLink
+        fields = [
+            "magic_link_id",
+            "email",
+            "recurso_tipo",
+            "recurso_id",
+            "issued_at",
+            "issued_by",
+            "expires_at",
+            "max_uses",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]
+        read_only_fields = [
+            "magic_link_id",
+            "issued_at",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]
+        extra_kwargs = {
+            # Calculado en IamMagicLinkViewSet.create a partir de
+            # expires_in_days (request data) - no se recibe directo del
+            # cliente para forzar que siempre pase por esa validacion.
+            "expires_at": {"required": False}
+        }
