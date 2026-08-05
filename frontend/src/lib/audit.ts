@@ -1,5 +1,7 @@
-// Cliente de audit-service - visor de bitacora de auditoria (Fase 1, Semana 6).
-// Contrato: services/audit-service/auditoria/views.py (GET /api/bitacora/).
+// Cliente de audit-service - visor de bitacora de auditoria (Fase 1, Semana 6)
+// y confirmacion de envio a Drive (Motor Documental).
+// Contrato: services/audit-service/auditoria/views.py (GET /api/bitacora/,
+// POST /api/bitacora/confirmar_envio_drive/).
 
 export interface BitacoraEvento {
   event_id: string;
@@ -37,6 +39,35 @@ export async function listBitacora({
   if (hasta) params.set("hasta", hasta);
 
   const response = await fetch(`${AUDIT_API_BASE_URL}/api/bitacora/?${params.toString()}`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Error de audit-service (${response.status}): ${body}`);
+  }
+  return response.json();
+}
+
+// Boton de confirmacion de envio a Drive (Motor Documental) - NO sube nada
+// real a Drive (ver services/document-intelligence-service/docint/drive.py,
+// bloqueado por falta del proyecto GCP). Solo deja constancia en la
+// bitacora de que el usuario confirmo la intencion, con formato y la fecha/
+// hora en que se consulto el documento.
+export async function confirmarEnvioDrive({
+  entidadId,
+  consultadoEn,
+}: {
+  entidadId: string;
+  consultadoEn: string;
+}): Promise<BitacoraEvento> {
+  const response = await fetch(`${AUDIT_API_BASE_URL}/api/bitacora/confirmar_envio_drive/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      entidad_id: entidadId,
+      servicio_origen: "document-intelligence-service",
+      entidad: "documento_analizado",
+      consultado_en: consultadoEn,
+    }),
+  });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Error de audit-service (${response.status}): ${body}`);

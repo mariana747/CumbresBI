@@ -25,7 +25,8 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { ChevronDown, Download, UploadCloud, X as CloseIcon } from "lucide-react";
+import { ChevronDown, CloudUpload, Download, UploadCloud, X as CloseIcon } from "lucide-react";
+import { confirmarEnvioDrive } from "@/lib/audit";
 import { analyzeDocument, DocumentAnalysisResult, guessDocumentTypeFromFilename } from "@/lib/docint";
 
 // Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
@@ -67,6 +68,7 @@ interface DocumentResult {
   expectedDocumentType: string;
   result?: DocumentAnalysisResult;
   error?: string;
+  driveConfirmadoEn?: string;
 }
 
 // Motor Inteligente de Procesamiento Documental (docint) - ver
@@ -132,6 +134,31 @@ export default function MotorDocumentalDialog({
     a.download = `expediente_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Confirmacion de envio a Drive (docs/architecture/README.md sec. 10:
+  // streaming via Drive API todavia bloqueado por falta del proyecto GCP,
+  // ver docint/drive.py). NO sube nada real a Drive - solo registra en la
+  // bitacora de auditoria que el usuario confirmo la intencion, con formato
+  // (PDF) y la fecha/hora en que se consulto el documento. Reemplazar por
+  // el envio real cuando exista esa integracion.
+  async function handleConfirmarDrive(index: number) {
+    const doc = documents[index];
+    const consultadoEn = new Date().toISOString();
+    try {
+      await confirmarEnvioDrive({ entidadId: doc.file.name, consultadoEn });
+      setDocuments((prev) =>
+        prev.map((d, i) => (i === index ? { ...d, driveConfirmadoEn: consultadoEn } : d))
+      );
+    } catch (err) {
+      setDocuments((prev) =>
+        prev.map((d, i) =>
+          i === index
+            ? { ...d, error: err instanceof Error ? err.message : "Error al confirmar envío a Drive" }
+            : d
+        )
+      );
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -321,6 +348,24 @@ export default function MotorDocumentalDialog({
                       >
                         {JSON.stringify(doc.result.extracted_data, null, 2)}
                       </Box>
+
+                      {doc.driveConfirmadoEn ? (
+                        <Alert severity="info">
+                          Envío a Drive confirmado el{" "}
+                          {new Date(doc.driveConfirmadoEn).toLocaleString("es-MX")} (como PDF) — pendiente
+                          de conexión real con Google Drive.
+                        </Alert>
+                      ) : (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<CloudUpload size={16} strokeWidth={1.5} />}
+                          onClick={() => handleConfirmarDrive(index)}
+                          sx={{ alignSelf: "flex-start" }}
+                        >
+                          Confirmar envío a Drive
+                        </Button>
+                      )}
                     </Stack>
                   )}
                 </AccordionDetails>
