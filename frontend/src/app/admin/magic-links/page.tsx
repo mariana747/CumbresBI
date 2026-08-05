@@ -21,12 +21,14 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Copy, Link2, ShieldCheck } from "lucide-react";
+import { Copy, Link2, ShieldCheck, UploadCloud } from "lucide-react";
 import AdminTabs from "@/components/AdminTabs";
 import AppShell from "@/components/AppShell";
 import {
   IamMagicLink,
+  IamMagicLinkMasivoError,
   createMagicLink,
+  createMagicLinksMasivo,
   listMagicLinks,
   revokeMagicLink,
   validateMagicLink,
@@ -72,6 +74,19 @@ export default function MagicLinksPage() {
 
   const [tokenPrueba, setTokenPrueba] = useState("");
   const [resultadoValidacion, setResultadoValidacion] = useState<{ jwt: string } | string | null>(null);
+
+  // Carga masiva por CSV (invitacion masiva, checklist Fase 1) - un correo
+  // por linea/columna. Reusa el mismo catalogoRecursos ya precargado arriba
+  // (pld_kyc), no necesita su propio efecto de carga.
+  const [emailsMasivoTexto, setEmailsMasivoTexto] = useState("");
+  const [recursoTipoMasivo, setRecursoTipoMasivo] = useState("");
+  const [recursoIdMasivo, setRecursoIdMasivo] = useState("");
+  const [cargandoMasivo, setCargandoMasivo] = useState(false);
+  const [resultadoMasivo, setResultadoMasivo] = useState<{
+    creados: IamMagicLink[];
+    errores: IamMagicLinkMasivoError[];
+  } | null>(null);
+  const recursoOpcionesMasivo = catalogoRecursos[recursoTipoMasivo] ?? [];
 
   function refrescarLista() {
     setLoading(true);
@@ -142,6 +157,50 @@ export default function MagicLinksPage() {
       setError(err instanceof Error ? err.message : "Error al generar el link");
     } finally {
       setCreando(false);
+    }
+  }
+
+  // Acepta un correo por linea o separados por coma/punto y coma - cubre
+  // tanto un CSV real (una columna, sin encabezado) como pegar la lista a
+  // mano. Filtra encabezados obvios ("correo"/"email") para que no cuente
+  // como un invitado mas si el CSV si trae encabezado.
+  function parseEmailsCsv(texto: string): string[] {
+    return texto
+      .split(/[\r\n,;]+/)
+      .map((linea) => linea.trim())
+      .filter((linea) => linea.length > 0 && !["correo", "email"].includes(linea.toLowerCase()));
+  }
+
+  async function handleArchivoCsv(e: React.ChangeEvent<HTMLInputElement>) {
+    const archivo = e.target.files?.[0];
+    if (!archivo) return;
+    setEmailsMasivoTexto(await archivo.text());
+    // Limpia el input para poder volver a subir el mismo archivo (ej. tras
+    // corregirlo) sin que el navegador ignore la seleccion por ser igual.
+    e.target.value = "";
+  }
+
+  async function handleCargaMasiva() {
+    setError(null);
+    setResultadoMasivo(null);
+    const emails = parseEmailsCsv(emailsMasivoTexto);
+    if (emails.length === 0) {
+      setError("Agrega al menos un correo (uno por línea, o sube un CSV).");
+      return;
+    }
+    setCargandoMasivo(true);
+    try {
+      const resultado = await createMagicLinksMasivo({
+        emails,
+        recursoTipo: recursoTipoMasivo,
+        recursoId: recursoIdMasivo,
+      });
+      setResultadoMasivo(resultado);
+      refrescarLista();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar el CSV");
+    } finally {
+      setCargandoMasivo(false);
     }
   }
 
@@ -279,6 +338,107 @@ export default function MagicLinksPage() {
             >
               {ultimoGenerado.magic_link_url}
             </Typography>
+          </Alert>
+        )}
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+          Carga masiva por CSV
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Sube un CSV (una columna, un correo por fila) o pega la lista abajo — un Magic Link por
+          cada correo, todos con el mismo recurso.
+        </Typography>
+        <Stack spacing={2}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+            <FormControl size="small" sx={{ flex: 1, minWidth: 180 }}>
+              <InputLabel id="recurso-tipo-masivo-label">Da acceso a</InputLabel>
+              <Select
+                labelId="recurso-tipo-masivo-label"
+                label="Da acceso a"
+                value={recursoTipoMasivo}
+                onChange={(e) => {
+                  setRecursoTipoMasivo(e.target.value);
+                  setRecursoIdMasivo("");
+                }}
+              >
+                <MenuItem value="">
+                  <em>Sin recurso específico</em>
+                </MenuItem>
+                {RECURSO_TIPO_OPTIONS.map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ flex: 1, minWidth: 200 }} disabled={!recursoTipoMasivo}>
+              <InputLabel id="recurso-id-masivo-label">Expediente</InputLabel>
+              <Select
+                labelId="recurso-id-masivo-label"
+                label="Expediente"
+                value={recursoIdMasivo}
+                onChange={(e) => setRecursoIdMasivo(e.target.value)}
+              >
+                {recursoOpcionesMasivo.length === 0 ? (
+                  <MenuItem value="" disabled>
+                    Sin expedientes disponibles
+                  </MenuItem>
+                ) : (
+                  recursoOpcionesMasivo.map((o) => (
+                    <MenuItem key={o.value} value={o.value}>
+                      {o.label}
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+            <Button component="label" variant="outlined" startIcon={<UploadCloud size={16} strokeWidth={1.5} />}>
+              Subir CSV
+              <input type="file" accept=".csv,text/csv" hidden onChange={handleArchivoCsv} />
+            </Button>
+          </Stack>
+          <TextField
+            multiline
+            minRows={4}
+            placeholder={"correo1@ejemplo.com\ncorreo2@ejemplo.com\ncorreo3@ejemplo.com"}
+            value={emailsMasivoTexto}
+            onChange={(e) => setEmailsMasivoTexto(e.target.value)}
+          />
+          <Button
+            variant="contained"
+            startIcon={<UploadCloud size={16} strokeWidth={1.5} />}
+            onClick={handleCargaMasiva}
+            disabled={cargandoMasivo || !emailsMasivoTexto.trim()}
+            sx={{ alignSelf: "flex-start" }}
+          >
+            {cargandoMasivo ? <CircularProgress size={20} color="inherit" /> : "Cargar"}
+          </Button>
+        </Stack>
+
+        {resultadoMasivo && (
+          <Alert severity={resultadoMasivo.errores.length > 0 ? "warning" : "success"} sx={{ mt: 2 }}>
+            {resultadoMasivo.creados.length === 0
+              ? "No se generó ningún Magic Link."
+              : resultadoMasivo.creados.length === 1
+                ? "Se generó 1 Magic Link."
+                : `Se generaron ${resultadoMasivo.creados.length} Magic Links.`}
+            {resultadoMasivo.errores.length > 0 && (
+              <>
+                {" "}
+                {resultadoMasivo.errores.length === 1
+                  ? "1 correo no se pudo procesar:"
+                  : `${resultadoMasivo.errores.length} correos no se pudieron procesar:`}
+                <Typography component="ul" variant="caption" sx={{ mt: 1, mb: 0, pl: 2 }}>
+                  {resultadoMasivo.errores.map((err, i) => (
+                    <li key={`${err.email}-${i}`}>
+                      <strong>{err.email}</strong> — {err.detail}
+                    </li>
+                  ))}
+                </Typography>
+              </>
+            )}
           </Alert>
         )}
       </Paper>
