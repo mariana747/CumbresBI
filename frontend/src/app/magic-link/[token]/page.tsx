@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { Box, CircularProgress, Paper, Stack, Typography } from "@mui/material";
-import { LayoutDashboard, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Box, CircularProgress, Paper, Stack, Typography, useTheme } from "@mui/material";
+import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { validateMagicLink } from "@/lib/iam";
+import { PublicNavbar } from "@/components/PublicNavbar";
 
 const RECURSO_TIPO_LABELS: Record<string, string> = {
   pld_kyc: "tu expediente KYC",
@@ -23,6 +24,7 @@ const RECURSO_TIPO_LABELS: Record<string, string> = {
 // modo dev, en lugar de redirigir. Cuando exista ese destino, se reemplaza
 // el bloque de "acceso verificado" por la redireccion correspondiente.
 export default function MagicLinkPage() {
+  const theme = useTheme();
   const params = useParams<{ token: string }>();
   const [estado, setEstado] = useState<"cargando" | "valido" | "invalido">("cargando");
   const [error, setError] = useState<string | null>(null);
@@ -47,29 +49,30 @@ export default function MagicLinkPage() {
       sx={{
         minHeight: "100vh",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        flexDirection: "column",
         bgcolor: "background.default",
-        p: 2,
       }}
     >
-      <Paper
-        elevation={0}
+      <PublicNavbar />
+      <Box
         sx={{
-          p: { xs: 3, sm: 4 },
-          width: "100%",
-          maxWidth: 420,
-          border: "1px solid",
-          borderColor: "divider",
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          p: 2,
         }}
       >
-        <Stack spacing={1} alignItems="center" sx={{ mb: 3 }}>
-          <LayoutDashboard size={28} strokeWidth={1.5} color="#1C75BC" />
-          <Typography variant="h6" fontWeight={600}>
-            CumbresBI
-          </Typography>
-        </Stack>
-
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 3, sm: 4 },
+            width: "100%",
+            maxWidth: 420,
+            border: "1px solid",
+            borderColor: "divider",
+          }}
+        >
         {estado === "cargando" && (
           <Stack spacing={2} alignItems="center">
             <CircularProgress size={28} />
@@ -81,7 +84,7 @@ export default function MagicLinkPage() {
 
         {estado === "valido" && (
           <Stack spacing={2} alignItems="center" textAlign="center">
-            <ShieldCheck size={32} strokeWidth={1.5} color="#2E7D32" />
+            <ShieldCheck size={32} strokeWidth={1.5} color={theme.palette.success.main} />
             <Typography variant="subtitle1" fontWeight={600}>
               Acceso verificado
             </Typography>
@@ -106,7 +109,7 @@ export default function MagicLinkPage() {
 
         {estado === "invalido" && (
           <Stack spacing={2} alignItems="center" textAlign="center">
-            <ShieldAlert size={32} strokeWidth={1.5} color="#C62828" />
+            <ShieldAlert size={32} strokeWidth={1.5} color={theme.palette.error.dark} />
             <Typography variant="subtitle1" fontWeight={600}>
               Enlace no disponible
             </Typography>
@@ -118,7 +121,8 @@ export default function MagicLinkPage() {
             </Typography>
           </Stack>
         )}
-      </Paper>
+        </Paper>
+      </Box>
     </Box>
   );
 }
