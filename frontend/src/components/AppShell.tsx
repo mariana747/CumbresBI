@@ -35,10 +35,11 @@ import {
 } from "lucide-react";
 import { isLoggedIn } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
+import { Footer } from "@/components/Footer";
+import { BRAND } from "@/theme/theme";
 
 const DRAWER_WIDTH = 240;
 const HEADER_HEIGHT = 56;
-const FOOTER_HEIGHT = 32;
 
 // Catalogo de modulos de negocio en el orden confirmado del Plan de Trabajo
 // v2.0 (docs/architecture/README.md sec. 2): Admin -> PLD -> Ventas/Vivienda
@@ -137,7 +138,7 @@ function Header({
       position="fixed"
       elevation={0}
       sx={{
-        bgcolor: "#fff",
+        bgcolor: "background.paper",
         color: "text.primary",
         borderBottom: "1px solid",
         borderColor: "divider",
@@ -189,33 +190,12 @@ function Header({
             ]
           )}
         </Menu>
-        <Avatar sx={{ width: 30, height: 30, bgcolor: "#1C75BC", fontSize: 13 }}>U</Avatar>
+        <Avatar sx={{ width: 30, height: 30, bgcolor: "primary.main", fontSize: 13 }}>U</Avatar>
       </Toolbar>
     </AppBar>
   );
 }
 
-// Footer inferior - info de version/estado, sin datos dinamicos todavia.
-function Footer() {
-  return (
-    <Box
-      component="footer"
-      sx={{
-        height: FOOTER_HEIGHT,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderTop: "1px solid",
-        borderColor: "divider",
-        bgcolor: "#fff",
-      }}
-    >
-      <Typography variant="caption" color="text.secondary">
-        CumbresBI · Fase 0
-      </Typography>
-    </Box>
-  );
-}
 
 // Guard de sesion de Fase 0 (ver src/lib/auth.ts - sesion simulada,
 // iam-service todavia no emite JWT real). Vive en AppShell porque todas las
@@ -259,12 +239,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const sidebarSx = {
     width: DRAWER_WIDTH,
-    bgcolor: "#343741",
-    color: "#fff",
+    bgcolor: BRAND.charcoal,
+    color: "common.white",
     "& .MuiDrawer-paper": {
       width: DRAWER_WIDTH,
-      bgcolor: "#343741",
-      color: "#fff",
+      bgcolor: BRAND.charcoal,
+      color: "common.white",
       boxSizing: "border-box",
     },
   };

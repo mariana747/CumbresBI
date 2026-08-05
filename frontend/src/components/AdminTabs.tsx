@@ -11,6 +11,8 @@ import { usePathname, useRouter } from "next/navigation";
 // adentro con pestañas.
 const ADMIN_TABS = [
   { label: "Usuarios", value: "/admin/usuarios" },
+  { label: "Permisos", value: "/admin/permisos" },
+  { label: "Reportes", value: "/admin/reportes" },
   { label: "Bitácora de auditoría", value: "/admin/auditoria" },
   { label: "Magic Links", value: "/admin/magic-links" },
 ] as const;

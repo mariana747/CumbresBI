@@ -9,6 +9,9 @@ export interface IamUser {
   access_mode: "STANDARD" | "RESTRICTED";
   roles: string[];
   empresas: { nombre: string }[];
+  // Reporte de matriz de acceso (Fase 1, Semana 6): detalle de alcance por
+  // asignacion activa (ver iam/serializers.py, IamUserSerializer.get_accesos).
+  accesos: { role_key: string; role_name: string; scope_type: string; scope_id: string }[];
   created_at: string;
   updated_at: string;
 }
@@ -17,6 +20,17 @@ export interface IamRole {
   role_id: string;
   role_key: string;
   role_name: string;
+  description: string | null;
+  // Claves de permiso otorgadas a este rol (ver iam/serializers.py,
+  // IamRoleSerializer.get_permisos) - para la matriz de permisos.
+  permisos: string[];
+}
+
+// Catalogo completo de permisos (Fase 1, Semana 5) - columnas de la matriz
+// de permisos, se combina con el campo "permisos" de cada IamRole.
+export interface IamPermission {
+  permission_id: string;
+  perm_key: string;
   description: string | null;
 }
 
@@ -69,6 +83,15 @@ export async function listRoles(): Promise<IamRole[]> {
   return response.json();
 }
 
+export async function listPermissions(): Promise<IamPermission[]> {
+  const response = await fetch(`${IAM_API_BASE_URL}/api/permissions/`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+  }
+  return response.json();
+}
+
 export async function listGroups(): Promise<IamGroup[]> {
   const response = await fetch(`${IAM_API_BASE_URL}/api/groups/`);
   if (!response.ok) {
@@ -92,6 +115,19 @@ export interface IamUserRole {
 
 export async function listUserRoles(userId: string): Promise<IamUserRole[]> {
   const response = await fetch(`${IAM_API_BASE_URL}/api/user-roles/?user=${userId}&active=true`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+  }
+  return response.json();
+}
+
+// Reporte de historial de cambios de permisos (Fase 1, Semana 6): la lista
+// completa de otorgamientos/revocaciones, mas recientes primero (ver
+// iam/views.py, IamUserRoleViewSet - sin ?user= es exactamente este reporte,
+// no hace falta un endpoint aparte).
+export async function listRoleHistory(): Promise<IamUserRole[]> {
+  const response = await fetch(`${IAM_API_BASE_URL}/api/user-roles/`);
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Error de iam-service (${response.status}): ${body}`);
