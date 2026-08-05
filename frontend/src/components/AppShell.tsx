@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   AppBar,
   Avatar,
   Badge,
   Box,
+  Collapse,
   Divider,
   Drawer,
   IconButton,
@@ -25,12 +26,18 @@ import {
 import {
   LayoutDashboard,
   ShieldCheck,
+  KeyRound,
   FileSearch,
+  ClipboardList,
+  History,
+  Link2,
   Building2,
   Landmark,
   Users,
   UserRound,
   Bell,
+  ChevronDown,
+  ChevronRight,
   Menu as MenuIcon,
 } from "lucide-react";
 import { isLoggedIn } from "@/lib/auth";
@@ -50,12 +57,28 @@ const HEADER_HEIGHT = 56;
 // cuando exista login real, debe filtrarse contra el alcance efectivo del
 // usuario (roles-y-permisos.md), no mostrarse completa con items
 // deshabilitados como aqui.
+//
+// "children": submenu desplegable dentro del sidebar (reemplaza el patron
+// anterior de pestañas horizontales arriba de la pagina, ver AdminTabs.tsx
+// - decision de diseno: la navegacion entre pantallas de un mismo modulo
+// vive en el sidebar, no repetida en cada pantalla). Mismo patron pensado
+// para reutilizarse en los demas modulos (PLD, Ventas, etc.) en cuanto
+// tengan mas de una pantalla propia - hoy solo Admin (IAM) lo necesita.
 const NAV_ITEMS = [
   { label: "Panel", href: "/", icon: LayoutDashboard, enabled: true },
-  // Admin (IAM) agrupa Usuarios/Bitacora/Magic Links como pestañas dentro
-  // de la pantalla (ver AdminTabs.tsx) - un solo item aqui, no tres, porque
-  // son capacidades de IAM, no modulos de negocio propios.
-  { label: "Admin (IAM)", href: "/admin/usuarios", icon: ShieldCheck, enabled: true },
+  {
+    label: "Admin (IAM)",
+    href: "/admin/usuarios",
+    icon: ShieldCheck,
+    enabled: true,
+    children: [
+      { label: "Usuarios", href: "/admin/usuarios", icon: UserRound },
+      { label: "Permisos", href: "/admin/permisos", icon: KeyRound },
+      { label: "Reportes", href: "/admin/reportes", icon: ClipboardList },
+      { label: "Bitácora de auditoría", href: "/admin/auditoria", icon: History },
+      { label: "Magic Links", href: "/admin/magic-links", icon: Link2 },
+    ],
+  },
   { label: "PLD / Cumplimiento", href: "/pld", icon: FileSearch, enabled: true },
   { label: "Ventas / Vivienda", href: "#", icon: Building2, enabled: false },
   { label: "Compras / Tesorería", href: "#", icon: Landmark, enabled: false },
@@ -78,7 +101,73 @@ export function notifySinRolChanged() {
   window.dispatchEvent(new Event(SIN_ROL_CHANGED_EVENT));
 }
 
+// Un item con "children" empieza abierto si la ruta actual es uno de sus
+// sub-items (ej. entrar directo a /admin/permisos desde un link externo
+// debe abrir el submenu de Admin, no dejarlo colapsado con la seccion
+// activa escondida adentro).
+function NavItemConChildren({
+  item,
+  pathname,
+  onNavigate,
+}: {
+  item: (typeof NAV_ITEMS)[number] & {
+    children: readonly { label: string; href: string; icon: React.ComponentType<{ size?: number; strokeWidth?: number }> }[];
+  };
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const activo = item.children.some((child) => pathname === child.href);
+  const [abierto, setAbierto] = useState(activo);
+
+  return (
+    // Contenedor unico (boton + lista desplegada) que se oscurece solo
+    // cuando la pagina actual pertenece a esta seccion (activo) - no cada
+    // vez que se despliega con un clic. Separado del highlight de "este es
+    // el hijo activo" de abajo (que usa un overlay claro, no oscuro).
+    <Box sx={{ bgcolor: activo ? "rgba(0,0,0,0.2)" : "transparent", borderRadius: 1 }}>
+      <ListItemButton onClick={() => setAbierto((v) => !v)} sx={{ borderRadius: 1, color: "inherit" }}>
+        <ListItemIcon sx={{ minWidth: 36, color: "inherit" }}>
+          <item.icon size={18} strokeWidth={1.5} />
+        </ListItemIcon>
+        <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 13 }} />
+        {abierto ? (
+          <ChevronDown size={16} strokeWidth={1.5} />
+        ) : (
+          <ChevronRight size={16} strokeWidth={1.5} />
+        )}
+      </ListItemButton>
+      <Collapse in={abierto} timeout="auto" unmountOnExit>
+        <List component="div" disablePadding>
+          {item.children.map((child) => (
+            <ListItemButton
+              key={child.href}
+              component="a"
+              href={child.href}
+              selected={pathname === child.href}
+              onClick={onNavigate}
+              sx={{
+                borderRadius: 1,
+                color: "inherit",
+                pl: 3,
+                "&.Mui-selected": { bgcolor: "rgba(255,255,255,0.12)" },
+                "&.Mui-selected:hover": { bgcolor: "rgba(255,255,255,0.18)" },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 36, color: "inherit" }}>
+                <child.icon size={16} strokeWidth={1.5} />
+              </ListItemIcon>
+              <ListItemText primary={child.label} primaryTypographyProps={{ fontSize: 13 }} />
+            </ListItemButton>
+          ))}
+        </List>
+      </Collapse>
+    </Box>
+  );
+}
+
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = usePathname();
+
   return (
     <>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
@@ -88,25 +177,32 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
         </Typography>
       </Stack>
       <List sx={{ px: 1 }}>
-        {NAV_ITEMS.map(({ label, href, icon: Icon, enabled }) => (
-          <ListItemButton
-            key={label}
-            component="a"
-            href={enabled ? href : undefined}
-            disabled={!enabled}
-            onClick={onNavigate}
-            sx={{
-              borderRadius: 1,
-              color: "inherit",
-              "&.Mui-disabled": { opacity: 0.45 },
-            }}
-          >
-            <ListItemIcon sx={{ minWidth: 36, color: "inherit" }}>
-              <Icon size={18} strokeWidth={1.5} />
-            </ListItemIcon>
-            <ListItemText primary={label} primaryTypographyProps={{ fontSize: 13 }} />
-          </ListItemButton>
-        ))}
+        {NAV_ITEMS.map((item) =>
+          "children" in item ? (
+            <NavItemConChildren key={item.label} item={item} pathname={pathname} onNavigate={onNavigate} />
+          ) : (
+            <ListItemButton
+              key={item.label}
+              component="a"
+              href={item.enabled ? item.href : undefined}
+              disabled={!item.enabled}
+              selected={pathname === item.href}
+              onClick={onNavigate}
+              sx={{
+                borderRadius: 1,
+                color: "inherit",
+                "&.Mui-disabled": { opacity: 0.45 },
+                "&.Mui-selected": { bgcolor: "rgba(255,255,255,0.12)" },
+                "&.Mui-selected:hover": { bgcolor: "rgba(255,255,255,0.18)" },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 36, color: "inherit" }}>
+                <item.icon size={18} strokeWidth={1.5} />
+              </ListItemIcon>
+              <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 13 }} />
+            </ListItemButton>
+          )
+        )}
       </List>
     </>
   );

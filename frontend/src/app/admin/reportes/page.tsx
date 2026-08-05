@@ -17,7 +17,6 @@ import {
   Tabs,
   Typography,
 } from "@mui/material";
-import AdminTabs from "@/components/AdminTabs";
 import AppShell from "@/components/AppShell";
 import { IamUser, IamUserRole, listRoleHistory, listUsers } from "@/lib/iam";
 
@@ -200,7 +199,6 @@ export default function ReportesPage() {
 
   return (
     <AppShell>
-      <AdminTabs />
       <Typography variant="h5" gutterBottom>
         Reportes
       </Typography>

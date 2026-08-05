@@ -22,7 +22,6 @@ import {
   Typography,
 } from "@mui/material";
 import { Copy, Link2, ShieldCheck, UploadCloud } from "lucide-react";
-import AdminTabs from "@/components/AdminTabs";
 import AppShell from "@/components/AppShell";
 import {
   IamMagicLink,
@@ -245,7 +244,6 @@ export default function MagicLinksPage() {
 
   return (
     <AppShell>
-      <AdminTabs />
       <Typography variant="h5" gutterBottom>
         Magic Links
       </Typography>
