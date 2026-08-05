@@ -5,7 +5,10 @@ import { createTheme } from "@mui/material/styles";
 // son los tokens que SI se confirmaron explicitamente por el cliente mientras
 // tanto; no inventar valores adicionales (spacing, elevaciones, etc.) - cuando
 // llegue design/, reconciliar este archivo contra esa fuente unica.
-const BRAND = {
+// Exportado para poder usar estos mismos valores fuera de sx/palette (ej.
+// el prop `color` de un icono de lucide-react, que no resuelve rutas de
+// tema como "primary.main") sin volver a escribir el hex a mano.
+export const BRAND = {
   azul: "#1C75BC", // acciones primarias, enlaces
   charcoal: "#343741", // sidebar, encabezados
   fondoApp: "#F1F3F5",
