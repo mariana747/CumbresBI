@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 
 from django.db.models import Count, Q
@@ -19,6 +20,12 @@ from .serializers import (
 )
 
 MAGIC_LINK_DEFAULT_EXPIRATION_DAYS = 7
+
+# Validacion simple de formato (no de existencia real del correo, eso solo
+# lo confirma que la persona de verdad abra el link) - misma tolerancia que
+# el campo EmailField del serializer, solo que aqui se necesita validar uno
+# por uno antes de crear, para poder reportar cual fila del CSV fallo.
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class IamUserViewSet(ReadOnlyModelViewSet):
@@ -188,6 +195,66 @@ class IamMagicLinkViewSet(ModelViewSet):
         data["token"] = token
         data["magic_link_url"] = f"/magic-link/{token}"
         return Response(data, status=201)
+
+    @action(detail=False, methods=["post"])
+    def masivo(self, request):
+        """Alta masiva de Magic Links (invitacion masiva por CSV, checklist
+        Fase 1 - la invitacion individual ya la cubre create() de uno en
+        uno). El CSV se parsea en el frontend (admin/magic-links); aqui solo
+        llega una lista de correos ya separada, no un archivo.
+
+        recurso_tipo/recurso_id/expires_in_days/issued_by son compartidos
+        para toda la carga (mismo criterio para todos los invitados de un
+        mismo CSV). Corres fila por fila en vez de bulk_create porque cada
+        fila necesita su propio token en claro (nunca se guarda, ver
+        magic_link_utils.generate_token) - no hay forma de recuperarlo
+        despues de un insert masivo.
+
+        No es atomico a proposito: si una fila falla (correo invalido,
+        duplicado dentro del mismo CSV), las demas se crean igual y el
+        detalle de cual fallo y por que va en "errores" - una fila mala en
+        un CSV de 200 no debe tirar las otras 199.
+        """
+        emails = request.data.get("emails")
+        if not isinstance(emails, list) or not emails:
+            return Response({"emails": ["Este campo es requerido y debe ser una lista."]}, status=400)
+
+        recurso_tipo = request.data.get("recurso_tipo") or None
+        recurso_id = request.data.get("recurso_id") or None
+        expires_in_days = int(request.data.get("expires_in_days") or MAGIC_LINK_DEFAULT_EXPIRATION_DAYS)
+        issued_by = request.data.get("issued_by") or None
+
+        creados = []
+        errores = []
+        vistos = set()
+        for raw_email in emails:
+            email = (raw_email or "").strip()
+            if not email:
+                continue
+            email_lower = email.lower()
+            if email_lower in vistos:
+                errores.append({"email": email, "detail": "Este correo ya aparece antes en la lista, se omitió."})
+                continue
+            vistos.add(email_lower)
+            if not EMAIL_RE.match(email):
+                errores.append({"email": email, "detail": "No parece un correo válido, revisa que esté bien escrito."})
+                continue
+
+            token, token_hash = generate_token()
+            magic_link = IamMagicLink.objects.create(
+                email=email,
+                recurso_tipo=recurso_tipo,
+                recurso_id=recurso_id,
+                token_hash=token_hash,
+                issued_by_id=issued_by,
+                expires_at=timezone.now() + timedelta(days=expires_in_days),
+            )
+            data = self.get_serializer(magic_link).data
+            data["token"] = token
+            data["magic_link_url"] = f"/magic-link/{token}"
+            creados.append(data)
+
+        return Response({"creados": creados, "errores": errores}, status=201)
 
     @action(detail=False, methods=["post"])
     def validar(self, request):
