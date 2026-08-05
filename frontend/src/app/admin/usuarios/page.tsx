@@ -230,7 +230,7 @@ export default function DirectorioUsuariosPage() {
                 users.map((user) => (
                   <TableRow key={user.user_id} hover>
                     <TableCell sx={{ width: 40 }}>
-                      <Avatar sx={{ width: 28, height: 28, bgcolor: "#1C75BC", fontSize: 12 }}>
+                      <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main", fontSize: 12 }}>
                         {(user.display_name || user.primary_email).charAt(0).toUpperCase()}
                       </Avatar>
                     </TableCell>

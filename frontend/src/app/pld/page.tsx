@@ -5,6 +5,7 @@ import { Button, Chip, Grid, Paper, Stack, Typography } from "@mui/material";
 import { FileSearch, FolderOpen, UploadCloud } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
+import { BRAND } from "@/theme/theme";
 
 // Tipos que el Motor Documental ya reconoce (docint/classifier.py) - se
 // muestran aqui solo como referencia informativa para el analista, no como
@@ -48,7 +49,7 @@ export default function PldPage() {
             }}
           >
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <FileSearch size={22} strokeWidth={1.5} color="#1C75BC" />
+              <FileSearch size={22} strokeWidth={1.5} color={BRAND.azul} />
               <Typography variant="subtitle1" fontWeight={600}>
                 Motor Documental
               </Typography>
