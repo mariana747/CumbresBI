@@ -1,5 +1,6 @@
-// Cliente de iam-service - directorio de usuarios (Fase 1).
+﻿// Cliente de iam-service - directorio de usuarios (Fase 1).
 // Contrato: services/iam-service/iam/views.py (GET /api/users/, GET /api/roles/).
+import { apiFetch, friendlyApiError } from "./apiError";
 
 export interface IamUser {
   user_id: string;
@@ -66,37 +67,33 @@ export async function listUsers({
   if (group) params.set("group", group);
   if (sinRol) params.set("sin_rol", "true");
 
-  const response = await fetch(`${IAM_API_BASE_URL}/api/users/?${params.toString()}`);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/users/?${params.toString()}`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
 
 export async function listRoles(): Promise<IamRole[]> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/roles/`);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/roles/`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
 
 export async function listPermissions(): Promise<IamPermission[]> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/permissions/`);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/permissions/`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
 
 export async function listGroups(): Promise<IamGroup[]> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/groups/`);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/groups/`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
@@ -114,10 +111,9 @@ export interface IamUserRole {
 }
 
 export async function listUserRoles(userId: string): Promise<IamUserRole[]> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/user-roles/?user=${userId}&active=true`);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-roles/?user=${userId}&active=true`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
@@ -127,34 +123,31 @@ export async function listUserRoles(userId: string): Promise<IamUserRole[]> {
 // iam/views.py, IamUserRoleViewSet - sin ?user= es exactamente este reporte,
 // no hace falta un endpoint aparte).
 export async function listRoleHistory(): Promise<IamUserRole[]> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/user-roles/`);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-roles/`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
 
 export async function grantRole(userId: string, roleId: string): Promise<IamUserRole> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/user-roles/`, {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-roles/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user: userId, role: roleId }),
   });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
 
 export async function revokeRole(assignmentId: string): Promise<IamUserRole> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/user-roles/${assignmentId}/revoke/`, {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-roles/${assignmentId}/revoke/`, {
     method: "POST",
   });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
@@ -181,10 +174,9 @@ export interface IamMagicLink {
 }
 
 export async function listMagicLinks(): Promise<IamMagicLink[]> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/`);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
@@ -194,7 +186,7 @@ export async function createMagicLink(params: {
   recursoTipo?: string;
   recursoId?: string;
 }): Promise<IamMagicLink> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/`, {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -204,14 +196,41 @@ export async function createMagicLink(params: {
     }),
   });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export interface IamMagicLinkMasivoError {
+  email: string;
+  detail: string;
+}
+
+// Alta masiva de Magic Links (invitacion masiva por CSV) - el CSV se
+// parsea aqui en el frontend (un correo por linea/columna), iam-service
+// solo recibe la lista ya separada (ver iam/views.py, accion "masivo").
+export async function createMagicLinksMasivo(params: {
+  emails: string[];
+  recursoTipo?: string;
+  recursoId?: string;
+}): Promise<{ creados: IamMagicLink[]; errores: IamMagicLinkMasivoError[] }> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/masivo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      emails: params.emails,
+      recurso_tipo: params.recursoTipo || null,
+      recurso_id: params.recursoId || null,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
 
 export async function validateMagicLink(token: string): Promise<{ magic_link: IamMagicLink; jwt: string }> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/validar/`, {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/validar/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -219,28 +238,20 @@ export async function validateMagicLink(token: string): Promise<{ magic_link: Ia
   if (!response.ok) {
     // Esta funcion la consume tambien la pagina publica
     // (app/magic-link/[token]/page.tsx) - el mensaje de error se le muestra
-    // directo a un usuario externo, asi que aqui si vale la pena extraer
-    // "detail" en vez del cuerpo crudo (a diferencia de los demas clientes
-    // de este archivo, de uso solo interno/admin).
-    const body = await response.text();
-    let detail: string | undefined;
-    try {
-      detail = JSON.parse(body).detail;
-    } catch {
-      // no era JSON - cae al mensaje generico de abajo
-    }
-    throw new Error(detail ?? `Error de iam-service (${response.status}): ${body}`);
+    // directo a un usuario externo. friendlyApiError ya extrae "detail" del
+    // backend cuando existe (ver iam/views.py, "Token invalido."/"Token
+    // revocado."/etc.), que es justo el caso de uso aqui.
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
 
 export async function revokeMagicLink(magicLinkId: string): Promise<IamMagicLink> {
-  const response = await fetch(`${IAM_API_BASE_URL}/api/magic-links/${magicLinkId}/revocar/`, {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/${magicLinkId}/revocar/`, {
     method: "POST",
   });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de iam-service (${response.status}): ${body}`);
+    throw await friendlyApiError("IAM", response);
   }
   return response.json();
 }
