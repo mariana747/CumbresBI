@@ -36,13 +36,22 @@ Esta instancia sigue sirviendo al sistema actual en producción. Antes de cualqu
       `cumbresbi_audit_service`, `cumbresbi_test` (datos de prueba). Como el nombre de base es
       configurable por variable de entorno (`DOCINT_DB_NAME`, `AUDIT_DB_NAME`), no hace falta tocar
       código — solo definir esas env vars con el nombre prefijado en vez de dejar el default.
-- [ ] Borrar `cumbresbi-dev` (confirmado vacía) y crear `cumbresbi_test` en su lugar
-- [ ] Crear base de datos `cumbresbi_docint_service` (charset `utf8mb4`) — configurar
-      `DOCINT_DB_NAME=cumbresbi_docint_service` (el default en
+- [x] Borrar `cumbresbi-dev` y crear `cumbresbi_test` en su lugar (charset `utf8mb4`,
+      intercalación `utf8mb4_0900_ai_ci`) — base de datos de pruebas, separada de las reales
+- [x] Crear base de datos `cumbresbi_docint_service` (charset `utf8mb4`, intercalación
+      `utf8mb4_0900_ai_ci`) — configurar `DOCINT_DB_NAME=cumbresbi_docint_service` (el default en
       `services/document-intelligence-service/config/settings.py:89` es solo para Docker local)
-- [ ] Crear base de datos `cumbresbi_audit_service` (charset `utf8mb4`) — configurar
-      `AUDIT_DB_NAME=cumbresbi_audit_service` (el default en
+- [x] Crear base de datos `cumbresbi_audit_service` (charset `utf8mb4`, intercalación
+      `utf8mb4_0900_ai_ci`) — configurar `AUDIT_DB_NAME=cumbresbi_audit_service` (el default en
       `services/audit-service/config/settings.py:71` es solo para Docker local)
+
+**Bases creadas en la instancia `db-cypcumbres` (2026-08-06):**
+
+| Base | Uso | Charset | Intercalación |
+|---|---|---|---|
+| `cumbresbi_docint_service` | Motor Documental (`document-intelligence-service`) | `utf8mb4` | `utf8mb4_0900_ai_ci` |
+| `cumbresbi_audit_service` | Auditoría (`audit-service`) | `utf8mb4` | `utf8mb4_0900_ai_ci` |
+| `cumbresbi_test` | Datos de prueba (reemplaza a `cumbresbi-dev`) | `utf8mb4` | `utf8mb4_0900_ai_ci` |
 - [ ] Crear usuario de BD para `document-intelligence-service`, con `GRANT` SOLO sobre
       `cumbresbi_docint_service` (verificar con `SHOW GRANTS` después de crear)
 - [ ] Crear usuario de BD para `audit-service`, con `GRANT` SOLO sobre `cumbresbi_audit_service`
