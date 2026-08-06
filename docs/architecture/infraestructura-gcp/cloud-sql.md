@@ -24,13 +24,21 @@ Esta instancia sigue sirviendo al sistema actual en producción. Antes de cualqu
 
 ## Checklist
 
-- [ ] Revisar la lista actual de bases y usuarios de la instancia (captura o anotación aquí) antes de
-      crear nada nuevo
-- [ ] Crear, dentro de la instancia existente, las 3 bases de datos nuevas (una por servicio: revisar
-      `*_DB_NAME` en cada `settings.py` para el nombre exacto esperado, ej. `iam_service`,
-      `audit_service`, `docint_service`)
-- [ ] Crear ahí los usuarios de BD de `iam-service`, `audit-service` y `document-intelligence-service`,
-      cada uno con `GRANT` SOLO sobre su propia base nueva (verificar con `SHOW GRANTS` después de
-      crear cada usuario)
+- [x] Revisar la lista actual de bases y usuarios de la instancia `db-cypcumbres` (MySQL 8.4): ya
+      existían `administracion` (sistema en producción, no tocar) y `cumbresbi-dev` (uso a definir,
+      no se usa como base compartida de los 3 servicios por riesgo de colisión de tablas Django)
+- [x] **Decisión de alcance (2026-08-06):** para cerrar Fase 0 (ver `docs/CumbresBI_estado.md`) solo se
+      necesitan las bases de `document-intelligence-service` (Motor Documental) y `audit-service`
+      (tabla de auditoría). `iam-service` es Fase 1 — su base se crea cuando arranque esa fase
+      formalmente, aunque su código ya está listo.
+- [ ] Crear base de datos `docint_service` (charset `utf8mb4`) — nombre exacto esperado por
+      `DOCINT_DB_NAME` en `services/document-intelligence-service/config/settings.py:89`
+- [ ] Crear base de datos `audit_service` (charset `utf8mb4`) — nombre exacto esperado por
+      `AUDIT_DB_NAME` en `services/audit-service/config/settings.py:71`
+- [ ] Crear usuario de BD para `document-intelligence-service`, con `GRANT` SOLO sobre `docint_service`
+      (verificar con `SHOW GRANTS` después de crear)
+- [ ] Crear usuario de BD para `audit-service`, con `GRANT` SOLO sobre `audit_service` (verificar con
+      `SHOW GRANTS` después de crear)
+- [ ] Pendiente para cuando arranque Fase 1: crear base `iam_service` + su usuario
 - [ ] Confirmar que también existe una base separada para datos de prueba, distinta de la base real de
       cada servicio (misma instancia, bases distintas — no una copia completa)
