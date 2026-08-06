@@ -25,20 +25,26 @@ Esta instancia sigue sirviendo al sistema actual en producción. Antes de cualqu
 ## Checklist
 
 - [x] Revisar la lista actual de bases y usuarios de la instancia `db-cypcumbres` (MySQL 8.4): ya
-      existían `administracion` (sistema en producción, no tocar) y `cumbresbi-dev` (uso a definir,
-      no se usa como base compartida de los 3 servicios por riesgo de colisión de tablas Django)
+      existían `administracion` (sistema en producción, no tocar) y `cumbresbi-dev` (base de prueba
+      inicial, vacía — nunca se pudo usar por permisos, se reemplaza por `cumbresbi_test`)
 - [x] **Decisión de alcance (2026-08-06):** para cerrar Fase 0 (ver `docs/CumbresBI_estado.md`) solo se
       necesitan las bases de `document-intelligence-service` (Motor Documental) y `audit-service`
       (tabla de auditoría). `iam-service` es Fase 1 — su base se crea cuando arranque esa fase
       formalmente, aunque su código ya está listo.
-- [ ] Crear base de datos `docint_service` (charset `utf8mb4`) — nombre exacto esperado por
-      `DOCINT_DB_NAME` en `services/document-intelligence-service/config/settings.py:89`
-- [ ] Crear base de datos `audit_service` (charset `utf8mb4`) — nombre exacto esperado por
-      `AUDIT_DB_NAME` en `services/audit-service/config/settings.py:71`
-- [ ] Crear usuario de BD para `document-intelligence-service`, con `GRANT` SOLO sobre `docint_service`
+- [x] **Convención de nombres (2026-08-06):** todas las bases de CumbresBI llevan el prefijo
+      `cumbresbi_` para no confundirlas con `administracion` (producción): `cumbresbi_docint_service`,
+      `cumbresbi_audit_service`, `cumbresbi_test` (datos de prueba). Como el nombre de base es
+      configurable por variable de entorno (`DOCINT_DB_NAME`, `AUDIT_DB_NAME`), no hace falta tocar
+      código — solo definir esas env vars con el nombre prefijado en vez de dejar el default.
+- [ ] Borrar `cumbresbi-dev` (confirmado vacía) y crear `cumbresbi_test` en su lugar
+- [ ] Crear base de datos `cumbresbi_docint_service` (charset `utf8mb4`) — configurar
+      `DOCINT_DB_NAME=cumbresbi_docint_service` (el default en
+      `services/document-intelligence-service/config/settings.py:89` es solo para Docker local)
+- [ ] Crear base de datos `cumbresbi_audit_service` (charset `utf8mb4`) — configurar
+      `AUDIT_DB_NAME=cumbresbi_audit_service` (el default en
+      `services/audit-service/config/settings.py:71` es solo para Docker local)
+- [ ] Crear usuario de BD para `document-intelligence-service`, con `GRANT` SOLO sobre
+      `cumbresbi_docint_service` (verificar con `SHOW GRANTS` después de crear)
+- [ ] Crear usuario de BD para `audit-service`, con `GRANT` SOLO sobre `cumbresbi_audit_service`
       (verificar con `SHOW GRANTS` después de crear)
-- [ ] Crear usuario de BD para `audit-service`, con `GRANT` SOLO sobre `audit_service` (verificar con
-      `SHOW GRANTS` después de crear)
-- [ ] Pendiente para cuando arranque Fase 1: crear base `iam_service` + su usuario
-- [ ] Confirmar que también existe una base separada para datos de prueba, distinta de la base real de
-      cada servicio (misma instancia, bases distintas — no una copia completa)
+- [ ] Pendiente para cuando arranque Fase 1: crear base `cumbresbi_iam_service` + su usuario
