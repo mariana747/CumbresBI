@@ -96,6 +96,38 @@ KIYLz1XLfh9TeCisjfT5wQ==
 
 JWT_PRIVATE_KEY = env("JWT_PRIVATE_KEY", default=_DEV_JWT_PRIVATE_KEY)
 
+# --- Login OIDC real (Google Workspace) - Fase 1, Semana 4 ---
+# docs/architecture/README.md sec. 6.1. Client ID/Secret ya existen en
+# Secret Manager (docs/architecture/infraestructura-gcp/oidc-login.md);
+# en dev local se leen de .env (cliente OAuth "iam-service-oidc" con las
+# URIs de localhost). SSO silencioso (sin boton "Iniciar sesion con
+# Google", decision de producto confirmada) = responsabilidad del
+# frontend, que redirige directo a OIDC_START_PATH sin pantalla propia.
+OIDC_CLIENT_ID = env("OIDC_CLIENT_ID", default="")
+OIDC_CLIENT_SECRET = env("OIDC_CLIENT_SECRET", default="")
+OIDC_REDIRECT_URI = env("OIDC_REDIRECT_URI", default="http://localhost:8000/auth/google/callback")
+# Dominios de Workspace aprobados (claim "hd" del id_token) - unico
+# dominio confirmado hoy es el de Cumbres; agregar aqui los demas cuando
+# se confirmen (ver memoria de sesion "login-y-drive-cuenta-workspace-cumbres").
+OIDC_APPROVED_DOMAINS = env.list("OIDC_APPROVED_DOMAINS", default=["cypcumbres.mx"])
+# A donde redirige el navegador tras un login exitoso (el frontend lee la
+# cookie de sesion ahi y sigue su flujo normal de AuthProvider).
+OIDC_FRONTEND_SUCCESS_URL = env("OIDC_FRONTEND_SUCCESS_URL", default="http://localhost:3000/")
+OIDC_FRONTEND_ERROR_URL = env("OIDC_FRONTEND_ERROR_URL", default="http://localhost:3000/login?error=oidc")
+
+# Cookie de sesion real (JWT RS256 propio, firmado con JWT_PRIVATE_KEY) -
+# reemplaza a la sesion simulada de localStorage (src/lib/auth.ts,
+# frontend) una vez que este flujo este probado de punta a punta.
+SESSION_COOKIE_NAME_JWT = "cumbresbi_session"
+SESSION_JWT_TTL_MINUTES = 15  # mismo TTL documentado en README.md sec. 6.1
+
+# Cookie temporal (PKCE code_verifier + state) entre /auth/google/start y
+# /auth/google/callback - firmada con django.core.signing (usa SECRET_KEY),
+# nunca en la sesion ni en la URL. TTL corto: solo dura el redirect a Google
+# y de vuelta.
+OIDC_PKCE_COOKIE_NAME = "oidc_pkce"
+OIDC_PKCE_MAX_AGE_SECONDS = 300
+
 # Fase 0: el frontend (Next.js, localhost:3000) llama a este servicio directo
 # desde el navegador, sin API Gateway todavia (docs/architecture/README.md
 # sec. 8, pendiente). CORS solo para orígenes de desarrollo local.
