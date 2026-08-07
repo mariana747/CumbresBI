@@ -331,7 +331,7 @@ sequenceDiagram
 
     U->>W: Abre /magic-link/[token] (recibido por correo)
     W->>IAMS: Valida token
-    IAMS->>DB: ¿hash coincide? ¿no expirado (7 días)?<br/>¿uses_count < max_uses? ¿revoked_at IS NULL?
+    IAMS->>DB: ¿hash coincide? ¿no expirado (30 min)?<br/>¿uses_count < max_uses? ¿revoked_at IS NULL?
     alt token válido
         DB-->>IAMS: OK
         IAMS->>DB: Marca uso (uses_count++, last_used_at)

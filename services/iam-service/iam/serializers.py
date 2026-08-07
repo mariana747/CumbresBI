@@ -159,7 +159,7 @@ class IamMagicLinkSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             # Calculado en IamMagicLinkViewSet.create a partir de
-            # expires_in_days (request data) - no se recibe directo del
+            # expires_in_minutes (request data) - no se recibe directo del
             # cliente para forzar que siempre pase por esa validacion.
             "expires_at": {"required": False}
         }

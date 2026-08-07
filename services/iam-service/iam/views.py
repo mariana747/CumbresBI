@@ -19,7 +19,11 @@ from .serializers import (
     IamUserSerializer,
 )
 
-MAGIC_LINK_DEFAULT_EXPIRATION_DAYS = 7
+# Cambio de decision del cliente (Dylan, 2026-08-07): el Magic Link ya no
+# vive 7 dias, vive 30 minutos - ventana corta a proposito, no es un
+# ajuste tecnico interno. Actualizar README.md sec. 6.2/sec. 4 y el Plan de
+# Trabajo si se documenta la fecha exacta de este cambio de alcance.
+MAGIC_LINK_DEFAULT_EXPIRATION_MINUTES = 30
 
 # Validacion simple de formato (no de existencia real del correo, eso solo
 # lo confirma que la persona de verdad abra el link) - misma tolerancia que
@@ -183,10 +187,12 @@ class IamMagicLinkViewSet(ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         token, token_hash = generate_token()
-        expires_in_days = int(request.data.get("expires_in_days") or MAGIC_LINK_DEFAULT_EXPIRATION_DAYS)
+        expires_in_minutes = int(
+            request.data.get("expires_in_minutes") or MAGIC_LINK_DEFAULT_EXPIRATION_MINUTES
+        )
         magic_link = serializer.save(
             token_hash=token_hash,
-            expires_at=timezone.now() + timedelta(days=expires_in_days),
+            expires_at=timezone.now() + timedelta(minutes=expires_in_minutes),
         )
 
         data = self.get_serializer(magic_link).data
@@ -203,7 +209,7 @@ class IamMagicLinkViewSet(ModelViewSet):
         uno). El CSV se parsea en el frontend (admin/magic-links); aqui solo
         llega una lista de correos ya separada, no un archivo.
 
-        recurso_tipo/recurso_id/expires_in_days/issued_by son compartidos
+        recurso_tipo/recurso_id/expires_in_minutes/issued_by son compartidos
         para toda la carga (mismo criterio para todos los invitados de un
         mismo CSV). Corres fila por fila en vez de bulk_create porque cada
         fila necesita su propio token en claro (nunca se guarda, ver
@@ -221,7 +227,9 @@ class IamMagicLinkViewSet(ModelViewSet):
 
         recurso_tipo = request.data.get("recurso_tipo") or None
         recurso_id = request.data.get("recurso_id") or None
-        expires_in_days = int(request.data.get("expires_in_days") or MAGIC_LINK_DEFAULT_EXPIRATION_DAYS)
+        expires_in_minutes = int(
+            request.data.get("expires_in_minutes") or MAGIC_LINK_DEFAULT_EXPIRATION_MINUTES
+        )
         issued_by = request.data.get("issued_by") or None
 
         creados = []
@@ -247,7 +255,7 @@ class IamMagicLinkViewSet(ModelViewSet):
                 recurso_id=recurso_id,
                 token_hash=token_hash,
                 issued_by_id=issued_by,
-                expires_at=timezone.now() + timedelta(days=expires_in_days),
+                expires_at=timezone.now() + timedelta(minutes=expires_in_minutes),
             )
             data = self.get_serializer(magic_link).data
             data["token"] = token
@@ -320,7 +328,7 @@ class IamMagicLinkViewSet(ModelViewSet):
             recurso_id=anterior.recurso_id,
             token_hash=token_hash,
             issued_by=anterior.issued_by,
-            expires_at=timezone.now() + timedelta(days=MAGIC_LINK_DEFAULT_EXPIRATION_DAYS),
+            expires_at=timezone.now() + timedelta(minutes=MAGIC_LINK_DEFAULT_EXPIRATION_MINUTES),
             max_uses=anterior.max_uses,
         )
         data = self.get_serializer(nuevo).data
