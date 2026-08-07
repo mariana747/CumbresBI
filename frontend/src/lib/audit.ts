@@ -110,6 +110,7 @@ const ENTITY_LABELS: Record<string, string> = {
   iam_users: "Usuario",
   iam_user_roles: "Rol de usuario",
   iam_groups: "Empresa",
+  iam_magic_links: "Magic Link",
   pld_contrapartes_kyc: "Expediente KYC",
   pld_contrapartes_docs: "Documento KYC",
   pld_ticket_cliente: "Ticket de cliente",
@@ -125,6 +126,8 @@ const ACTION_VERB_LABELS: Record<string, string> = {
   update: "Actualizó",
   delete: "Eliminó",
   login: "Inició sesión",
+  use: "Usó",
+  resend: "Reenvió",
 };
 
 // Acciones que ya son una frase completa por si solas - no se les concatena

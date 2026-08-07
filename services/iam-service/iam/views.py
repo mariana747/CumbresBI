@@ -197,7 +197,7 @@ class IamMagicLinkViewSet(ModelViewSet):
         )
 
         emitir_evento_auditoria(
-            "magic_link.creado",
+            "iam_magic_links.create",
             "iam_magic_links",
             magic_link.magic_link_id,
             actor_user_id=request.data.get("issued_by"),
@@ -272,7 +272,7 @@ class IamMagicLinkViewSet(ModelViewSet):
                 expires_at=timezone.now() + timedelta(minutes=expires_in_minutes),
             )
             emitir_evento_auditoria(
-                "magic_link.creado",
+                "iam_magic_links.create",
                 "iam_magic_links",
                 magic_link.magic_link_id,
                 actor_user_id=issued_by,
@@ -325,7 +325,7 @@ class IamMagicLinkViewSet(ModelViewSet):
         magic_link.save(update_fields=["uses_count", "last_used_at", "first_used_at"])
 
         emitir_evento_auditoria(
-            "magic_link.usado",
+            "iam_magic_links.use",
             "iam_magic_links",
             magic_link.magic_link_id,
             actor_user_id="externo",
@@ -346,7 +346,7 @@ class IamMagicLinkViewSet(ModelViewSet):
             magic_link.revoked_at = timezone.now()
             magic_link.save(update_fields=["revoked_at"])
             emitir_evento_auditoria(
-                "magic_link.revocado",
+                "iam_magic_links.revoke",
                 "iam_magic_links",
                 magic_link.magic_link_id,
                 actor_user_id=request.data.get("actor_user_id"),
@@ -375,7 +375,7 @@ class IamMagicLinkViewSet(ModelViewSet):
             max_uses=anterior.max_uses,
         )
         emitir_evento_auditoria(
-            "magic_link.reenviado",
+            "iam_magic_links.resend",
             "iam_magic_links",
             nuevo.magic_link_id,
             actor_user_id=request.data.get("actor_user_id"),
