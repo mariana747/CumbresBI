@@ -22,7 +22,6 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import AdminTabs from "@/components/AdminTabs";
 import AppShell from "@/components/AppShell";
 import { IamPermission, IamRole, listPermissions, listRoles } from "@/lib/iam";
 
@@ -155,7 +154,6 @@ export default function MatrizPermisosPage() {
 
   return (
     <AppShell>
-      <AdminTabs />
       <Typography variant="h5" gutterBottom>
         Matriz de permisos
       </Typography>

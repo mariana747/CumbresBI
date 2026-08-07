@@ -25,7 +25,6 @@ import {
   Typography,
 } from "@mui/material";
 import { Pencil, Search } from "lucide-react";
-import AdminTabs from "@/components/AdminTabs";
 import AppShell, { notifySinRolChanged } from "@/components/AppShell";
 import RoleAssignmentDialog from "@/components/RoleAssignmentDialog";
 import { IamGroup, IamRole, IamUser, listGroups, listRoles, listUsers } from "@/lib/iam";
@@ -122,7 +121,6 @@ export default function DirectorioUsuariosPage() {
 
   return (
     <AppShell>
-      <AdminTabs />
       <Typography variant="h5" gutterBottom>
         Directorio de usuarios
       </Typography>

@@ -9,7 +9,8 @@ from django.utils import timezone
 # TTL del JWT emitido tras validar un magic link - corto a proposito (ver
 # docs/architecture/README.md sec. 6.2: "TTL corto (~15 min) para limitar el
 # dano de una revocacion tardia"). No confundir con expires_at del magic
-# link en si (7 dias por defecto, ver views.py) - eso es cuanto tiempo el
+# link en si (30 minutos por defecto, ver views.py - decision de cliente
+# 2026-08-07, antes era 7 dias) - eso es cuanto tiempo el
 # link es utilizable, esto es cuanto dura la sesion externa una vez que ya
 # se uso.
 EXTERNAL_JWT_TTL_MINUTES = 15

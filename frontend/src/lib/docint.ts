@@ -4,6 +4,7 @@
 // multipart. Cuando la integracion con Google Drive este lista (bloqueada
 // por Actividad 1, ver docint/drive.py), este campo cambia de `file` a un
 // identificador de Drive sin que la UI del formulario deba rediseñarse.
+import { apiFetch, friendlyApiError } from "./apiError";
 
 export interface DocumentAnalysisResult {
   detected_document_type: string | null;
@@ -85,14 +86,13 @@ export async function analyzeDocument({
     formData.append("metadata", JSON.stringify(metadata));
   }
 
-  const response = await fetch(`${DOCINT_API_BASE_URL}/analyze`, {
+  const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze`, {
     method: "POST",
     body: formData,
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error del motor documental (${response.status}): ${body}`);
+    throw await friendlyApiError("DOCINT", response);
   }
 
   return response.json();

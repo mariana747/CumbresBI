@@ -2,6 +2,7 @@
 // y confirmacion de envio a Drive (Motor Documental).
 // Contrato: services/audit-service/auditoria/views.py (GET /api/bitacora/,
 // POST /api/bitacora/confirmar_envio_drive/).
+import { apiFetch, friendlyApiError } from "./apiError";
 
 export interface BitacoraEvento {
   event_id: string;
@@ -38,10 +39,9 @@ export async function listBitacora({
   if (desde) params.set("desde", desde);
   if (hasta) params.set("hasta", hasta);
 
-  const response = await fetch(`${AUDIT_API_BASE_URL}/api/bitacora/?${params.toString()}`);
+  const response = await apiFetch("AUDIT", `${AUDIT_API_BASE_URL}/api/bitacora/?${params.toString()}`);
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de audit-service (${response.status}): ${body}`);
+    throw await friendlyApiError("AUDIT", response);
   }
   return response.json();
 }
@@ -58,7 +58,7 @@ export async function confirmarEnvioDrive({
   entidadId: string;
   consultadoEn: string;
 }): Promise<BitacoraEvento> {
-  const response = await fetch(`${AUDIT_API_BASE_URL}/api/bitacora/confirmar_envio_drive/`, {
+  const response = await apiFetch("AUDIT", `${AUDIT_API_BASE_URL}/api/bitacora/confirmar_envio_drive/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -69,8 +69,7 @@ export async function confirmarEnvioDrive({
     }),
   });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Error de audit-service (${response.status}): ${body}`);
+    throw await friendlyApiError("AUDIT", response);
   }
   return response.json();
 }
