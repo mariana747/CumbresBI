@@ -52,8 +52,9 @@ Esta instancia sigue sirviendo al sistema actual en producción. Antes de cualqu
 | `cumbresbi_docint_service` | Motor Documental (`document-intelligence-service`) | `utf8mb4` | `utf8mb4_0900_ai_ci` |
 | `cumbresbi_audit_service` | Auditoría (`audit-service`) | `utf8mb4` | `utf8mb4_0900_ai_ci` |
 | `cumbresbi_test` | Datos de prueba (reemplaza a `cumbresbi-dev`) | `utf8mb4` | `utf8mb4_0900_ai_ci` |
-- [ ] Crear usuario de BD para `document-intelligence-service`, con `GRANT` SOLO sobre
-      `cumbresbi_docint_service` (verificar con `SHOW GRANTS` después de crear)
-- [ ] Crear usuario de BD para `audit-service`, con `GRANT` SOLO sobre `cumbresbi_audit_service`
-      (verificar con `SHOW GRANTS` después de crear)
-- [ ] Pendiente para cuando arranque Fase 1: crear base `cumbresbi_iam_service` + su usuario
+- [x] Usuario de BD para `document-intelligence-service`, con `GRANT` SOLO sobre
+      `cumbresbi_docint_service` (verificado con `SHOW GRANTS`)
+- [x] Usuario de BD para `audit-service`, con `GRANT` SOLO sobre `cumbresbi_audit_service`
+      (verificado con `SHOW GRANTS`)
+- [x] Fase 1 en curso: base `cumbresbi_iam_service` + usuario `iam_app` creados y acotados
+      (`GRANT` solo sobre su propia base)
