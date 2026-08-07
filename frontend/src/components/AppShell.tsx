@@ -39,7 +39,7 @@ import {
   ChevronRight,
   Menu as MenuIcon,
 } from "lucide-react";
-import { isLoggedIn } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
 import { Footer } from "@/components/Footer";
 import { BRAND } from "@/theme/theme";
@@ -291,10 +291,10 @@ function Header({
 }
 
 
-// Guard de sesion de Fase 0 (ver src/lib/auth.ts - sesion simulada,
-// iam-service todavia no emite JWT real). Vive en AppShell porque todas las
-// paginas autenticadas ya lo envuelven; /login es la unica ruta publica y no
-// usa este componente.
+// Guard de sesion real (Fase 1, Semana 4; ver src/lib/auth.ts - cookie
+// HttpOnly emitida por iam-service tras el login OIDC). Vive en AppShell
+// porque todas las paginas autenticadas ya lo envuelven; /login es la
+// unica ruta publica y no usa este componente.
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
@@ -304,11 +304,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [sinRolUsers, setSinRolUsers] = useState<IamUser[]>([]);
 
   useEffect(() => {
-    if (!isLoggedIn()) {
-      router.replace("/login");
-    } else {
-      setChecked(true);
-    }
+    getSession().then((session) => {
+      if (!session) {
+        router.replace("/login");
+      } else {
+        setChecked(true);
+      }
+    });
   }, [router]);
 
   // Aviso de "usuarios sin rol asignado" (ver Header arriba) - se consulta

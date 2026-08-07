@@ -6,10 +6,10 @@ API JSON convencional - /api/me es la unica que responde JSON.
 SSO silencioso (decision de producto confirmada, ver memoria de sesion
 "oidc-sso-silencioso-sin-boton-login"): esta vista NO decide eso, solo la
 implementa - /auth/google/start no muestra ninguna pantalla propia, salta
-directo a Google. El frontend es quien no debe mostrar un boton "Iniciar
-sesion con Google" para usuarios internos (queda pendiente en frontend,
-ver src/lib/auth.ts - sesion simulada, se retira cuando este flujo quede
-probado de punta a punta).
+directo a Google. El frontend ya no muestra el boton "Iniciar sesion con
+Google" para usuarios internos (ver src/app/login/page.tsx - redirige
+directo, solo cae a un boton "Reintentar" si /auth/google/callback regreso
+con ?error=oidc).
 """
 
 import logging

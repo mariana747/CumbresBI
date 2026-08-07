@@ -1,22 +1,42 @@
-// Sesion simulada de Fase 0 - NO es autenticacion real. iam-service todavia
-// no expone un endpoint OIDC (ver services/iam-service/iam/views.py, solo
-// tiene un ReadOnlyModelViewSet de usuarios). Esto existe unicamente para
-// poder construir y probar el flujo de navegacion (login -> panel, guard de
-// rutas) mientras se conecta el backend real. Reemplazar por JWT +
-// EffectiveScope de iam-service en Fase 1 - ver docs/architecture/
-// roles-y-permisos.md.
+// Sesion real via OIDC (Fase 1, Semana 4; docs/architecture/README.md sec.
+// 6.1). Reemplaza la sesion simulada de localStorage - ahora la sesion
+// vive en una cookie HttpOnly que pone iam-service (services/iam-service/
+// iam/auth_views.py), esta libreria solo la consulta via /api/me.
+import { apiFetch } from "./apiError";
 
-const SESSION_KEY = "cumbresbi.devSession";
+const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? "http://localhost:8000";
 
-export function isLoggedIn(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(SESSION_KEY) === "true";
+export interface SessionUser {
+  user_id: string;
+  email: string;
+  is_global: boolean;
+  sociedad_rfcs: string[];
+  proyecto_ids: string[];
+  centro_ids: string[];
+  contrato_ids: string[];
 }
 
-export function login(): void {
-  window.localStorage.setItem(SESSION_KEY, "true");
+// null = no autenticado (cookie ausente/expirada) - nunca lanza, para que
+// el guard de AppShell pueda usarlo directo sin try/catch propio.
+export async function getSession(): Promise<SessionUser | null> {
+  try {
+    const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/me/`, { credentials: "include" });
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
 }
 
-export function logout(): void {
-  window.localStorage.removeItem(SESSION_KEY);
+// SSO silencioso (decision de producto confirmada, ver memoria de sesion
+// "oidc-sso-silencioso-sin-boton-login"): no hay pantalla propia de login,
+// esto salta directo al backend, que a su vez salta directo a Google. Si
+// el usuario ya tiene sesion activa de Google, todo el salto es
+// invisible para el.
+export function startGoogleLogin(): void {
+  window.location.href = `${IAM_API_BASE_URL}/auth/google/start`;
+}
+
+export async function logout(): Promise<void> {
+  await apiFetch("IAM", `${IAM_API_BASE_URL}/auth/logout`, { credentials: "include" });
 }

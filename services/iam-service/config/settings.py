@@ -135,6 +135,10 @@ CORS_ALLOWED_ORIGINS = env.list(
     "IAM_CORS_ALLOWED_ORIGINS",
     default=["http://localhost:3000", "http://127.0.0.1:3000"],
 )
+# La sesion real (cookie HttpOnly de auth_views.py) viaja en fetch() con
+# credentials:"include" desde el frontend (otro origen) - sin esto el
+# navegador nunca manda ni acepta la cookie entre localhost:3000 y :8000.
+CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = "config.urls"
 
