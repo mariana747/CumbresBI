@@ -11,6 +11,12 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-only-insecure-key")
 DEBUG = env.bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
 
+# URL interna de audit-service (nombre de servicio de docker-compose en
+# dev; en Cloud Run seria la URL real del servicio) - usada para el
+# registro sincrono interino de eventos de auditoria (ver
+# iam/audit_utils.py) mientras no exista Pub/Sub real.
+AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8001")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

@@ -8,6 +8,7 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
+from .audit_utils import emitir_evento_auditoria
 from .magic_link_utils import generate_token, hash_token, issue_external_jwt
 from .models import IamGroup, IamMagicLink, IamPermission, IamRole, IamUser, IamUserRole
 from .serializers import (
@@ -195,6 +196,19 @@ class IamMagicLinkViewSet(ModelViewSet):
             expires_at=timezone.now() + timedelta(minutes=expires_in_minutes),
         )
 
+        emitir_evento_auditoria(
+            "magic_link.creado",
+            "iam_magic_links",
+            magic_link.magic_link_id,
+            actor_user_id=request.data.get("issued_by"),
+            valores_nuevos={
+                "email": magic_link.email,
+                "recurso_tipo": magic_link.recurso_tipo,
+                "recurso_id": magic_link.recurso_id,
+                "expires_at": magic_link.expires_at.isoformat(),
+            },
+        )
+
         data = self.get_serializer(magic_link).data
         # Modo dev sin correo real (ver docstring de la clase) - remover
         # "token" y "magic_link_url" de aqui cuando exista el envio real.
@@ -257,6 +271,20 @@ class IamMagicLinkViewSet(ModelViewSet):
                 issued_by_id=issued_by,
                 expires_at=timezone.now() + timedelta(minutes=expires_in_minutes),
             )
+            emitir_evento_auditoria(
+                "magic_link.creado",
+                "iam_magic_links",
+                magic_link.magic_link_id,
+                actor_user_id=issued_by,
+                valores_nuevos={
+                    "email": magic_link.email,
+                    "recurso_tipo": magic_link.recurso_tipo,
+                    "recurso_id": magic_link.recurso_id,
+                    "expires_at": magic_link.expires_at.isoformat(),
+                    "origen": "carga_masiva_csv",
+                },
+            )
+
             data = self.get_serializer(magic_link).data
             data["token"] = token
             data["magic_link_url"] = f"/magic-link/{token}"
@@ -296,6 +324,14 @@ class IamMagicLinkViewSet(ModelViewSet):
             magic_link.first_used_at = now
         magic_link.save(update_fields=["uses_count", "last_used_at", "first_used_at"])
 
+        emitir_evento_auditoria(
+            "magic_link.usado",
+            "iam_magic_links",
+            magic_link.magic_link_id,
+            actor_user_id="externo",
+            valores_nuevos={"email": magic_link.email, "uses_count": magic_link.uses_count},
+        )
+
         return Response(
             {
                 "magic_link": self.get_serializer(magic_link).data,
@@ -309,6 +345,13 @@ class IamMagicLinkViewSet(ModelViewSet):
         if magic_link.revoked_at is None:
             magic_link.revoked_at = timezone.now()
             magic_link.save(update_fields=["revoked_at"])
+            emitir_evento_auditoria(
+                "magic_link.revocado",
+                "iam_magic_links",
+                magic_link.magic_link_id,
+                actor_user_id=request.data.get("actor_user_id"),
+                valores_nuevos={"email": magic_link.email},
+            )
         return Response(self.get_serializer(magic_link).data)
 
     @action(detail=True, methods=["post"])
@@ -331,6 +374,15 @@ class IamMagicLinkViewSet(ModelViewSet):
             expires_at=timezone.now() + timedelta(minutes=MAGIC_LINK_DEFAULT_EXPIRATION_MINUTES),
             max_uses=anterior.max_uses,
         )
+        emitir_evento_auditoria(
+            "magic_link.reenviado",
+            "iam_magic_links",
+            nuevo.magic_link_id,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_previos={"magic_link_id_anterior": anterior.magic_link_id},
+            valores_nuevos={"email": nuevo.email, "expires_at": nuevo.expires_at.isoformat()},
+        )
+
         data = self.get_serializer(nuevo).data
         data["token"] = token
         data["magic_link_url"] = f"/magic-link/{token}"

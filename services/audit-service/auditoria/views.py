@@ -82,6 +82,37 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
         return response
 
     @action(detail=False, methods=["post"])
+    def registrar_evento(self, request):
+        """Registro directo de un evento de auditoria (llamada sincrona
+        service-to-service), mismo criterio interino que
+        confirmar_envio_drive: mientras no exista Pub/Sub real
+        (docs/architecture/README.md sec. 9), los servicios consumidores
+        POSTean aqui en vez de publicar al outbox. Reemplazar por el
+        consumidor real de `audit.events` cuando exista GCP/Pub-Sub.
+
+        Requiere servicio_origen, accion, entidad, entidad_id. actor_user_id
+        y valores_previos/valores_nuevos son opcionales (actor_user_id
+        default "sin-auth" para acciones sin usuario interno identificable,
+        ej. un usuario externo via Magic Link).
+        """
+        required = ["servicio_origen", "accion", "entidad", "entidad_id"]
+        faltantes = [campo for campo in required if not request.data.get(campo)]
+        if faltantes:
+            return Response({campo: ["Este campo es requerido."] for campo in faltantes}, status=400)
+
+        evento = BitacoraAuditoria.objects.create(
+            servicio_origen=request.data["servicio_origen"],
+            actor_user_id=request.data.get("actor_user_id") or "sin-auth",
+            accion=request.data["accion"],
+            entidad=request.data["entidad"],
+            entidad_id=request.data["entidad_id"],
+            valores_previos=request.data.get("valores_previos"),
+            valores_nuevos=request.data.get("valores_nuevos"),
+            ocurrido_en=request.data.get("ocurrido_en") or timezone.now(),
+        )
+        return Response(BitacoraAuditoriaSerializer(evento).data, status=201)
+
+    @action(detail=False, methods=["post"])
     def confirmar_envio_drive(self, request):
         """Boton de confirmacion de envio a Drive (Motor Documental, Fase 0
         sec. 10 - streaming via Drive API todavia bloqueado por falta del
