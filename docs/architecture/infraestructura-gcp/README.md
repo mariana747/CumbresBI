@@ -1,13 +1,18 @@
 # Infraestructura GCP (proyecto `cyp-cumbres-461220`)
 
-Checklists de infraestructura GCP para Cloud SQL y Secret Manager (Tarea 1 "Dar de alta GCP + Cloud
-SQL" y Tarea 2 "Configurar Secret Manager" del correo original). Un archivo por servicio/tema, para
-que cada sub-rama de código actualice solo el suyo sin pisar el trabajo de las demás.
+Documentación de la infraestructura real de GCP para CumbresBI: Cloud SQL y Secret Manager (Tarea 1
+"Dar de alta GCP + Cloud SQL" y Tarea 2 "Configurar Secret Manager" del correo original). Un archivo
+por servicio/tema, para que cada sub-rama de código documente solo lo suyo sin pisar el trabajo de las
+demás.
 
-- [audit-service.md](audit-service.md)
-- [iam-service.md](iam-service.md)
-- [document-intelligence-service.md](document-intelligence-service.md)
-- [cloud-sql.md](cloud-sql.md)
-- [oidc-login.md](oidc-login.md)
-
-Convención: cada punto se marca `[x]` con fecha cuando se completa en la consola de GCP.
+- [cloud-sql.md](cloud-sql.md) — decisión de reusar la instancia existente, convención de nombres,
+  bases y usuarios creados, reglas de seguridad para no afectar el sistema en producción.
+- [document-intelligence-service.md](document-intelligence-service.md) — cuenta de servicio, base de
+  datos y secretos de `document-intelligence-service`.
+- [audit-service.md](audit-service.md) — cuenta de servicio, base de datos y secretos de
+  `audit-service`.
+- [iam-service.md](iam-service.md) — cuenta de servicio de `iam-service`, la nota sobre la cuenta
+  duplicada `iam-service@...` vs `iam-service-956@...`, y qué queda pendiente para cuando arranque
+  Fase 1.
+- [oidc-login.md](oidc-login.md) — registro de la app OIDC en Google Workspace, cliente OAuth y
+  secretos de credenciales.

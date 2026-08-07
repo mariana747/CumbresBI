@@ -531,6 +531,7 @@ Esta arquitectura fue explícitamente solicitada por el cliente. Documentamos su
 ## Referencias
 
 - **[Catálogo de roles, permisos y reglas de RLS por rol](roles-y-permisos.md)** — mapeo de roles de negocio, matriz de permisos por microservicio y reglas concretas de `ScopedManager` por rol (incluye dos hallazgos nuevos: alcance por GRUPO y alcance por IDENTIDAD, no cubiertos por el diseño original de GLOBAL/SOCIEDAD/PROYECTO/CENTRO).
+- **[Google Cloud Document AI como alternativa futura](document-ai-alternativa-futura.md)** — por qué no se usa en esta versión, cómo se integraría vía el patrón adaptador ya existente (`DocumentIntelligenceProvider`), y qué señales harían reconsiderarlo.
 - Historial de diseño monolítico (v1.0, reemplazado): `con-base-en-el-delightful-mccarthy.md`.
 - Esquema de origen: [`20260727_Cumbres_ERD.sql`](../../20260727_Cumbres_ERD.sql), [`schema.csv`](../../schema.csv), [`fk_relationships.csv`](../../fk_relationships.csv).
 - Cronograma de referencia: `CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.docx`.
