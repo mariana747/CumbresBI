@@ -13,6 +13,7 @@ con ?error=oidc).
 """
 
 import logging
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.core import signing
@@ -23,7 +24,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
 from .audit_utils import emitir_evento_auditoria
-from .models import IamIdentity, IamUser
+from .models import IamIdentity, IamInvitation, IamUser
 from .oidc_utils import (
     OidcError,
     build_authorization_url,
@@ -38,6 +39,23 @@ from .session_utils import decode_session_jwt, issue_session_jwt
 logger = logging.getLogger(__name__)
 
 _PKCE_SALT = "oidc-pkce"
+
+
+class LoginRechazadoSinInvitacion(Exception):
+    """El correo no tiene IamUser existente ni invitacion pendiente -
+    decision hibrida 10/Ago/2026 (ver memoria de sesion
+    "iam-invitacion-alcance-incierto"): un usuario ya registrado entra con
+    login libre, uno nuevo de la organizacion necesita que un IAM Admin lo
+    invite primero."""
+
+
+def _agregar_error_a_redirect(url: str, error_code: str) -> str:
+    """Reescribe el ?error=... de OIDC_FRONTEND_ERROR_URL sin asumir que
+    su querystring ya tiene ese parametro (o ningun parametro)."""
+    partes = urlsplit(url)
+    query = dict(parse_qsl(partes.query))
+    query["error"] = error_code
+    return urlunsplit((partes.scheme, partes.netloc, partes.path, urlencode(query), partes.fragment))
 
 
 @require_GET
@@ -91,7 +109,15 @@ def google_callback(request):
         response.delete_cookie(settings.OIDC_PKCE_COOKIE_NAME)
         return response
 
-    user = _upsert_identity(claims)
+    try:
+        user = _upsert_identity(claims)
+    except LoginRechazadoSinInvitacion:
+        logger.warning(
+            "Login rechazado: %s no tiene IamUser ni invitacion pendiente", claims.get("email")
+        )
+        response = redirect(_agregar_error_a_redirect(settings.OIDC_FRONTEND_ERROR_URL, "sin_invitacion"))
+        response.delete_cookie(settings.OIDC_PKCE_COOKIE_NAME)
+        return response
 
     session_jwt = issue_session_jwt(user)
     response = redirect(settings.OIDC_FRONTEND_SUCCESS_URL)
@@ -117,13 +143,30 @@ def google_callback(request):
 def _upsert_identity(claims: dict) -> IamUser:
     """Crea/actualiza iam_identities + iam_users (README.md sec. 6.1, paso
     7). email_verified/hd/picture se refrescan en cada login - son datos
-    de Google, no editables por el usuario dentro de CumbresBI."""
+    de Google, no editables por el usuario dentro de CumbresBI.
+
+    Gate de invitacion formal (decision hibrida 10/Ago/2026, ver memoria
+    de sesion "iam-invitacion-alcance-incierto"): si el correo YA tiene
+    IamUser, es un usuario ya registrado en la organizacion -> login
+    libre, como siempre. Si NO lo tiene, es alguien nuevo -> solo entra si
+    un IAM Admin ya lo invito (IamInvitation pendiente, ni aceptada ni
+    revocada); si no hay invitacion, se rechaza el login SIN crear el
+    IamUser (antes de este gate, cualquier correo del dominio aprobado se
+    autocreaba en silencio - ver LoginRechazadoSinInvitacion arriba)."""
     email = claims["email"]
     now = timezone.now()
 
     user = IamUser.objects.filter(primary_email__iexact=email).first()
     if not user:
+        invitacion = IamInvitation.objects.filter(
+            email__iexact=email, accepted_at__isnull=True, revoked_at__isnull=True
+        ).first()
+        if not invitacion:
+            raise LoginRechazadoSinInvitacion(email)
+
         user = IamUser.objects.create(primary_email=email, display_name=claims.get("name"))
+        invitacion.accepted_at = now
+        invitacion.save(update_fields=["accepted_at"])
 
     identity = IamIdentity.objects.filter(
         provider=IamIdentity.PROVIDER_GOOGLE, provider_subject=claims["sub"]

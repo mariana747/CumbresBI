@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -12,27 +13,69 @@ import {
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { Copy, Link2, ShieldCheck, UploadCloud } from "lucide-react";
+import { Copy, Link2, ShieldCheck, UploadCloud, UserPlus } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import {
+  IamInvitation,
   IamMagicLink,
   IamMagicLinkMasivoError,
+  createInvitation,
   createMagicLink,
   createMagicLinksMasivo,
+  listInvitations,
   listMagicLinks,
+  revokeInvitation,
   revokeMagicLink,
   validateMagicLink,
 } from "@/lib/iam";
 import { listKyc } from "@/lib/pld";
+
+// "Invitaciones" (unifica lo que antes eran dos pantallas separadas,
+// Magic Links + IamInvitation - decision de producto 10/Ago/2026): dos
+// mecanismos distintos que comparten el mismo concepto de "dejar entrar
+// a alguien sin que ya sea parte de CumbresBI", solo que uno es temporal
+// y sin cuenta de Workspace (Magic Link) y el otro es formal y con cuenta
+// real (IamInvitation, gate de auth_views._upsert_identity).
+export default function InvitacionesPage() {
+  const [tab, setTab] = useState(0);
+
+  return (
+    <AppShell>
+      <Typography variant="h5" gutterBottom>
+        Invitaciones
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Dos formas de dejar entrar a alguien que todavía no es parte de CumbresBI: un acceso
+        temporal sin cuenta de Workspace, o el alta formal de un colaborador nuevo.
+      </Typography>
+
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+        <Tab icon={<Link2 size={16} strokeWidth={1.5} />} iconPosition="start" label="Temporales" />
+        <Tab icon={<UserPlus size={16} strokeWidth={1.5} />} iconPosition="start" label="Colaboradores" />
+      </Tabs>
+
+      <Box role="tabpanel" hidden={tab !== 0}>
+        {tab === 0 && <InvitacionesTemporalesTab />}
+      </Box>
+      <Box role="tabpanel" hidden={tab !== 1}>
+        {tab === 1 && <ColaboradoresNuevosTab />}
+      </Box>
+    </AppShell>
+  );
+}
+
+// --- Tab 1: Invitaciones temporales (antes /admin/magic-links, pestaña "Temporales" ahora) ---------
 
 // Tipos de recurso que un Magic Link puede autorizar - lista cerrada a
 // proposito (recurso_tipo es un string libre en el backend, pero mostrar un
@@ -47,12 +90,12 @@ const ESTADO_LLENADO_LABELS: Record<string, string> = {
   ENTREGADO: "Entregado",
 };
 
-// Magic Links (Fase 1, Semana 4) - pantalla de prueba en modo dev. Sin
-// envio de correo real todavia (ver iam/views.py) - por eso esta pantalla
-// muestra el token/link generado directamente en lugar de solo "enviarlo".
-// Cuando exista el envio real desde Workspace, esta pantalla deja de
-// mostrar el token y solo confirma que se envio.
-export default function MagicLinksPage() {
+// Magic Links (Fase 1, Semana 4) - modo dev. Sin envio de correo real
+// todavia (ver iam/views.py) - por eso esta pantalla muestra el
+// token/link generado directamente en lugar de solo "enviarlo". Cuando
+// exista el envio real desde Workspace, esta pantalla deja de mostrar el
+// token y solo confirma que se envio.
+function InvitacionesTemporalesTab() {
   const [email, setEmail] = useState("");
   const [recursoTipo, setRecursoTipo] = useState("");
   const [recursoId, setRecursoId] = useState("");
@@ -243,10 +286,7 @@ export default function MagicLinksPage() {
   }
 
   return (
-    <AppShell>
-      <Typography variant="h5" gutterBottom>
-        Magic Links
-      </Typography>
+    <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Acceso de un solo uso para usuarios externos, sin contraseña. Modo desarrollo — sin envío de
         correo real todavía, el link se muestra aquí directamente en vez de enviarse por email.
@@ -550,6 +590,164 @@ export default function MagicLinksPage() {
           </Table>
         </TableContainer>
       </Paper>
-    </AppShell>
+    </>
+  );
+}
+
+// --- Tab 2: Colaboradores nuevos (IamInvitation, gate real) -------------
+
+// Alta formal de un empleado nuevo (decision hibrida 10/Ago/2026, ver
+// iam/auth_views.py y memoria de sesion "iam-invitacion-alcance-incierto"):
+// a diferencia de la pestaña anterior, aqui no hay token ni link que
+// copiar - el correo simplemente ya puede iniciar sesion con Google en
+// cuanto existe esta fila pendiente (el gate real vive en el backend,
+// _upsert_identity).
+function ColaboradoresNuevosTab() {
+  const [email, setEmail] = useState("");
+  const [creando, setCreando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [invitaciones, setInvitaciones] = useState<IamInvitation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  function refrescarLista() {
+    setLoading(true);
+    listInvitations()
+      .then(setInvitaciones)
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    refrescarLista();
+  }, []);
+
+  async function handleInvitar(e: React.FormEvent) {
+    e.preventDefault();
+    setCreando(true);
+    setError(null);
+    try {
+      await createInvitation(email);
+      setEmail("");
+      refrescarLista();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al invitar");
+    } finally {
+      setCreando(false);
+    }
+  }
+
+  async function handleRevocar(invitationId: string) {
+    try {
+      await revokeInvitation(invitationId);
+      refrescarLista();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al revocar");
+    }
+  }
+
+  function estadoDe(inv: IamInvitation): { label: string; color: "success" | "default" | "error" } {
+    if (inv.revoked_at) return { label: "Revocada", color: "error" };
+    if (inv.accepted_at) return { label: "Aceptada", color: "default" };
+    return { label: "Pendiente", color: "success" };
+  }
+
+  return (
+    <>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Un correo que todavía no forma parte de CumbresBI no puede iniciar sesión hasta que un
+        Admin lo invite aquí — no hace falta enviarle ningún link, en cuanto queda pendiente ya
+        puede entrar con su cuenta de Google Workspace.
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+          Invitar colaborador nuevo
+        </Typography>
+        <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleInvitar}>
+          <TextField
+            size="small"
+            label="Correo del colaborador (Google Workspace)"
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            sx={{ flex: 1 }}
+          />
+          <Button
+            type="submit"
+            variant="contained"
+            startIcon={<UserPlus size={16} strokeWidth={1.5} />}
+            disabled={creando}
+          >
+            {creando ? <CircularProgress size={20} color="inherit" /> : "Invitar"}
+          </Button>
+        </Stack>
+      </Paper>
+
+      <Paper variant="outlined">
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Correo</TableCell>
+                <TableCell>Invitado por</TableCell>
+                <TableCell>Invitado el</TableCell>
+                <TableCell>Estado</TableCell>
+                <TableCell align="right">Acciones</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                    <CircularProgress size={24} />
+                  </TableCell>
+                </TableRow>
+              ) : invitaciones.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Sin invitaciones todavía.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                invitaciones.map((inv) => {
+                  const estado = estadoDe(inv);
+                  return (
+                    <TableRow key={inv.invitation_id} hover>
+                      <TableCell>{inv.email}</TableCell>
+                      <TableCell>{inv.invited_by_email ?? "—"}</TableCell>
+                      <TableCell>{new Date(inv.invited_at).toLocaleString("es-MX")}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={estado.label} color={estado.color} />
+                      </TableCell>
+                      <TableCell align="right">
+                        {estado.label === "Pendiente" && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            onClick={() => handleRevocar(inv.invitation_id)}
+                          >
+                            Revocar
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+    </>
   );
 }

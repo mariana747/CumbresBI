@@ -310,6 +310,37 @@ class IamMagicLink(models.Model):
         return f"{self.magic_link_id} ({self.email})"
 
 
+class IamInvitation(models.Model):
+    """Invitación formal para dar de alta a un empleado nuevo (decisión
+    híbrida 10/Ago/2026, ver memoria de sesión
+    "iam-invitacion-alcance-incierto"): un usuario ya registrado (ya tiene
+    `IamUser`) entra con login libre de siempre; uno nuevo de la
+    organización necesita que un IAM Admin lo invite primero -
+    `_upsert_identity` (`auth_views.py`) rechaza el login OIDC si el
+    correo no tiene ya un `IamUser` NI una invitación pendiente.
+
+    Sin token propio a propósito: a diferencia de `IamMagicLink` (acceso
+    puntual sin cuenta de Workspace), aquí el usuario sí tiene/tendrá
+    cuenta real de Workspace - el "canje" es simplemente iniciar sesión
+    con Google; el dominio aprobado + esta fila pendiente son la
+    validación completa, no hace falta un link con token."""
+
+    invitation_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    email = models.EmailField(max_length=254)
+    invited_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="invitations_sent"
+    )
+    invited_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_invitations"
+
+    def __str__(self):
+        return self.email
+
+
 class IamUserCentroAccess(models.Model):
     """Grant plano de alcance CENTRO (columna real del ERD, schema.csv) -
     a diferencia de SOCIEDAD/PROYECTO, CENTRO no vive en

@@ -14,6 +14,7 @@ from .magic_link_utils import generate_token, hash_token, issue_external_jwt
 from .models import (
     GeneralSociedad,
     IamGroup,
+    IamInvitation,
     IamMagicLink,
     IamPermission,
     IamRole,
@@ -27,6 +28,7 @@ from .models import (
 from .serializers import (
     GeneralSociedadSerializer,
     IamGroupSerializer,
+    IamInvitationSerializer,
     IamMagicLinkSerializer,
     IamPermissionSerializer,
     IamRoleSerializer,
@@ -644,3 +646,77 @@ class IamMagicLinkViewSet(ModelViewSet):
         data["token"] = token
         data["magic_link_url"] = f"/magic-link/{token}"
         return Response(data, status=201)
+
+
+class IamInvitationViewSet(ModelViewSet):
+    """Invitaciones formales de empleado nuevo (gate de _upsert_identity,
+    ver auth_views.py y memoria de sesion "iam-invitacion-alcance-incierto").
+
+    DELETE no esta permitido: una invitacion no se borra, se revoca (mismo
+    criterio que iam_user_roles/iam_magic_links) - usa
+    POST /api/invitaciones/{id}/revocar/.
+    """
+
+    http_method_names = ["get", "post", "head", "options"]
+    queryset = IamInvitation.objects.all().order_by("-invited_at")
+    serializer_class = IamInvitationSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("iam.crear")()]
+        if self.action == "revocar":
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        email_param = self.request.query_params.get("email")
+        if email_param:
+            queryset = queryset.filter(email__iexact=email_param)
+        pendientes = self.request.query_params.get("pendientes")
+        if pendientes == "true":
+            queryset = queryset.filter(accepted_at__isnull=True, revoked_at__isnull=True)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        email = (request.data.get("email") or "").strip()
+        if not email:
+            return Response({"email": ["Este campo es requerido."]}, status=400)
+        if IamUser.objects.filter(primary_email__iexact=email).exists():
+            return Response(
+                {"email": ["Ya existe una cuenta con este correo, no necesita invitación."]}, status=400
+            )
+        if IamInvitation.objects.filter(
+            email__iexact=email, accepted_at__isnull=True, revoked_at__isnull=True
+        ).exists():
+            return Response({"email": ["Ya hay una invitación pendiente para este correo."]}, status=400)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invitation = serializer.save()
+
+        emitir_evento_auditoria(
+            "iam_invitations.create",
+            "iam_invitations",
+            invitation.invitation_id,
+            actor_user_id=request.data.get("invited_by"),
+            valores_nuevos={"email": invitation.email},
+        )
+        return Response(self.get_serializer(invitation).data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def revocar(self, request, pk=None):
+        invitation = self.get_object()
+        if invitation.accepted_at is not None:
+            return Response({"detail": "Esta invitación ya fue aceptada, no se puede revocar."}, status=400)
+        if invitation.revoked_at is None:
+            invitation.revoked_at = timezone.now()
+            invitation.save(update_fields=["revoked_at"])
+            emitir_evento_auditoria(
+                "iam_invitations.revoke",
+                "iam_invitations",
+                invitation.invitation_id,
+                actor_user_id=request.data.get("actor_user_id"),
+                valores_nuevos={"email": invitation.email},
+            )
+        return Response(self.get_serializer(invitation).data)

@@ -461,6 +461,51 @@ export async function revokeMagicLink(magicLinkId: string): Promise<IamMagicLink
   return response.json();
 }
 
+// Invitacion formal de colaborador nuevo (gate hibrido 10/Ago/2026, ver
+// iam/auth_views.py y memoria de sesion "iam-invitacion-alcance-incierto"):
+// a diferencia de Magic Link (acceso puntual sin cuenta de Workspace),
+// aqui no hay token que copiar/enviar - basta con que exista esta fila
+// pendiente para que el correo pueda iniciar sesion con Google.
+export interface IamInvitation {
+  invitation_id: string;
+  email: string;
+  invited_by: string | null;
+  invited_by_email: string | null;
+  invited_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+}
+
+export async function listInvitations(): Promise<IamInvitation[]> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/invitaciones/`);
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function createInvitation(email: string): Promise<IamInvitation> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/invitaciones/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function revokeInvitation(invitationId: string): Promise<IamInvitation> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/invitaciones/${invitationId}/revocar/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
 // Grants planos CENTRO/CONTRATO (roles-y-permisos.md sec. 1) - NO son
 // scope_type de iam_user_roles, son su propia tabla (contrato: iam/views.py,
 // IamUserCentroAccessViewSet/IamUserContratoAccessViewSet). Ningun modulo

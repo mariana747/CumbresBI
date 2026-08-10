@@ -42,7 +42,7 @@ const ESTADO_LLENADO_LABELS: Record<string, string> = {
 
 // Tickets de cliente externo para KYC (Fase 2, Semana 9 - "Workflow de
 // expediente y formularios públicos"). Mismo patrón de pantalla que
-// /admin/magic-links (iam-service) pero simplificado - sin carga masiva
+// /admin/invitaciones (pestaña "Temporales") (iam-service) pero simplificado - sin carga masiva
 // por CSV, no la pidió el negocio para este flujo todavía. Modo dev: sin
 // envío de correo real (mismo gap que Magic Links) - el link se muestra
 // aquí directamente.

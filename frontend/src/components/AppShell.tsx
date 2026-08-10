@@ -34,6 +34,7 @@ import {
   Landmark,
   Users,
   UserRound,
+  UserPlus,
   Bell,
   ChevronDown,
   ChevronRight,
@@ -87,9 +88,9 @@ const NAV_ITEMS: readonly NavItem[] = [
     enabled: true,
     children: [
       { label: "Usuarios", href: "/admin/usuarios", icon: UserRound },
+      { label: "Invitaciones", href: "/admin/invitaciones", icon: UserPlus },
       { label: "Permisos", href: "/admin/permisos", icon: KeyRound },
       { label: "Reportes", href: "/admin/reportes", icon: ClipboardList },
-      { label: "Magic Links", href: "/admin/magic-links", icon: Link2 },
       { label: "Organización", href: "/admin/organizacion", icon: Building2 },
     ],
   },

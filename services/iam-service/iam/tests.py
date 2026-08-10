@@ -12,10 +12,12 @@ verificar la firma (eso ya esta cubierto en libs/cumbresbi-scope/tests).
 
 from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
-from .models import GeneralSociedad, IamRole, IamUser, IamUserRole
-from .views import GeneralSociedadViewSet, IamUserRoleViewSet, IamUserViewSet
+from .auth_views import LoginRechazadoSinInvitacion, _upsert_identity
+from .models import GeneralSociedad, IamInvitation, IamRole, IamUser, IamUserRole
+from .views import GeneralSociedadViewSet, IamInvitationViewSet, IamUserRoleViewSet, IamUserViewSet
 
 
 def _with_scope(request, scope):
@@ -189,3 +191,97 @@ class GeneralSociedadCrudTests(TestCase):
         view = GeneralSociedadViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
+
+
+class GateDeInvitacionFormalTests(TestCase):
+    """Pruebas del gate hibrido (decision 10/Ago/2026, ver memoria de
+    sesion "iam-invitacion-alcance-incierto"): _upsert_identity ya NO
+    autocrea el IamUser de cualquier correo del dominio aprobado - solo
+    entra si ya tiene IamUser (login libre) o hay una IamInvitation
+    pendiente para ese correo (invitacion formal)."""
+
+    def _claims(self, email, sub="sub-000", name="Persona de Prueba"):
+        return {"email": email, "sub": sub, "name": name, "email_verified": True, "hd": "cypcumbres.mx"}
+
+    def test_usuario_ya_registrado_entra_con_login_libre(self):
+        existente = IamUser.objects.create(user_id="usr00777", primary_email="ya@cypcumbres.mx")
+        user = _upsert_identity(self._claims("ya@cypcumbres.mx"))
+        self.assertEqual(user.user_id, existente.user_id)
+
+    def test_correo_nuevo_sin_invitacion_se_rechaza_sin_crear_usuario(self):
+        with self.assertRaises(LoginRechazadoSinInvitacion):
+            _upsert_identity(self._claims("nuevo@cypcumbres.mx"))
+        self.assertFalse(IamUser.objects.filter(primary_email__iexact="nuevo@cypcumbres.mx").exists())
+
+    def test_correo_nuevo_con_invitacion_pendiente_entra_y_la_marca_aceptada(self):
+        invitacion = IamInvitation.objects.create(email="invitado@cypcumbres.mx")
+        user = _upsert_identity(self._claims("invitado@cypcumbres.mx"))
+        self.assertEqual(user.primary_email, "invitado@cypcumbres.mx")
+        invitacion.refresh_from_db()
+        self.assertIsNotNone(invitacion.accepted_at)
+
+    def test_invitacion_revocada_no_sirve(self):
+        IamInvitation.objects.create(email="revocado@cypcumbres.mx", revoked_at=timezone.now())
+        with self.assertRaises(LoginRechazadoSinInvitacion):
+            _upsert_identity(self._claims("revocado@cypcumbres.mx"))
+
+    def test_invitacion_ya_aceptada_no_sirve_dos_veces(self):
+        """Si ya se acepto (el usuario ya existe) el flujo normal entra por
+        el camino de 'ya registrado' - esto cubre el caso borde de que
+        alguien borre su IamUser pero la invitacion ya aceptada no
+        deberia revivir el gate abierto."""
+        IamInvitation.objects.create(email="dos-veces@cypcumbres.mx", accepted_at=timezone.now())
+        with self.assertRaises(LoginRechazadoSinInvitacion):
+            _upsert_identity(self._claims("dos-veces@cypcumbres.mx"))
+
+
+class IamInvitationViewSetTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.admin = IamUser.objects.create(user_id="usr00888", primary_email="admin@cypcumbres.mx")
+
+    def test_crear_sin_permiso_da_403(self):
+        request = self.factory.post("/api/invitaciones/", {"email": "nueva@cypcumbres.mx"})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = IamInvitationViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_permiso_iam_crear(self):
+        request = self.factory.post("/api/invitaciones/", {"email": "nueva@cypcumbres.mx"})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",))
+        view = IamInvitationViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(IamInvitation.objects.filter(email="nueva@cypcumbres.mx").exists())
+
+    def test_no_se_puede_invitar_un_correo_que_ya_tiene_usuario(self):
+        IamUser.objects.create(user_id="usr00999", primary_email="existente@cypcumbres.mx")
+        request = self.factory.post("/api/invitaciones/", {"email": "existente@cypcumbres.mx"})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",))
+        view = IamInvitationViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_no_se_puede_duplicar_invitacion_pendiente(self):
+        IamInvitation.objects.create(email="repetido@cypcumbres.mx")
+        request = self.factory.post("/api/invitaciones/", {"email": "repetido@cypcumbres.mx"})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",))
+        view = IamInvitationViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_revocar_requiere_iam_editar(self):
+        invitacion = IamInvitation.objects.create(email="porrevocar@cypcumbres.mx", invited_by=self.admin)
+        request = self.factory.post(f"/api/invitaciones/{invitacion.invitation_id}/revocar/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",))
+        view = IamInvitationViewSet.as_view({"post": "revocar"})
+        response = view(request, pk=invitacion.invitation_id)
+        self.assertEqual(response.status_code, 403)
+
+        request2 = self.factory.post(f"/api/invitaciones/{invitacion.invitation_id}/revocar/")
+        request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("iam.editar",))
+        response2 = view(request2, pk=invitacion.invitation_id)
+        self.assertEqual(response2.status_code, 200)
+        invitacion.refresh_from_db()
+        self.assertIsNotNone(invitacion.revoked_at)

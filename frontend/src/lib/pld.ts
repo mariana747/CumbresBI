@@ -22,7 +22,7 @@ export interface PldContraparteDoc {
   updated_at: string;
 }
 
-// Superset del tipo minimo usado en admin/magic-links/page.tsx - mismo
+// Superset del tipo minimo usado en admin/invitaciones/page.tsx (pestaña "Temporales") - mismo
 // contrato de API, aqui se listan todos los campos que la tabla de
 // expedientes necesita mostrar.
 export interface PldContraparteKyc {

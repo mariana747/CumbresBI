@@ -7,6 +7,7 @@ from iam.auth_views import google_callback, google_start, logout, me
 from iam.views import (
     GeneralSociedadViewSet,
     IamGroupViewSet,
+    IamInvitationViewSet,
     IamMagicLinkViewSet,
     IamPermissionViewSet,
     IamRoleViewSet,
@@ -28,6 +29,7 @@ router.register("user-groups", IamUserGroupViewSet, basename="iamusergroup")
 router.register("user-centro-access", IamUserCentroAccessViewSet, basename="iamusercentroaccess")
 router.register("user-contrato-access", IamUserContratoAccessViewSet, basename="iamusercontratoaccess")
 router.register("magic-links", IamMagicLinkViewSet, basename="iammagiclink")
+router.register("invitaciones", IamInvitationViewSet, basename="iaminvitation")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

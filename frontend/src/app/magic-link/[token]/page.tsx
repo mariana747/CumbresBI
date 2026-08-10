@@ -13,7 +13,7 @@ const RECURSO_TIPO_LABELS: Record<string, string> = {
 
 // Pagina publica (sin AppShell) - a donde llega el usuario externo real al
 // abrir el link recibido (hoy, en modo dev, mostrado directo en
-// /admin/magic-links en vez de enviarse por correo - ver iam/views.py).
+// /admin/invitaciones (pestaña "Temporales") en vez de enviarse por correo - ver iam/views.py).
 // Reemplaza al simulador manual "Probar validacion" de esa pantalla: aqui
 // la validacion ocurre sola, sin que nadie pegue el token a mano.
 //

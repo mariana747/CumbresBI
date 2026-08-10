@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import (
     GeneralSociedad,
     IamGroup,
+    IamInvitation,
     IamMagicLink,
     IamPermission,
     IamRole,
@@ -245,3 +246,26 @@ class IamMagicLinkSerializer(serializers.ModelSerializer):
             # cliente para forzar que siempre pase por esa validacion.
             "expires_at": {"required": False}
         }
+
+
+class IamInvitationSerializer(serializers.ModelSerializer):
+    """Invitación formal de empleado nuevo (gate de _upsert_identity, ver
+    auth_views.py). invited_by_email denormalizado por lo mismo que
+    user_email en IamUserRoleSerializer - evitar que el frontend resuelva
+    cada user_id contra /api/users/ solo para mostrar el correo del
+    admin que invitó."""
+
+    invited_by_email = serializers.EmailField(source="invited_by.primary_email", read_only=True)
+
+    class Meta:
+        model = IamInvitation
+        fields = [
+            "invitation_id",
+            "email",
+            "invited_by",
+            "invited_by_email",
+            "invited_at",
+            "accepted_at",
+            "revoked_at",
+        ]
+        read_only_fields = ["invitation_id", "invited_by_email", "invited_at", "accepted_at", "revoked_at"]

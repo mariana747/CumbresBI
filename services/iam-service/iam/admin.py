@@ -65,6 +65,7 @@ class IamUserAdmin(admin.ModelAdmin):
 
 admin.site.register(models.GeneralSociedad)
 admin.site.register(models.IamIdentity)
+admin.site.register(models.IamInvitation)
 admin.site.register(models.IamRole)
 admin.site.register(models.IamPermission)
 admin.site.register(models.IamRolePermission)
