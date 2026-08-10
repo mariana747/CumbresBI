@@ -2,6 +2,8 @@ import uuid
 
 from django.db import models
 
+from cumbresbi_scope.managers import ScopedManager
+
 
 def _short_id():
     return uuid.uuid4().hex[:8]
@@ -126,6 +128,12 @@ class IamUser(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Sin SCOPE_FIELD_* declarado todavia (gap documentado en
+    # roles-y-permisos.md, pendiente del punto 2 del plan de Fase 1: agregar
+    # columna real de sociedad/proyecto). Mientras tanto, ScopedManager
+    # actua como gate GLOBAL/no-GLOBAL: solo GLOBAL ve el directorio.
+    objects = ScopedManager()
+
     class Meta:
         db_table = "iam_users"
 
@@ -235,6 +243,14 @@ class IamUserRole(models.Model):
     granted_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
 
+    # scope_type/scope_id ya existen pero son genericos (un solo campo que
+    # cambia de significado segun scope_type) - no calzan directo con la
+    # convencion SCOPE_FIELD_* de ScopedManager (que espera un campo fijo
+    # por dimension, ej. sociedad_rfc). Mismo gate GLOBAL/no-GLOBAL que
+    # IamUser mientras tanto; mapear scope_type/scope_id a columnas reales
+    # queda para el punto 2 del plan de Fase 1.
+    objects = ScopedManager()
+
     class Meta:
         db_table = "iam_user_roles"
 
@@ -317,3 +333,43 @@ class IamMagicLink(models.Model):
 
     def __str__(self):
         return f"{self.magic_link_id} ({self.email})"
+
+
+class IamUserCentroAccess(models.Model):
+    """Grant plano de alcance CENTRO (columna real del ERD, schema.csv) -
+    a diferencia de SOCIEDAD/PROYECTO, CENTRO no vive en
+    iam_user_roles.scope_type (ese enum solo tiene GLOBAL/SOCIEDAD/
+    PROYECTO en la BD real) sino en esta tabla aparte, usuario por
+    usuario, centro por centro. Ver roles-y-permisos.md sec. 1 ("CENTRO/
+    CONTRATO como grants planos") y scope_utils.compute_effective_scope_claims.
+    """
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(IamUser, on_delete=models.CASCADE, related_name="centro_access", db_column="user_id")
+    centro_id = models.CharField(max_length=255)
+    granted_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="centro_access_granted"
+    )
+    granted_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_user_centro_access"
+
+
+class IamUserContratoAccess(models.Model):
+    """Grant plano de alcance CONTRATO - mismo criterio que
+    IamUserCentroAccess arriba, pero sobre un contrato individual
+    (id_contrato, columna real del ERD) en vez de un centro."""
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(IamUser, on_delete=models.CASCADE, related_name="contrato_access", db_column="user_id")
+    id_contrato = models.CharField(max_length=255)
+    granted_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="contrato_access_granted"
+    )
+    granted_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_user_contrato_access"

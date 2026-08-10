@@ -38,6 +38,7 @@ import {
   ChevronDown,
   ChevronRight,
   Menu as MenuIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
@@ -63,8 +64,22 @@ const HEADER_HEIGHT = 56;
 // vive en el sidebar, no repetida en cada pantalla). Mismo patron pensado
 // para reutilizarse en los demas modulos (PLD, Ventas, etc.) en cuanto
 // tengan mas de una pantalla propia - hoy solo Admin (IAM) lo necesita.
-const NAV_ITEMS = [
-  { label: "Panel", href: "/", icon: LayoutDashboard, enabled: true },
+// Tipos explicitos (en vez de `as const` + `typeof NAV_ITEMS[number]`) para
+// evitar el choque de tipos entre el `icon` de lucide-react
+// (ForwardRefExoticComponent con su propio WeakValidationMap de propTypes)
+// y un `React.ComponentType<{size?, strokeWidth?}>` hecho a mano - con
+// `LucideIcon` real como tipo de icono, la union queda limpia y
+// `"children" in item` narrowa sin conflicto.
+type NavChild = { label: string; href: string; icon: LucideIcon };
+type NavLeaf = { label: string; href: string; icon: LucideIcon; enabled: boolean };
+type NavParent = NavLeaf & { children: readonly NavChild[] };
+type NavItem = NavLeaf | NavParent;
+
+const NAV_ITEMS: readonly NavItem[] = [
+  // "Panel" (dashboard en "/") se quita del menu por ahora (10/Ago/2026) -
+  // no aparece en ningun requerimiento del onboarding de Dylan, era un
+  // placeholder vacio de Fase 0 sin dato real. La pagina sigue existiendo
+  // (app/page.tsx) por si se retoma, solo no se muestra en el sidebar.
   {
     label: "Admin (IAM)",
     href: "/admin/usuarios",
@@ -75,14 +90,24 @@ const NAV_ITEMS = [
       { label: "Permisos", href: "/admin/permisos", icon: KeyRound },
       { label: "Reportes", href: "/admin/reportes", icon: ClipboardList },
       { label: "Magic Links", href: "/admin/magic-links", icon: Link2 },
+      { label: "Organización", href: "/admin/organizacion", icon: Building2 },
     ],
   },
-  { label: "PLD / Cumplimiento", href: "/pld", icon: FileSearch, enabled: true },
+  {
+    label: "PLD / Cumplimiento",
+    href: "/pld",
+    icon: FileSearch,
+    enabled: true,
+    children: [
+      { label: "Expedientes KYC", href: "/pld", icon: FileSearch },
+      { label: "Tickets de cliente", href: "/pld/tickets", icon: Link2 },
+    ],
+  },
   { label: "Ventas / Vivienda", href: "#", icon: Building2, enabled: false },
   { label: "Compras / Tesorería", href: "#", icon: Landmark, enabled: false },
   { label: "RRHH y Talento", href: "#", icon: Users, enabled: false },
   { label: "MiCumbres (portal empleado)", href: "/micumbres", icon: UserRound, enabled: true },
-] as const;
+];
 
 // Evento global (no Context) para que cualquier pantalla pida un refresco
 // del aviso de "usuarios sin rol asignado" de la campana (ej. el
@@ -108,9 +133,7 @@ function NavItemConChildren({
   pathname,
   onNavigate,
 }: {
-  item: (typeof NAV_ITEMS)[number] & {
-    children: readonly { label: string; href: string; icon: React.ComponentType<{ size?: number; strokeWidth?: number }> }[];
-  };
+  item: NavParent;
   pathname: string;
   onNavigate?: () => void;
 }) {

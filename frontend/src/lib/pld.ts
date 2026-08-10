@@ -69,3 +69,97 @@ export async function aprobarKyc(idKyc: string, aprobadoPor: string): Promise<Pl
   }
   return response.json();
 }
+
+// Ticket de cliente externo para KYC (Fase 2, Semana 9) - mismo patron que
+// IamMagicLink (iam-service, ver src/lib/iam.ts), pero sin JWT propio:
+// pld-service no tiene llave privada, "validar" regresa el ticket + el
+// expediente KYC anidado directamente. Contrato:
+// services/pld-service/pld/views.py, PldTicketClienteViewSet.
+export interface PldTicketCliente {
+  id_pld_ticket: string;
+  kyc: string | null;
+  email: string;
+  issued_at: string;
+  issued_by: string;
+  expires_at: string;
+  max_uses: number;
+  uses_count: number;
+  first_used_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  // Solo presente en la respuesta de createTicketCliente() - el token en
+  // claro se expone una unica vez, nunca se guarda (ver ticket_utils.py).
+  token?: string;
+}
+
+export async function listTicketsCliente(kycId?: string): Promise<PldTicketCliente[]> {
+  const params = new URLSearchParams();
+  if (kycId) params.set("kyc", kycId);
+  const qs = params.toString();
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/${qs ? `?${qs}` : ""}`);
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// A diferencia de IamMagicLink (que calcula expires_at server-side desde
+// expires_in_minutes), el serializer de PldTicketCliente requiere
+// expires_at/max_uses ya resueltos - se calculan aqui, mismo default (30
+// min) que Magic Links para consistencia entre los dos flujos de acceso
+// externo.
+export async function createTicketCliente(params: {
+  kycId?: string;
+  email: string;
+  issuedBy: string;
+  expiresInMinutes?: number;
+  maxUses?: number;
+}): Promise<PldTicketCliente> {
+  const expiresAt = new Date(Date.now() + (params.expiresInMinutes ?? 30) * 60_000).toISOString();
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kyc: params.kycId || null,
+      email: params.email,
+      issued_by: params.issuedBy,
+      expires_at: expiresAt,
+      max_uses: params.maxUses ?? 1,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// A diferencia de validateMagicLink (que regresa un jwt de alcance
+// externo), pld-service no tiene llave privada - regresa el ticket y,
+// si tiene expediente asociado, el KYC anidado directamente.
+export async function validarTicketCliente(
+  token: string
+): Promise<{ ticket: PldTicketCliente; kyc?: PldContraparteKyc }> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/validar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    // Consumida tambien por la pagina publica (app/pld-ticket/[token]/page.tsx)
+    // - el mensaje se le muestra directo a un usuario externo.
+    throw await friendlyApiError("PLD", response);
+  }
+  const data = await response.json();
+  const { kyc, ...ticket } = data;
+  return { ticket, kyc };
+}
+
+export async function revocarTicketCliente(idPldTicket: string): Promise<PldTicketCliente> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/${idPldTicket}/revocar/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}

@@ -127,6 +127,82 @@ export async function revokeRolePermission(
   return response.json();
 }
 
+// Catalogo real de sociedades (contrato: iam/views.py, GeneralSociedadViewSet)
+// - CRUD real (pantalla /admin/organizacion, Gestion organizacional) ademas
+// de alimentar el autocomplete de RFC en RoleAssignmentDialog. Centro y
+// Proyecto NO tienen equivalente aqui a proposito - no son catalogos
+// genericos reales (pertenecen a modulos que todavia no se construyen,
+// Tickets/Vivienda - ver memoria de sesion, decision 10/Ago/2026).
+export interface GeneralSociedad {
+  rfc: string;
+  razon_social: string | null;
+  regimen_mercantil?: string | null;
+  alias_sociedad: string | null;
+  grupo?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function listSociedades(search?: string): Promise<GeneralSociedad[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function createSociedad(params: {
+  rfc: string;
+  razonSocial?: string;
+  regimenMercantil?: string;
+  aliasSociedad?: string;
+}): Promise<GeneralSociedad> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      rfc: params.rfc,
+      razon_social: params.razonSocial || null,
+      regimen_mercantil: params.regimenMercantil || null,
+      alias_sociedad: params.aliasSociedad || null,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function updateSociedad(
+  rfc: string,
+  params: { razonSocial?: string; regimenMercantil?: string; aliasSociedad?: string }
+): Promise<GeneralSociedad> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/${rfc}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      razon_social: params.razonSocial,
+      regimen_mercantil: params.regimenMercantil,
+      alias_sociedad: params.aliasSociedad,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function deleteSociedad(rfc: string): Promise<void> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/${rfc}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+}
+
 export async function listGroups(): Promise<IamGroup[]> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/groups/`);
   if (!response.ok) {
@@ -135,9 +211,92 @@ export async function listGroups(): Promise<IamGroup[]> {
   return response.json();
 }
 
+// Cambiar la empresa de un usuario desde el Directorio (icono de lapiz en
+// la columna "Empresa") - contrato: iam/views.py, IamUserGroupViewSet.
+export interface IamUserGroup {
+  id: number;
+  user: string;
+  user_email: string;
+  group: string;
+  group_nombre: string;
+  group_alias: string | null;
+  created_at: string;
+  removed_at: string | null;
+}
+
+export async function listUserGroups(userId: string): Promise<IamUserGroup[]> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-groups/?user=${userId}&active=true`);
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function assignGroup(userId: string, groupId: string): Promise<IamUserGroup> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-groups/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user: userId, group: groupId }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function removeUserGroup(userGroupId: number): Promise<IamUserGroup> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-groups/${userGroupId}/quitar/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+// Nomenclatura de color por nivel de alcance (roles-y-permisos.md sec. 1)
+// - se usa en cualquier tabla/chip que muestre scope_type, para que el
+// nivel se reconozca de un vistazo sin leer el texto. Un solo lugar
+// (aqui) para que no se desincronicen los colores entre pantallas
+// (Directorio de usuarios, Reportes > Historial/Matriz de acceso).
+// GRUPO NO esta aqui a proposito - decision revertida, se queda como los
+// 4 niveles que marca el onboarding de Dylan (ver memoria de sesion
+// "nivel-grupo-holding-confirmado").
+export const SCOPE_LABELS: Record<string, string> = {
+  GLOBAL: "Global",
+  SOCIEDAD: "Sociedad",
+  PROYECTO: "Proyecto",
+  CENTRO: "Centro",
+  CONTRATO: "Contrato",
+};
+
+// Colores reales (hex) en src/theme/theme.ts (SCOPE_PALETTE) - aqui solo
+// se mapea scope_type -> el nombre de color de la paleta del theme
+// (scopeGlobal/scopeSociedad/...), nunca un hex suelto.
+export type ScopeChipColor =
+  | "scopeGlobal"
+  | "scopeSociedad"
+  | "scopeProyecto"
+  | "scopeCentro"
+  | "scopeContrato"
+  | "default";
+
+export const SCOPE_COLORS: Record<string, ScopeChipColor> = {
+  GLOBAL: "scopeGlobal",
+  SOCIEDAD: "scopeSociedad",
+  PROYECTO: "scopeProyecto",
+  CENTRO: "scopeCentro",
+  CONTRATO: "scopeContrato",
+};
+
+export function scopeChipColor(scopeType: string): ScopeChipColor {
+  return SCOPE_COLORS[scopeType] ?? "default";
+}
+
 export interface IamUserRole {
   assignment_id: string;
   user: string;
+  user_email: string;
   role: string;
   role_key: string;
   role_name: string;
@@ -167,11 +326,20 @@ export async function listRoleHistory(): Promise<IamUserRole[]> {
   return response.json();
 }
 
-export async function grantRole(userId: string, roleId: string): Promise<IamUserRole> {
+// scopeType/scopeId: GLOBAL (default, scope_id="*"), SOCIEDAD o PROYECTO -
+// CENTRO/CONTRATO NO van aqui, son grants planos aparte (ver
+// listCentroAccess/listContratoAccess abajo) - no son parte del enum real
+// de iam_user_roles.scope_type (roles-y-permisos.md sec. 1).
+export async function grantRole(
+  userId: string,
+  roleId: string,
+  scopeType: "GLOBAL" | "SOCIEDAD" | "PROYECTO" = "GLOBAL",
+  scopeId: string = "*"
+): Promise<IamUserRole> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-roles/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user: userId, role: roleId }),
+    body: JSON.stringify({ user: userId, role: roleId, scope_type: scopeType, scope_id: scopeId }),
   });
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
@@ -290,5 +458,97 @@ export async function revokeMagicLink(magicLinkId: string): Promise<IamMagicLink
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
   }
+  return response.json();
+}
+
+// Grants planos CENTRO/CONTRATO (roles-y-permisos.md sec. 1) - NO son
+// scope_type de iam_user_roles, son su propia tabla (contrato: iam/views.py,
+// IamUserCentroAccessViewSet/IamUserContratoAccessViewSet). Ningun modulo
+// de negocio los consume todavia (SCOPE_FIELD_CENTRO/CONTRATO sin declarar
+// en ningun modelo aun) - se otorgan desde ya para no bloquear el dato
+// cuando ese modulo exista.
+export interface IamUserCentroAccess {
+  id: number;
+  user: string;
+  user_email: string;
+  centro_id: string;
+  granted_by: string | null;
+  granted_at: string | null;
+  revoked_at: string | null;
+}
+
+export async function listCentroAccess(userId: string): Promise<IamUserCentroAccess[]> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-centro-access/?user=${userId}&active=true`);
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+// Sin ?user= - lista TODOS los grants existentes (de cualquier usuario),
+// solo para armar las sugerencias del autocomplete freeSolo de
+// RoleAssignmentDialog (no hay catalogo real de centros/contratos
+// todavia, ver pantalla /admin/organizacion - esto es "lo que ya se ha
+// usado antes", no un catalogo formal).
+export async function listAllCentroAccess(): Promise<IamUserCentroAccess[]> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-centro-access/`);
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+export async function grantCentroAccess(userId: string, centroId: string): Promise<IamUserCentroAccess> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-centro-access/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user: userId, centro_id: centroId }),
+  });
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+export async function revokeCentroAccess(id: number): Promise<IamUserCentroAccess> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-centro-access/${id}/revoke/`, {
+    method: "POST",
+  });
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+export interface IamUserContratoAccess {
+  id: number;
+  user: string;
+  user_email: string;
+  id_contrato: string;
+  granted_by: string | null;
+  granted_at: string | null;
+  revoked_at: string | null;
+}
+
+export async function listContratoAccess(userId: string): Promise<IamUserContratoAccess[]> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-contrato-access/?user=${userId}&active=true`);
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+// Mismo criterio que listAllCentroAccess de arriba - sugerencias, no catalogo.
+export async function listAllContratoAccess(): Promise<IamUserContratoAccess[]> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-contrato-access/`);
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+export async function grantContratoAccess(userId: string, idContrato: string): Promise<IamUserContratoAccess> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-contrato-access/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user: userId, id_contrato: idContrato }),
+  });
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+export async function revokeContratoAccess(id: number): Promise<IamUserContratoAccess> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/user-contrato-access/${id}/revoke/`, {
+    method: "POST",
+  });
+  if (!response.ok) throw await friendlyApiError("IAM", response);
   return response.json();
 }

@@ -69,14 +69,33 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# VIVIENDA_DB_SOCKET_DIR: cuando corre en Cloud Run, la conexion a Cloud SQL NO es
+# por IP publica/TCP (Cloud Run no tiene IP fija que autorizar en Cloud SQL,
+# la conexion por IP publica se cuelga hasta que Cloud Run corta la request
+# con 503 "Service Unavailable"). En su lugar, Cloud Run monta un socket Unix
+# en /cloudsql/<INSTANCE_CONNECTION_NAME> cuando adjuntas la conexion Cloud
+# SQL al servicio (Cloud Run -> Editar e implementar nueva revision ->
+# Conexiones -> Conexiones de Cloud SQL). Configura VIVIENDA_DB_SOCKET_DIR con
+# esa ruta completa; en local (Docker Compose) se deja vacio y se usa TCP
+# normal via VIVIENDA_DB_HOST/VIVIENDA_DB_PORT como hasta ahora (mismo patron
+# que iam-service, ver su config/settings.py).
+VIVIENDA_DB_SOCKET_DIR = env("VIVIENDA_DB_SOCKET_DIR", default=None)
+
+if VIVIENDA_DB_SOCKET_DIR:
+    _db_host = VIVIENDA_DB_SOCKET_DIR
+    _db_port = ""
+else:
+    _db_host = env("VIVIENDA_DB_HOST", default="vivienda-service-db")
+    _db_port = env("VIVIENDA_DB_PORT", default="3306")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
         "NAME": env("VIVIENDA_DB_NAME", default="vivienda_service"),
         "USER": env("VIVIENDA_DB_USER", default="vivienda_app"),
         "PASSWORD": env("VIVIENDA_DB_PASSWORD", default=""),
-        "HOST": env("VIVIENDA_DB_HOST", default="vivienda-service-db"),
-        "PORT": env("VIVIENDA_DB_PORT", default="3306"),
+        "HOST": _db_host,
+        "PORT": _db_port,
         "OPTIONS": {"charset": "utf8mb4"},
     }
 }

@@ -1,6 +1,17 @@
 from rest_framework import serializers
 
-from .models import IamGroup, IamMagicLink, IamPermission, IamRole, IamUser, IamUserRole
+from .models import (
+    GeneralSociedad,
+    IamGroup,
+    IamMagicLink,
+    IamPermission,
+    IamRole,
+    IamUser,
+    IamUserCentroAccess,
+    IamUserContratoAccess,
+    IamUserGroup,
+    IamUserRole,
+)
 
 
 class IamUserSerializer(serializers.ModelSerializer):
@@ -125,6 +136,77 @@ class IamGroupSerializer(serializers.ModelSerializer):
         model = IamGroup
         fields = ["group_id", "nombre", "alias"]
         read_only_fields = fields
+
+
+class GeneralSociedadSerializer(serializers.ModelSerializer):
+    """Catalogo real de sociedades (tabla general_sociedades del ERD).
+    CRUD real (Fase 1, "Gestion organizacional" - onboarding sec. 7.2),
+    ademas de alimentar el autocomplete de RFC en RoleAssignmentDialog.
+    `rfc` es la primary key real - no editable despues de creada (crear
+    una nueva fila si se necesita cambiar), igual que cualquier PK."""
+
+    class Meta:
+        model = GeneralSociedad
+        fields = [
+            "rfc",
+            "razon_social",
+            "regimen_mercantil",
+            "alias_sociedad",
+            "grupo",
+            "created_at",
+            "updated_at",
+            "created_by",
+            "updated_by",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class IamUserGroupSerializer(serializers.ModelSerializer):
+    """Otorgar/quitar la empresa de un usuario desde el Directorio (mismo
+    criterio interino que IamUserRole: sin permisos reales todavia,
+    granted_by null hasta que exista JWT real)."""
+
+    group_nombre = serializers.CharField(source="group.nombre", read_only=True)
+    group_alias = serializers.CharField(source="group.alias", read_only=True)
+    user_email = serializers.EmailField(source="user.primary_email", read_only=True)
+
+    class Meta:
+        model = IamUserGroup
+        fields = [
+            "id",
+            "user",
+            "user_email",
+            "group",
+            "group_nombre",
+            "group_alias",
+            "created_at",
+            "removed_at",
+        ]
+        read_only_fields = ["id", "user_email", "group_nombre", "group_alias", "created_at", "removed_at"]
+
+
+class IamUserCentroAccessSerializer(serializers.ModelSerializer):
+    """Grant plano de alcance CENTRO (roles-y-permisos.md sec. 1) -
+    otorgar/revocar acceso de un usuario a un centro de trabajo especifico."""
+
+    user_email = serializers.EmailField(source="user.primary_email", read_only=True)
+
+    class Meta:
+        model = IamUserCentroAccess
+        fields = ["id", "user", "user_email", "centro_id", "granted_by", "granted_at", "revoked_at"]
+        read_only_fields = ["id", "user_email", "granted_at", "revoked_at"]
+
+
+class IamUserContratoAccessSerializer(serializers.ModelSerializer):
+    """Grant plano de alcance CONTRATO - mismo criterio que
+    IamUserCentroAccessSerializer, sobre un contrato individual."""
+
+    user_email = serializers.EmailField(source="user.primary_email", read_only=True)
+
+    class Meta:
+        model = IamUserContratoAccess
+        fields = ["id", "user", "user_email", "id_contrato", "granted_by", "granted_at", "revoked_at"]
+        read_only_fields = ["id", "user_email", "granted_at", "revoked_at"]
 
 
 class IamMagicLinkSerializer(serializers.ModelSerializer):

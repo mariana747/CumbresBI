@@ -21,6 +21,20 @@ class EffectiveScope:
     centro_ids: tuple = field(default_factory=tuple)
     contrato_ids: tuple = field(default_factory=tuple)
     identity_user_id: str | None = None
+    # role_keys: claves de los roles activos del usuario (union, igual que el
+    # resto de los claims). No se usa para el filtrado por ScopedManager
+    # (eso es solo sociedad/proyecto/centro/contrato/identidad) - sirve para
+    # el puñado de vistas que necesitan gate por rol en vez de por fila, ej.
+    # BitacoraAuditoriaViewSet (solo GLOBAL o rol AUDITOR).
+    role_keys: tuple = field(default_factory=tuple)
+    # perm_keys: union de los perm_key (ej. "iam.crear", "pld-compliance.aprobar"
+    # - formato "{servicio}.{accion}", ver iam-service/iam/migrations/
+    # 0004_seed_permisos_matriz.py) de todos los roles activos del usuario.
+    # Es la pieza que faltaba para "cumplimiento real de permisos en
+    # escritura" (roles-y-permisos.md sec. 3, la matriz de permisos): antes
+    # solo se controlaba QUE VE cada quien (ScopedManager); esto controla
+    # QUE PUEDE HACER, via has_permission() + cumbresbi_scope.permissions.
+    perm_keys: tuple = field(default_factory=tuple)
 
     @classmethod
     def from_claims(cls, claims: dict) -> "EffectiveScope":
@@ -31,7 +45,15 @@ class EffectiveScope:
             centro_ids=tuple(claims.get("centro_ids", []) or []),
             contrato_ids=tuple(claims.get("contrato_ids", []) or []),
             identity_user_id=claims.get("identity_user_id"),
+            role_keys=tuple(claims.get("role_keys", []) or []),
+            perm_keys=tuple(claims.get("perm_keys", []) or []),
         )
+
+    def has_role(self, role_key: str) -> bool:
+        return role_key in self.role_keys
+
+    def has_permission(self, perm_key: str) -> bool:
+        return perm_key in self.perm_keys
 
     @classmethod
     def anonymous(cls) -> "EffectiveScope":

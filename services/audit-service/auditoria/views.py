@@ -32,6 +32,14 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        # Gate por rol, no por fila: la bitacora no tiene columna de
+        # sociedad/proyecto (es un log cross-empresa por diseño), asi que
+        # ScopedManager no aplica aqui. Solo GLOBAL o rol AUDITOR la ven -
+        # decision de producto 2026-08-10, ver memoria de sesion
+        # "empresas-alcance-fase1"/plan Fase 1 punto 1.
+        scope = self.request.effective_scope
+        if not (scope is not None and (scope.is_global or scope.has_role("AUDITOR"))):
+            return queryset.none()
         servicio_origen = self.request.query_params.get("servicio_origen")
         if servicio_origen:
             queryset = queryset.filter(servicio_origen=servicio_origen)

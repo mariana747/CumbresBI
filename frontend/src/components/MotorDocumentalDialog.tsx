@@ -95,7 +95,13 @@ export default function MotorDocumentalDialog({
   onClose: () => void;
 }) {
   const [documents, setDocuments] = useState<DocumentResult[]>([]);
-  const [servicioSolicitante, setServicioSolicitante] = useState(SERVICIOS_SOLICITANTES[0]);
+  // Tipado explicito: SERVICIOS_SOLICITANTES es "as const" (tupla de
+  // literales), asi que SERVICIOS_SOLICITANTES[0] solo, sin el generic,
+  // infiere el tipo mas angosto ("pld-service" a secas) - el setter
+  // entonces rechaza cualquier otro valor del propio arreglo.
+  const [servicioSolicitante, setServicioSolicitante] = useState<(typeof SERVICIOS_SOLICITANTES)[number]>(
+    SERVICIOS_SOLICITANTES[0]
+  );
   const [loading, setLoading] = useState(false);
 
   function resetAndClose() {
@@ -254,7 +260,7 @@ export default function MotorDocumentalDialog({
               labelId="servicio-solicitante-label"
               label="Servicio solicitante"
               value={servicioSolicitante}
-              onChange={(e) => setServicioSolicitante(e.target.value)}
+              onChange={(e) => setServicioSolicitante(e.target.value as (typeof SERVICIOS_SOLICITANTES)[number])}
             >
               {SERVICIOS_SOLICITANTES.map((servicio) => (
                 <MenuItem key={servicio} value={servicio}>
