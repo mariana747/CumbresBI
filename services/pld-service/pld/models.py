@@ -2,6 +2,8 @@ import uuid
 
 from django.db import models
 
+from cumbresbi_scope.managers import ScopedManager
+
 
 def _short_id():
     return uuid.uuid4().hex[:8]
@@ -33,6 +35,13 @@ class PldContraparteKyc(models.Model):
 
     id_kyc = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     id_contraparte = models.CharField(max_length=8)
+    # FK real a general_sociedades.rfc (iam-service) - referencia laxa, ver
+    # nota de clase arriba. Columna real de alcance (punto 2 del plan de
+    # Fase 1, RLS real) - que sociedad de Cumbres es la duena de este
+    # expediente KYC, para filtrar por SCOPE_FIELD_SOCIEDAD. blank/null
+    # porque los expedientes creados antes de esta columna no tienen valor
+    # todavia (backfill pendiente).
+    sociedad_rfc = models.CharField(max_length=13, blank=True, null=True)
     fecha_nac_const = models.DateField()
     pais_nac_const = models.CharField(max_length=100)
     folio_mercantil = models.CharField(max_length=250, blank=True, null=True)
@@ -79,6 +88,13 @@ class PldContraparteKyc(models.Model):
     updated_by = models.CharField(max_length=8)
     fecha_vencimiento = models.DateField()
 
+    # SCOPE_FIELD_SOCIEDAD ya resuelto (punto 2 del plan de Fase 1, ver
+    # sociedad_rfc arriba). Un usuario de alcance SOCIEDAD ya puede ver los
+    # expedientes de su(s) sociedad(es) - ya no es solo GLOBAL/nada, salvo
+    # para expedientes viejos con sociedad_rfc=NULL (backfill pendiente).
+    SCOPE_FIELD_SOCIEDAD = "sociedad_rfc"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "pld_contrapartes_kyc"
 
@@ -116,6 +132,12 @@ class PldContraparteDoc(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
 
+    # Alcance via el expediente padre (Django soporta lookup a traves de FK
+    # con "__" en el nombre del campo) - un documento hereda la sociedad de
+    # su PldContraparteKyc, no tiene sociedad propia.
+    SCOPE_FIELD_SOCIEDAD = "kyc__sociedad_rfc"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "pld_contrapartes_docs"
 
@@ -125,7 +147,12 @@ class PldContraparteDoc(models.Model):
 
 class PldTicketCliente(models.Model):
     """Magic link de un solo uso para KYC externo (sec. 6.2 del doc de
-    arquitectura). token/uses_count/revoked_at siguen el patron documentado.
+    arquitectura). Mismo patron que IamMagicLink (iam-service): token_hash
+    (nunca el token en claro), uses_count/revoked_at para el ciclo de vida.
+    pld-service no tiene llave privada para emitir JWT propio (solo verifica
+    el de cumbresbi_scope, ver config/settings.py), asi que a diferencia de
+    iam-service este ticket no emite sesion externa - "validar" regresa el
+    ticket/expediente directamente (ver views.py).
     """
 
     id_pld_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
@@ -137,8 +164,9 @@ class PldTicketCliente(models.Model):
         blank=True,
         null=True,
     )
-    token = models.CharField(max_length=64)
-    issued_at = models.DateTimeField()
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
     # FK real a iam_users.user_id (iam-service) - referencia laxa.
     issued_by = models.CharField(max_length=8)
     expires_at = models.DateTimeField()
@@ -147,6 +175,13 @@ class PldTicketCliente(models.Model):
     first_used_at = models.DateTimeField(blank=True, null=True)
     last_used_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
+
+    # Igual que PldContraparteDoc: sin columna propia de alcance, pero
+    # ScopedManager sigue siendo el gate GLOBAL/no-GLOBAL para el listado
+    # interno (ver PldTicketClienteViewSet.get_queryset). El endpoint
+    # publico "validar" usa PldTicketCliente.objects.get(...) directo, sin
+    # for_scope, a proposito - es la unica via de acceso sin sesion interna.
+    objects = ScopedManager()
 
     class Meta:
         db_table = "pld_ticket_cliente"

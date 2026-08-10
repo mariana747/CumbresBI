@@ -1,0 +1,311 @@
+"""Pruebas de alcance (Fase 1, punto 2: columna real sociedad_rfc en
+PldContraparteKyc). A diferencia de iam-service, aqui SI hay filtro fino
+por sociedad (no solo el gate GLOBAL/no-GLOBAL) - demuestra que un usuario
+de una sociedad NO ve los expedientes de otra (requisito de cierre de
+Fase 1, punto 3 del plan: "2 usuarios de distinto alcance, uno no ve los
+datos del otro").
+"""
+
+import datetime
+
+from cumbresbi_scope.scope import EffectiveScope
+from django.test import TestCase
+from django.utils import timezone
+from rest_framework.test import APIRequestFactory
+
+from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
+from .ticket_utils import hash_token
+from .views import PldContraparteDocViewSet, PldContraparteKycViewSet, PldTicketClienteViewSet
+
+RFC_TIZARA = "#####1"
+RFC_CAPITAL = "#####2"
+
+
+def _kyc(id_contraparte, sociedad_rfc):
+    return PldContraparteKyc.objects.create(
+        id_contraparte=id_contraparte,
+        fecha_nac_const=datetime.date(1990, 1, 1),
+        pais_nac_const="Mexico",
+        nacionalidad="Mexicana",
+        ocupacion_act_economica="Empresario",
+        dom_calle="Calle 1",
+        dom_numero_ext="1",
+        dom_numero_int="1",
+        dom_colonia="Centro",
+        dom_municipio_alcaldia="CDMX",
+        dom_estado="CDMX",
+        dom_cp="01000",
+        dom_pais="Mexico",
+        telefono_fijo="5555555555",
+        telefono_sms="5555555555",
+        estado_civil="SOLTERO",
+        ident_fideicomiso="FID1",
+        aprobado_por="system01",
+        fecha_vencimiento=datetime.date(2030, 1, 1),
+        sociedad_rfc=sociedad_rfc,
+    )
+
+
+def _with_scope(request, scope):
+    request.effective_scope = scope
+    return request
+
+
+class PldContraparteKycScopeTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc_tizara = _kyc("cp000001", RFC_TIZARA)
+        self.kyc_capital = _kyc("cp000002", RFC_CAPITAL)
+        self.kyc_sin_sociedad = _kyc("cp000003", None)
+
+    def _listar(self, scope):
+        request = _with_scope(self.factory.get("/api/kyc/"), scope)
+        view = PldContraparteKycViewSet.as_view({"get": "list"})
+        return view(request)
+
+    def test_global_ve_los_tres_expedientes(self):
+        response = self._listar(EffectiveScope(is_global=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+
+    def test_usuario_de_tizara_solo_ve_su_expediente(self):
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        response = self._listar(scope)
+        ids = {row["id_contraparte"] for row in response.data}
+        self.assertEqual(ids, {"cp000001"})
+
+    def test_usuario_de_capital_no_ve_el_expediente_de_tizara(self):
+        """El caso de seguridad clave: dos usuarios de distinta sociedad,
+        ninguno ve los datos del otro."""
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_CAPITAL,))
+        response = self._listar(scope)
+        ids = {row["id_contraparte"] for row in response.data}
+        self.assertEqual(ids, {"cp000002"})
+        self.assertNotIn("cp000001", ids)
+
+    def test_expediente_sin_sociedad_asignada_es_invisible_para_no_global(self):
+        """Backfill pendiente (ver memoria "empresas-alcance-fase1"): un
+        expediente con sociedad_rfc=NULL no hace match con ninguna
+        sociedad - queda fuera hasta que se le asigne una."""
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA, RFC_CAPITAL))
+        response = self._listar(scope)
+        ids = {row["id_contraparte"] for row in response.data}
+        self.assertNotIn("cp000003", ids)
+
+    def test_anonimo_no_ve_nada(self):
+        response = self._listar(EffectiveScope.anonymous())
+        self.assertEqual(len(response.data), 0)
+
+
+class PldContraparteDocScopeTests(TestCase):
+    """El documento hereda el alcance de su expediente KYC padre
+    (SCOPE_FIELD_SOCIEDAD = "kyc__sociedad_rfc")."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc_tizara = _kyc("cp000001", RFC_TIZARA)
+        self.kyc_capital = _kyc("cp000002", RFC_CAPITAL)
+        PldContraparteDoc.objects.create(kyc=self.kyc_tizara, denominacion="INE")
+        PldContraparteDoc.objects.create(kyc=self.kyc_capital, denominacion="Acta constitutiva")
+
+    def _listar(self, scope):
+        request = _with_scope(self.factory.get("/api/kyc-docs/"), scope)
+        view = PldContraparteDocViewSet.as_view({"get": "list"})
+        return view(request)
+
+    def test_usuario_de_tizara_solo_ve_los_documentos_de_su_sociedad(self):
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        response = self._listar(scope)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["denominacion"], "INE")
+
+
+class CumplimientoDePermisosEnEscrituraTests(TestCase):
+    """Cumplimiento real de permisos en escritura (plan Fase 1): crear un
+    expediente requiere "pld-compliance.crear"; aprobarlo requiere
+    "pld-compliance.aprobar" - un perm_key distinto, a proposito
+    (segregacion de funciones PLD_ANALISTA/PLD_APROBADOR,
+    roles-y-permisos.md sec. 2/6)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000009", RFC_TIZARA)
+
+    def _crear_kyc(self, scope):
+        request = self.factory.post(
+            "/api/kyc/",
+            {
+                "id_contraparte": "cp000010",
+                "fecha_nac_const": "1990-01-01",
+                "pais_nac_const": "Mexico",
+                "nacionalidad": "Mexicana",
+                "ocupacion_act_economica": "Empresario",
+                "dom_calle": "Calle 1",
+                "dom_numero_ext": "1",
+                "dom_numero_int": "1",
+                "dom_colonia": "Centro",
+                "dom_municipio_alcaldia": "CDMX",
+                "dom_estado": "CDMX",
+                "dom_cp": "01000",
+                "dom_pais": "Mexico",
+                "telefono_fijo": "5555555555",
+                "telefono_sms": "5555555555",
+                "estado_civil": "SOLTERO",
+                "ident_fideicomiso": "FID9",
+                "aprobado_por": "system01",
+                "fecha_vencimiento": "2030-01-01",
+                "sociedad_rfc": RFC_TIZARA,
+                "created_by": "system01",
+                "updated_by": "system01",
+            },
+            format="json",
+        )
+        request.effective_scope = scope
+        view = PldContraparteKycViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def _aprobar_kyc(self, scope):
+        request = self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/aprobar/", {"aprobado_por": "usr00001"})
+        request.effective_scope = scope
+        view = PldContraparteKycViewSet.as_view({"post": "aprobar"})
+        return view(request, pk=self.kyc.id_kyc)
+
+    def test_analista_sin_permiso_no_puede_crear_expediente(self):
+        response = self._crear_kyc(EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_analista_con_permiso_si_puede_crear_expediente(self):
+        response = self._crear_kyc(EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)))
+        self.assertEqual(response.status_code, 201)
+
+    def test_analista_no_puede_aprobar_su_propio_permiso_de_crear(self):
+        """Segregacion de funciones: tener "crear" no da "aprobar"."""
+        response = self._aprobar_kyc(EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)))
+        self.assertEqual(response.status_code, 403)
+
+    def test_aprobador_con_permiso_si_puede_aprobar(self):
+        response = self._aprobar_kyc(EffectiveScope(is_global=True, perm_keys=("pld-compliance.aprobar",)))
+        self.assertEqual(response.status_code, 200)
+
+
+class PldTicketClienteTests(TestCase):
+    """Frontend de PldTicketCliente (magic link de KYC externo, Fase 2
+    Semana 9): crear/revocar requieren permiso real, "validar" es publico
+    (el cliente externo canjea por token, sin sesion previa - mismo
+    criterio que IamMagicLink, ver memoria de sesion
+    "iam-magic-link-alcance")."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000099", RFC_TIZARA)
+
+    def _crear_ticket(self, scope):
+        request = self.factory.post(
+            "/api/ticket-cliente/",
+            {
+                "kyc": self.kyc.id_kyc,
+                "email": "cliente@externo.com",
+                "issued_by": "usr00001",
+                "expires_at": (timezone.now() + datetime.timedelta(minutes=30)).isoformat(),
+                "max_uses": 1,
+            },
+            format="json",
+        )
+        request.effective_scope = scope
+        view = PldTicketClienteViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_crear_sin_permiso_da_403(self):
+        response = self._crear_ticket(EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_permiso_regresa_token_en_claro(self):
+        response = self._crear_ticket(EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)))
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("token", response.data)
+        self.assertTrue(response.data["token"])
+        # El hash del token en claro debe coincidir con el guardado - la
+        # unica prueba real de que "validar" despues va a poder encontrarlo.
+        ticket = PldTicketCliente.objects.get(pk=response.data["id_pld_ticket"])
+        self.assertEqual(ticket.token_hash, hash_token(response.data["token"]))
+
+    def test_revocar_requiere_permiso_editar(self):
+        ticket = PldTicketCliente.objects.create(
+            kyc=self.kyc,
+            email="cliente@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-de-prueba"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=1,
+        )
+        request = self.factory.post(f"/api/ticket-cliente/{ticket.id_pld_ticket}/revocar/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",))
+        view = PldTicketClienteViewSet.as_view({"post": "revocar"})
+        response = view(request, pk=ticket.id_pld_ticket)
+        self.assertEqual(response.status_code, 403)
+
+        request2 = self.factory.post(f"/api/ticket-cliente/{ticket.id_pld_ticket}/revocar/")
+        request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        response2 = view(request2, pk=ticket.id_pld_ticket)
+        self.assertEqual(response2.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertIsNotNone(ticket.revoked_at)
+
+    def test_validar_es_publico_y_regresa_el_kyc(self):
+        """El cliente externo no tiene sesion - validar debe funcionar con
+        EffectiveScope.anonymous(), sin necesitar ningun perm_key."""
+        ticket = PldTicketCliente.objects.create(
+            kyc=self.kyc,
+            email="cliente@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-valido-123"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=1,
+        )
+        request = self.factory.post("/api/ticket-cliente/validar/", {"token": "token-valido-123"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = PldTicketClienteViewSet.as_view({"post": "validar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["kyc"]["id_contraparte"], "cp000099")
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.uses_count, 1)
+
+    def test_validar_token_revocado_da_403(self):
+        ticket = PldTicketCliente.objects.create(
+            kyc=self.kyc,
+            email="cliente@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-revocado"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=1,
+            revoked_at=timezone.now(),
+        )
+        request = self.factory.post("/api/ticket-cliente/validar/", {"token": "token-revocado"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = PldTicketClienteViewSet.as_view({"post": "validar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_validar_token_agotado_da_403(self):
+        ticket = PldTicketCliente.objects.create(
+            kyc=self.kyc,
+            email="cliente@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-agotado"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=1,
+            uses_count=1,
+        )
+        request = self.factory.post("/api/ticket-cliente/validar/", {"token": "token-agotado"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = PldTicketClienteViewSet.as_view({"post": "validar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_validar_token_inexistente_da_404(self):
+        request = self.factory.post("/api/ticket-cliente/validar/", {"token": "no-existe"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = PldTicketClienteViewSet.as_view({"post": "validar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 404)

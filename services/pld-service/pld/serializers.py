@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import PldContraparteDoc, PldContraparteKyc
+from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
 
 
 class PldContraparteDocSerializer(serializers.ModelSerializer):
@@ -82,3 +82,33 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "fecha_vencimiento",
         ]
         read_only_fields = ["id_kyc", "aprobado_por", "aprobado_en", "created_at", "updated_at"]
+
+
+class PldTicketClienteSerializer(serializers.ModelSerializer):
+    """Magic link de KYC externo (Fase 2, Semana 9 del plan). token_hash
+    nunca se expone via API - se genera y regresa una unica vez, en claro,
+    al crear el ticket (ver PldTicketClienteViewSet.perform_create)."""
+
+    class Meta:
+        model = PldTicketCliente
+        fields = [
+            "id_pld_ticket",
+            "kyc",
+            "email",
+            "issued_at",
+            "issued_by",
+            "expires_at",
+            "max_uses",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]
+        read_only_fields = [
+            "id_pld_ticket",
+            "issued_at",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]
