@@ -33,7 +33,21 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env("CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", default=None)
+# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
+# par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
+# este default fuera de dev; en un ambiente real viene de Secret Manager.
+CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
+    "CUMBRESBI_SCOPE_JWT_PUBLIC_KEY",
+    default="""-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuANSmqBa2csu48OmC2k9
+k/gtsVZynSl/M76fsdkGwL7nVMh5egK/YYIZO3cYWOMuNcWNchkxDQ2OjgTKNgGw
+zIcEgyy+GDW0CFlqSdGRWjnCQSbuxGQW5Qca5w7SJT75h+fQjNGicGP62gLo1k+v
+FtnNGk5bcPxEFhQtSuya2/re1kvIGMnUVk/1/1ytbaN5pl3xaghaNfVY6XSbKULo
+Gg06Cc6r+DO24tf7yc0ZiavjWAWvzdzEdtpc1Yr9f7zQdVB+2Ze0wJFaMLedK0Ar
+Pzzk6e7rDpCf91ZLB3wY5DMYtLmnfkrV7vovWjKRMOR0aAcbI4MbiG+Cot/YNptN
+fwIDAQAB
+-----END PUBLIC KEY-----""",
+)
 
 ROOT_URLCONF = "config.urls"
 

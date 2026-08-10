@@ -87,6 +87,46 @@ def test_valid_jwt_claims_populate_the_scope(monkeypatch, settings):
     assert result.effective_scope.sociedad_rfcs == ("ABC123456XYZ",)
 
 
+def test_cookie_fallback_used_when_no_authorization_header(monkeypatch, settings):
+    settings.DEBUG = False
+    settings.CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = "fake-public-key-for-test"
+
+    import jwt as pyjwt
+
+    monkeypatch.setattr(
+        pyjwt,
+        "decode",
+        lambda token, key, algorithms: {"is_global": True},
+    )
+
+    middleware = EffectiveScopeMiddleware(_passthrough)
+    request = rf.get("/")
+    request.COOKIES["cumbresbi_session"] = "cookie-value-checked-out"
+    result = middleware(request)
+
+    assert result.effective_scope.is_global is True
+
+
+def test_authorization_header_wins_over_cookie_when_both_present(monkeypatch, settings):
+    settings.DEBUG = False
+    settings.CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = "fake-public-key-for-test"
+
+    import jwt as pyjwt
+
+    monkeypatch.setattr(
+        pyjwt,
+        "decode",
+        lambda token, key, algorithms: {"is_global": token == "header-token"},
+    )
+
+    middleware = EffectiveScopeMiddleware(_passthrough)
+    request = rf.get("/", HTTP_AUTHORIZATION="Bearer header-token")
+    request.COOKIES["cumbresbi_session"] = "cookie-token"
+    result = middleware(request)
+
+    assert result.effective_scope.is_global is True
+
+
 def test_debug_header_never_honored_outside_debug_even_if_public_key_missing():
     # Fail-closed explicito: DEBUG=False + sin llave publica configurada no
     # debe caer de vuelta al header de debug - debe ser anonimo, punto.

@@ -52,11 +52,24 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Clave publica RS256 para validar el JWT de alcance emitido por iam-service
-# (ver docs/architecture/README.md sec. 8). Vacio en dev local hasta Fase 1,
-# donde iam-service empiece a emitir JWTs reales - cumbresbi_scope cae a
-# X-Debug-Scope solo si DEBUG=True.
-CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env("CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", default=None)
+# Clave publica RS256 para validar el JWT de alcance (docs/architecture/
+# README.md sec. 8) - es la publica de JWT_PRIVATE_KEY (ver mas abajo), con
+# la que iam-service ya firma tanto sus propios JWT de sesion (auth_views.py)
+# como los de Magic Link. El default es la publica del par de DESARROLLO -
+# NUNCA usarlo fuera de dev; en cualquier ambiente real, esta variable debe
+# venir de Secret Manager con la publica que corresponda a la privada real.
+CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
+    "CUMBRESBI_SCOPE_JWT_PUBLIC_KEY",
+    default="""-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuANSmqBa2csu48OmC2k9
+k/gtsVZynSl/M76fsdkGwL7nVMh5egK/YYIZO3cYWOMuNcWNchkxDQ2OjgTKNgGw
+zIcEgyy+GDW0CFlqSdGRWjnCQSbuxGQW5Qca5w7SJT75h+fQjNGicGP62gLo1k+v
+FtnNGk5bcPxEFhQtSuya2/re1kvIGMnUVk/1/1ytbaN5pl3xaghaNfVY6XSbKULo
+Gg06Cc6r+DO24tf7yc0ZiavjWAWvzdzEdtpc1Yr9f7zQdVB+2Ze0wJFaMLedK0Ar
+Pzzk6e7rDpCf91ZLB3wY5DMYtLmnfkrV7vovWjKRMOR0aAcbI4MbiG+Cot/YNptN
+fwIDAQAB
+-----END PUBLIC KEY-----""",
+)
 
 # Llave privada RS256 para firmar los JWT de alcance externo emitidos al
 # validar un Magic Link (Fase 1, Semana 4; ver iam/magic_link_utils.py). El

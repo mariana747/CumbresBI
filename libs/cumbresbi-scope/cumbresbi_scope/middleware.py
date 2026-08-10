@@ -9,12 +9,23 @@ logger = logging.getLogger("cumbresbi_scope")
 
 
 class EffectiveScopeMiddleware:
-    """Puebla request.effective_scope a partir del JWT de alcance.
+    """Prueba request.effective_scope a partir del JWT de alcance.
 
     En produccion: el JWT (RS256, firmado por iam-service, validado ademas por
     el API Gateway - ver docs/architecture/README.md sec. 8) viaja en el header
     Authorization: Bearer <token>. Se valida la firma con
     settings.CUMBRESBI_SCOPE_JWT_PUBLIC_KEY.
+
+    Fallback de cookie (mientras no exista el API Gateway real, Fase 1): el
+    mismo JWT tambien viaja en la cookie HttpOnly que pone iam-service tras el
+    login OIDC (nombre configurable via settings.CUMBRESBI_SCOPE_SESSION_COOKIE_NAME,
+    default "cumbresbi_session" - ver services/iam-service/iam/auth_views.py). El
+    frontend no puede leer esa cookie con JS (es HttpOnly a proposito) para
+    reenviarla como header, pero el navegador SI la manda en cualquier fetch con
+    credentials:"include" hacia el mismo host (localhost, sin importar el puerto,
+    en dev) - por eso cada servicio puede leerla directo de sus propias cookies,
+    sin necesitar un Gateway que traduzca cookie->header. En produccion, con un
+    dominio raiz compartido real, esto sigue funcionando igual.
 
     En dev local (DEBUG=True y sin esa key configurada): iam-service todavia
     no emite JWTs reales (eso es trabajo de Fase 1, no de Fase 0), asi que se
@@ -36,9 +47,13 @@ class EffectiveScopeMiddleware:
     def _resolve_scope(self, request):
         public_key = getattr(settings, "CUMBRESBI_SCOPE_JWT_PUBLIC_KEY", None)
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        cookie_name = getattr(settings, "CUMBRESBI_SCOPE_SESSION_COOKIE_NAME", "cumbresbi_session")
 
         if public_key and auth_header.startswith("Bearer "):
             return self._scope_from_jwt(auth_header.removeprefix("Bearer "), public_key)
+
+        if public_key and request.COOKIES.get(cookie_name):
+            return self._scope_from_jwt(request.COOKIES[cookie_name], public_key)
 
         if settings.DEBUG and not public_key:
             debug_header = request.META.get("HTTP_X_DEBUG_SCOPE")

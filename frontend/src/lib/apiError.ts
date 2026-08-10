@@ -73,7 +73,13 @@ export async function friendlyApiError(serviceCode: string, response: Response):
 // contra la consola - no es un codigo HTTP, es un identificador de ocurrencia.
 export async function apiFetch(serviceCode: string, url: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, init);
+    // credentials:"include" por default en TODAS las llamadas a los
+    // microservicios - es como viaja la cookie de sesion real
+    // (cumbresbi_session, puesta por iam-service) hacia cualquier servicio
+    // en localhost, sin importar el puerto (ver cumbresbi_scope.middleware,
+    // fallback de cookie). Un caller puede sobreescribirlo pasando su propio
+    // "credentials" en init.
+    return await fetch(url, { credentials: "include", ...init });
   } catch (err) {
     const idOcurrencia = Date.now().toString(36).slice(-4).toUpperCase();
     const codigo = `${serviceCode}-CONEXION-${idOcurrencia}`;
