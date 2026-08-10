@@ -5,6 +5,7 @@
 // por Actividad 1, ver docint/drive.py), este campo cambia de `file` a un
 // identificador de Drive sin que la UI del formulario deba rediseñarse.
 import { apiFetch, friendlyApiError } from "./apiError";
+import { GATEWAY_URL } from "./gatewayUrl";
 
 export interface DocumentAnalysisResult {
   detected_document_type: string | null;
@@ -25,7 +26,7 @@ export interface AnalyzeDocumentParams {
 }
 
 const DOCINT_API_BASE_URL =
-  process.env.NEXT_PUBLIC_DOCINT_API_BASE_URL ?? "http://localhost:8006";
+  process.env.NEXT_PUBLIC_DOCINT_API_BASE_URL ?? `${GATEWAY_URL}/docint`;
 
 // Espejo en cliente de docint/classifier.py (KEYWORD_TO_PROMPT_KEY) - se usa
 // para autollenar expected_document_type al subir varios archivos sin pedirle

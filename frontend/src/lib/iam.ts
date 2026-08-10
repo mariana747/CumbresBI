@@ -1,6 +1,7 @@
 ﻿// Cliente de iam-service - directorio de usuarios (Fase 1).
 // Contrato: services/iam-service/iam/views.py (GET /api/users/, GET /api/roles/).
 import { apiFetch, friendlyApiError } from "./apiError";
+import { GATEWAY_URL } from "./gatewayUrl";
 
 export interface IamUser {
   user_id: string;
@@ -43,7 +44,7 @@ export interface IamGroup {
   alias: string | null;
 }
 
-const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? "http://localhost:8000";
+const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? `${GATEWAY_URL}/iam`;
 
 export async function listUsers({
   search,

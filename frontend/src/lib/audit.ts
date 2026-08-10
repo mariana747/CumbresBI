@@ -3,6 +3,7 @@
 // Contrato: services/audit-service/auditoria/views.py (GET /api/bitacora/,
 // POST /api/bitacora/confirmar_envio_drive/).
 import { apiFetch, friendlyApiError } from "./apiError";
+import { GATEWAY_URL } from "./gatewayUrl";
 
 export interface BitacoraEvento {
   event_id: string;
@@ -17,7 +18,7 @@ export interface BitacoraEvento {
   recibido_en: string;
 }
 
-const AUDIT_API_BASE_URL = process.env.NEXT_PUBLIC_AUDIT_API_BASE_URL ?? "http://localhost:8001";
+const AUDIT_API_BASE_URL = process.env.NEXT_PUBLIC_AUDIT_API_BASE_URL ?? `${GATEWAY_URL}/audit`;
 
 export async function listBitacora({
   search,

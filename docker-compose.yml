@@ -1,4 +1,16 @@
 services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./services/api-gateway:/app
+    ports:
+      - "8080:8080"
+
   iam-db:
     image: mysql:8.0
     restart: unless-stopped
