@@ -1,6 +1,7 @@
 import re
 from datetime import timedelta
 
+from cumbresbi_scope.permissions import require_permission
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import action
@@ -10,12 +11,28 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from .audit_utils import emitir_evento_auditoria
 from .magic_link_utils import generate_token, hash_token, issue_external_jwt
-from .models import IamGroup, IamMagicLink, IamPermission, IamRole, IamRolePermission, IamUser, IamUserRole
+from .models import (
+    GeneralSociedad,
+    IamGroup,
+    IamMagicLink,
+    IamPermission,
+    IamRole,
+    IamRolePermission,
+    IamUser,
+    IamUserCentroAccess,
+    IamUserContratoAccess,
+    IamUserGroup,
+    IamUserRole,
+)
 from .serializers import (
+    GeneralSociedadSerializer,
     IamGroupSerializer,
     IamMagicLinkSerializer,
     IamPermissionSerializer,
     IamRoleSerializer,
+    IamUserCentroAccessSerializer,
+    IamUserContratoAccessSerializer,
+    IamUserGroupSerializer,
     IamUserRoleSerializer,
     IamUserSerializer,
 )
@@ -58,7 +75,14 @@ class IamUserViewSet(ReadOnlyModelViewSet):
     search_fields = ["primary_email", "display_name"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        # IamUser es dato operativo por usuario (no un catalogo), por eso si
+        # lleva ScopedManager - a diferencia de IamRole/IamPermission/
+        # IamGroup (catalogos compartidos, decision 2026-08-10, sin filtro).
+        # IamUser todavia no declara SCOPE_FIELD_* (gap documentado en
+        # roles-y-permisos.md) asi que hoy esto es el gate GLOBAL/no-GLOBAL:
+        # solo GLOBAL ve el directorio, el resto no ve nada hasta el punto 2
+        # del plan (columnas reales de sociedad/proyecto).
+        queryset = IamUser.objects.for_scope(self.request.effective_scope).order_by("primary_email")
         status_param = self.request.query_params.get("status")
         if status_param:
             queryset = queryset.filter(status=status_param.upper())
@@ -96,6 +120,15 @@ class IamRoleViewSet(ModelViewSet):
     http_method_names = ["get", "post", "head", "options"]
     queryset = IamRole.objects.all().order_by("role_name")
     serializer_class = IamRoleSerializer
+
+    def get_permissions(self):
+        # Editar la matriz de permisos (otorgar/revocar) requiere
+        # "iam.editar" - el rol en si sigue siendo de solo lectura (sin
+        # accion de create/update expuesta), asi que solo estas dos
+        # acciones necesitan el gate.
+        if self.action in ("otorgar_permiso", "revocar_permiso"):
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
 
     @action(detail=True, methods=["post"])
     def otorgar_permiso(self, request, pk=None):
@@ -173,10 +206,8 @@ class IamGroupViewSet(ReadOnlyModelViewSet):
 
 class IamUserRoleViewSet(ModelViewSet):
     """Otorgar y revocar roles (Fase 1, Semana 5: "logica de asignacion de
-    roles con alcance"). Sin permisos reales todavia (pendiente JWT/scope de
-    iam-service) - cualquiera puede otorgar/revocar por ahora, ver nota en
-    serializers.py. Filtra por ?user=<user_id> para listar las asignaciones
-    de un usuario especifico.
+    roles con alcance"). Filtra por ?user=<user_id> para listar las
+    asignaciones de un usuario especifico.
 
     DELETE no esta permitido a proposito: una asignacion nunca se borra, se
     revoca (revoked_at) para conservar el historial - usa
@@ -192,8 +223,20 @@ class IamUserRoleViewSet(ModelViewSet):
     queryset = IamUserRole.objects.select_related("role", "user").order_by("-granted_at")
     serializer_class = IamUserRoleSerializer
 
+    def get_permissions(self):
+        # Otorgar un rol nuevo = "iam.crear"; revocar uno existente =
+        # "iam.editar" (mismo criterio que el resto de este archivo -
+        # cumplimiento real de permisos en escritura, plan Fase 1).
+        if self.action == "create":
+            return [require_permission("iam.crear")()]
+        if self.action == "revoke":
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = IamUserRole.objects.for_scope(self.request.effective_scope).select_related(
+            "role", "user"
+        ).order_by("-granted_at")
         user_param = self.request.query_params.get("user")
         if user_param:
             queryset = queryset.filter(user_id=user_param)
@@ -214,10 +257,154 @@ class IamUserRoleViewSet(ModelViewSet):
         return Response(self.get_serializer(user_role).data)
 
 
+class GeneralSociedadViewSet(ModelViewSet):
+    """Catalogo real de sociedades (tabla general_sociedades del ERD) -
+    CRUD real (Fase 1, "Gestion organizacional", pantalla /admin/organizacion)
+    ademas de alimentar el autocomplete de RFC en RoleAssignmentDialog
+    (alcance SOCIEDAD). Busqueda de texto libre (?search=) sobre
+    razon_social/rfc.
+
+    A diferencia de Centro/Proyecto (que NO son catalogos genericos reales
+    - pertenecen a modulos que todavia no existen, Tickets/Vivienda, ver
+    memoria de sesion), Sociedad SI es un catalogo real y generico del ERD
+    (general_sociedades), por eso es el unico con CRUD completo por ahora.
+
+    DELETE es fisico (sin columna de soft-delete en el ERD real) - las
+    referencias a sociedad_rfc en otros servicios (ej. PldContraparteKyc)
+    son laxas (no FK real, por diseño de aislamiento de esquema), asi que
+    borrar una sociedad no rompe integridad referencial a nivel de BD,
+    pero SI deja esos registros con un RFC que ya no existe en el
+    catalogo - usar con cuidado.
+    """
+
+    queryset = GeneralSociedad.objects.all().order_by("razon_social")
+    serializer_class = GeneralSociedadSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["razon_social", "rfc", "alias_sociedad"]
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("iam.crear")()]
+        if self.action in ("update", "partial_update"):
+            return [require_permission("iam.editar")()]
+        if self.action == "destroy":
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
+
+class IamUserGroupViewSet(ModelViewSet):
+    """Cambiar la empresa de un usuario desde el Directorio (icono de lapiz
+    en la columna "Empresa"). DELETE no permitido - se "quita" via revocar
+    (removed_at), no se borra la fila (conserva historial). Filtra por
+    ?user=<user_id>."""
+
+    http_method_names = ["get", "post", "head", "options"]
+    queryset = IamUserGroup.objects.select_related("group", "user").order_by("-created_at")
+    serializer_class = IamUserGroupSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("iam.crear")()]
+        if self.action == "quitar":
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user_param = self.request.query_params.get("user")
+        if user_param:
+            queryset = queryset.filter(user_id=user_param)
+        active_only = self.request.query_params.get("active")
+        if active_only == "true":
+            queryset = queryset.filter(removed_at__isnull=True)
+        return queryset
+
+    @action(detail=True, methods=["post"])
+    def quitar(self, request, pk=None):
+        user_group = self.get_object()
+        if user_group.removed_at is None:
+            user_group.removed_at = timezone.now()
+            user_group.save(update_fields=["removed_at"])
+        return Response(self.get_serializer(user_group).data)
+
+
+class IamUserCentroAccessViewSet(ModelViewSet):
+    """Otorgar/revocar acceso CENTRO (grant plano, roles-y-permisos.md sec.
+    1) - mismo patron que IamUserRoleViewSet. Filtra por ?user=<user_id>."""
+
+    http_method_names = ["get", "post", "head", "options"]
+    queryset = IamUserCentroAccess.objects.select_related("user").order_by("-granted_at")
+    serializer_class = IamUserCentroAccessSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("iam.crear")()]
+        if self.action == "revoke":
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user_param = self.request.query_params.get("user")
+        if user_param:
+            queryset = queryset.filter(user_id=user_param)
+        active_only = self.request.query_params.get("active")
+        if active_only == "true":
+            queryset = queryset.filter(revoked_at__isnull=True)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(granted_at=timezone.now())
+
+    @action(detail=True, methods=["post"])
+    def revoke(self, request, pk=None):
+        access = self.get_object()
+        if access.revoked_at is None:
+            access.revoked_at = timezone.now()
+            access.save(update_fields=["revoked_at"])
+        return Response(self.get_serializer(access).data)
+
+
+class IamUserContratoAccessViewSet(ModelViewSet):
+    """Otorgar/revocar acceso CONTRATO - mismo patron que
+    IamUserCentroAccessViewSet, sobre un contrato individual."""
+
+    http_method_names = ["get", "post", "head", "options"]
+    queryset = IamUserContratoAccess.objects.select_related("user").order_by("-granted_at")
+    serializer_class = IamUserContratoAccessSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("iam.crear")()]
+        if self.action == "revoke":
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user_param = self.request.query_params.get("user")
+        if user_param:
+            queryset = queryset.filter(user_id=user_param)
+        active_only = self.request.query_params.get("active")
+        if active_only == "true":
+            queryset = queryset.filter(revoked_at__isnull=True)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(granted_at=timezone.now())
+
+    @action(detail=True, methods=["post"])
+    def revoke(self, request, pk=None):
+        access = self.get_object()
+        if access.revoked_at is None:
+            access.revoked_at = timezone.now()
+            access.save(update_fields=["revoked_at"])
+        return Response(self.get_serializer(access).data)
+
+
 class IamMagicLinkViewSet(ModelViewSet):
     """Magic Links de un solo uso para usuarios externos (Fase 1, Semana 4;
-    docs/architecture/README.md sec. 6.2). Sin permisos reales todavia
-    (mismo estado que el resto de iam-service, pendiente JWT/scope real).
+    docs/architecture/README.md sec. 6.2).
 
     MODO DEV: no hay envio de correo real todavia (pendiente confirmar con
     Arturo el envio desde una cuenta de Workspace) - por eso "crear" regresa
@@ -232,6 +419,19 @@ class IamMagicLinkViewSet(ModelViewSet):
     http_method_names = ["get", "post", "head", "options"]
     queryset = IamMagicLink.objects.all().order_by("-issued_at")
     serializer_class = IamMagicLinkSerializer
+
+    def get_permissions(self):
+        # "validar" es el unico punto de entrada publico (el externo lo
+        # canjea sin sesion, ver memoria de sesion "iam-magic-link-alcance")
+        # - todo lo demas (crear/masivo/revocar/reenviar un link) es una
+        # accion interna, requiere "iam.crear"/"iam.editar" como el resto.
+        if self.action == "validar":
+            return []
+        if self.action in ("create", "masivo"):
+            return [require_permission("iam.crear")()]
+        if self.action in ("revocar", "reenviar"):
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
 
     def get_queryset(self):
         queryset = super().get_queryset()
