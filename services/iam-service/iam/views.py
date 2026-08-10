@@ -10,7 +10,7 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from .audit_utils import emitir_evento_auditoria
 from .magic_link_utils import generate_token, hash_token, issue_external_jwt
-from .models import IamGroup, IamMagicLink, IamPermission, IamRole, IamUser, IamUserRole
+from .models import IamGroup, IamMagicLink, IamPermission, IamRole, IamRolePermission, IamUser, IamUserRole
 from .serializers import (
     IamGroupSerializer,
     IamMagicLinkSerializer,
@@ -85,14 +85,71 @@ class IamUserViewSet(ReadOnlyModelViewSet):
         return queryset
 
 
-class IamRoleViewSet(ReadOnlyModelViewSet):
-    """Solo lectura - catalogo de roles para poblar el filtro del directorio
-    de usuarios y, via el campo "permisos" del serializer, la matriz de
-    permisos roles x permisos (Fase 1, Semana 5). La gestion de roles
-    (crear/editar) sigue pendiente."""
+class IamRoleViewSet(ModelViewSet):
+    """Catalogo de roles para el filtro del directorio de usuarios y, via el
+    campo "permisos" del serializer, la matriz de permisos roles x permisos
+    (Fase 1, Semana 5). El rol en si sigue siendo de solo lectura (crear/
+    editar/borrar un rol sigue pendiente) - lo unico editable son sus
+    permisos, via las dos acciones de abajo (matriz de permisos editable).
+    """
 
+    http_method_names = ["get", "post", "head", "options"]
     queryset = IamRole.objects.all().order_by("role_name")
     serializer_class = IamRoleSerializer
+
+    @action(detail=True, methods=["post"])
+    def otorgar_permiso(self, request, pk=None):
+        role = self.get_object()
+        permission_id = request.data.get("permission")
+        actor_user_id = request.data.get("actor_user_id")
+        errors = {}
+        if not permission_id:
+            errors["permission"] = ["Este campo es requerido."]
+        if not actor_user_id:
+            errors["actor_user_id"] = ["Este campo es requerido."]
+        if errors:
+            return Response(errors, status=400)
+
+        try:
+            permission = IamPermission.objects.get(pk=permission_id)
+        except IamPermission.DoesNotExist:
+            return Response({"permission": ["No existe ese permiso."]}, status=404)
+
+        _, created = IamRolePermission.objects.get_or_create(
+            role=role,
+            permission=permission,
+            defaults={"created_by_id": actor_user_id, "updated_by_id": actor_user_id},
+        )
+        if created:
+            emitir_evento_auditoria(
+                "iam_role_permissions.grant",
+                "iam_role_permissions",
+                f"{role.role_id}:{permission.permission_id}",
+                actor_user_id=actor_user_id,
+                valores_nuevos={"role": role.role_key, "permission": permission.perm_key},
+            )
+        return Response(self.get_serializer(role).data, status=201 if created else 200)
+
+    @action(detail=True, methods=["post"])
+    def revocar_permiso(self, request, pk=None):
+        role = self.get_object()
+        permission_id = request.data.get("permission")
+        actor_user_id = request.data.get("actor_user_id")
+        if not permission_id:
+            return Response({"permission": ["Este campo es requerido."]}, status=400)
+
+        deleted_count, _ = IamRolePermission.objects.filter(
+            role=role, permission_id=permission_id
+        ).delete()
+        if deleted_count:
+            emitir_evento_auditoria(
+                "iam_role_permissions.revoke",
+                "iam_role_permissions",
+                f"{role.role_id}:{permission_id}",
+                actor_user_id=actor_user_id,
+                valores_nuevos={"role": role.role_key, "permission_id": permission_id},
+            )
+        return Response(self.get_serializer(role).data)
 
 
 class IamPermissionViewSet(ReadOnlyModelViewSet):

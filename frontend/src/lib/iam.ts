@@ -91,6 +91,42 @@ export async function listPermissions(): Promise<IamPermission[]> {
   return response.json();
 }
 
+// Matriz de permisos editable (Fase 1): otorgar/revocar un permiso a un rol.
+// actorUserId viene de getSession() (src/lib/auth.ts) - primer lugar donde
+// se usa el usuario real logueado como actor de auditoria, en vez de un
+// placeholder "sin-auth".
+export async function grantRolePermission(
+  roleId: string,
+  permissionId: string,
+  actorUserId: string
+): Promise<IamRole> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/roles/${roleId}/otorgar_permiso/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ permission: permissionId, actor_user_id: actorUserId }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function revokeRolePermission(
+  roleId: string,
+  permissionId: string,
+  actorUserId: string
+): Promise<IamRole> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/roles/${roleId}/revocar_permiso/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ permission: permissionId, actor_user_id: actorUserId }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
 export async function listGroups(): Promise<IamGroup[]> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/groups/`);
   if (!response.ok) {

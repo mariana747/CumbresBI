@@ -6,6 +6,7 @@ import {
   Checkbox,
   CircularProgress,
   FormControl,
+  FormControlLabel,
   InputLabel,
   ListItemText,
   MenuItem,
@@ -13,6 +14,7 @@ import {
   Select,
   SelectChangeEvent,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -23,11 +25,22 @@ import {
   Typography,
 } from "@mui/material";
 import AppShell from "@/components/AppShell";
-import { IamPermission, IamRole, listPermissions, listRoles } from "@/lib/iam";
+import { getSession } from "@/lib/auth";
+import {
+  IamPermission,
+  IamRole,
+  grantRolePermission,
+  listPermissions,
+  listRoles,
+  revokeRolePermission,
+} from "@/lib/iam";
 
-// Matriz de permisos roles x servicios (Fase 1, Semana 5). Solo lectura -
-// la gestion de roles/permisos (crear, editar, otorgar permiso a un rol)
-// sigue pendiente, ver iam/views.py (IamRoleViewSet, IamPermissionViewSet).
+// Matriz de permisos roles x servicios (Fase 1, Semana 5) - editable: un
+// admin con sesion real puede otorgar/revocar un permiso especifico a un
+// rol directo desde esta pantalla (antes solo se veia, no se editaba). El
+// actor de auditoria es el usuario real logueado (getSession(), via
+// iam-service/auth_views.py) - primer lugar del frontend que usa la
+// sesion real para algo mas que solo mostrar el nombre.
 //
 // Cada IamPermission.perm_key tiene la forma "<servicio>.<accion>" (ver
 // iam/migrations/0004_seed_permisos_matriz.py). En vez de una casilla por
@@ -35,6 +48,7 @@ import { IamPermission, IamRole, listPermissions, listRoles } from "@/lib/iam";
 // ilegible), se agrupa por servicio y se muestra que acciones (L/C/E/A)
 // tiene el rol en ese servicio - mismo formato que
 // docs/architecture/roles-y-permisos.md sec. 3, que el cliente ya conoce.
+// En "modo edicion" cada celda se abre en 4 checkboxes (uno por accion).
 const LETRA_POR_ACCION: Record<string, string> = {
   leer: "L",
   crear: "C",
@@ -111,18 +125,64 @@ function CeldaAcciones({ acciones }: { acciones: Set<string> | undefined }) {
   );
 }
 
+// Celda editable: 4 checkboxes chiquitos (L/C/E/A), uno de-/marcado segun si
+// existe el perm_key "<servicio>.<accion>" en el catalogo Y en el rol. Un
+// checkbox no aparece clicable si ese perm_key no existe en el catalogo
+// completo (no se puede otorgar un permiso que no existe).
+function CeldaAccionesEditable({
+  servicio,
+  role,
+  permisoIdPorKey,
+  disabled,
+  onToggle,
+}: {
+  servicio: string;
+  role: IamRole;
+  permisoIdPorKey: Map<string, string>;
+  disabled: boolean;
+  onToggle: (permissionId: string, checked: boolean) => void;
+}) {
+  const rolePermSet = new Set(role.permisos);
+  return (
+    <Stack direction="row" spacing={0} justifyContent="center">
+      {ORDEN_ACCIONES.map((accion) => {
+        const permKey = `${servicio}.${accion}`;
+        const permissionId = permisoIdPorKey.get(permKey);
+        if (!permissionId) {
+          return <Typography key={accion} variant="caption" sx={{ width: 28 }} />;
+        }
+        const checked = rolePermSet.has(permKey);
+        return (
+          <Tooltip key={accion} title={NOMBRE_POR_ACCION[accion]}>
+            <Checkbox
+              size="small"
+              checked={checked}
+              disabled={disabled}
+              onChange={(e) => onToggle(permissionId, e.target.checked)}
+              sx={{ p: 0.5 }}
+            />
+          </Tooltip>
+        );
+      })}
+    </Stack>
+  );
+}
+
 export default function MatrizPermisosPage() {
   const [roles, setRoles] = useState<IamRole[]>([]);
   const [permisos, setPermisos] = useState<IamPermission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actorUserId, setActorUserId] = useState<string | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
   // Filtro por area/servicio (Fase 1, Semana 5) - [] = sin filtro, se
   // muestran todas las areas. No se filtra en el backend: el catalogo
   // completo (roles + permisos) ya se trae una sola vez, filtrar aqui
   // evita ir y venir al servidor por cada cambio de seleccion.
   const [areasFiltro, setAreasFiltro] = useState<string[]>([]);
 
-  useEffect(() => {
+  function cargar() {
     setLoading(true);
     setError(null);
     Promise.all([listRoles(), listPermissions()])
@@ -132,6 +192,11 @@ export default function MatrizPermisosPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    cargar();
+    getSession().then((session) => setActorUserId(session?.user_id ?? null));
   }, []);
 
   // Columnas = servicios distintos presentes en el catalogo completo de
@@ -139,11 +204,15 @@ export default function MatrizPermisosPage() {
   const todasLasAreas = Array.from(new Set(permisos.map((p) => p.perm_key.split(".")[0]))).sort();
   const servicios = areasFiltro.length > 0 ? todasLasAreas.filter((a) => areasFiltro.includes(a)) : todasLasAreas;
 
+  const permisoIdPorKey = new Map(permisos.map((p) => [p.perm_key, p.permission_id]));
+
   // Con filtro activo, se ocultan los roles que no tengan ningun permiso
   // en ninguna de las areas elegidas - de otro modo quedarian filas con
   // puros "—", ruido sin informacion util para lo que se esta buscando.
+  // En modo edicion se muestran todos los roles igual (podrias querer
+  // OTORGAR el primer permiso de esa area a un rol que hoy no tiene nada).
   const rolesVisibles =
-    areasFiltro.length > 0
+    areasFiltro.length > 0 && !editando
       ? roles.filter((role) => role.permisos.some((permKey) => areasFiltro.includes(permKey.split(".")[0])))
       : roles;
 
@@ -152,12 +221,56 @@ export default function MatrizPermisosPage() {
     setAreasFiltro(typeof value === "string" ? value.split(",") : value);
   }
 
+  async function handleToggle(role: IamRole, permissionId: string, checked: boolean) {
+    if (!actorUserId) return;
+    const toggleKey = `${role.role_id}:${permissionId}`;
+    setSaving(toggleKey);
+    setError(null);
+    // Actualizacion optimista sobre la lista de roles en memoria - evita
+    // recargar todo el catalogo por cada click.
+    const permKey = permisos.find((p) => p.permission_id === permissionId)?.perm_key;
+    setRoles((prev) =>
+      prev.map((r) =>
+        r.role_id !== role.role_id
+          ? r
+          : {
+              ...r,
+              permisos: checked
+                ? [...r.permisos, permKey!].filter((v, i, arr) => arr.indexOf(v) === i)
+                : r.permisos.filter((p) => p !== permKey),
+            }
+      )
+    );
+    try {
+      if (checked) {
+        await grantRolePermission(role.role_id, permissionId, actorUserId);
+      } else {
+        await revokeRolePermission(role.role_id, permissionId, actorUserId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+      cargar(); // revertir el optimismo si fallo
+    } finally {
+      setSaving(null);
+    }
+  }
+
   return (
     <AppShell>
-      <Typography variant="h5" gutterBottom>
-        Matriz de permisos
-      </Typography>
-      
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+        <Typography variant="h5">Matriz de permisos</Typography>
+        <FormControlLabel
+          control={<Switch checked={editando} onChange={(e) => setEditando(e.target.checked)} />}
+          label="Modo edición"
+        />
+      </Stack>
+
+      {editando && !actorUserId && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          No se pudo confirmar tu sesión — no podrás otorgar/revocar permisos hasta recargar la página.
+        </Alert>
+      )}
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -174,7 +287,9 @@ export default function MatrizPermisosPage() {
       >
         <Paper variant="outlined" sx={{ p: 2, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Permisos otorgados a cada rol, agrupados por servicio.
+            {editando
+              ? "Modo edición: marca o desmarca una acción para otorgar/revocar ese permiso al rol."
+              : "Permisos otorgados a cada rol, agrupados por servicio."}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontWeight: "bold" }}>
             L = leer, C = crear, E = editar, A = aprobar/autorizar.
@@ -203,18 +318,48 @@ export default function MatrizPermisosPage() {
         </FormControl>
       </Stack>
 
-      <Paper variant="outlined">
+      <Stack direction="row" justifyContent="center">
+      <Paper variant="outlined" sx={{ display: "inline-block", maxWidth: "100%" }}>
         <TableContainer sx={{ overflowX: "auto" }}>
-          <Table size="small">
+          <Table size="small" sx={{ width: "auto" }}>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ minWidth: 200, fontWeight: 600 }}>Rol</TableCell>
+                <TableCell
+                  rowSpan={editando ? 2 : 1}
+                  sx={{ minWidth: 200, width: 200, fontWeight: 600, verticalAlign: "bottom" }}
+                >
+                  Rol
+                </TableCell>
                 {servicios.map((servicio) => (
-                  <TableCell key={servicio} align="center" sx={{ minWidth: 90 }}>
+                  <TableCell
+                    key={servicio}
+                    align="center"
+                    colSpan={editando ? 1 : undefined}
+                    sx={{ minWidth: editando ? 150 : 90, width: editando ? 150 : 90 }}
+                  >
                     {friendlyAreaName(servicio)}
                   </TableCell>
                 ))}
               </TableRow>
+              {editando && (
+                <TableRow>
+                  {servicios.map((servicio) => (
+                    <TableCell key={servicio} align="center" sx={{ py: 0.5 }}>
+                      <Stack direction="row" spacing={0} justifyContent="center">
+                        {ORDEN_ACCIONES.map((accion) => (
+                          <Typography
+                            key={accion}
+                            variant="caption"
+                            sx={{ width: 28, fontWeight: 700, color: "text.secondary" }}
+                          >
+                            {LETRA_POR_ACCION[accion]}
+                          </Typography>
+                        ))}
+                      </Stack>
+                    </TableCell>
+                  ))}
+                </TableRow>
+              )}
             </TableHead>
             <TableBody>
               {loading ? (
@@ -246,11 +391,23 @@ export default function MatrizPermisosPage() {
                           {role.role_key}
                         </Typography>
                       </TableCell>
-                      {servicios.map((servicio) => (
-                        <TableCell key={servicio}>
-                          <CeldaAcciones acciones={porServicio.get(servicio)} />
-                        </TableCell>
-                      ))}
+                      {servicios.map((servicio) =>
+                        editando ? (
+                          <TableCell key={servicio}>
+                            <CeldaAccionesEditable
+                              servicio={servicio}
+                              role={role}
+                              permisoIdPorKey={permisoIdPorKey}
+                              disabled={!actorUserId || saving !== null}
+                              onToggle={(permissionId, checked) => handleToggle(role, permissionId, checked)}
+                            />
+                          </TableCell>
+                        ) : (
+                          <TableCell key={servicio}>
+                            <CeldaAcciones acciones={porServicio.get(servicio)} />
+                          </TableCell>
+                        )
+                      )}
                     </TableRow>
                   );
                 })
@@ -259,6 +416,7 @@ export default function MatrizPermisosPage() {
           </Table>
         </TableContainer>
       </Paper>
+      </Stack>
     </AppShell>
   );
 }
