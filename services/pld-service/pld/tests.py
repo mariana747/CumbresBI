@@ -272,7 +272,7 @@ class PldTicketClienteTests(TestCase):
         self.assertEqual(ticket.uses_count, 1)
 
     def test_validar_token_revocado_da_403(self):
-        ticket = PldTicketCliente.objects.create(
+        PldTicketCliente.objects.create(
             kyc=self.kyc,
             email="cliente@externo.com",
             issued_by="usr00001",
@@ -288,7 +288,7 @@ class PldTicketClienteTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_validar_token_agotado_da_403(self):
-        ticket = PldTicketCliente.objects.create(
+        PldTicketCliente.objects.create(
             kyc=self.kyc,
             email="cliente@externo.com",
             issued_by="usr00001",

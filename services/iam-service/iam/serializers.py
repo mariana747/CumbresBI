@@ -19,8 +19,8 @@ class IamUserSerializer(serializers.ModelSerializer):
     # directorio de usuarios; el detalle de alcance (scope_type/scope_id)
     # de cada asignacion no aplica aqui, ver iam_user_roles.
     roles = serializers.SerializerMethodField()
-    # Empresa(s) activa(s) (IamGroup, removed_at IS NULL) y su holding
-    # (GeneralGrupo), para el filtro de empresa/grupo del directorio.
+    # Empresa(s) activa(s) (IamGroup, removed_at IS NULL), para el filtro
+    # de empresa del directorio.
     empresas = serializers.SerializerMethodField()
     # Reporte de matriz de acceso (Fase 1, Semana 6): a diferencia de
     # "roles" (solo claves), aqui va el detalle de alcance por asignacion
