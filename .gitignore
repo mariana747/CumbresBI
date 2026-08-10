@@ -75,4 +75,6 @@ services/document-intelligence-service/Maria/
 *.png
 *.md
 *.pdf
+*.docx
 !docs/architecture/*.md
+!docs/architecture/**/*.md
