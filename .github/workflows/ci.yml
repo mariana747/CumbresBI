@@ -51,6 +51,45 @@ jobs:
             rentas-service,
             document-intelligence-service,
           ]
+    services:
+      # iam-service, audit-service y pld-service ya tienen suites reales que
+      # golpean la BD (TestCase de Django) - sin esto, "manage.py test"
+      # truena al no poder conectar. Un solo contenedor mysql sirve para
+      # los 9, cada uno crea su propia test_<db> via el usuario root.
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DJANGO_SECRET_KEY: ci-only-key
+      # Cada servicio solo usa la variable *_DB_HOST/*_DB_USER que le
+      # corresponde (ver config/settings.py); fijar las nueve aqui es
+      # inocuo y evita mantener un mapeo servicio -> nombre de variable.
+      IAM_DB_HOST: 127.0.0.1
+      AUDIT_DB_HOST: 127.0.0.1
+      PLD_DB_HOST: 127.0.0.1
+      VIVIENDA_DB_HOST: 127.0.0.1
+      COMPRAS_TESORERIA_DB_HOST: 127.0.0.1
+      RRHH_DB_HOST: 127.0.0.1
+      TESORERIA_DB_HOST: 127.0.0.1
+      RENTAS_DB_HOST: 127.0.0.1
+      DOCINT_DB_HOST: 127.0.0.1
+      IAM_DB_USER: root
+      AUDIT_DB_USER: root
+      PLD_DB_USER: root
+      VIVIENDA_DB_USER: root
+      COMPRAS_TESORERIA_DB_USER: root
+      RRHH_DB_USER: root
+      TESORERIA_DB_USER: root
+      RENTAS_DB_USER: root
+      DOCINT_DB_USER: root
     steps:
       - uses: actions/checkout@v4
 
@@ -75,26 +114,10 @@ jobs:
 
       - name: Django check
         working-directory: services/${{ matrix.service }}
-        env:
-          DJANGO_SECRET_KEY: ci-only-key
-          # Cada servicio solo usa la variable *_DB_HOST que le corresponde
-          # (ver config/settings.py); fijar las nueve a localhost es inocuo
-          # y evita mantener un mapeo servicio -> nombre de variable aqui.
-          IAM_DB_HOST: localhost
-          AUDIT_DB_HOST: localhost
-          PLD_DB_HOST: localhost
-          VIVIENDA_DB_HOST: localhost
-          COMPRAS_TESORERIA_DB_HOST: localhost
-          RRHH_DB_HOST: localhost
-          TESORERIA_DB_HOST: localhost
-          RENTAS_DB_HOST: localhost
-          DOCINT_DB_HOST: localhost
         run: python manage.py check
 
       - name: Tests
         working-directory: services/${{ matrix.service }}
-        env:
-          DJANGO_SECRET_KEY: ci-only-key
         # Ya hay suites reales (iam-service, pld-service, audit-service -
         # ver rama feature/iam-scoped-manager); los servicios sin tests.py
         # todavia simplemente corren "Ran 0 tests, OK" - sin "|| true": una
