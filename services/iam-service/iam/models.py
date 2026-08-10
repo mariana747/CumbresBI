@@ -76,26 +76,6 @@ class GeneralSociedad(models.Model):
         return f"{self.rfc} - {self.razon_social}"
 
 
-class GeneralGrupo(ScopedAuditMixin):
-    """Holding / agrupación empresarial por encima de SOCIEDAD.
-
-    No existe en el ERD de origen ni en la arquitectura v2.0 aprobada
-    (marcado explicitamente "sin decidir" en roles-y-permisos.md sec. 5).
-    Se crea aqui a peticion explicita para este arranque de proyecto;
-    reconciliar con el cliente antes de depender de ella en produccion.
-    """
-
-    grupo_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    nombre = models.CharField(max_length=150)
-    descripcion = models.CharField(max_length=255, blank=True, null=True)
-
-    class Meta:
-        db_table = "general_grupos"
-
-    def __str__(self):
-        return self.nombre
-
-
 class IamUser(models.Model):
     STATUS_ACTIVE = "ACTIVE"
     STATUS_SUSPENDED = "SUSPENDED"
@@ -256,21 +236,16 @@ class IamUserRole(models.Model):
 
 
 class IamGroup(ScopedAuditMixin):
-    """Equipos internos (no confundir con GeneralGrupo/holding).
+    """Equipos internos / "empresa" del usuario en el directorio.
 
-    Igual que GeneralGrupo, tabla nueva pedida explicitamente para este
-    arranque; no aparece en el ERD ni en la arquitectura v2.0 aprobada.
+    No confundir con el nivel de alcance GRUPO (descartado, ver
+    docs/architecture/roles-y-permisos.md) - esto es solo un catalogo de
+    equipos/empresa para filtrar el directorio de usuarios, sin relacion
+    con RLS. Tabla nueva pedida explicitamente para este arranque; no
+    aparece en el ERD ni en la arquitectura v2.0 aprobada.
     """
 
     group_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    grupo = models.ForeignKey(
-        GeneralGrupo,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="equipos",
-        help_text="Holding empresarial al que pertenece este equipo, si aplica.",
-    )
     nombre = models.CharField(max_length=150)
     alias = models.CharField(
         max_length=50,
