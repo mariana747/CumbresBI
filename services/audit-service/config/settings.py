@@ -80,14 +80,33 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# AUDIT_DB_SOCKET_DIR: cuando corre en Cloud Run, la conexion a Cloud SQL NO es
+# por IP publica/TCP (Cloud Run no tiene IP fija que autorizar en Cloud SQL,
+# la conexion por IP publica se cuelga hasta que Cloud Run corta la request
+# con 503 "Service Unavailable"). En su lugar, Cloud Run monta un socket Unix
+# en /cloudsql/<INSTANCE_CONNECTION_NAME> cuando adjuntas la conexion Cloud
+# SQL al servicio (Cloud Run -> Editar e implementar nueva revision ->
+# Conexiones -> Conexiones de Cloud SQL). Configura AUDIT_DB_SOCKET_DIR con
+# esa ruta completa; en local (Docker Compose) se deja vacio y se usa TCP
+# normal via AUDIT_DB_HOST/AUDIT_DB_PORT como hasta ahora (mismo patron
+# que iam-service, ver su config/settings.py).
+AUDIT_DB_SOCKET_DIR = env("AUDIT_DB_SOCKET_DIR", default=None)
+
+if AUDIT_DB_SOCKET_DIR:
+    _db_host = AUDIT_DB_SOCKET_DIR
+    _db_port = ""
+else:
+    _db_host = env("AUDIT_DB_HOST", default="audit-db")
+    _db_port = env("AUDIT_DB_PORT", default="3306")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
         "NAME": env("AUDIT_DB_NAME", default="audit_service"),
         "USER": env("AUDIT_DB_USER", default="audit_app"),
         "PASSWORD": env("AUDIT_DB_PASSWORD", default=""),
-        "HOST": env("AUDIT_DB_HOST", default="audit-db"),
-        "PORT": env("AUDIT_DB_PORT", default="3306"),
+        "HOST": _db_host,
+        "PORT": _db_port,
         "OPTIONS": {"charset": "utf8mb4"},
     }
 }

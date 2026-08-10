@@ -61,14 +61,18 @@ SESSION_COOKIE_NAME_JWT = "cumbresbi_session"
 # red interna de Docker). En Cloud Run, esta tabla se reemplaza por la
 # configuracion de Cloud Endpoints ESPv2 (openapi.yaml por servicio) - el
 # contrato que ve el frontend (GATEWAY_URL + prefijo) no cambia.
+# Todos los servicios ahora escuchan en el puerto interno 8080 dentro de su
+# contenedor (gunicorn + $PORT, ver services/<x>/Dockerfile - necesario para
+# Cloud Run) - antes cada uno tenia su propio puerto interno fijo
+# (pld-service:8002, audit-service:8001, etc.), que ya no existe.
 SERVICE_ROUTES = {
     "iam": env("GATEWAY_ROUTE_IAM", default="http://iam-service:8080"),
-    "pld": env("GATEWAY_ROUTE_PLD", default="http://pld-service:8002"),
-    "audit": env("GATEWAY_ROUTE_AUDIT", default="http://audit-service:8001"),
-    "docint": env("GATEWAY_ROUTE_DOCINT", default="http://document-intelligence-service:8006"),
-    "vivienda": env("GATEWAY_ROUTE_VIVIENDA", default="http://vivienda-service:8003"),
-    "compras-tesoreria": env("GATEWAY_ROUTE_COMPRAS_TESORERIA", default="http://compras-tesoreria-service:8004"),
-    "rrhh": env("GATEWAY_ROUTE_RRHH", default="http://rrhh-service:8005"),
-    "tesoreria": env("GATEWAY_ROUTE_TESORERIA", default="http://tesoreria-service:8007"),
-    "rentas": env("GATEWAY_ROUTE_RENTAS", default="http://rentas-service:8008"),
+    "pld": env("GATEWAY_ROUTE_PLD", default="http://pld-service:8080"),
+    "audit": env("GATEWAY_ROUTE_AUDIT", default="http://audit-service:8080"),
+    "docint": env("GATEWAY_ROUTE_DOCINT", default="http://document-intelligence-service:8080"),
+    "vivienda": env("GATEWAY_ROUTE_VIVIENDA", default="http://vivienda-service:8080"),
+    "compras-tesoreria": env("GATEWAY_ROUTE_COMPRAS_TESORERIA", default="http://compras-tesoreria-service:8080"),
+    "rrhh": env("GATEWAY_ROUTE_RRHH", default="http://rrhh-service:8080"),
+    "tesoreria": env("GATEWAY_ROUTE_TESORERIA", default="http://tesoreria-service:8080"),
+    "rentas": env("GATEWAY_ROUTE_RENTAS", default="http://rentas-service:8080"),
 }

@@ -1,10 +1,9 @@
 name: CI
 
-# Pipeline inicial de Fase 0 (build, lint, pruebas). No incluye deploy real -
-# eso depende de tener el proyecto GCP/Cloud SQL/Artifact Registry dados de
-# alta (bloqueado, ver docs/architecture/README.md sec. 4). Cuando exista esa
-# infraestructura, agregar un job de deploy que dispare en push a main (dev) y
-# en tag vN-faseX (staging), como documenta la arquitectura.
+# Pipeline de Fase 1 (build, lint, pruebas). El deploy real vive en
+# deploy.yml - separado a proposito, para poder correr CI en cada push/PR
+# sin necesitar credenciales de GCP, y solo intentar el deploy cuando ya
+# hay algo que valga la pena subir (push a main).
 
 on:
   push:
@@ -27,7 +26,7 @@ jobs:
         working-directory: libs/cumbresbi-scope
         run: pip install -e ".[dev]"
 
-      - name: Pruebas de scope.py / managers.py / middleware.py
+      - name: Pruebas de scope.py / managers.py / middleware.py / permissions.py
         working-directory: libs/cumbresbi-scope
         run: python -m pytest -q
 
@@ -37,6 +36,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Los 9 microservicios Django (no incluye api-gateway - no tiene BD
+        # propia, ver job aparte "gateway-check" abajo; no incluye
+        # frontend - Next.js, sin manage.py).
         service:
           [
             iam-service,
@@ -45,6 +47,9 @@ jobs:
             vivienda-service,
             compras-tesoreria-service,
             rrhh-service,
+            tesoreria-service,
+            rentas-service,
+            document-intelligence-service,
           ]
     steps:
       - uses: actions/checkout@v4
@@ -73,26 +78,72 @@ jobs:
         env:
           DJANGO_SECRET_KEY: ci-only-key
           # Cada servicio solo usa la variable *_DB_HOST que le corresponde
-          # (ver config/settings.py); fijar las seis a localhost es inocuo y
-          # evita mantener un mapeo servicio -> nombre de variable aqui.
+          # (ver config/settings.py); fijar las nueve a localhost es inocuo
+          # y evita mantener un mapeo servicio -> nombre de variable aqui.
           IAM_DB_HOST: localhost
           AUDIT_DB_HOST: localhost
           PLD_DB_HOST: localhost
           VIVIENDA_DB_HOST: localhost
           COMPRAS_TESORERIA_DB_HOST: localhost
           RRHH_DB_HOST: localhost
+          TESORERIA_DB_HOST: localhost
+          RENTAS_DB_HOST: localhost
+          DOCINT_DB_HOST: localhost
         run: python manage.py check
 
       - name: Tests
         working-directory: services/${{ matrix.service }}
         env:
           DJANGO_SECRET_KEY: ci-only-key
-        run: python manage.py test --no-input || true
-        # "|| true": todavia no hay suites de prueba por servicio (Fase 0);
-        # el paso queda como placeholder para que falle real en cuanto
-        # existan pruebas y se quite este passthrough. La libreria
-        # compartida cumbresbi-scope si tiene pruebas reales, ver el job
-        # scope-lib-tests arriba.
+        # Ya hay suites reales (iam-service, pld-service, audit-service -
+        # ver rama feature/iam-scoped-manager); los servicios sin tests.py
+        # todavia simplemente corren "Ran 0 tests, OK" - sin "|| true": una
+        # prueba real que falle ahora si debe tumbar el pipeline.
+        run: python manage.py test --no-input
+
+  gateway-check:
+    name: api-gateway
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: services/api-gateway
+        run: pip install -r requirements.txt
+      - name: Lint (ruff)
+        working-directory: services/api-gateway
+        run: |
+          pip install ruff==0.6.9
+          ruff check .
+      - name: Django check
+        working-directory: services/api-gateway
+        env:
+          DJANGO_SECRET_KEY: ci-only-key
+        run: python manage.py check
+
+  frontend-check:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install
+      - name: Type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+        # "npm run lint" (next lint) queda fuera a proposito - ESLint
+        # todavia no esta configurado en el proyecto (pide setup
+        # interactivo la primera vez, "Strict/Base/Cancel"), se agrega
+        # aparte cuando se decida la configuracion (docs/CumbresBI_estado.md).
+      - name: Production build (mismo build que usa deploy.yml)
+        working-directory: frontend
+        run: npm run build
 
   docker-build:
     name: docker build (${{ matrix.service }})
@@ -108,8 +159,20 @@ jobs:
             vivienda-service,
             compras-tesoreria-service,
             rrhh-service,
+            tesoreria-service,
+            rentas-service,
+            document-intelligence-service,
+            api-gateway,
           ]
     steps:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -f services/${{ matrix.service }}/Dockerfile -t cumbresbi-${{ matrix.service }}:ci .
+
+  docker-build-frontend:
+    name: docker build (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (produccion, misma imagen que Cloud Run)
+        run: docker build -f frontend/Dockerfile -t cumbresbi-frontend:ci frontend

@@ -15,6 +15,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/vivienda-service/ .
 
-EXPOSE 8003
+# Cloud Run inyecta su propia variable PORT (normalmente 8080) y espera que
+# el contenedor escuche exactamente ahi - "runserver" con puerto fijo 8003
+# causaba "container failed to start and listen on the port defined by
+# PORT=8080". gunicorn + $PORT funciona igual en Cloud Run y en Docker
+# Compose local (ver docker-compose.yml, mapeo 8003:8080).
+ENV PORT=8080
+EXPOSE 8080
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8003"]
+CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2"]

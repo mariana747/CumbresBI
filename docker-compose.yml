@@ -81,7 +81,7 @@ services:
     volumes:
       - ./services/audit-service:/app
     ports:
-      - "8001:8001"
+      - "8001:8080"
     depends_on:
       audit-db:
         condition: service_healthy
@@ -116,7 +116,7 @@ services:
     volumes:
       - ./services/pld-service:/app
     ports:
-      - "8002:8002"
+      - "8002:8080"
     depends_on:
       pld-service-db:
         condition: service_healthy
@@ -151,7 +151,7 @@ services:
     volumes:
       - ./services/vivienda-service:/app
     ports:
-      - "8003:8003"
+      - "8003:8080"
     depends_on:
       vivienda-service-db:
         condition: service_healthy
@@ -186,7 +186,7 @@ services:
     volumes:
       - ./services/compras-tesoreria-service:/app
     ports:
-      - "8004:8004"
+      - "8004:8080"
     depends_on:
       compras-tesoreria-service-db:
         condition: service_healthy
@@ -221,7 +221,7 @@ services:
     volumes:
       - ./services/rrhh-service:/app
     ports:
-      - "8005:8005"
+      - "8005:8080"
     depends_on:
       rrhh-service-db:
         condition: service_healthy
@@ -229,6 +229,14 @@ services:
   frontend:
     build:
       context: ./frontend
+      # El Dockerfile es multi-etapa (build de produccion para Cloud Run,
+      # ver frontend/Dockerfile) - localmente nos quedamos en la etapa
+      # "builder" (tiene devDependencies + codigo fuente completo) y
+      # sobreescribimos el CMD con "npm run dev" para conservar hot-reload
+      # via el volumen montado abajo. El pipeline de CI/CD, en cambio,
+      # construye sin --target (usa la etapa final "runner", produccion).
+      target: builder
+    command: npm run dev
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
@@ -268,7 +276,7 @@ services:
     volumes:
       - ./services/document-intelligence-service:/app
     ports:
-      - "8006:8006"
+      - "8006:8080"
     depends_on:
       document-intelligence-service-db:
         condition: service_healthy
@@ -303,7 +311,7 @@ services:
     volumes:
       - ./services/tesoreria-service:/app
     ports:
-      - "8007:8007"
+      - "8007:8080"
     depends_on:
       tesoreria-service-db:
         condition: service_healthy
@@ -338,7 +346,7 @@ services:
     volumes:
       - ./services/rentas-service:/app
     ports:
-      - "8008:8008"
+      - "8008:8080"
     depends_on:
       rentas-service-db:
         condition: service_healthy
