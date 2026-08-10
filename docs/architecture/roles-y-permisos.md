@@ -2,13 +2,13 @@
 
 **Cumbres Consultoría y Proyectos** · Anexo al documento de arquitectura v2.0 (microservicios)
 
-> **Estado: catálogo de roles confirmado por el cliente — se van a crear estos roles.** Dos decisiones adicionales confirmadas: (1) **un usuario puede tener varios roles activos en la misma sesión** (ver ajuste a la sección 4 — el alcance efectivo es la unión de todos sus roles, no uno solo); (2) **el nivel GRUPO (holding de sociedades) queda sin decidir** — el cliente no tiene aún certeza de si debe crearse como valor de `scope_type`, así que se documenta como pendiente y se propone una vía interina que no bloquea la Fase 0/1 (ver sección 5, pregunta 1). El resto de este documento (matriz de permisos y reglas de RLS por rol) se mantiene como base de trabajo para la implementación en `iam_permissions`/`iam_role_permissions`.
+> **Estado: catálogo de roles confirmado por el cliente — se van a crear estos roles.** Dos decisiones adicionales confirmadas: (1) **un usuario puede tener varios roles activos en la misma sesión** (ver ajuste a la sección 4 — el alcance efectivo es la unión de todos sus roles, no uno solo); (2) **el nivel GRUPO (holding de sociedades) NO se crea** (decisión final, 10/Ago/2026 — ver sección 5, pregunta 1, ya cerrada). El sistema se queda con los **4 niveles de alcance** confirmados en el onboarding de Dylan: GLOBAL, SOCIEDAD, PROYECTO, CENTRO. El resto de este documento (matriz de permisos y reglas de RLS por rol) se mantiene como base de trabajo para la implementación en `iam_permissions`/`iam_role_permissions`.
 
 ## 1. Niveles de alcance 
 
 Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYECTO`, `CENTRO`/`CONTRATO` como grants planos) no cubren todos los casos reales del esquema. Al construir este catálogo aparecieron dos patrones adicionales que **no son parte de `iam_user_roles.scope_type`** y que deben tratarse como mecanismos de RLS distintos, no como bugs a forzar dentro del mismo modelo:
 
-- **Alcance por GRUPO** — `general_sociedades.grupo` (columna `varchar(50)`) existe en el esquema y sugiere una agrupación de sociedades (ej. un holding con varias razones sociales) por encima de SOCIEDAD y por debajo de GLOBAL. Hoy `iam_user_roles.scope_type` no tiene un valor `GRUPO`. Un rol tipo "Contralor/CFO" que debe ver el consolidado de varias sociedades del mismo grupo, pero no de otros grupos, no se puede modelar limpiamente hoy — o es GLOBAL (ve todo) o es una lista de `sociedad_rfcs` individuales (frágil si el grupo crece). **Ver pregunta abierta en sección 5.**
+- **Alcance por GRUPO — descartado (decisión final, 10/Ago/2026).** `general_sociedades.grupo` (columna `varchar(50)`) existe en el esquema, pero se confirmó que **no se crea GRUPO como `scope_type`** — el sistema se queda con los 4 niveles del onboarding oficial (GLOBAL/SOCIEDAD/PROYECTO/CENTRO). Un rol tipo "Contralor/CFO" que necesite ver el consolidado de varias sociedades se resuelve con la vía interina ya propuesta abajo: una lista explícita de `sociedad_rfcs` (varias asignaciones `SOCIEDAD` para el mismo usuario), no con un nivel nuevo. **Ver sección 5, pregunta 1 (cerrada).**
 - **Alcance por IDENTIDAD (self-service)** — casos donde el filtro correcto no es jerárquico sino "el registro me pertenece a mí": un empleado en el portal MiCumbres viendo su propio expediente (`rrhh_empleados` vía `iam_users.employee_id`), o un usuario de `tickets` viendo los tickets donde `asignado_a = mi user_id`. Esto **no es** GLOBAL/SOCIEDAD/PROYECTO/CENTRO — es un filtro por igualdad directa contra el usuario autenticado, y debe implementarse como una regla de `ScopedManager` distinta (`SCOPE_FIELD_IDENTITY`), no forzada dentro de los mismos claims jerárquicos del JWT.
 
 ## 2. Catálogo de roles (confirmado — se van a crear)
@@ -26,7 +26,7 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Finance Manager | `FINANZAS_MANAGER` | `tesoreria-service`, `compras-service` | **SOCIEDAD** | Confirmado literalmente en el plan: *"Finance Manager de la Empresa A no ve datos de la Empresa B"* |
 | Analista de Tesorería | `TESORERIA_ANALISTA` | `tesoreria-service` | SOCIEDAD | Opera flujos/conciliación bajo supervisión del Finance Manager; sin permiso de autorización de pago |
 | Comprador / Analista de Compras | `COMPRAS_ANALISTA` | `compras-service`, `materiales-service` | SOCIEDAD o PROYECTO | Gestiona proveedores y órdenes de compra; reutiliza el Motor Documental para cotizaciones |
-| Contralor / CFO | `CONTRALOR` | `tesoreria-service`, `facturacion-cfdi-service` | **GRUPO** (ver hallazgo §1 — hoy solo aproximable como GLOBAL o lista de sociedades) | Necesita consolidado multi-sociedad de un mismo grupo — caso que motiva la pregunta abierta de §5 |
+| Contralor / CFO | `CONTRALOR` | `tesoreria-service`, `facturacion-cfdi-service` | **SOCIEDAD** (lista explícita, varias sociedades del mismo grupo — ver §5 pregunta 1, cerrada) | Necesita consolidado multi-sociedad de un mismo grupo, sin nivel GRUPO formal |
 | Supervisor de Centro | `RRHH_SUPERVISOR_CENTRO` | `rrhh-service` | **CENTRO** | Confirmado literalmente en el plan: *"un supervisor de centro no ve empleados de otro centro"* |
 | Administrador RRHH | `RRHH_ADMIN` | `rrhh-service` | GLOBAL o SOCIEDAD | Onboarding, nómina, integración Firmenti/DocuSeal |
 | Empleado (portal MiCumbres) | `EMPLEADO_SELF` | `rrhh-service` | **IDENTIDAD** (ver hallazgo §1) | Ve únicamente su propio expediente/nómina — nunca el de otro empleado, sin importar su alcance jerárquico |
@@ -51,7 +51,7 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Finance Manager | L | LCE | — | L | L | LCE | LCEA | LCE | LCEA | — | — | — |
 | Analista de Tesorería | L | L | — | — | — | — | LCE | LC | — | — | — | — |
 | Comprador | L | L | — | — | LCE | — | L | — | LCEA | — | — | — |
-| Contralor/CFO | L | L | — | L | L | L | L *(su GRUPO)* | L | L | — | — | L |
+| Contralor/CFO | L | L | — | L | L | L | L *(lista de sociedades)* | L | L | — | — | L |
 | Supervisor de Centro | L | — | — | — | — | — | — | — | — | LE *(su CENTRO)* | — | — |
 | Administrador RRHH | L | — | — | — | — | — | — | — | — | LCEA | — | — |
 | Empleado (MiCumbres) | — | — | — | — | — | — | — | — | — | L *(solo su registro)* | L *(solo asignados a mí)* | — |
@@ -84,9 +84,9 @@ Cada rol individual aporta su propia combinación de claims al agregado anterior
 
 Estas preguntas son además de las ya planteadas sobre CENTRO/CONTRATO y el dominio raíz de cookies:
 
-1. **Sin decidir (confirmado por el cliente: "no sé si se debe crear un valor de GRUPO").** 
+1. **Cerrado (decisión final, 10/Ago/2026): NO se crea GRUPO.** El sistema se queda con los 4 niveles del onboarding oficial de Dylan (GLOBAL/SOCIEDAD/PROYECTO/CENTRO).
 
-Mientras se resuelve, la vía interina recomendada para no bloquear la Fase 0/1: mantener el rol `CONTRALOR` con alcance `sociedad_rfcs` como **lista explícita** de las sociedades del grupo que le correspondan (asignada manualmente al crear el usuario, vía `iam_user_roles` múltiples con `scope_type='SOCIEDAD'`, uno por sociedad), en vez de agregar `GRUPO` al ENUM. Es más frágil si el grupo crece (hay que actualizar la lista de roles del usuario cada vez que se agregue una sociedad al holding), pero no requiere migración de esquema y es reversible: si más adelante se confirma que se necesita `GRUPO` como nivel formal, se migra sin romper lo ya construido. Confirmar con el cliente si esta vía interina es aceptable para el arranque o si prefiere resolver la pregunta de fondo antes de la Fase 1 (IAM).
+Vía definitiva (ya no interina): el rol `CONTRALOR` recibe alcance `sociedad_rfcs` como **lista explícita** de las sociedades del grupo que le correspondan (asignada manualmente al crear el usuario, vía `iam_user_roles` múltiples con `scope_type='SOCIEDAD'`, uno por sociedad) — sin agregar `GRUPO` al ENUM. Es más manual si el grupo crece (hay que actualizar la lista de roles del usuario cada vez que se agregue una sociedad al holding), pero no requiere migración de esquema. Confirmado por el cliente (10/Ago/2026) como la solución definitiva, no un parche temporal.
 
 2. **¿El catálogo de roles de arriba corresponde a los roles reales de Cumbres**, o hay roles adicionales (ej. ¿existe un rol específico para RRHH que gestione solo nómina sin ver expedientes completos? ¿hay un rol "auditor externo" con acceso temporal?) que debamos agregar antes de construir la matriz de permisos en Django/`iam_permissions`?
 
@@ -102,4 +102,4 @@ Mientras se resuelve, la vía interina recomendada para no bloquear la Fase 0/1:
 
 ---
 
-**Referencia:** este catálogo complementa la sección 8 (Arquitectura de RLS) de [`README.md`](README.md) y no reemplaza ninguna decisión ya tomada allí — extiende el contrato de `EffectiveScope` con `SCOPE_FIELD_IDENTITY`, con soporte explícito para múltiples roles activos por sesión (unión de claims, sección 4), y deja abierta la decisión de un nivel `GRUPO` (sección 5, pregunta 1) con una vía interina que no bloquea el arranque de la Fase 0/1.
+**Referencia:** este catálogo complementa la sección 8 (Arquitectura de RLS) de [`README.md`](README.md) y no reemplaza ninguna decisión ya tomada allí — extiende el contrato de `EffectiveScope` con `SCOPE_FIELD_IDENTITY`, con soporte explícito para múltiples roles activos por sesión (unión de claims, sección 4). La decisión de un nivel `GRUPO` (sección 5, pregunta 1) queda **cerrada: no se crea**, el sistema opera con los 4 niveles de alcance del onboarding oficial.
