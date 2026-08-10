@@ -27,7 +27,7 @@ import {
 } from "@mui/material";
 import { Download, Search } from "lucide-react";
 import AppShell from "@/components/AppShell";
-import { IamUser, IamUserRole, listRoleHistory, listUsers } from "@/lib/iam";
+import { IamUser, IamUserRole, SCOPE_LABELS, listRoleHistory, listUsers, scopeChipColor } from "@/lib/iam";
 import {
   BitacoraEvento,
   ENTITY_OPTIONS,
@@ -53,12 +53,6 @@ const SUB_REPORTES = [
   { label: "Matriz de acceso", value: "matriz" },
   { label: "Bitácora de auditoría", value: "auditoria" },
 ] as const;
-
-const SCOPE_LABELS: Record<string, string> = {
-  GLOBAL: "Global",
-  SOCIEDAD: "Sociedad",
-  PROYECTO: "Proyecto",
-};
 
 function HistorialCambios() {
   const [historial, setHistorial] = useState<IamUserRole[]>([]);
@@ -114,7 +108,13 @@ function HistorialCambios() {
                     <TableCell>{cambio.user_email}</TableCell>
                     <TableCell>{cambio.role_name}</TableCell>
                     <TableCell>
-                      {SCOPE_LABELS[cambio.scope_type] ?? cambio.scope_type}
+                      <Chip
+                        size="small"
+                        color={scopeChipColor(cambio.scope_type)}
+                        label={
+                          SCOPE_LABELS[cambio.scope_type] ?? cambio.scope_type
+                        }
+                      />
                       {cambio.scope_id !== "*" ? ` (${cambio.scope_id})` : ""}
                     </TableCell>
                     <TableCell>{new Date(cambio.granted_at).toLocaleString("es-MX")}</TableCell>
@@ -193,6 +193,7 @@ function MatrizAcceso() {
                               key={`${acceso.role_key}-${i}`}
                               size="small"
                               variant="outlined"
+                              color={scopeChipColor(acceso.scope_type)}
                               label={`${acceso.role_name} · ${SCOPE_LABELS[acceso.scope_type] ?? acceso.scope_type}${
                                 acceso.scope_id !== "*" ? ` (${acceso.scope_id})` : ""
                               }`}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Alert,
@@ -26,8 +26,9 @@ import {
 } from "@mui/material";
 import { Pencil, Search } from "lucide-react";
 import AppShell, { notifySinRolChanged } from "@/components/AppShell";
+import EmpresaAssignmentDialog from "@/components/EmpresaAssignmentDialog";
 import RoleAssignmentDialog from "@/components/RoleAssignmentDialog";
-import { IamGroup, IamRole, IamUser, listGroups, listRoles, listUsers } from "@/lib/iam";
+import { IamGroup, IamRole, IamUser, listGroups, listRoles, listUsers, scopeChipColor } from "@/lib/iam";
 
 const STATUS_LABELS: Record<IamUser["status"], string> = {
   ACTIVE: "Activo",
@@ -55,7 +56,20 @@ const STATUS_COLORS: Record<IamUser["status"], "success" | "warning" | "default"
 // formal - ver memoria de sesion "iam-invitacion-alcance-incierto").
 const SIN_ROL_VALUE = "__SIN_ROL__";
 
+// useSearchParams() obliga a envolver en Suspense para el build de
+// produccion (next build intenta pre-renderizar la pagina; sin este
+// boundary, falla con "useSearchParams() should be wrapped in a suspense
+// boundary" - descubierto al armar el pipeline de Cloud Run, ver
+// docs/CumbresBI_estado.md).
 export default function DirectorioUsuariosPage() {
+  return (
+    <Suspense fallback={null}>
+      <DirectorioUsuariosContent />
+    </Suspense>
+  );
+}
+
+function DirectorioUsuariosContent() {
   const searchParams = useSearchParams();
   const [users, setUsers] = useState<IamUser[]>([]);
   const [roles, setRoles] = useState<IamRole[]>([]);
@@ -70,6 +84,7 @@ export default function DirectorioUsuariosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managingUser, setManagingUser] = useState<IamUser | null>(null);
+  const [managingEmpresaUser, setManagingEmpresaUser] = useState<IamUser | null>(null);
 
   const sinRol = roleFilter === SIN_ROL_VALUE;
   const role = sinRol ? "" : roleFilter;
@@ -238,23 +253,41 @@ export default function DirectorioUsuariosPage() {
                       <Chip size="small" label={STATUS_LABELS[user.status]} color={STATUS_COLORS[user.status]} />
                     </TableCell>
                     <TableCell>
-                      {user.empresas.length > 0 ? (
-                        user.empresas.map((e) => (
-                          <Typography key={e.nombre} variant="body2">
-                            {e.nombre}
+                      <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
+                        {user.empresas.length > 0 ? (
+                          user.empresas.map((e) => (
+                            <Typography key={e.nombre} variant="body2">
+                              {e.nombre}
+                            </Typography>
+                          ))
+                        ) : (
+                          <Typography variant="caption" color="text.secondary">
+                            Sin empresa
                           </Typography>
-                        ))
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">
-                          Sin empresa
-                        </Typography>
-                      )}
+                        )}
+                        <IconButton
+                          size="small"
+                          aria-label="Cambiar empresa"
+                          onClick={() => setManagingEmpresaUser(user)}
+                        >
+                          <Pencil size={13} strokeWidth={1.5} />
+                        </IconButton>
+                      </Stack>
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
-                        {user.roles.length > 0 ? (
-                          user.roles.map((roleKey) => (
-                            <Chip key={roleKey} size="small" variant="outlined" label={roleKey} />
+                        {user.accesos.length > 0 ? (
+                          user.accesos.map((acceso, i) => (
+                            <Chip
+                              key={`${acceso.role_key}-${i}`}
+                              size="small"
+                              color={scopeChipColor(acceso.scope_type)}
+                              label={
+                                acceso.scope_type === "GLOBAL"
+                                  ? acceso.role_key
+                                  : `${acceso.role_key} · ${acceso.scope_id}`
+                              }
+                            />
                           ))
                         ) : (
                           <Typography variant="caption" color="text.secondary">
@@ -281,6 +314,17 @@ export default function DirectorioUsuariosPage() {
           userId={managingUser.user_id}
           userLabel={managingUser.display_name || managingUser.primary_email}
           allRoles={roles}
+          onChanged={refreshUsers}
+        />
+      )}
+
+      {managingEmpresaUser && (
+        <EmpresaAssignmentDialog
+          open={!!managingEmpresaUser}
+          onClose={() => setManagingEmpresaUser(null)}
+          userId={managingEmpresaUser.user_id}
+          userLabel={managingEmpresaUser.display_name || managingEmpresaUser.primary_email}
+          allGroups={groups}
           onChanged={refreshUsers}
         />
       )}
