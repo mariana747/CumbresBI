@@ -16,10 +16,10 @@
 set -euo pipefail
 
 PROJECT_ID="cyp-cumbres-461220"
-REGION="us-central1"  # AJUSTAR: no hay region documentada todavia en infraestructura-gcp/ - confirmar con quien configuro db-cypcumbres, debe ser la MISMA region de esa instancia (Cloud Run <-> Cloud SQL en distinta region agrega latencia/puede fallar la conexion por socket).
+REGION="northamerica-south1"  # confirmado 11/Ago/2026 via "gcloud sql instances describe db-cypcumbres" - misma region que la instancia real.
 SQL_INSTANCE="db-cypcumbres"  # instancia YA EXISTENTE, reutilizada (ver infraestructura-gcp/cloud-sql.md) - este script NO la crea.
 AR_REPO="cumbresbi"
-GITHUB_REPO="ORG/CumbresBI"  # AJUSTAR: owner/repo real de GitHub, para el binding de Workload Identity Federation.
+GITHUB_REPO="mariana747/CumbresBI"
 
 echo "== Proyecto: $PROJECT_ID / Region: $REGION =="
 gcloud config set project "$PROJECT_ID"

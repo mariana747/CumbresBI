@@ -11,7 +11,7 @@
 set -euo pipefail
 
 PROJECT_ID="cyp-cumbres-461220"
-REGION="us-central1"  # mismo valor que scripts/gcp_setup.sh
+REGION="northamerica-south1"  # mismo valor que scripts/gcp_setup.sh
 SQL_INSTANCE_CONNECTION="${PROJECT_ID}:${REGION}:db-cypcumbres"
 AR_REPO="cumbresbi"
 
