@@ -1,0 +1,95 @@
+"""Catalogo de servicios/roles/permisos confirmado por el cliente
+(docs/architecture/roles-y-permisos.md sec. 3). Extraido de
+iam/migrations/0004_seed_permisos_matriz.py (11/Ago/2026) a un modulo
+normal en vez de vivir solo dentro de la migracion, para que el frontend
+(fixture de pruebas, ver frontend/src/components/__tests__/fixtures/
+roleAccessMatrix.json) y cualquier otro consumidor futuro tengan una sola
+fuente de verdad en vez de copiar el dict a mano - antes solo la migracion
+lo conocia.
+
+Nota: una migracion que importa codigo de la app "vivo" (no congelado en
+el momento de la migracion) es la excepcion, no la regla en Django - se
+acepta aqui a proposito porque este dict es un catalogo de negocio
+estable (roles/permisos confirmados por el cliente), no un modelo que
+vaya a mutar de forma incompatible; si algun dia cambia retroactivamente
+el comportamiento historico de esta migracion seria aceptable (mismo
+riesgo que ya existia teniendo el dict inline, solo que ahora tambien lo
+lee alguien mas).
+
+L=leer, C=crear, E=editar, A=aprobar/autorizar. Simplificaciones
+documentadas caso por caso:
+- TICKETS_PARTICIPANTE: el doc distingue "L solo lo asignado a mi" de
+  "C solo comentarios" - aqui se modela como LC llano sobre "tickets", sin
+  ese matiz de alcance por registro (lo resuelve RLS, no el catalogo de
+  permisos).
+"""
+
+SERVICIOS = [
+    "iam",
+    "contrapartes",
+    "pld-compliance",
+    "ventas-vivienda",
+    "materiales",
+    "rentas",
+    "tesoreria",
+    "facturacion-cfdi",
+    "compras",
+    "rrhh",
+    "tickets",
+    "audit",
+]
+
+ACCION_POR_LETRA = {"L": "leer", "C": "crear", "E": "editar", "A": "aprobar"}
+
+ROLE_ACCESS = {
+    "SUPER_ADMIN": {
+        "iam": "LCEA", "contrapartes": "LCEA", "pld-compliance": "LCEA",
+        "ventas-vivienda": "LCEA", "materiales": "LCEA", "rentas": "LCEA",
+        "tesoreria": "LCEA", "facturacion-cfdi": "LCEA", "compras": "LCEA",
+        "rrhh": "LCEA", "tickets": "LCEA", "audit": "L",
+    },
+    "IAM_ADMIN": {"iam": "LCEA", "audit": "L"},
+    "AUDITOR": {s: "L" for s in SERVICIOS},
+    "PLD_ANALISTA": {"iam": "L", "contrapartes": "L", "pld-compliance": "LCE"},
+    "PLD_APROBADOR": {"iam": "L", "contrapartes": "L", "pld-compliance": "LEA"},
+    "VENTAS_ASESOR": {
+        "iam": "L", "contrapartes": "L", "ventas-vivienda": "LCE", "materiales": "L",
+    },
+    "VENTAS_GERENTE": {
+        "iam": "L", "contrapartes": "L", "ventas-vivienda": "LCEA",
+        "materiales": "LE", "tesoreria": "L",
+    },
+    "OBRA_COORDINADOR": {"iam": "L", "ventas-vivienda": "LE", "materiales": "LCE"},
+    "FINANZAS_MANAGER": {
+        "iam": "L", "contrapartes": "LCE", "ventas-vivienda": "L", "materiales": "L",
+        "rentas": "LCE", "tesoreria": "LCEA", "facturacion-cfdi": "LCE", "compras": "LCEA",
+    },
+    "TESORERIA_ANALISTA": {
+        "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "LC",
+    },
+    "COMPRAS_ANALISTA": {
+        "iam": "L", "contrapartes": "L", "materiales": "LCE", "tesoreria": "L", "compras": "LCEA",
+    },
+    "CONTRALOR": {
+        "iam": "L", "contrapartes": "L", "ventas-vivienda": "L", "materiales": "L",
+        "rentas": "L", "tesoreria": "L", "facturacion-cfdi": "L", "compras": "L", "audit": "L",
+    },
+    "RRHH_SUPERVISOR_CENTRO": {"iam": "L", "rrhh": "LE"},
+    "RRHH_ADMIN": {"iam": "L", "rrhh": "LCEA"},
+    "EMPLEADO_SELF": {"rrhh": "L", "tickets": "L"},
+    "TICKETS_RESPONSABLE": {"iam": "L", "tickets": "LCEA"},
+    "TICKETS_PARTICIPANTE": {"tickets": "LC"},
+}
+
+
+def perm_keys_de(role_key: str) -> list[str]:
+    """perm_keys ("iam.leer", "pld-compliance.aprobar", etc.) de un rol -
+    mismo criterio que _perm_keys()/seed() en la migracion 0004, expuesto
+    aqui para que dev_views.py (switch de rol sin Google) y cualquier
+    script/test lo reutilicen sin reimplementar el cruce letra->accion."""
+    accesos = ROLE_ACCESS[role_key]
+    return sorted(
+        f"{servicio}.{ACCION_POR_LETRA[letra]}"
+        for servicio, letras in accesos.items()
+        for letra in letras
+    )

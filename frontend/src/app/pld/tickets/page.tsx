@@ -21,9 +21,9 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Copy, Link2, ShieldCheck } from "lucide-react";
+import { Copy, Link2 } from "lucide-react";
 import AppShell from "@/components/AppShell";
-import { getSession } from "@/lib/auth";
+import { SessionUser, getSession } from "@/lib/auth";
 import {
   PldContraparteKyc,
   PldTicketCliente,
@@ -31,7 +31,6 @@ import {
   listKyc,
   listTicketsCliente,
   revocarTicketCliente,
-  validarTicketCliente,
 } from "@/lib/pld";
 
 const ESTADO_LLENADO_LABELS: Record<string, string> = {
@@ -55,15 +54,11 @@ export default function TicketsClientePage() {
   const [error, setError] = useState<string | null>(null);
   const [ultimoGenerado, setUltimoGenerado] = useState<PldTicketCliente | null>(null);
   const [issuedBy, setIssuedBy] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionUser | null>(null);
 
   const [expedientes, setExpedientes] = useState<PldContraparteKyc[]>([]);
   const [tickets, setTickets] = useState<PldTicketCliente[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [tokenPrueba, setTokenPrueba] = useState("");
-  const [resultadoValidacion, setResultadoValidacion] = useState<
-    { kyc?: PldContraparteKyc } | string | null
-  >(null);
 
   function refrescarLista() {
     setLoading(true);
@@ -82,9 +77,17 @@ export default function TicketsClientePage() {
     // diferencia de flujos viejos como aprobarKyc, que todavia piden el ID
     // a mano porque se construyeron antes de que existiera login real.
     getSession()
-      .then((session) => setIssuedBy(session?.user_id ?? null))
+      .then((s) => {
+        setSession(s);
+        setIssuedBy(s?.user_id ?? null);
+      })
       .catch(() => undefined);
   }, []);
+
+  // Mismo criterio que PldTicketClienteViewSet.get_permissions
+  // (crear=pld-compliance.crear, revocar=pld-compliance.editar).
+  const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("pld-compliance.editar") ?? false;
 
   function expedienteLabel(kyc: PldContraparteKyc): string {
     return `${kyc.id_contraparte}${kyc.curp ? ` · ${kyc.curp}` : ""} — ${
@@ -115,8 +118,6 @@ export default function TicketsClientePage() {
         maxUses,
       });
       setUltimoGenerado(nuevo);
-      setTokenPrueba(nuevo.token ?? "");
-      setResultadoValidacion(null);
       setEmail("");
       setKycId("");
       refrescarLista();
@@ -124,18 +125,6 @@ export default function TicketsClientePage() {
       setError(err instanceof Error ? err.message : "Error al generar el ticket");
     } finally {
       setCreando(false);
-    }
-  }
-
-  async function handleValidar() {
-    setResultadoValidacion(null);
-    setError(null);
-    try {
-      const resultado = await validarTicketCliente(tokenPrueba);
-      setResultadoValidacion({ kyc: resultado.kyc });
-      refrescarLista();
-    } catch (err) {
-      setResultadoValidacion(err instanceof Error ? err.message : "Token inválido");
     }
   }
 
@@ -176,112 +165,80 @@ export default function TicketsClientePage() {
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          Generar ticket
-        </Typography>
-        <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleGenerar}>
-          <TextField
-            size="small"
-            label="Correo del cliente"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            sx={{ flex: 2 }}
-          />
-          <FormControl size="small" sx={{ flex: 1, minWidth: 200 }}>
-            <InputLabel id="kyc-label">Expediente</InputLabel>
-            <Select labelId="kyc-label" label="Expediente" value={kycId} onChange={(e) => setKycId(e.target.value)}>
-              <MenuItem value="">
-                <em>Sin expediente específico</em>
-              </MenuItem>
-              {expedientes.map((k) => (
-                <MenuItem key={k.id_kyc} value={k.id_kyc}>
-                  {expedienteLabel(k)}
+      {/* Bloque completo oculto (no solo el boton) para quien no tiene
+      pld-compliance.crear - decision de producto 11/Ago/2026: sin
+      permiso de generar, mostrar los campos del formulario no lleva a
+      nada util (distinto de otorgar/revocar en otras pantallas, que se
+      dejan visibles-deshabilitados). */}
+      {puedeCrear && (
+        <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+            Generar ticket
+          </Typography>
+          <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleGenerar}>
+            <TextField
+              size="small"
+              label="Correo del cliente"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              sx={{ flex: 2 }}
+            />
+            <FormControl size="small" sx={{ flex: 1, minWidth: 200 }}>
+              <InputLabel id="kyc-label">Expediente</InputLabel>
+              <Select labelId="kyc-label" label="Expediente" value={kycId} onChange={(e) => setKycId(e.target.value)}>
+                <MenuItem value="">
+                  <em>Sin expediente específico</em>
                 </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            size="small"
-            label="Expira en (min)"
-            type="number"
-            value={expiresInMinutes}
-            onChange={(e) => setExpiresInMinutes(Number(e.target.value) || 30)}
-            sx={{ width: 130 }}
-          />
-          <TextField
-            size="small"
-            label="Máx. usos"
-            type="number"
-            value={maxUses}
-            onChange={(e) => setMaxUses(Number(e.target.value) || 1)}
-            sx={{ width: 110 }}
-          />
-          <Button
-            type="submit"
-            variant="contained"
-            startIcon={<Link2 size={16} strokeWidth={1.5} />}
-            disabled={creando || !issuedBy}
-          >
-            {creando ? <CircularProgress size={20} color="inherit" /> : "Generar"}
-          </Button>
-        </Stack>
-
-        {ultimoGenerado && (
-          <Alert severity="info" sx={{ mt: 2 }} icon={<Copy size={18} strokeWidth={1.5} />}>
-            Ticket generado para <strong>{ultimoGenerado.email}</strong> (expira el{" "}
-            {new Date(ultimoGenerado.expires_at).toLocaleString("es-MX")}):
-            <Typography
-              component="pre"
-              variant="caption"
-              sx={{ mt: 1, wordBreak: "break-all", whiteSpace: "pre-wrap" }}
+                {expedientes.map((k) => (
+                  <MenuItem key={k.id_kyc} value={k.id_kyc}>
+                    {expedienteLabel(k)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              label="Expira en (min)"
+              type="number"
+              value={expiresInMinutes}
+              onChange={(e) => setExpiresInMinutes(Number(e.target.value) || 30)}
+              sx={{ width: 130 }}
+            />
+            <TextField
+              size="small"
+              label="Máx. usos"
+              type="number"
+              value={maxUses}
+              onChange={(e) => setMaxUses(Number(e.target.value) || 1)}
+              sx={{ width: 110 }}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              startIcon={<Link2 size={16} strokeWidth={1.5} />}
+              disabled={creando || !issuedBy}
             >
-              {linkGenerado}
-            </Typography>
-          </Alert>
-        )}
-      </Paper>
+              {creando ? <CircularProgress size={20} color="inherit" /> : "Generar"}
+            </Button>
+          </Stack>
+        </Paper>
+      )}
 
-      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          Probar validación
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Simula que el cliente abrió el link — pega el token (o usa el recién generado) para ver el
-          resultado de la validación.
-        </Typography>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-          <TextField
-            size="small"
-            label="Token"
-            value={tokenPrueba}
-            onChange={(e) => setTokenPrueba(e.target.value)}
-            sx={{ flex: 1 }}
-          />
-          <Button
-            variant="outlined"
-            startIcon={<ShieldCheck size={16} strokeWidth={1.5} />}
-            onClick={handleValidar}
-            disabled={!tokenPrueba}
+      {ultimoGenerado && (
+        <Alert severity="info" sx={{ mt: 2, mb: 3 }} icon={<Copy size={18} strokeWidth={1.5} />}>
+          Ticket generado para <strong>{ultimoGenerado.email}</strong> (expira el{" "}
+          {new Date(ultimoGenerado.expires_at).toLocaleString("es-MX")}):
+          <Typography
+            component="pre"
+            variant="caption"
+            sx={{ mt: 1, wordBreak: "break-all", whiteSpace: "pre-wrap" }}
           >
-            Validar
-          </Button>
-        </Stack>
-
-        {resultadoValidacion && typeof resultadoValidacion === "string" && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {resultadoValidacion}
-          </Alert>
-        )}
-        {resultadoValidacion && typeof resultadoValidacion === "object" && (
-          <Alert severity="success" sx={{ mt: 2 }}>
-            Token válido
-            {resultadoValidacion.kyc ? ` — expediente ${resultadoValidacion.kyc.id_contraparte}` : ""}.
-          </Alert>
-        )}
-      </Paper>
+            {linkGenerado}
+          </Typography>
+        </Alert>
+      )}
 
       <Paper variant="outlined">
         <TableContainer>
@@ -334,6 +291,7 @@ export default function TicketsClientePage() {
                             variant="outlined"
                             color="error"
                             onClick={() => handleRevocar(ticket.id_pld_ticket)}
+                            disabled={!puedeEditar}
                           >
                             Revocar
                           </Button>

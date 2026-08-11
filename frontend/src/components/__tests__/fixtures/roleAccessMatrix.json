@@ -1,0 +1,210 @@
+{
+  "generatedFrom": "services/iam-service/iam/permission_matrix.py",
+  "generatedAt": "2026-08-11",
+  "servicios": [
+    "iam",
+    "contrapartes",
+    "pld-compliance",
+    "ventas-vivienda",
+    "materiales",
+    "rentas",
+    "tesoreria",
+    "facturacion-cfdi",
+    "compras",
+    "rrhh",
+    "tickets",
+    "audit"
+  ],
+  "roles": {
+    "SUPER_ADMIN": [
+      "audit.leer",
+      "compras.aprobar",
+      "compras.crear",
+      "compras.editar",
+      "compras.leer",
+      "contrapartes.aprobar",
+      "contrapartes.crear",
+      "contrapartes.editar",
+      "contrapartes.leer",
+      "facturacion-cfdi.aprobar",
+      "facturacion-cfdi.crear",
+      "facturacion-cfdi.editar",
+      "facturacion-cfdi.leer",
+      "iam.aprobar",
+      "iam.crear",
+      "iam.editar",
+      "iam.leer",
+      "materiales.aprobar",
+      "materiales.crear",
+      "materiales.editar",
+      "materiales.leer",
+      "pld-compliance.aprobar",
+      "pld-compliance.crear",
+      "pld-compliance.editar",
+      "pld-compliance.leer",
+      "rentas.aprobar",
+      "rentas.crear",
+      "rentas.editar",
+      "rentas.leer",
+      "rrhh.aprobar",
+      "rrhh.crear",
+      "rrhh.editar",
+      "rrhh.leer",
+      "tesoreria.aprobar",
+      "tesoreria.crear",
+      "tesoreria.editar",
+      "tesoreria.leer",
+      "tickets.aprobar",
+      "tickets.crear",
+      "tickets.editar",
+      "tickets.leer",
+      "ventas-vivienda.aprobar",
+      "ventas-vivienda.crear",
+      "ventas-vivienda.editar",
+      "ventas-vivienda.leer"
+    ],
+    "IAM_ADMIN": [
+      "audit.leer",
+      "iam.aprobar",
+      "iam.crear",
+      "iam.editar",
+      "iam.leer"
+    ],
+    "AUDITOR": [
+      "audit.leer",
+      "compras.leer",
+      "contrapartes.leer",
+      "facturacion-cfdi.leer",
+      "iam.leer",
+      "materiales.leer",
+      "pld-compliance.leer",
+      "rentas.leer",
+      "rrhh.leer",
+      "tesoreria.leer",
+      "tickets.leer",
+      "ventas-vivienda.leer"
+    ],
+    "PLD_ANALISTA": [
+      "contrapartes.leer",
+      "iam.leer",
+      "pld-compliance.crear",
+      "pld-compliance.editar",
+      "pld-compliance.leer"
+    ],
+    "PLD_APROBADOR": [
+      "contrapartes.leer",
+      "iam.leer",
+      "pld-compliance.aprobar",
+      "pld-compliance.editar",
+      "pld-compliance.leer"
+    ],
+    "VENTAS_ASESOR": [
+      "contrapartes.leer",
+      "iam.leer",
+      "materiales.leer",
+      "ventas-vivienda.crear",
+      "ventas-vivienda.editar",
+      "ventas-vivienda.leer"
+    ],
+    "VENTAS_GERENTE": [
+      "contrapartes.leer",
+      "iam.leer",
+      "materiales.editar",
+      "materiales.leer",
+      "tesoreria.leer",
+      "ventas-vivienda.aprobar",
+      "ventas-vivienda.crear",
+      "ventas-vivienda.editar",
+      "ventas-vivienda.leer"
+    ],
+    "OBRA_COORDINADOR": [
+      "iam.leer",
+      "materiales.crear",
+      "materiales.editar",
+      "materiales.leer",
+      "ventas-vivienda.editar",
+      "ventas-vivienda.leer"
+    ],
+    "FINANZAS_MANAGER": [
+      "compras.aprobar",
+      "compras.crear",
+      "compras.editar",
+      "compras.leer",
+      "contrapartes.crear",
+      "contrapartes.editar",
+      "contrapartes.leer",
+      "facturacion-cfdi.crear",
+      "facturacion-cfdi.editar",
+      "facturacion-cfdi.leer",
+      "iam.leer",
+      "materiales.leer",
+      "rentas.crear",
+      "rentas.editar",
+      "rentas.leer",
+      "tesoreria.aprobar",
+      "tesoreria.crear",
+      "tesoreria.editar",
+      "tesoreria.leer",
+      "ventas-vivienda.leer"
+    ],
+    "TESORERIA_ANALISTA": [
+      "contrapartes.leer",
+      "facturacion-cfdi.crear",
+      "facturacion-cfdi.leer",
+      "iam.leer",
+      "tesoreria.crear",
+      "tesoreria.editar",
+      "tesoreria.leer"
+    ],
+    "COMPRAS_ANALISTA": [
+      "compras.aprobar",
+      "compras.crear",
+      "compras.editar",
+      "compras.leer",
+      "contrapartes.leer",
+      "iam.leer",
+      "materiales.crear",
+      "materiales.editar",
+      "materiales.leer",
+      "tesoreria.leer"
+    ],
+    "CONTRALOR": [
+      "audit.leer",
+      "compras.leer",
+      "contrapartes.leer",
+      "facturacion-cfdi.leer",
+      "iam.leer",
+      "materiales.leer",
+      "rentas.leer",
+      "tesoreria.leer",
+      "ventas-vivienda.leer"
+    ],
+    "RRHH_SUPERVISOR_CENTRO": [
+      "iam.leer",
+      "rrhh.editar",
+      "rrhh.leer"
+    ],
+    "RRHH_ADMIN": [
+      "iam.leer",
+      "rrhh.aprobar",
+      "rrhh.crear",
+      "rrhh.editar",
+      "rrhh.leer"
+    ],
+    "EMPLEADO_SELF": [
+      "rrhh.leer",
+      "tickets.leer"
+    ],
+    "TICKETS_RESPONSABLE": [
+      "iam.leer",
+      "tickets.aprobar",
+      "tickets.crear",
+      "tickets.editar",
+      "tickets.leer"
+    ],
+    "TICKETS_PARTICIPANTE": [
+      "tickets.crear",
+      "tickets.leer"
+    ]
+  }
+}

@@ -24,8 +24,9 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Copy, Link2, ShieldCheck, UploadCloud, UserPlus } from "lucide-react";
+import { Copy, Link2, UploadCloud, UserPlus } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import { SessionUser, getSession } from "@/lib/auth";
 import {
   IamInvitation,
   IamMagicLink,
@@ -37,7 +38,6 @@ import {
   listMagicLinks,
   revokeInvitation,
   revokeMagicLink,
-  validateMagicLink,
 } from "@/lib/iam";
 import { listKyc } from "@/lib/pld";
 
@@ -49,6 +49,11 @@ import { listKyc } from "@/lib/pld";
 // real (IamInvitation, gate de auth_views._upsert_identity).
 export default function InvitacionesPage() {
   const [tab, setTab] = useState(0);
+  const [session, setSession] = useState<SessionUser | null>(null);
+
+  useEffect(() => {
+    getSession().then(setSession);
+  }, []);
 
   return (
     <AppShell>
@@ -66,10 +71,10 @@ export default function InvitacionesPage() {
       </Tabs>
 
       <Box role="tabpanel" hidden={tab !== 0}>
-        {tab === 0 && <InvitacionesTemporalesTab />}
+        {tab === 0 && <InvitacionesTemporalesTab session={session} />}
       </Box>
       <Box role="tabpanel" hidden={tab !== 1}>
-        {tab === 1 && <ColaboradoresNuevosTab />}
+        {tab === 1 && <ColaboradoresNuevosTab session={session} />}
       </Box>
     </AppShell>
   );
@@ -95,7 +100,12 @@ const ESTADO_LLENADO_LABELS: Record<string, string> = {
 // token/link generado directamente en lugar de solo "enviarlo". Cuando
 // exista el envio real desde Workspace, esta pantalla deja de mostrar el
 // token y solo confirma que se envio.
-function InvitacionesTemporalesTab() {
+function InvitacionesTemporalesTab({ session }: { session: SessionUser | null }) {
+  // Mismo criterio que el resto de escritura en iam-service - ver
+  // IamMagicLinkViewSet.get_permissions (create/masivo=iam.crear,
+  // revocar/reenviar=iam.editar).
+  const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
   const [email, setEmail] = useState("");
   const [recursoTipo, setRecursoTipo] = useState("");
   const [recursoId, setRecursoId] = useState("");
@@ -113,9 +123,6 @@ function InvitacionesTemporalesTab() {
 
   const [links, setLinks] = useState<IamMagicLink[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [tokenPrueba, setTokenPrueba] = useState("");
-  const [resultadoValidacion, setResultadoValidacion] = useState<{ jwt: string } | string | null>(null);
 
   // Carga masiva por CSV (invitacion masiva, checklist Fase 1) - un correo
   // por linea/columna. Reusa el mismo catalogoRecursos ya precargado arriba
@@ -189,8 +196,6 @@ function InvitacionesTemporalesTab() {
     try {
       const nuevo = await createMagicLink({ email, recursoTipo, recursoId });
       setUltimoGenerado(nuevo);
-      setTokenPrueba(nuevo.token ?? "");
-      setResultadoValidacion(null);
       setEmail("");
       setRecursoTipo("");
       setRecursoId("");
@@ -246,18 +251,6 @@ function InvitacionesTemporalesTab() {
     }
   }
 
-  async function handleValidar() {
-    setResultadoValidacion(null);
-    setError(null);
-    try {
-      const resultado = await validateMagicLink(tokenPrueba);
-      setResultadoValidacion({ jwt: resultado.jwt });
-      refrescarLista();
-    } catch (err) {
-      setResultadoValidacion(err instanceof Error ? err.message : "Token invalido");
-    }
-  }
-
   async function handleRevocar(magicLinkId: string) {
     try {
       await revokeMagicLink(magicLinkId);
@@ -298,6 +291,12 @@ function InvitacionesTemporalesTab() {
         </Alert>
       )}
 
+      {/* Los dos bloques de generar/subir de aqui abajo se ocultan
+      completos (no solo el boton) para quien no tiene iam.crear -
+      decision de producto 11/Ago/2026: sin permiso, los campos del
+      formulario no llevan a nada (distinto de Revocar en la tabla de
+      abajo, que se deja visible-deshabilitado). */}
+      {puedeCrear && (
       <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
         <Typography variant="subtitle1" fontWeight={600} gutterBottom>
           Generar Magic Link
@@ -379,7 +378,9 @@ function InvitacionesTemporalesTab() {
           </Alert>
         )}
       </Paper>
+      )}
 
+      {puedeCrear && (
       <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
         <Typography variant="subtitle1" fontWeight={600} gutterBottom>
           Carga masiva por CSV
@@ -480,51 +481,7 @@ function InvitacionesTemporalesTab() {
           </Alert>
         )}
       </Paper>
-
-      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          Probar validación
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Simula que el usuario externo abrió el link — pega el token (o usa el recién generado) para
-          ver el JWT de alcance externo que se emite.
-        </Typography>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-          <TextField
-            size="small"
-            label="Token"
-            value={tokenPrueba}
-            onChange={(e) => setTokenPrueba(e.target.value)}
-            sx={{ flex: 1 }}
-          />
-          <Button
-            variant="outlined"
-            startIcon={<ShieldCheck size={16} strokeWidth={1.5} />}
-            onClick={handleValidar}
-            disabled={!tokenPrueba}
-          >
-            Validar
-          </Button>
-        </Stack>
-
-        {resultadoValidacion && typeof resultadoValidacion === "string" && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {resultadoValidacion}
-          </Alert>
-        )}
-        {resultadoValidacion && typeof resultadoValidacion === "object" && (
-          <Alert severity="success" sx={{ mt: 2 }}>
-            Token válido — JWT emitido:
-            <Typography
-              component="pre"
-              variant="caption"
-              sx={{ mt: 1, wordBreak: "break-all", whiteSpace: "pre-wrap" }}
-            >
-              {resultadoValidacion.jwt}
-            </Typography>
-          </Alert>
-        )}
-      </Paper>
+      )}
 
       <Paper variant="outlined">
         <TableContainer>
@@ -577,6 +534,7 @@ function InvitacionesTemporalesTab() {
                             variant="outlined"
                             color="error"
                             onClick={() => handleRevocar(link.magic_link_id)}
+                            disabled={!puedeEditar}
                           >
                             Revocar
                           </Button>
@@ -602,7 +560,9 @@ function InvitacionesTemporalesTab() {
 // copiar - el correo simplemente ya puede iniciar sesion con Google en
 // cuanto existe esta fila pendiente (el gate real vive en el backend,
 // _upsert_identity).
-function ColaboradoresNuevosTab() {
+function ColaboradoresNuevosTab({ session }: { session: SessionUser | null }) {
+  const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
   const [email, setEmail] = useState("");
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -665,6 +625,7 @@ function ColaboradoresNuevosTab() {
         </Alert>
       )}
 
+      {puedeCrear && (
       <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
         <Typography variant="subtitle1" fontWeight={600} gutterBottom>
           Invitar colaborador nuevo
@@ -689,6 +650,7 @@ function ColaboradoresNuevosTab() {
           </Button>
         </Stack>
       </Paper>
+      )}
 
       <Paper variant="outlined">
         <TableContainer>
@@ -735,6 +697,7 @@ function ColaboradoresNuevosTab() {
                             variant="outlined"
                             color="error"
                             onClick={() => handleRevocar(inv.invitation_id)}
+                            disabled={!puedeEditar}
                           >
                             Revocar
                           </Button>

@@ -24,6 +24,7 @@ import {
 } from "@mui/material";
 import { Building2, MapPin, Milestone, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import { SessionUser, getSession } from "@/lib/auth";
 import {
   GeneralSociedad,
   createSociedad,
@@ -53,6 +54,17 @@ export default function OrganizacionPage() {
   const [form, setForm] = useState({ rfc: "", razonSocial: "", regimenMercantil: "", aliasSociedad: "" });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionUser | null>(null);
+
+  useEffect(() => {
+    getSession().then(setSession);
+  }, []);
+
+  // El backend ya bloquea con 403 (require_permission), esto es solo para
+  // no mostrar botones que van a fallar - misma matriz que el sidebar
+  // (roles-y-permisos.md sec. 3, "iam": create=iam.crear, editar/borrar=iam.editar).
+  const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
 
   function refresh() {
     setLoading(true);
@@ -151,15 +163,21 @@ export default function OrganizacionPage() {
           <Typography variant="subtitle1" fontWeight={600}>
             Sociedades
           </Typography>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Plus size={14} strokeWidth={2} />}
-            onClick={abrirAlta}
-            sx={{ ml: "auto" }}
-          >
-            Nueva sociedad
-          </Button>
+          {/* Oculto (no solo deshabilitado) para quien no tiene iam.crear
+          - decision de producto 11/Ago/2026, mismo criterio que
+          Invitaciones/PLD (distinto de Editar/Borrar de la tabla de
+          abajo, que se dejan visibles-deshabilitados). */}
+          {puedeCrear && (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<Plus size={14} strokeWidth={2} />}
+              onClick={abrirAlta}
+              sx={{ ml: "auto" }}
+            >
+              Nueva sociedad
+            </Button>
+          )}
         </Stack>
         <TableContainer>
           <Table size="small">
@@ -193,10 +211,10 @@ export default function OrganizacionPage() {
                     <TableCell>{s.razon_social || "—"}</TableCell>
                     <TableCell>{s.alias_sociedad || "—"}</TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(s)}>
+                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(s)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
                       </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(s)}>
+                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(s)} disabled={!puedeEditar}>
                         <Trash2 size={14} strokeWidth={1.5} />
                       </IconButton>
                     </TableCell>

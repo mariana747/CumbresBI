@@ -18,12 +18,13 @@ import {
   Typography,
 } from "@mui/material";
 import { X as CloseIcon } from "lucide-react";
+import { SessionUser, getSession } from "@/lib/auth";
 import { IamGroup, IamUserGroup, assignGroup, listUserGroups, removeUserGroup } from "@/lib/iam";
 
 // Cambiar la empresa de un usuario desde el Directorio (icono de lapiz en
-// la columna "Empresa") - mismo patron que RoleAssignmentDialog. Sin
-// permisos reales todavia - cualquiera con acceso a esta pantalla puede
-// cambiarla (ver nota en iam-service/iam/serializers.py).
+// la columna "Empresa") - mismo patron que RoleAssignmentDialog. Permisos
+// reales ya conectados (IamUserGroupViewSet: asignar=iam.crear,
+// quitar=iam.editar).
 export default function EmpresaAssignmentDialog({
   open,
   onClose,
@@ -43,6 +44,14 @@ export default function EmpresaAssignmentDialog({
   const [selectedGroup, setSelectedGroup] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionUser | null>(null);
+
+  useEffect(() => {
+    getSession().then(setSession);
+  }, []);
+
+  const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
 
   function refresh() {
     setLoading(true);
@@ -114,7 +123,7 @@ export default function EmpresaAssignmentDialog({
                 <Chip
                   key={ug.id}
                   label={ug.group_alias || ug.group_nombre}
-                  onDelete={() => handleRemove(ug.id)}
+                  onDelete={puedeEditar ? () => handleRemove(ug.id) : undefined}
                 />
               ))
             )}
@@ -137,7 +146,7 @@ export default function EmpresaAssignmentDialog({
               ))}
             </Select>
           </FormControl>
-          <Button variant="contained" disabled={!selectedGroup} onClick={handleAssign}>
+          <Button variant="contained" disabled={!selectedGroup || !puedeCrear} onClick={handleAssign}>
             Asignar
           </Button>
         </Stack>

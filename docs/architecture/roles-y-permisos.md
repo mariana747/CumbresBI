@@ -103,3 +103,134 @@ Vía definitiva (ya no interina): el rol `CONTRALOR` recibe alcance `sociedad_rf
 ---
 
 **Referencia:** este catálogo complementa la sección 8 (Arquitectura de RLS) de [`README.md`](README.md) y no reemplaza ninguna decisión ya tomada allí — extiende el contrato de `EffectiveScope` con `SCOPE_FIELD_IDENTITY`, con soporte explícito para múltiples roles activos por sesión (unión de claims, sección 4). La decisión de un nivel `GRUPO` (sección 5, pregunta 1) queda **cerrada: no se crea**, el sistema opera con los 4 niveles de alcance del onboarding oficial.
+
+## 6. Cómo el frontend traduce permisos en pantalla
+
+Las secciones 1-5 dicen qué puede **hacer** cada rol (el catálogo de
+permisos, fuente de negocio). Esta sección explica qué **ve** cada rol en
+la UI — la traducción de `perm_keys`/`role_keys` a sidebar, panel y
+botones de escritura no siempre es "un permiso, una pantalla" (ver el
+caso de `AUDITOR` más abajo), y quedaba solo en comentarios de código
+dispersos hasta que se juntó aquí (11/Ago/2026).
+
+El sidebar y el panel (`/`) se arman en tiempo real a partir de la sesión
+(`/api/me` → `role_keys` + `perm_keys`, unión de todos los roles activos
+del usuario — sección 4), **no** hay una lista fija por `role_key`. Casi
+todo se decide por `perm_keys` (para que un rol nuevo con los permisos
+correctos "simplemente funcione" sin tocar el frontend); solo el caso de
+`AUDITOR` mira `role_keys` directamente.
+
+Los botones de escritura (crear/editar/aprobar/revocar) dentro de cada
+pantalla siguen el mismo criterio: visibles siempre, pero deshabilitados
+si falta el `perm_key` exacto que exige el backend — nunca ocultos.
+Excepción confirmada (11/Ago/2026): los bloques de **generar/subir**
+(crear un recurso desde cero — Magic Link, ticket, invitación, sociedad,
+documento) se **ocultan por completo** para quien no tiene el `perm_key`
+de `.crear`, en vez de mostrarse deshabilitados — mostrar un formulario
+vacío que no lleva a nada confundía más que ayudar. Las acciones sobre un
+recurso ya existente (Editar/Borrar/Revocar/Otorgar) siguen el criterio
+original: visibles, deshabilitadas.
+
+Código fuente de estas reglas: [`AppShell.tsx`](../../frontend/src/components/AppShell.tsx)
+(`buildNavItems`) y [`lib/auth.ts`](../../frontend/src/lib/auth.ts) (los
+helpers `puedeAdministrarIam`, `tieneAccesoIam`, `tieneAccesoPld`,
+`puedeVerBitacora`, `tieneAlgunPermiso`). Suite que lo prueba
+automáticamente: [`AppShell.test.ts`](../../frontend/src/components/AppShell.test.ts)
+(18/18 en verde al 11/Ago/2026).
+
+### 6.1 Sidebar, regla por regla
+
+| Si la sesión tiene... | Ve en el sidebar | Por qué |
+|---|---|---|
+| `iam.crear` o `iam.editar` | **Admin (IAM)** completo — Usuarios, Invitaciones, Permisos, Reportes, Organización, y "Bitácora" anidada adentro | Solo quien puede escribir en IAM administra IAM de verdad (`puedeAdministrarIam`) |
+| `iam.leer` solamente, y **no** es `AUDITOR` | **Administración (solo lectura)** — mismas 4 pantallas menos Reportes/Bitácora, todo deshabilitado adentro | Decisión 11/Ago/2026: reusar las pantallas existentes en vez de construir un directorio aparte para "puede ver pero no tocar" (`tieneAccesoIam`); nombre distinto a propósito para no verse igual que el menú completo |
+| `role_keys` incluye `AUDITOR` | **Auditar** (solo "Bitácora") — **no** ve Admin(IAM), aunque también tenga `iam.leer` | Caso especial por `role_keys`, no por `perm_keys` — evita que Auditor caiga en el menú completo de IAM (bug corregido 11/Ago/2026) |
+| Algún `pld-compliance.*` | **PLD / Cumplimiento** (etiqueta cambia a "Analista PLD"/"Aprobador PLD" según el rol exacto) | `tieneAccesoPld` |
+| Algún `contrapartes.*` | **Contrapartes** — clickeable, pantalla "en desarrollo" | Servicio sin backend propio todavía |
+| Algún `ventas-vivienda.*` o `materiales.*` | **Ventas / Vivienda** — clickeable, "en desarrollo" | Fase 3, sin construir |
+| Algún `tesoreria.*`, `compras.*` o `facturacion-cfdi.*` | **Compras / Tesorería** — clickeable, "en desarrollo" | Fase 4, sin construir |
+| Algún `rrhh.*` | **RRHH y Talento** — clickeable, "en desarrollo" | Fase 5, sin construir |
+| Algún `tickets.*` | **Tickets** — clickeable, "en desarrollo" | Sin backend todavía (hallazgo de `AppShell.test.ts`, resuelto 11/Ago/2026 agregando el apartado) |
+| Algún `rentas.*` | **Rentas** — clickeable, "en desarrollo" | Sin backend todavía (mismo hallazgo — antes pasaba desapercibido porque `FINANZAS_MANAGER`/`CONTRALOR` ya veían "Compras/Tesorería" por otros permisos) |
+| Cualquier sesión válida | **Panel** y **MiCumbres** siempre | No dependen de ningún permiso |
+
+### 6.2 Tabla concreta: qué ve cada uno de los 17 roles
+
+Generada corriendo `buildNavItems` real contra la matriz de
+`services/iam-service/iam/permission_matrix.py` (mismo fixture que usa
+`AppShell.test.ts`), no a mano — para regenerarla si la matriz cambia,
+ver el fixture `roleAccessMatrix.json` y correr `buildNavItems` con cada
+rol (con `is_global=false`, que es el caso que importa para esta tabla —
+con `is_global=true` cualquier rol suma "Bitácora" adentro de su
+apartado de IAM/Auditar, ver 6.3).
+
+| `role_key` | Apartados del sidebar (en orden) |
+|---|---|
+| `SUPER_ADMIN` | Panel · **Super Admin** (IAM completo) · PLD / Cumplimiento · Contrapartes · Ventas / Vivienda · Compras / Tesorería · RRHH y Talento · Tickets · Rentas · MiCumbres |
+| `IAM_ADMIN` | Panel · **Admin IAM** (IAM completo) · MiCumbres |
+| `AUDITOR` | Panel · **Auditar** · PLD / Cumplimiento · Contrapartes · Ventas / Vivienda · Compras / Tesorería · RRHH y Talento · Tickets · Rentas · MiCumbres *(tiene `L` en todo el catálogo — ve los placeholders también)* |
+| `PLD_ANALISTA` | Panel · Administración (solo lectura) · **Analista PLD** · Contrapartes · MiCumbres |
+| `PLD_APROBADOR` | Panel · Administración (solo lectura) · **Aprobador PLD** · Contrapartes · MiCumbres |
+| `VENTAS_ASESOR` | Panel · Administración (solo lectura) · Contrapartes · Ventas / Vivienda · MiCumbres |
+| `VENTAS_GERENTE` | Panel · Administración (solo lectura) · Contrapartes · Ventas / Vivienda · Compras / Tesorería · MiCumbres |
+| `OBRA_COORDINADOR` | Panel · Administración (solo lectura) · Ventas / Vivienda · MiCumbres |
+| `FINANZAS_MANAGER` | Panel · Administración (solo lectura) · Contrapartes · Ventas / Vivienda · Compras / Tesorería · Rentas · MiCumbres |
+| `TESORERIA_ANALISTA` | Panel · Administración (solo lectura) · Contrapartes · Compras / Tesorería · MiCumbres |
+| `COMPRAS_ANALISTA` | Panel · Administración (solo lectura) · Contrapartes · Ventas / Vivienda · Compras / Tesorería · MiCumbres |
+| `CONTRALOR` | Panel · Administración (solo lectura) · Contrapartes · Ventas / Vivienda · Compras / Tesorería · Rentas · MiCumbres |
+| `RRHH_SUPERVISOR_CENTRO` | Panel · Administración (solo lectura) · RRHH y Talento · MiCumbres |
+| `RRHH_ADMIN` | Panel · Administración (solo lectura) · RRHH y Talento · MiCumbres |
+| `EMPLEADO_SELF` | Panel · RRHH y Talento · Tickets · MiCumbres *(sin `iam.leer` — no le toca ni el modo solo-lectura)* |
+| `TICKETS_RESPONSABLE` | Panel · Administración (solo lectura) · Tickets · MiCumbres |
+| `TICKETS_PARTICIPANTE` | Panel · Tickets · MiCumbres *(sin `iam.leer` — el más "vacío" del catálogo aparte de Tickets)* |
+
+### 6.3 Panel (`/`)
+
+- Tarjeta "Sociedades registradas": siempre visible (catálogo abierto),
+  pero solo **clickeable** si `puedeAdministrarIam` (si no, el dato es
+  público pero la pantalla de administración detrás no le toca).
+- Tarjeta "Usuarios sin rol" / "Invitaciones pendientes": solo si
+  `puedeAdministrarIam`.
+- Tarjeta "Expedientes KYC": solo si `tieneAccesoPld`.
+- "Bitácora reciente": `puedeVerBitacora` = `is_global === true` **o**
+  `role_keys` incluye `AUDITOR` — **no** depende de `iam.leer` ni de
+  `audit.leer`. Importante: `is_global` se prende con que **cualquier**
+  rol activo del usuario tenga `scope_type=GLOBAL` (`scope_utils.py`),
+  sin importar cuál rol sea — un rol de alcance `SOCIEDAD`/`PROYECTO` no
+  la prende aunque el rol en sí no tenga nada que ver con auditoría.
+
+### 6.4 Botones de escritura dentro de cada pantalla
+
+Mismo `perm_key` que exige el backend (`require_permission` en cada
+`ViewSet.get_permissions`), replicado en el frontend para no mostrar un
+botón que va a fallar con 403:
+
+| Pantalla | Botón | `perm_key` exigido | Visible-deshabilitado u oculto si falta |
+|---|---|---|---|
+| `/admin/organizacion` | Nueva sociedad | `iam.crear` | Oculto |
+| `/admin/organizacion` | Editar / Borrar | `iam.editar` | Visible-deshabilitado |
+| `/admin/permisos` | Switch "Modo edición" + otorgar/revocar en la matriz | `iam.editar` | Oculto |
+| `/admin/invitaciones` | Generar Magic Link / Carga masiva / Invitar colaborador | `iam.crear` | Oculto |
+| `/admin/invitaciones` | Revocar | `iam.editar` | Visible-deshabilitado |
+| `RoleAssignmentDialog` / `EmpresaAssignmentDialog` | Otorgar / Revocar rol o empresa | `iam.crear` / `iam.editar` | Visible-deshabilitado |
+| `/pld` | Cargar documento | `pld-compliance.crear` | Oculto |
+| `/pld` | Aprobar expediente | `pld-compliance.aprobar` | Visible-deshabilitado |
+| `/pld/tickets` | Generar ticket | `pld-compliance.crear` | Oculto |
+| `/pld/tickets` | Revocar ticket | `pld-compliance.editar` | Visible-deshabilitado |
+
+### 6.5 Huecos conocidos (no son bugs de gating, son módulos sin construir)
+
+- **Contrapartes, Ventas/Vivienda, Compras/Tesorería, RRHH, Tickets,
+  Rentas**: tienen apartado en el sidebar (clickeable, "en desarrollo")
+  pero ninguna pantalla real todavía.
+- **`EMPLEADO_SELF` / `TICKETS_PARTICIPANTE`**: su alcance real es
+  `IDENTIDAD` ("solo mis propios registros"), que no existe como
+  mecanismo en `iam-service` todavía (sección 1) — el gating de
+  sidebar/botones ya funciona igual que cualquier otro rol, lo que falta
+  es el filtro de datos (RLS) por identidad en los servicios de negocio,
+  no en el frontend.
+- **Herramientas de depuración ya quitadas**: el bloque "Probar
+  validación" (pegar un token y ver el JWT/resultado) que existía en
+  `/admin/invitaciones` y `/pld/tickets` se eliminó por completo
+  (11/Ago/2026) — era una herramienta de desarrollo sin permiso asociado,
+  no una pantalla de producto.
