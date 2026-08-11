@@ -118,8 +118,6 @@ export default function TicketsClientePage() {
         maxUses,
       });
       setUltimoGenerado(nuevo);
-      setTokenPrueba(nuevo.token ?? "");
-      setResultadoValidacion(null);
       setEmail("");
       setKycId("");
       refrescarLista();

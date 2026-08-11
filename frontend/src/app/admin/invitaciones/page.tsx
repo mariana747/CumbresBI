@@ -196,8 +196,6 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     try {
       const nuevo = await createMagicLink({ email, recursoTipo, recursoId });
       setUltimoGenerado(nuevo);
-      setTokenPrueba(nuevo.token ?? "");
-      setResultadoValidacion(null);
       setEmail("");
       setRecursoTipo("");
       setRecursoId("");
