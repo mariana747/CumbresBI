@@ -662,7 +662,12 @@ class IamInvitationViewSet(ModelViewSet):
     serializer_class = IamInvitationSerializer
 
     def get_permissions(self):
-        if self.action == "create":
+        # Sin DEFAULT_PERMISSION_CLASSES en settings (DRF cae a AllowAny) -
+        # sin este gate, list/retrieve quedaban abiertos a cualquiera, ni
+        # siquiera con sesion, exponiendo correos de gente por invitar
+        # (hallazgo 11/Ago/2026). Es territorio de administracion de IAM,
+        # no lectura general - mismo perm_key que create.
+        if self.action in ("create", "list", "retrieve"):
             return [require_permission("iam.crear")()]
         if self.action == "revocar":
             return [require_permission("iam.editar")()]

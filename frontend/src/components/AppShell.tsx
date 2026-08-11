@@ -35,13 +35,14 @@ import {
   Users,
   UserRound,
   UserPlus,
+  ScrollText,
   Bell,
   ChevronDown,
   ChevronRight,
   Menu as MenuIcon,
   type LucideIcon,
 } from "lucide-react";
-import { getSession } from "@/lib/auth";
+import { SessionUser, getSession, puedeAdministrarIam, tieneAccesoIam, tieneAccesoPld, tieneAlgunPermiso } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
 import { Footer } from "@/components/Footer";
 import { BRAND } from "@/theme/theme";
@@ -74,41 +75,149 @@ const HEADER_HEIGHT = 56;
 type NavChild = { label: string; href: string; icon: LucideIcon };
 type NavLeaf = { label: string; href: string; icon: LucideIcon; enabled: boolean };
 type NavParent = NavLeaf & { children: readonly NavChild[] };
-type NavItem = NavLeaf | NavParent;
+export type NavItem = NavLeaf | NavParent;
 
-const NAV_ITEMS: readonly NavItem[] = [
-  // "Panel" (dashboard en "/") se quita del menu por ahora (10/Ago/2026) -
-  // no aparece en ningun requerimiento del onboarding de Dylan, era un
-  // placeholder vacio de Fase 0 sin dato real. La pagina sigue existiendo
-  // (app/page.tsx) por si se retoma, solo no se muestra en el sidebar.
-  {
-    label: "Admin (IAM)",
-    href: "/admin/usuarios",
-    icon: ShieldCheck,
-    enabled: true,
-    children: [
-      { label: "Usuarios", href: "/admin/usuarios", icon: UserRound },
-      { label: "Invitaciones", href: "/admin/invitaciones", icon: UserPlus },
-      { label: "Permisos", href: "/admin/permisos", icon: KeyRound },
-      { label: "Reportes", href: "/admin/reportes", icon: ClipboardList },
-      { label: "Organización", href: "/admin/organizacion", icon: Building2 },
-    ],
-  },
-  {
-    label: "PLD / Cumplimiento",
-    href: "/pld",
-    icon: FileSearch,
-    enabled: true,
-    children: [
-      { label: "Expedientes KYC", href: "/pld", icon: FileSearch },
-      { label: "Tickets de cliente", href: "/pld/tickets", icon: Link2 },
-    ],
-  },
-  { label: "Ventas / Vivienda", href: "#", icon: Building2, enabled: false },
-  { label: "Compras / Tesorería", href: "#", icon: Landmark, enabled: false },
-  { label: "RRHH y Talento", href: "#", icon: Users, enabled: false },
-  { label: "MiCumbres (portal empleado)", href: "/micumbres", icon: UserRound, enabled: true },
-];
+// "Auditar > Bitácora" - mismo destino (/admin/reportes?tab=auditoria) para
+// los dos roles que pueden llegar ahi, pero en un lugar distinto del menu
+// segun el rol (decision de producto 11/Ago/2026): quien administra IAM lo
+// ve anidado dentro de "Admin (IAM)" (es una funcion mas de administracion
+// para el); AUDITOR no tiene Admin(IAM) en absoluto, asi que le toca como
+// seccion propia de primer nivel. El gate real sigue siendo el backend
+// (audit-service: GLOBAL o role AUDITOR, ver auditoria/views.py) - esto
+// solo decide DONDE aparece el link, no quien puede usarlo.
+const AUDITAR_ITEM: NavChild = { label: "Bitácora", href: "/admin/reportes?tab=auditoria", icon: ScrollText };
+
+// Encabezado del apartado con el nombre del rol especifico de la sesion
+// en vez de un nombre generico de modulo (decision de producto
+// 11/Ago/2026) - varios roles distintos comparten el mismo apartado (ej.
+// PLD_ANALISTA y PLD_APROBADOR ambos ven "PLD"), asi que cada uno debe
+// reconocer su propia etiqueta ahi. Sin rol especifico de ese modulo
+// (ej. SUPER_ADMIN, que no es "un" PLD_ANALISTA) se queda el nombre
+// generico del modulo.
+function etiquetaAdminIam(session: SessionUser | null): string {
+  if (session?.role_keys.includes("SUPER_ADMIN")) return "Super Admin";
+  if (session?.role_keys.includes("IAM_ADMIN")) return "Admin IAM";
+  return "Admin (IAM)";
+}
+
+function etiquetaPld(session: SessionUser | null): string {
+  if (session?.role_keys.includes("PLD_ANALISTA")) return "Analista PLD";
+  if (session?.role_keys.includes("PLD_APROBADOR")) return "Aprobador PLD";
+  return "PLD / Cumplimiento";
+}
+
+// Cada apartado del sidebar se agrega solo si el rol de la sesion lo
+// necesita (antes se mostraba todo a cualquiera con sesion - placeholder
+// de Fase 0, ver git blame) - construye el arbol en vez de filtrar uno
+// fijo porque "Auditar" cambia de posicion segun el rol (ver AUDITAR_ITEM).
+// Exportado para AppShell.test.ts (11/Ago/2026) - es una funcion pura
+// (SessionUser | null) => NavItem[], no necesita cambios de logica para
+// ser probada, solo dejar de ser privada del modulo.
+export function buildNavItems(session: SessionUser | null): NavItem[] {
+  const items: NavItem[] = [{ label: "Panel", href: "/", icon: LayoutDashboard, enabled: true }];
+
+  if (puedeAdministrarIam(session)) {
+    items.push({
+      label: etiquetaAdminIam(session),
+      href: "/admin/usuarios",
+      icon: ShieldCheck,
+      enabled: true,
+      children: [
+        { label: "Usuarios", href: "/admin/usuarios", icon: UserRound },
+        { label: "Invitaciones", href: "/admin/invitaciones", icon: UserPlus },
+        { label: "Permisos", href: "/admin/permisos", icon: KeyRound },
+        { label: "Reportes", href: "/admin/reportes", icon: ClipboardList },
+        { label: "Organización", href: "/admin/organizacion", icon: Building2 },
+        AUDITAR_ITEM,
+      ],
+    });
+  } else if (session?.role_keys.includes("AUDITOR")) {
+    items.push({
+      label: "Auditar",
+      href: AUDITAR_ITEM.href,
+      icon: ScrollText,
+      enabled: true,
+      children: [AUDITAR_ITEM],
+    });
+  } else if (tieneAccesoIam(session)) {
+    // Solo "iam.leer" (casi todos los roles lo traen) sin escritura: mismo
+    // apartado que arriba, pero sin Auditar (eso sigue siendo exclusivo de
+    // AUDITOR) - cada pantalla adentro ya deja los botones de
+    // crear/editar/otorgar deshabilitados por si mismos (ver
+    // puedeAdministrarIam en cada pantalla), asi que reusarlas aqui no
+    // requiere logica nueva, solo dejarlas entrar (decision de producto
+    // 11/Ago/2026: mejor reusar Admin(IAM) en solo-lectura que construir
+    // una pantalla de directorio aparte para este caso). Nombre distinto a
+    // proposito ("Administración (solo lectura)", no "Admin (IAM)") - con
+    // la misma etiqueta se veia identico al menu completo y confundia a
+    // quien solo puede ver (hallazgo 11/Ago/2026, PLD_ANALISTA).
+    items.push({
+      label: "Administración (solo lectura)",
+      href: "/admin/usuarios",
+      icon: ShieldCheck,
+      enabled: true,
+      children: [
+        { label: "Usuarios", href: "/admin/usuarios", icon: UserRound },
+        { label: "Invitaciones", href: "/admin/invitaciones", icon: UserPlus },
+        { label: "Permisos", href: "/admin/permisos", icon: KeyRound },
+        { label: "Organización", href: "/admin/organizacion", icon: Building2 },
+      ],
+    });
+  }
+
+  if (tieneAccesoPld(session)) {
+    items.push({
+      label: etiquetaPld(session),
+      href: "/pld",
+      icon: FileSearch,
+      enabled: true,
+      children: [
+        { label: "Expedientes KYC", href: "/pld", icon: FileSearch },
+        { label: "Tickets de cliente", href: "/pld/tickets", icon: Link2 },
+      ],
+    });
+  }
+
+  // Modulos sin construir todavia (Fase 3/4) - se muestran (y se puede
+  // entrar, la pantalla dice "en desarrollo" - ver EnDesarrolloPage.tsx)
+  // solo a quien SI tiene algun permiso de ese dominio en la matriz
+  // (roles-y-permisos.md sec. 3); a quien no le toca nada ahi, se le quita
+  // de la barra en vez de dejarlo en gris sin motivo (decision 11/Ago/2026
+  // - antes se mostraban los 3 a cualquiera con sesion, y despues se
+  // dejaron deshabilitados; version actual permite entrar, ver mas abajo).
+  // Contrapartes: permiso ya asignado en la matriz (varios roles PLD lo
+  // traen, ej. PLD_APROBADOR/PLD_ANALISTA) pero el "contrapartes-service"
+  // (dueno real de id_contraparte, ver comentario en pld/models.py) todavia
+  // no existe. Decision de producto 11/Ago/2026: en vez de dejarlo
+  // deshabilitado, se deja entrar - la pantalla misma dice "en desarrollo"
+  // (mismo criterio que Ventas/Compras/RRHH de aqui abajo y que MiCumbres
+  // desde Fase 0) - ver docs/CumbresBI_estado.md Fase 2.
+  if (tieneAlgunPermiso(session, ["contrapartes"])) {
+    items.push({ label: "Contrapartes", href: "/contrapartes", icon: Users, enabled: true });
+  }
+  if (tieneAlgunPermiso(session, ["ventas-vivienda", "materiales"])) {
+    items.push({ label: "Ventas / Vivienda", href: "/ventas-vivienda", icon: Building2, enabled: true });
+  }
+  if (tieneAlgunPermiso(session, ["tesoreria", "compras", "facturacion-cfdi"])) {
+    items.push({ label: "Compras / Tesorería", href: "/compras-tesoreria", icon: Landmark, enabled: true });
+  }
+  if (tieneAlgunPermiso(session, ["rrhh"])) {
+    items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });
+  }
+  // Hallazgo de AppShell.test.ts (11/Ago/2026, ver docs/CumbresBI_estado.md):
+  // estos dos prefijos no tenian apartado dueno todavia - se agregan aqui
+  // con el mismo patron "en desarrollo" (TICKETS_RESPONSABLE/
+  // TICKETS_PARTICIPANTE/EMPLEADO_SELF para tickets; FINANZAS_MANAGER/
+  // CONTRALOR para rentas).
+  if (tieneAlgunPermiso(session, ["tickets"])) {
+    items.push({ label: "Tickets", href: "/tickets", icon: Link2, enabled: true });
+  }
+  if (tieneAlgunPermiso(session, ["rentas"])) {
+    items.push({ label: "Rentas", href: "/rentas", icon: Landmark, enabled: true });
+  }
+  items.push({ label: "MiCumbres (portal empleado)", href: "/micumbres", icon: UserRound, enabled: true });
+  return items;
+}
 
 // Evento global (no Context) para que cualquier pantalla pida un refresco
 // del aviso de "usuarios sin rol asignado" de la campana (ej. el
@@ -187,8 +296,9 @@ function NavItemConChildren({
   );
 }
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
+function NavList({ session, onNavigate }: { session: SessionUser | null; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const navItems = buildNavItems(session);
 
   return (
     <>
@@ -199,7 +309,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
         </Typography>
       </Stack>
       <List sx={{ px: 1 }}>
-        {NAV_ITEMS.map((item) =>
+        {navItems.map((item) =>
           "children" in item ? (
             <NavItemConChildren key={item.label} item={item} pathname={pathname} onNavigate={onNavigate} />
           ) : (
@@ -242,13 +352,16 @@ function Header({
   isMobile,
   sinRolUsers,
   onVerTodos,
+  session,
 }: {
   onMenuClick: () => void;
   isMobile: boolean;
   sinRolUsers: IamUser[];
   onVerTodos: () => void;
+  session: SessionUser | null;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [avatarAnchorEl, setAvatarAnchorEl] = useState<HTMLElement | null>(null);
   const count = sinRolUsers.length;
 
   return (
@@ -308,7 +421,33 @@ function Header({
             ]
           )}
         </Menu>
-        <Avatar sx={{ width: 30, height: 30, bgcolor: "primary.main", fontSize: 13 }}>U</Avatar>
+        <IconButton
+          aria-label="Cuenta"
+          size="small"
+          onClick={(e) => setAvatarAnchorEl(e.currentTarget)}
+        >
+          <Avatar
+            src={session?.picture_url ?? undefined}
+            sx={{ width: 30, height: 30, bgcolor: "primary.main", fontSize: 13 }}
+          >
+            {session?.email ? session.email[0].toUpperCase() : "U"}
+          </Avatar>
+        </IconButton>
+        {/* Solo muestra correo + rol(es) activos, sin "Cerrar sesion" a
+        proposito (SSO silencioso, decision de producto): con Google activo
+        el logout de CumbresBI no cierra nada de verdad, solo confunde. Los
+        roles se agregan aqui (11/Ago/2026) para saber de un vistazo con
+        cual sesion se esta probando, sin tener que consultar la BD. */}
+        <Menu anchorEl={avatarAnchorEl} open={Boolean(avatarAnchorEl)} onClose={() => setAvatarAnchorEl(null)}>
+          <MenuItem disabled sx={{ opacity: 1 }}>
+            <Stack>
+              <Typography variant="body2">{session?.email ?? "—"}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {session?.role_keys.length ? session.role_keys.join(", ") : "Sin rol asignado"}
+              </Typography>
+            </Stack>
+          </MenuItem>
+        </Menu>
       </Toolbar>
     </AppBar>
   );
@@ -325,6 +464,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
   const [checked, setChecked] = useState(false);
+  const [session, setSession] = useState<SessionUser | null>(null);
   const [sinRolUsers, setSinRolUsers] = useState<IamUser[]>([]);
 
   useEffect(() => {
@@ -332,6 +472,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (!session) {
         router.replace("/login");
       } else {
+        setSession(session);
         setChecked(true);
       }
     });
@@ -376,6 +517,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         isMobile={isMobile}
         sinRolUsers={sinRolUsers}
         onVerTodos={() => router.push("/admin/usuarios?sinRol=true")}
+        session={session}
       />
 
       {isMobile ? (
@@ -386,11 +528,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ModalProps={{ keepMounted: true }}
           sx={sidebarSx}
         >
-          <NavList onNavigate={() => setMobileOpen(false)} />
+          <NavList session={session} onNavigate={() => setMobileOpen(false)} />
         </Drawer>
       ) : (
         <Drawer variant="permanent" sx={sidebarSx}>
-          <NavList />
+          <NavList session={session} />
         </Drawer>
       )}
 

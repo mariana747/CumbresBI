@@ -21,6 +21,7 @@ import {
   Typography,
 } from "@mui/material";
 import { X as CloseIcon } from "lucide-react";
+import { SessionUser, getSession } from "@/lib/auth";
 import {
   GeneralSociedad,
   IamRole,
@@ -52,9 +53,10 @@ type ScopeType = "GLOBAL" | "SOCIEDAD" | "PROYECTO";
 // (iam_user_centro_access/iam_user_contrato_access), no scope_type de
 // iam_user_roles (roles-y-permisos.md sec. 1) - ver memoria de sesion
 // "pendiente-quitar-grupo-del-codigo" para el porque de esta separacion.
-// Sin permisos reales todavia - cualquiera con acceso a esta pantalla puede
-// otorgar/revocar (ver nota en iam-service/iam/serializers.py); se
-// restringe cuando exista JWT/scope.
+// Permisos reales ya conectados (iam.crear/iam.editar, mismo criterio en
+// los 3 pares otorgar/revocar de aqui abajo) - el backend ya los exige
+// desde la rama feature/iam-scoped-manager; esto solo evita mostrar
+// botones que van a fallar con 403.
 export default function RoleAssignmentDialog({
   open,
   onClose,
@@ -76,6 +78,14 @@ export default function RoleAssignmentDialog({
   const [scopeId, setScopeId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionUser | null>(null);
+
+  useEffect(() => {
+    getSession().then(setSession);
+  }, []);
+
+  const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
 
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   // Sugerencias freeSolo (no hay catalogo real de proyecto/centro/contrato
@@ -251,7 +261,7 @@ export default function RoleAssignmentDialog({
                         ? `${ur.role_name} · ${SCOPE_LABELS[ur.scope_type]}`
                         : `${ur.role_name} · ${SCOPE_LABELS[ur.scope_type] ?? ur.scope_type} ${ur.scope_id}`
                     }
-                    onDelete={() => handleRevoke(ur.assignment_id)}
+                    onDelete={puedeEditar ? () => handleRevoke(ur.assignment_id) : undefined}
                   />
                 ))
               )}
@@ -321,7 +331,7 @@ export default function RoleAssignmentDialog({
                 )}
                 <Button
                   variant="contained"
-                  disabled={!selectedRole || (scopeType !== "GLOBAL" && !scopeId.trim())}
+                  disabled={!selectedRole || (scopeType !== "GLOBAL" && !scopeId.trim()) || !puedeCrear}
                   onClick={handleGrant}
                   sx={{ whiteSpace: "nowrap" }}
                 >
@@ -343,7 +353,11 @@ export default function RoleAssignmentDialog({
                 </Typography>
               ) : (
                 centroAccess.map((c) => (
-                  <Chip key={c.id} label={c.centro_id} onDelete={() => handleRevokeCentro(c.id)} />
+                  <Chip
+                    key={c.id}
+                    label={c.centro_id}
+                    onDelete={puedeEditar ? () => handleRevokeCentro(c.id) : undefined}
+                  />
                 ))
               )}
             </Stack>
@@ -359,7 +373,7 @@ export default function RoleAssignmentDialog({
                 onInputChange={(_, value) => setCentroInput(value)}
                 renderInput={(params) => <TextField {...params} label="ID de centro" />}
               />
-              <Button variant="outlined" disabled={!centroInput.trim()} onClick={handleGrantCentro}>
+              <Button variant="outlined" disabled={!centroInput.trim() || !puedeCrear} onClick={handleGrantCentro}>
                 Otorgar
               </Button>
             </Stack>
@@ -375,7 +389,11 @@ export default function RoleAssignmentDialog({
                 </Typography>
               ) : (
                 contratoAccess.map((c) => (
-                  <Chip key={c.id} label={c.id_contrato} onDelete={() => handleRevokeContrato(c.id)} />
+                  <Chip
+                    key={c.id}
+                    label={c.id_contrato}
+                    onDelete={puedeEditar ? () => handleRevokeContrato(c.id) : undefined}
+                  />
                 ))
               )}
             </Stack>
@@ -391,7 +409,7 @@ export default function RoleAssignmentDialog({
                 onInputChange={(_, value) => setContratoInput(value)}
                 renderInput={(params) => <TextField {...params} label="ID de contrato" />}
               />
-              <Button variant="outlined" disabled={!contratoInput.trim()} onClick={handleGrantContrato}>
+              <Button variant="outlined" disabled={!contratoInput.trim() || !puedeCrear} onClick={handleGrantContrato}>
                 Otorgar
               </Button>
             </Stack>

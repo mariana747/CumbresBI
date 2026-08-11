@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -41,3 +42,10 @@ urlpatterns = [
     path("auth/google/callback", google_callback, name="oidc-callback"),
     path("auth/logout", logout, name="oidc-logout"),
 ]
+
+# TEMPORAL (ver iam/dev_views.py) - ni siquiera se registra la ruta si
+# DEBUG=False, para no depender solo del 404 interno de la vista.
+if settings.DEBUG:
+    from iam.dev_views import dev_role_switch
+
+    urlpatterns.append(path("auth/dev/switch-role", dev_role_switch, name="dev-role-switch"))

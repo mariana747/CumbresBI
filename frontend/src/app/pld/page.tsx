@@ -27,6 +27,7 @@ import { CheckCircle2, FileSearch, FolderOpen, Search, UploadCloud } from "lucid
 import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
+import { SessionUser, getSession } from "@/lib/auth";
 import { PldContraparteKyc, aprobarKyc, listKyc } from "@/lib/pld";
 
 // Tipos que el Motor Documental ya reconoce (docint/classifier.py) - se
@@ -53,7 +54,12 @@ const ESTADO_COLOR: Record<string, "default" | "warning" | "info" | "success"> =
   ENTREGADO: "info",
 };
 
-function TablaExpedientes() {
+function TablaExpedientes({ session }: { session: SessionUser | null }) {
+  // Mismo criterio que PldContraparteKycViewSet.get_permissions
+  // (crear=pld-compliance.crear, editar=pld-compliance.editar,
+  // aprobar=pld-compliance.aprobar - segregacion de funciones a
+  // proposito, PLD_ANALISTA no puede aprobar su propio trabajo).
+  const puedeAprobar = session?.perm_keys.includes("pld-compliance.aprobar") ?? false;
   const [expedientes, setExpedientes] = useState<PldContraparteKyc[]>([]);
   const [search, setSearch] = useState("");
   const [estadoLlenado, setEstadoLlenado] = useState("");
@@ -198,7 +204,7 @@ function TablaExpedientes() {
                         size="small"
                         variant="outlined"
                         startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
-                        disabled={aprobando === kyc.id_kyc}
+                        disabled={aprobando === kyc.id_kyc || !puedeAprobar}
                         onClick={() => handleAprobar(kyc.id_kyc)}
                       >
                         Aprobar
@@ -223,6 +229,18 @@ function TablaExpedientes() {
 // Motor Documental dentro de PLD (ver docs/CumbresBI_estado.md, Fase 2).
 export default function PldPage() {
   const [open, setOpen] = useState(false);
+  const [session, setSession] = useState<SessionUser | null>(null);
+
+  useEffect(() => {
+    getSession().then(setSession);
+  }, []);
+
+  // El Motor Documental en si (analyzeDocument) no escribe en pld-service,
+  // pero conceptualmente es captura de documentos para un expediente KYC -
+  // se gatea igual que "crear" (mismo criterio que PldContraparteDocViewSet,
+  // pld-compliance.crear) para que un rol de solo lectura (ej. AUDITOR) no
+  // pueda usarlo, aunque el backend de docint no lo bloquee el mismo.
+  const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
 
   return (
     <AppShell>
@@ -257,14 +275,21 @@ export default function PldPage() {
               vez (ej. INE, CURP y comprobante) — el tipo se detecta
               automáticamente por el nombre del archivo.
             </Typography>
-            <Button
-              variant="contained"
-              startIcon={<UploadCloud size={18} strokeWidth={1.5} />}
-              onClick={() => setOpen(true)}
-              sx={{ alignSelf: "flex-start", mt: "auto" }}
-            >
-              Cargar documento
-            </Button>
+            {/* Oculto (no solo deshabilitado) para quien no tiene
+            pld-compliance.crear - decision de producto 11/Ago/2026: para
+            las acciones de generar/subir, un rol de solo lectura no debe
+            ni ver el boton (distinto del criterio de otorgar/revocar,
+            que si se deja visible-deshabilitado). */}
+            {puedeCrear && (
+              <Button
+                variant="contained"
+                startIcon={<UploadCloud size={18} strokeWidth={1.5} />}
+                onClick={() => setOpen(true)}
+                sx={{ alignSelf: "flex-start", mt: "auto" }}
+              >
+                Cargar documento
+              </Button>
+            )}
           </Paper>
         </Grid>
 
@@ -282,7 +307,7 @@ export default function PldPage() {
         </Grid>
 
         <Grid item xs={12}>
-          <TablaExpedientes />
+          <TablaExpedientes session={session} />
         </Grid>
       </Grid>
 

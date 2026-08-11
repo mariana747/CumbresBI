@@ -211,6 +211,11 @@ def me(request):
     if not claims:
         return JsonResponse({"detail": "Sesion invalida o expirada."}, status=401)
 
+    # picture_url no viaja en el JWT (es dato de Google que se refresca en
+    # cada login, no un claim de alcance) - se resuelve aqui de la
+    # identidad mas reciente, para el avatar real del header (AppShell.tsx).
+    identity = IamIdentity.objects.filter(user_id=claims["sub"]).order_by("-last_login_at").first()
+
     return JsonResponse(
         {
             "user_id": claims["sub"],
@@ -220,5 +225,12 @@ def me(request):
             "proyecto_ids": claims["proyecto_ids"],
             "centro_ids": claims["centro_ids"],
             "contrato_ids": claims["contrato_ids"],
+            # Ya viajaban en el JWT (compute_effective_scope_claims) pero
+            # /api/me no los exponia - el frontend los necesita para
+            # filtrar el sidebar por rol (ver AppShell.tsx), no solo
+            # confiar en que el backend regrese 403 en escritura.
+            "role_keys": claims["role_keys"],
+            "perm_keys": claims["perm_keys"],
+            "picture_url": identity.picture_url if identity else None,
         }
     )

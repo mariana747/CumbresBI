@@ -25,7 +25,7 @@ import {
   Typography,
 } from "@mui/material";
 import AppShell from "@/components/AppShell";
-import { getSession } from "@/lib/auth";
+import { SessionUser, getSession } from "@/lib/auth";
 import {
   IamPermission,
   IamRole,
@@ -174,6 +174,7 @@ export default function MatrizPermisosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actorUserId, setActorUserId] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionUser | null>(null);
   const [editando, setEditando] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   // Filtro por area/servicio (Fase 1, Semana 5) - [] = sin filtro, se
@@ -196,8 +197,16 @@ export default function MatrizPermisosPage() {
 
   useEffect(() => {
     cargar();
-    getSession().then((session) => setActorUserId(session?.user_id ?? null));
+    getSession().then((s) => {
+      setSession(s);
+      setActorUserId(s?.user_id ?? null);
+    });
   }, []);
+
+  // IamRoleViewSet.get_permissions: otorgar_permiso/revocar_permiso
+  // requieren iam.editar (grantRolePermission/revokeRolePermission usan
+  // el mismo endpoint - ver views.py, no hay iam.crear distinto aqui).
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
 
   // Columnas = servicios distintos presentes en el catalogo completo de
   // permisos (no solo los que algun rol ya tiene), ordenados alfabeticamente.
@@ -259,10 +268,19 @@ export default function MatrizPermisosPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
         <Typography variant="h5">Matriz de permisos</Typography>
-        <FormControlLabel
-          control={<Switch checked={editando} onChange={(e) => setEditando(e.target.checked)} />}
-          label="Modo edición"
-        />
+        {/* A diferencia del resto de la app (boton visible pero
+        deshabilitado), este switch no tiene sentido ni mostrarlo a quien
+        no tiene iam.editar: "activarlo" no hace nada por si mismo (los
+        checkboxes de adentro ya estaban deshabilitados, ver puedeEditar
+        mas abajo), pero visualmente parecia que SI se podia entrar a
+        "modo edicion" - confuso para un rol de solo lectura (hallazgo
+        11/Ago/2026, PLD_ANALISTA). Se oculta en vez de deshabilitar. */}
+        {puedeEditar && (
+          <FormControlLabel
+            control={<Switch checked={editando} onChange={(e) => setEditando(e.target.checked)} />}
+            label="Modo edición"
+          />
+        )}
       </Stack>
 
       {editando && !actorUserId && (
@@ -398,7 +416,7 @@ export default function MatrizPermisosPage() {
                               servicio={servicio}
                               role={role}
                               permisoIdPorKey={permisoIdPorKey}
-                              disabled={!actorUserId || saving !== null}
+                              disabled={!actorUserId || saving !== null || !puedeEditar}
                               onToggle={(permissionId, checked) => handleToggle(role, permissionId, checked)}
                             />
                           </TableCell>
