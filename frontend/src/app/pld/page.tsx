@@ -28,7 +28,7 @@ import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession } from "@/lib/auth";
-import { PldContraparteKyc, aprobarKyc, listKyc } from "@/lib/pld";
+import { PldContraparteKyc, aprobarKyc, listKyc, reactivarAutoEstadoKyc } from "@/lib/pld";
 
 // Tipos que el Motor Documental ya reconoce (docint/classifier.py) - se
 // muestran aqui solo como referencia informativa para el analista, no como
@@ -66,6 +66,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [aprobando, setAprobando] = useState<string | null>(null);
+  const [reactivando, setReactivando] = useState<string | null>(null);
 
   function cargar() {
     setLoading(true);
@@ -94,6 +95,21 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
       setAprobando(null);
+    }
+  }
+
+  // Workflow hibrido (pld/signals.py): "manual" es reversible - este
+  // boton apaga estado_llenado_manual y deja que vuelva a calcularse solo
+  // segun el status de los documentos del expediente.
+  async function handleReactivarAuto(idKyc: string) {
+    setReactivando(idKyc);
+    try {
+      await reactivarAutoEstadoKyc(idKyc);
+      cargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setReactivando(null);
     }
   }
 
@@ -179,11 +195,21 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   <TableCell>{kyc.id_contraparte}</TableCell>
                   <TableCell>{kyc.curp || "—"}</TableCell>
                   <TableCell>
-                    <Chip
-                      size="small"
-                      label={ESTADO_OPTIONS.find((o) => o.value === kyc.estado_llenado)?.label ?? kyc.estado_llenado}
-                      color={ESTADO_COLOR[kyc.estado_llenado] ?? "default"}
-                    />
+                    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Chip
+                        size="small"
+                        label={ESTADO_OPTIONS.find((o) => o.value === kyc.estado_llenado)?.label ?? kyc.estado_llenado}
+                        color={ESTADO_COLOR[kyc.estado_llenado] ?? "default"}
+                      />
+                      {kyc.estado_llenado_manual && (
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label="Manual"
+                          title="El analista fijó este estado a mano - ya no se recalcula solo según los documentos."
+                        />
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>
                     {kyc.documentos.length} documento{kyc.documentos.length === 1 ? "" : "s"}
@@ -199,17 +225,29 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   </TableCell>
                   <TableCell>{new Date(kyc.created_at).toLocaleDateString("es-MX")}</TableCell>
                   <TableCell align="right">
-                    {!kyc.aprobado_en && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
-                        disabled={aprobando === kyc.id_kyc || !puedeAprobar}
-                        onClick={() => handleAprobar(kyc.id_kyc)}
-                      >
-                        Aprobar
-                      </Button>
-                    )}
+                    <Stack direction="row" spacing={1} justifyContent="flex-end">
+                      {kyc.estado_llenado_manual && (
+                        <Button
+                          size="small"
+                          variant="text"
+                          disabled={reactivando === kyc.id_kyc}
+                          onClick={() => handleReactivarAuto(kyc.id_kyc)}
+                        >
+                          Reactivar automático
+                        </Button>
+                      )}
+                      {!kyc.aprobado_en && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
+                          disabled={aprobando === kyc.id_kyc || !puedeAprobar}
+                          onClick={() => handleAprobar(kyc.id_kyc)}
+                        >
+                          Aprobar
+                        </Button>
+                      )}
+                    </Stack>
                   </TableCell>
                 </TableRow>
               ))

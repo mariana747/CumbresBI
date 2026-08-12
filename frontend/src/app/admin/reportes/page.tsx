@@ -32,7 +32,7 @@ import {
   BitacoraEvento,
   ENTITY_OPTIONS,
   SERVICE_OPTIONS,
-  exportBitacoraCsvUrl,
+  exportarBitacoraCsvADrive,
   friendlyActionName,
   friendlyEntityName,
   friendlyServiceName,
@@ -228,6 +228,30 @@ function BitacoraAuditoria() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actorLabels, setActorLabels] = useState<Record<string, string>>({});
+  const [exportando, setExportando] = useState(false);
+
+  // El boton ya no descarga localmente - sube el CSV a Drive
+  // (CumbresBI/Auditoria/Bitacora/) y abre el link de Drive en una pestaña
+  // nueva (decision de Mariana, 12/Ago/2026, ver memoria de sesion
+  // "csv-auditoria-a-drive").
+  async function handleExportarCsv() {
+    setExportando(true);
+    setError(null);
+    try {
+      const resultado = await exportarBitacoraCsvADrive({
+        search: search || undefined,
+        servicioOrigen: servicioOrigen || undefined,
+        entidad: entidad || undefined,
+        desde: desde || undefined,
+        hasta: hasta || undefined,
+      });
+      window.open(resultado.web_view_link, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al exportar a Drive");
+    } finally {
+      setExportando(false);
+    }
+  }
 
   // Resolver actor_user_id contra iam-service - la bitacora no lleva FK
   // cruzada de esquema (ver audit-service/auditoria/models.py), asi que el
@@ -341,11 +365,13 @@ function BitacoraAuditoria() {
         />
         <Button
           variant="outlined"
-          startIcon={<Download size={16} strokeWidth={1.5} />}
-          component="a"
-          href={exportBitacoraCsvUrl({ search, servicioOrigen, entidad, desde, hasta })}
+          startIcon={
+            exportando ? <CircularProgress size={16} /> : <Download size={16} strokeWidth={1.5} />
+          }
+          disabled={exportando}
+          onClick={handleExportarCsv}
         >
-          CSV
+          CSV a Drive
         </Button>
       </Stack>
 

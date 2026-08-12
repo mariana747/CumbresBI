@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Accordion,
   AccordionDetails,
@@ -25,9 +25,10 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { ChevronDown, CloudUpload, Download, UploadCloud, X as CloseIcon } from "lucide-react";
+import { CheckCircle2, ChevronDown, CloudUpload, UploadCloud, X as CloseIcon } from "lucide-react";
 import { confirmarEnvioDrive } from "@/lib/audit";
 import { analyzeDocument, DocumentAnalysisResult, guessDocumentTypeFromFilename } from "@/lib/docint";
+import { PLD_CAMPOS_CONFIRMABLES, PldContraparteKyc, confirmarExtraccionKyc, listKyc } from "@/lib/pld";
 
 // Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
 // docint/classifier.py, KEYWORD_TO_PROMPT_KEY) - solo para mostrar el tipo
@@ -69,6 +70,12 @@ interface DocumentResult {
   result?: DocumentAnalysisResult;
   error?: string;
   driveConfirmadoEn?: string;
+  // Expediente KYC elegido para volcar los datos ya validados (solo aplica
+  // a servicioSolicitante === "pld-service", ver confirmar_extraccion en
+  // pld-service). undefined mientras el analista no elige uno.
+  kycSeleccionado?: string;
+  extraccionConfirmadaEn?: string;
+  extraccionError?: string;
 }
 
 // Motor Inteligente de Procesamiento Documental (docint) - ver
@@ -104,12 +111,18 @@ export default function MotorDocumentalDialog({
   );
   const [loading, setLoading] = useState(false);
 
-  function resetAndClose() {
-    setDocuments([]);
-    setServicioSolicitante(SERVICIOS_SOLICITANTES[0]);
-    setLoading(false);
-    onClose();
-  }
+  // Expedientes KYC existentes, para que el analista elija a cual volcar los
+  // datos ya validados (solo tiene sentido cuando servicioSolicitante ===
+  // "pld-service" - es el unico consumidor con endpoint de confirmacion
+  // hoy, ver services/pld-service/pld/views.py::confirmar_extraccion).
+  const [kycOptions, setKycOptions] = useState<PldContraparteKyc[]>([]);
+
+  useEffect(() => {
+    if (!open || servicioSolicitante !== "pld-service") return;
+    listKyc()
+      .then(setKycOptions)
+      .catch(() => setKycOptions([]));
+  }, [open, servicioSolicitante]);
 
   function handleFilesSelected(fileList: FileList | null) {
     if (!fileList) return;
@@ -120,26 +133,55 @@ export default function MotorDocumentalDialog({
     setDocuments((prev) => [...prev, ...newDocuments]);
   }
 
-  // Descarga todos los resultados como un solo .json - docint no persiste
-  // extracted_data (docs/architecture/README.md sec. 1.1: "ninguna tabla de
-  // negocio, solo su propio log de solicitudes") y pld-service todavia no
-  // tiene un endpoint para guardar el expediente (Fase 0). Mientras tanto,
-  // "guardar" es exportar el archivo localmente; cuando exista el endpoint
-  // real, este boton se reemplaza por una llamada que persista el expediente.
-  function handleDownloadJson() {
-    const payload = documents.map((doc) => ({
-      archivo: doc.file.name,
-      tipo_esperado: doc.expectedDocumentType,
-      resultado: doc.result ?? null,
-      error: doc.error ?? null,
-    }));
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expediente_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  function handleKycSeleccionado(index: number, kycId: string) {
+    setDocuments((prev) =>
+      prev.map((d, i) => (i === index ? { ...d, kycSeleccionado: kycId, extraccionError: undefined } : d))
+    );
+  }
+
+  // Reemplaza la descarga local de JSON (docs/architecture/README.md sec.
+  // 1.1 dejo de aplicar: ya existe confirmar_extraccion en pld-service).
+  // Solo manda las llaves de extracted_data que el expediente realmente
+  // puede guardar (PLD_CAMPOS_CONFIRMABLES, espejo de
+  // PldContraparteKycViewSet.CAMPOS_CONFIRMABLES) - el resto (ej.
+  // "nombre_completo", "clave_elector") no tiene columna propia en este
+  // modelo y se descarta aqui mismo, antes de llamar al backend.
+  async function handleConfirmarExtraccion(index: number) {
+    const doc = documents[index];
+    if (!doc.result || !doc.kycSeleccionado) return;
+
+    const campos = Object.fromEntries(
+      Object.entries(doc.result.extracted_data).filter(
+        ([key, value]) => value !== null && (PLD_CAMPOS_CONFIRMABLES as readonly string[]).includes(key)
+      )
+    );
+    if (Object.keys(campos).length === 0) {
+      setDocuments((prev) =>
+        prev.map((d, i) =>
+          i === index
+            ? { ...d, extraccionError: "Ningún dato extraído coincide con campos guardables del expediente." }
+            : d
+        )
+      );
+      return;
+    }
+
+    try {
+      await confirmarExtraccionKyc(doc.kycSeleccionado, campos);
+      setDocuments((prev) =>
+        prev.map((d, i) =>
+          i === index ? { ...d, extraccionConfirmadaEn: new Date().toISOString(), extraccionError: undefined } : d
+        )
+      );
+    } catch (err) {
+      setDocuments((prev) =>
+        prev.map((d, i) =>
+          i === index
+            ? { ...d, extraccionError: err instanceof Error ? err.message : "Error al confirmar la extracción" }
+            : d
+        )
+      );
+    }
   }
 
   // Confirmacion de envio a Drive (docs/architecture/README.md sec. 10:
@@ -194,11 +236,27 @@ export default function MotorDocumentalDialog({
 
   const hasResults = documents.some((doc) => doc.result || doc.error);
 
+  // Cerrar el dialogo (X, Escape o clic afuera) NO debe perder lo ya
+  // extraido - volver a analizar cuesta tokens de la IA. Por eso "cerrar" y
+  // "borrar" son acciones distintas: cerrar solo oculta el dialogo
+  // (el estado sigue vivo en este componente, sin desmontarse, mientras el
+  // padre no cambie `open`); "Borrar todo" es la unica accion que limpia
+  // `documents` de verdad.
+  function handleClose(_event?: unknown, reason?: "backdropClick" | "escapeKeyDown") {
+    if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+    onClose();
+  }
+
+  function handleBorrarTodo() {
+    setDocuments([]);
+    setServicioSolicitante(SERVICIOS_SOLICITANTES[0]);
+  }
+
   return (
-    <Dialog open={open} onClose={resetAndClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         Motor Documental
-        <IconButton onClick={resetAndClose} size="small" aria-label="Cerrar">
+        <IconButton onClick={() => onClose()} size="small" aria-label="Cerrar">
           <CloseIcon size={18} strokeWidth={1.5} />
         </IconButton>
       </DialogTitle>
@@ -290,12 +348,8 @@ export default function MotorDocumentalDialog({
               <Typography variant="subtitle1" fontWeight={600}>
                 Resultados
               </Typography>
-              <Button
-                size="small"
-                startIcon={<Download size={16} strokeWidth={1.5} />}
-                onClick={handleDownloadJson}
-              >
-                Guardar JSON
+              <Button size="small" color="error" onClick={handleBorrarTodo}>
+                Borrar todo
               </Button>
             </Stack>
 
@@ -354,6 +408,43 @@ export default function MotorDocumentalDialog({
                       >
                         {JSON.stringify(doc.result.extracted_data, null, 2)}
                       </Box>
+
+                      {servicioSolicitante === "pld-service" &&
+                        (doc.extraccionConfirmadaEn ? (
+                          <Alert severity="success">
+                            Datos confirmados en el expediente el{" "}
+                            {new Date(doc.extraccionConfirmadaEn).toLocaleString("es-MX")}.
+                          </Alert>
+                        ) : (
+                          <Stack spacing={1}>
+                            <FormControl size="small" fullWidth>
+                              <InputLabel id={`kyc-select-${index}`}>Expediente KYC destino</InputLabel>
+                              <Select
+                                labelId={`kyc-select-${index}`}
+                                label="Expediente KYC destino"
+                                value={doc.kycSeleccionado ?? ""}
+                                onChange={(e) => handleKycSeleccionado(index, e.target.value)}
+                              >
+                                {kycOptions.map((kyc) => (
+                                  <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
+                                    {kyc.id_contraparte} ({kyc.id_kyc})
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                            {doc.extraccionError && <Alert severity="error">{doc.extraccionError}</Alert>}
+                            <Button
+                              size="small"
+                              variant="contained"
+                              startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
+                              disabled={!doc.kycSeleccionado}
+                              onClick={() => handleConfirmarExtraccion(index)}
+                              sx={{ alignSelf: "flex-start" }}
+                            >
+                              Confirmar y guardar en el expediente
+                            </Button>
+                          </Stack>
+                        ))}
 
                       {doc.driveConfirmadoEn ? (
                         <Alert severity="info">

@@ -75,20 +75,41 @@ export async function confirmarEnvioDrive({
   return response.json();
 }
 
-export function exportBitacoraCsvUrl(params: {
+export interface BitacoraCsvExportado {
+  file_id: string;
+  web_view_link: string;
+  mime_type: string;
+  tamano_bytes: number;
+}
+
+// Ya NO regresa una URL para <a href> de descarga local (decision de
+// Mariana, 12/Ago/2026, ver memoria de sesion "csv-auditoria-a-drive"):
+// arma el CSV en audit-service y lo sube a Drive
+// (CumbresBI/Auditoria/Bitacora/) - esta funcion dispara esa subida y
+// regresa la referencia de Drive (web_view_link) para que el frontend la
+// abra en una pestaña nueva, sin bajar el archivo al navegador.
+export async function exportarBitacoraCsvADrive(params: {
   search?: string;
   servicioOrigen?: string;
   entidad?: string;
   desde?: string;
   hasta?: string;
-}): string {
+}): Promise<BitacoraCsvExportado> {
   const query = new URLSearchParams();
   if (params.search) query.set("search", params.search);
   if (params.servicioOrigen) query.set("servicio_origen", params.servicioOrigen);
   if (params.entidad) query.set("entidad", params.entidad);
   if (params.desde) query.set("desde", params.desde);
   if (params.hasta) query.set("hasta", params.hasta);
-  return `${AUDIT_API_BASE_URL}/api/bitacora/export_csv/?${query.toString()}`;
+
+  const response = await apiFetch(
+    "AUDIT",
+    `${AUDIT_API_BASE_URL}/api/bitacora/export_csv/?${query.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("AUDIT", response);
+  }
+  return response.json();
 }
 
 // Nombres amigables para mostrar en pantalla - solo cubren los servicios,
