@@ -49,3 +49,13 @@ gcloud run deploy "${SERVICE}-${ENV_SUFFIX}" \
 # - document-intelligence-service: agregar tambien GEMINI_API_KEY como
 #   --set-secrets (ya existe en Secret Manager, ver infraestructura-gcp/
 #   document-intelligence-service.md).
+# - drive-service: sin *_DB_* ni --add-cloudsql-instances (sin BD propia,
+#   proxy stateless hacia Drive - mismo criterio que api-gateway). Env vars:
+#   DRIVE_IMPERSONATE_SUBJECT y DRIVE_ROOT_FOLDER_ID como --set-env-vars
+#   (no son secretos); DRIVE_SERVICE_ACCOUNT_JSON como --set-secrets
+#   ("DRIVE_SERVICE_ACCOUNT_JSON=DRIVE_SERVICE_ACCOUNT_JSON:latest" - ya
+#   existe en Secret Manager, ver memoria de sesion
+#   "drive-estructura-carpetas-grupos"). Mientras ese secreto no tenga una
+#   version real cargada, el servicio sigue en modo simulado sin romperse
+#   (ver driveclient.py) - se puede desplegar antes de tener la credencial
+#   final.
