@@ -31,6 +31,10 @@ export interface PldContraparteKyc {
   curp: string | null;
   nacionalidad: string | null;
   estado_llenado: PldEstadoLlenado;
+  // Workflow hibrido (pld/signals.py): true si el analista edito
+  // estado_llenado a mano - a partir de ahi deja de recalcularse solo
+  // segun el status de los documentos, hasta reactivarAutoEstadoKyc().
+  estado_llenado_manual: boolean;
   aprobado_por: string | null;
   aprobado_en: string | null;
   comentarios: string | null;
@@ -52,6 +56,75 @@ export async function listKyc(params?: {
   const qs = query.toString();
 
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${qs ? `?${qs}` : ""}`);
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Whitelist en espejo de PldContraparteKycViewSet.CAMPOS_CONFIRMABLES
+// (views.py) - solo informativo aqui, el backend es quien realmente filtra;
+// se usa para no ni intentar mandar llaves de extracted_data que el
+// expediente no tiene columna para guardar (ej. "nombre_completo").
+export const PLD_CAMPOS_CONFIRMABLES = [
+  "fecha_nac_const",
+  "pais_nac_const",
+  "folio_mercantil",
+  "objeto_social",
+  "curp",
+  "nacionalidad",
+  "ocupacion_act_economica",
+  "dom_calle",
+  "dom_numero_ext",
+  "dom_numero_int",
+  "dom_colonia",
+  "dom_municipio_alcaldia",
+  "dom_estado",
+  "dom_cp",
+  "dom_pais",
+  "tipo_identificacion",
+  "autoridad_identificacion",
+  "numero_identificacion",
+  "dom_corresp_dom_calle",
+  "dom_corresp_dom_numero_ext",
+  "dom_corresp_dom_numero_int",
+  "dom_corresp_dom_colonia",
+  "dom_corresp_dom_municipio_alcaldia",
+  "dom_corresp_dom_estado",
+  "dom_corresp_dom_cp",
+  "dom_corresp_dom_pais",
+  "telefono_fijo",
+  "telefono_sms",
+  "estado_civil",
+  "ident_fideicomiso",
+  "comentarios",
+] as const;
+
+// Confirma en el expediente los datos ya revisados por el analista (Motor
+// Documental -> docint/analyze -> correccion en pantalla -> este endpoint).
+// Ver services/pld-service/pld/views.py::confirmar_extraccion.
+export async function confirmarExtraccionKyc(
+  idKyc: string,
+  campos: Record<string, unknown>
+): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/confirmar_extraccion/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ campos }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Apaga estado_llenado_manual y recalcula de inmediato segun los
+// documentos actuales del expediente. Ver
+// services/pld-service/pld/views.py::reactivar_auto_estado.
+export async function reactivarAutoEstadoKyc(idKyc: string): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/reactivar_auto_estado/`, {
+    method: "POST",
+  });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);
   }

@@ -1,7 +1,12 @@
+import logging
+
+import requests
 from cumbresbi_scope.permissions import require_permission
+from django.conf import settings
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
@@ -11,7 +16,10 @@ from .serializers import (
     PldContraparteKycSerializer,
     PldTicketClienteSerializer,
 )
+from .signals import recalcular_estado_llenado
 from .ticket_utils import generate_token, hash_token
+
+logger = logging.getLogger(__name__)
 
 
 class PldContraparteKycViewSet(ModelViewSet):
@@ -36,7 +44,7 @@ class PldContraparteKycViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [require_permission("pld-compliance.crear")()]
-        if self.action in ("update", "partial_update"):
+        if self.action in ("update", "partial_update", "confirmar_extraccion", "reactivar_auto_estado"):
             return [require_permission("pld-compliance.editar")()]
         if self.action == "aprobar":
             return [require_permission("pld-compliance.aprobar")()]
@@ -50,6 +58,94 @@ class PldContraparteKycViewSet(ModelViewSet):
         if estado_llenado:
             queryset = queryset.filter(estado_llenado=estado_llenado.upper())
         return queryset
+
+    # Campos del expediente que el Motor Documental puede llenar con datos ya
+    # validados por el analista (docint/prompts.py: los nombres de
+    # extracted_data ya estan alineados a estas columnas a proposito, para
+    # que el frontend pueda mandarlos casi tal cual, ver
+    # MotorDocumentalDialog.tsx). Whitelist explicita para no permitir que
+    # confirmar_extraccion escriba campos fuera de este conjunto (ej.
+    # aprobado_por/aprobado_en, que tienen su propio flujo en aprobar()).
+    CAMPOS_CONFIRMABLES = {
+        "fecha_nac_const",
+        "pais_nac_const",
+        "folio_mercantil",
+        "objeto_social",
+        "curp",
+        "nacionalidad",
+        "ocupacion_act_economica",
+        "dom_calle",
+        "dom_numero_ext",
+        "dom_numero_int",
+        "dom_colonia",
+        "dom_municipio_alcaldia",
+        "dom_estado",
+        "dom_cp",
+        "dom_pais",
+        "tipo_identificacion",
+        "autoridad_identificacion",
+        "numero_identificacion",
+        "dom_corresp_dom_calle",
+        "dom_corresp_dom_numero_ext",
+        "dom_corresp_dom_numero_int",
+        "dom_corresp_dom_colonia",
+        "dom_corresp_dom_municipio_alcaldia",
+        "dom_corresp_dom_estado",
+        "dom_corresp_dom_cp",
+        "dom_corresp_dom_pais",
+        "telefono_fijo",
+        "telefono_sms",
+        "estado_civil",
+        "ident_fideicomiso",
+        "comentarios",
+    }
+
+    @action(detail=True, methods=["post"])
+    def confirmar_extraccion(self, request, pk=None):
+        """Guarda en el expediente los datos que salieron del Motor
+        Documental (docint AnalyzeView) DESPUES de que el analista los revisó
+        y corrigió en pantalla - ver docs/architecture/pld-fase2-alcance.md y
+        memoria de sesion "pld-flujo-extraccion-vs-archivo": la IA propone,
+        un humano confirma antes de que el dato quede como verdad de negocio.
+
+        Body: {"campos": {<nombre_de_campo>: <valor>, ...}} - solo se
+        aceptan campos en CAMPOS_CONFIRMABLES; cualquier otra llave se
+        ignora silenciosamente (ej. datos informativos de la extraccion que
+        no tienen columna propia en este modelo, como "nombre_completo").
+        Mismo permiso que editar el expediente a mano (pld-compliance.editar)
+        - confirmar una extraccion es una forma de edicion, no una accion
+        distinta con su propia regla de acceso."""
+        campos = request.data.get("campos")
+        if not isinstance(campos, dict) or not campos:
+            return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
+
+        datos_validos = {k: v for k, v in campos.items() if k in self.CAMPOS_CONFIRMABLES}
+        if not datos_validos:
+            return Response(
+                {"detail": "Ninguno de los campos enviados es confirmable en el expediente."},
+                status=400,
+            )
+
+        kyc = self.get_object()
+        serializer = self.get_serializer(kyc, data=datos_validos, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def reactivar_auto_estado(self, request, pk=None):
+        """Apaga estado_llenado_manual y recalcula de inmediato segun el
+        status actual de los documentos del expediente (docs/architecture/
+        pld-fase2-alcance.md sec. 3, workflow hibrido) - para cuando el
+        analista quiere devolverle el control automatico a un expediente
+        que el mismo edito a mano antes. Mismo permiso que editar el
+        expediente (no es una accion distinta con su propia regla)."""
+        kyc = self.get_object()
+        kyc.estado_llenado_manual = False
+        kyc.save(update_fields=["estado_llenado_manual"])
+        recalcular_estado_llenado(kyc)
+        kyc.refresh_from_db()
+        return Response(self.get_serializer(kyc).data)
 
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
@@ -82,7 +178,7 @@ class PldContraparteDocViewSet(ModelViewSet):
     serializer_class = PldContraparteDocSerializer
 
     def get_permissions(self):
-        if self.action == "create":
+        if self.action in ("create", "subir"):
             return [require_permission("pld-compliance.crear")()]
         if self.action in ("update", "partial_update"):
             return [require_permission("pld-compliance.editar")()]
@@ -96,6 +192,60 @@ class PldContraparteDocViewSet(ModelViewSet):
         if kyc_param:
             queryset = queryset.filter(kyc_id=kyc_param)
         return queryset
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir(self, request, pk=None):
+        """Sube el archivo real de este documento a Drive (via drive-service,
+        docs/architecture/pld-fase2-alcance.md sec. 1.4) y guarda la
+        referencia (drive_file_id/mime_type/tamano_bytes/subido_en) - separado
+        de create() porque el registro de metadata (denominacion, fecha
+        limite, etc.) puede existir antes de que llegue el archivo real
+        (documento "solicitado" pendiente de entrega).
+
+        Reenvia el JWT del usuario original a drive-service (Authorization
+        header o cookie de sesion) para que el permiso lo siga decidiendo el
+        rol de quien sube, no una credencial propia de pld-service."""
+        doc = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers = {}
+        auth_header = request.META.get("HTTP_AUTHORIZATION")
+        if auth_header:
+            headers["Authorization"] = auth_header
+        cookie_name = getattr(settings, "CUMBRESBI_SCOPE_SESSION_COOKIE_NAME", "cumbresbi_session")
+        cookies = {}
+        if request.COOKIES.get(cookie_name):
+            cookies[cookie_name] = request.COOKIES[cookie_name]
+
+        carpeta = f"PLD/{doc.kyc.id_contraparte}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "pld-compliance.crear"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir documento %s", doc.id_kyc_doc, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(upstream.json() if upstream.content else {"detail": "Error al subir a Drive"}, status=upstream.status_code)
+
+        resultado = upstream.json()
+        doc.drive_file_id = resultado["file_id"]
+        doc.link_documento = resultado["web_view_link"]
+        doc.mime_type = resultado["mime_type"]
+        doc.tamano_bytes = resultado["tamano_bytes"]
+        doc.subido_en = timezone.now()
+        doc.save(update_fields=["drive_file_id", "link_documento", "mime_type", "tamano_bytes", "subido_en"])
+
+        return Response(self.get_serializer(doc).data)
 
 
 class PldTicketClienteViewSet(ModelViewSet):
