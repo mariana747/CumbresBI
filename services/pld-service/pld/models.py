@@ -78,6 +78,14 @@ class PldContraparteKyc(models.Model):
     estado_llenado = models.CharField(
         max_length=20, choices=ESTADO_LLENADO_CHOICES, default=ESTADO_PENDIENTE
     )
+    # Workflow hibrido (decision de Mariana, 12/Ago/2026, ver
+    # docs/architecture/pld-fase2-alcance.md sec. 3): estado_llenado se
+    # recalcula solo cada vez que cambia el status de un documento del
+    # expediente (ver pld/signals.py) - PERO si el analista lo edita a mano
+    # via PATCH, se marca este flag en True y deja de recalcularse encima
+    # de esa decision manual (hasta que alguien lo apague, ver
+    # PldContraparteKycViewSet.reactivar_auto_estado).
+    estado_llenado_manual = models.BooleanField(default=False)
     # FK real a iam_users.user_id (iam-service) - referencia laxa, ver nota arriba.
     aprobado_por = models.CharField(max_length=8)
     aprobado_en = models.DateTimeField(blank=True, null=True)

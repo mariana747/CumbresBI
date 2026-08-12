@@ -87,6 +87,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "link_plantillas",
             "link_documento_pld",
             "estado_llenado",
+            "estado_llenado_manual",
             "aprobado_por",
             "aprobado_en",
             "comentarios",
@@ -97,7 +98,29 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "updated_by",
             "fecha_vencimiento",
         ]
-        read_only_fields = ["id_kyc", "aprobado_por", "aprobado_en", "created_at", "updated_at"]
+        # estado_llenado_manual NO esta aqui a proposito: no se expone para
+        # setear directo, solo se prende solo (ver update() abajo) cuando el
+        # analista edita estado_llenado a mano, o se apaga via la accion
+        # reactivar_auto_estado (views.py) - nunca por PATCH directo.
+        read_only_fields = [
+            "id_kyc",
+            "estado_llenado_manual",
+            "aprobado_por",
+            "aprobado_en",
+            "created_at",
+            "updated_at",
+        ]
+
+    def update(self, instance, validated_data):
+        # Workflow hibrido (docs/architecture/pld-fase2-alcance.md sec. 3,
+        # ver pld/signals.py): si el analista edita estado_llenado a mano
+        # (via PATCH normal, no confirmar_extraccion ni la accion de
+        # aprobar), a partir de ahi deja de recalcularse automatico segun
+        # los documentos - se marca aqui, en el unico lugar donde
+        # estado_llenado_manual se prende.
+        if "estado_llenado" in validated_data:
+            validated_data["estado_llenado_manual"] = True
+        return super().update(instance, validated_data)
 
 
 class PldTicketClienteSerializer(serializers.ModelSerializer):

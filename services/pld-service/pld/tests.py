@@ -309,3 +309,120 @@ class PldTicketClienteTests(TestCase):
         view = PldTicketClienteViewSet.as_view({"post": "validar"})
         response = view(request)
         self.assertEqual(response.status_code, 404)
+
+
+class WorkflowEstadoLlenadoTests(TestCase):
+    """Workflow hibrido de estado_llenado (docs/architecture/
+    pld-fase2-alcance.md sec. 3, decision de Mariana 12/Ago/2026): se
+    recalcula solo segun el status de los documentos, salvo override
+    manual via PATCH."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000050", RFC_TIZARA)
+
+    def test_expediente_sin_documentos_es_pendiente(self):
+        self.assertEqual(self.kyc.estado_llenado, PldContraparteKyc.ESTADO_PENDIENTE)
+
+    def test_agregar_documento_no_entregado_marca_incompleto(self):
+        PldContraparteDoc.objects.create(
+            kyc=self.kyc, denominacion="INE", status=PldContraparteDoc.STATUS_PENDIENTE
+        )
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.estado_llenado, PldContraparteKyc.ESTADO_INCOMPLETO)
+
+    def test_todos_los_documentos_entregados_o_aprobados_marca_entregado(self):
+        PldContraparteDoc.objects.create(
+            kyc=self.kyc, denominacion="INE", status=PldContraparteDoc.STATUS_ENTREGADO
+        )
+        PldContraparteDoc.objects.create(
+            kyc=self.kyc, denominacion="CURP", status=PldContraparteDoc.STATUS_APROBADO
+        )
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.estado_llenado, PldContraparteKyc.ESTADO_ENTREGADO)
+
+    def test_override_manual_detiene_el_recalculo_automatico(self):
+        """PATCH directo a estado_llenado prende estado_llenado_manual - a
+        partir de ahi, agregar documentos NO debe pisar ese valor."""
+        request = self.factory.patch(
+            f"/api/kyc/{self.kyc.id_kyc}/", {"estado_llenado": "ENTREGADO"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+        response = view(request, pk=self.kyc.id_kyc)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["estado_llenado_manual"])
+
+        # Agregar un documento pendiente normalmente forzaria INCOMPLETO -
+        # pero el override manual debe ganar.
+        PldContraparteDoc.objects.create(
+            kyc=self.kyc, denominacion="INE", status=PldContraparteDoc.STATUS_PENDIENTE
+        )
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.estado_llenado, PldContraparteKyc.ESTADO_ENTREGADO)
+        self.assertTrue(self.kyc.estado_llenado_manual)
+
+    def test_reactivar_auto_estado_recalcula_y_apaga_el_override(self):
+        self.kyc.estado_llenado_manual = True
+        self.kyc.estado_llenado = PldContraparteKyc.ESTADO_ENTREGADO
+        self.kyc.save(update_fields=["estado_llenado_manual", "estado_llenado"])
+        PldContraparteDoc.objects.create(
+            kyc=self.kyc, denominacion="INE", status=PldContraparteDoc.STATUS_PENDIENTE
+        )
+
+        request = self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/reactivar_auto_estado/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldContraparteKycViewSet.as_view({"post": "reactivar_auto_estado"})
+        response = view(request, pk=self.kyc.id_kyc)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["estado_llenado_manual"])
+        self.assertEqual(response.data["estado_llenado"], PldContraparteKyc.ESTADO_INCOMPLETO)
+
+
+class ConfirmarExtraccionTests(TestCase):
+    """confirmar_extraccion (docs/architecture/pld-fase2-alcance.md sec. 1,
+    memoria de sesion "pld-flujo-extraccion-vs-archivo"): guarda en el
+    expediente solo los campos ya validados por el analista, filtrados
+    contra CAMPOS_CONFIRMABLES."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000060", RFC_TIZARA)
+
+    def _confirmar(self, campos, scope=None):
+        request = self.factory.post(
+            f"/api/kyc/{self.kyc.id_kyc}/confirmar_extraccion/", {"campos": campos}, format="json"
+        )
+        request.effective_scope = scope or EffectiveScope(
+            is_global=True, perm_keys=("pld-compliance.editar",)
+        )
+        view = PldContraparteKycViewSet.as_view({"post": "confirmar_extraccion"})
+        return view(request, pk=self.kyc.id_kyc)
+
+    def test_requiere_permiso_editar(self):
+        response = self._confirmar(
+            {"curp": "CURP000000HDFRRL01"}, scope=EffectiveScope(is_global=True, perm_keys=())
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_guarda_solo_los_campos_confirmables(self):
+        response = self._confirmar(
+            {
+                "curp": "CURP000000HDFRRL01",
+                "nombre_completo": "Alguien Que No Tiene Columna Propia",
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.curp, "CURP000000HDFRRL01")
+        # "nombre_completo" no es un campo del modelo - se ignora, no truena.
+        self.assertNotIn("nombre_completo", response.data)
+
+    def test_rechaza_si_ningun_campo_es_confirmable(self):
+        response = self._confirmar({"nombre_completo": "Alguien"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_rechaza_body_vacio(self):
+        response = self._confirmar({})
+        self.assertEqual(response.status_code, 400)
