@@ -111,6 +111,12 @@ DATABASES = {
     }
 }
 
+# URL interna de drive-service (export_csv sube el CSV ahi en vez de
+# descargarlo directo al navegador - decision de Mariana 12/Ago/2026, ver
+# memoria de sesion "csv-auditoria-a-drive"). Mismo patron que
+# pld-service/config/settings.py.
+DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
+
 AUTH_PASSWORD_VALIDATORS = []
 
 LANGUAGE_CODE = "es-mx"

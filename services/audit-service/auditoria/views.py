@@ -1,6 +1,9 @@
 import csv
+import io
+import logging
 
-from django.http import HttpResponse
+import requests
+from django.conf import settings
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
@@ -9,6 +12,8 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from .models import BitacoraAuditoria
 from .serializers import BitacoraAuditoriaSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
@@ -59,9 +64,19 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"])
     def export_csv(self, request):
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="bitacora_auditoria.csv"'
-        writer = csv.writer(response)
+        """Ya NO descarga el CSV directo al navegador (decision de Mariana,
+        12/Ago/2026, ver memoria de sesion "csv-auditoria-a-drive"): arma el
+        CSV en memoria y lo sube a Drive via drive-service
+        (CumbresBI/Auditoria/Bitacora/), igual que pld-service sube
+        documentos KYC. Regresa el file_id/web_view_link de Drive en vez de
+        streamear el archivo - el frontend ya no ofrece descarga local.
+
+        Reenvia el JWT del usuario original a drive-service (mismo patron
+        que PldContraparteDocViewSet.subir) - el permiso real de subida lo
+        decide drive-service via ?perm=audit.leer (el mismo perm_key que ya
+        exige get_queryset arriba para poder ver la bitacora)."""
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
         writer.writerow(
             [
                 "event_id",
@@ -87,7 +102,39 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
                     evento.recibido_en,
                 ]
             )
-        return response
+        contenido = buffer.getvalue().encode("utf-8")
+
+        headers = {}
+        auth_header = request.META.get("HTTP_AUTHORIZATION")
+        if auth_header:
+            headers["Authorization"] = auth_header
+        cookie_name = getattr(settings, "CUMBRESBI_SCOPE_SESSION_COOKIE_NAME", "cumbresbi_session")
+        cookies = {}
+        if request.COOKIES.get(cookie_name):
+            cookies[cookie_name] = request.COOKIES[cookie_name]
+
+        nombre_archivo = f"bitacora_auditoria_{timezone.now().strftime('%Y%m%d%H%M%S')}.csv"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "audit.leer"},
+                files={"file": (nombre_archivo, contenido, "text/csv")},
+                data={"carpeta": "Auditoria/Bitacora"},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al exportar la bitacora a CSV", exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir el CSV a Drive"},
+                status=upstream.status_code,
+            )
+
+        return Response(upstream.json(), status=201)
 
     @action(detail=False, methods=["post"])
     def registrar_evento(self, request):
