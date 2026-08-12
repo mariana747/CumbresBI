@@ -78,3 +78,6 @@ services/document-intelligence-service/Maria/
 *.docx
 !docs/architecture/*.md
 !docs/architecture/**/*.md
+# Excepcion a la excepcion: este no debe subirse nunca (instruccion de
+# Mariana, 12/Ago/2026), aunque viva dentro de docs/architecture/.
+docs/architecture/CumbresBI_Onboarding_Desarrollador.md
