@@ -10,8 +10,6 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-logger = logging.getLogger(__name__)
-
 from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
 from .serializers import (
     PldContraparteDocSerializer,
@@ -20,6 +18,8 @@ from .serializers import (
 )
 from .signals import recalcular_estado_llenado
 from .ticket_utils import generate_token, hash_token
+
+logger = logging.getLogger(__name__)
 
 
 class PldContraparteKycViewSet(ModelViewSet):
