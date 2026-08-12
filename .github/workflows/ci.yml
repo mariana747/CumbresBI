@@ -146,6 +146,35 @@ jobs:
           DJANGO_SECRET_KEY: ci-only-key
         run: python manage.py check
 
+  drive-service-check:
+    name: drive-service
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install cumbresbi-scope (libreria compartida)
+        run: pip install ./libs/cumbresbi-scope
+      - name: Install service dependencies
+        working-directory: services/drive-service
+        run: |
+          sed -i '/^\/libs\/cumbresbi-scope$/d' requirements.txt
+          pip install -r requirements.txt
+      - name: Lint (ruff)
+        working-directory: services/drive-service
+        run: |
+          pip install ruff==0.6.9
+          ruff check .
+      - name: Django check
+        working-directory: services/drive-service
+        env:
+          DJANGO_SECRET_KEY: ci-only-key
+        run: python manage.py check
+        # Sin base de datos propia (proxy stateless hacia Drive) - no entra
+        # a la matriz de lint-and-test (esa exige MySQL real), mismo
+        # criterio que gateway-check.
+
   frontend-check:
     name: frontend
     runs-on: ubuntu-latest
@@ -185,6 +214,7 @@ jobs:
             tesoreria-service,
             rentas-service,
             document-intelligence-service,
+            drive-service,
             api-gateway,
           ]
     steps:

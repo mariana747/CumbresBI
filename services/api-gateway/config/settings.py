@@ -75,4 +75,5 @@ SERVICE_ROUTES = {
     "rrhh": env("GATEWAY_ROUTE_RRHH", default="http://rrhh-service:8080"),
     "tesoreria": env("GATEWAY_ROUTE_TESORERIA", default="http://tesoreria-service:8080"),
     "rentas": env("GATEWAY_ROUTE_RENTAS", default="http://rentas-service:8080"),
+    "drive": env("GATEWAY_ROUTE_DRIVE", default="http://drive-service:8080"),
 }

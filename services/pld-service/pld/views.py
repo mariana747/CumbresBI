@@ -1,9 +1,16 @@
+import logging
+
+import requests
 from cumbresbi_scope.permissions import require_permission
+from django.conf import settings
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
+
+logger = logging.getLogger(__name__)
 
 from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
 from .serializers import (
@@ -82,7 +89,7 @@ class PldContraparteDocViewSet(ModelViewSet):
     serializer_class = PldContraparteDocSerializer
 
     def get_permissions(self):
-        if self.action == "create":
+        if self.action in ("create", "subir"):
             return [require_permission("pld-compliance.crear")()]
         if self.action in ("update", "partial_update"):
             return [require_permission("pld-compliance.editar")()]
@@ -96,6 +103,60 @@ class PldContraparteDocViewSet(ModelViewSet):
         if kyc_param:
             queryset = queryset.filter(kyc_id=kyc_param)
         return queryset
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir(self, request, pk=None):
+        """Sube el archivo real de este documento a Drive (via drive-service,
+        docs/architecture/pld-fase2-alcance.md sec. 1.4) y guarda la
+        referencia (drive_file_id/mime_type/tamano_bytes/subido_en) - separado
+        de create() porque el registro de metadata (denominacion, fecha
+        limite, etc.) puede existir antes de que llegue el archivo real
+        (documento "solicitado" pendiente de entrega).
+
+        Reenvia el JWT del usuario original a drive-service (Authorization
+        header o cookie de sesion) para que el permiso lo siga decidiendo el
+        rol de quien sube, no una credencial propia de pld-service."""
+        doc = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers = {}
+        auth_header = request.META.get("HTTP_AUTHORIZATION")
+        if auth_header:
+            headers["Authorization"] = auth_header
+        cookie_name = getattr(settings, "CUMBRESBI_SCOPE_SESSION_COOKIE_NAME", "cumbresbi_session")
+        cookies = {}
+        if request.COOKIES.get(cookie_name):
+            cookies[cookie_name] = request.COOKIES[cookie_name]
+
+        carpeta = f"PLD/{doc.kyc.id_contraparte}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "pld-compliance.crear"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir documento %s", doc.id_kyc_doc, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(upstream.json() if upstream.content else {"detail": "Error al subir a Drive"}, status=upstream.status_code)
+
+        resultado = upstream.json()
+        doc.drive_file_id = resultado["file_id"]
+        doc.link_documento = resultado["web_view_link"]
+        doc.mime_type = resultado["mime_type"]
+        doc.tamano_bytes = resultado["tamano_bytes"]
+        doc.subido_en = timezone.now()
+        doc.save(update_fields=["drive_file_id", "link_documento", "mime_type", "tamano_bytes", "subido_en"])
+
+        return Response(self.get_serializer(doc).data)
 
 
 class PldTicketClienteViewSet(ModelViewSet):

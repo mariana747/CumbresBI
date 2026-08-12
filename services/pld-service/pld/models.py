@@ -121,7 +121,18 @@ class PldContraparteDoc(models.Model):
     denominacion = models.CharField(max_length=250, blank=True, null=True)
     detalles_adicionales = models.CharField(max_length=500, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, blank=True, null=True)
+    # link_documento se queda como el web_view_link legible (para abrir el
+    # documento con un clic, ya lo consumia el frontend) - los campos de
+    # abajo son la referencia real a Drive (docs/architecture/
+    # pld-fase2-alcance.md sec. 1.4). blank/null porque los documentos
+    # creados antes de esta migracion no tienen valor todavia (no hay
+    # backfill pendiente: 0 documentos reales en la base al 11/Ago/2026,
+    # ver CumbresBI_estado.md).
     link_documento = models.CharField(max_length=2083, blank=True, null=True)
+    drive_file_id = models.CharField(max_length=128, blank=True, null=True)
+    mime_type = models.CharField(max_length=100, blank=True, null=True)
+    tamano_bytes = models.PositiveIntegerField(blank=True, null=True)
+    subido_en = models.DateTimeField(blank=True, null=True)
     fecha_solicitud = models.DateField(blank=True, null=True)
     fecha_limite = models.DateField(blank=True, null=True)
     fecha_entrega = models.DateField(blank=True, null=True)

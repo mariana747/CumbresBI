@@ -121,3 +121,11 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# URL interna de drive-service (docs/architecture/pld-fase2-alcance.md sec.
+# 1.4) - pld-service le reenvia el archivo subido en PldContraparteDocViewSet.
+# subir(), pasando el JWT del usuario original (no una credencial propia)
+# para que el permiso lo siga decidiendo el rol de quien sube, no
+# "pld-service puede subir lo que sea". Nombre de servicio de docker-compose,
+# resuelto por la red interna de Docker - mismo patron que GATEWAY_ROUTE_*.
+DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")

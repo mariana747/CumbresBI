@@ -13,6 +13,10 @@ class PldContraparteDocSerializer(serializers.ModelSerializer):
             "detalles_adicionales",
             "status",
             "link_documento",
+            "drive_file_id",
+            "mime_type",
+            "tamano_bytes",
+            "subido_en",
             "fecha_solicitud",
             "fecha_limite",
             "fecha_entrega",
@@ -23,7 +27,19 @@ class PldContraparteDocSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_kyc_doc", "created_at", "updated_at"]
+        # drive_file_id/mime_type/tamano_bytes/subido_en/link_documento se
+        # llenan via la accion subir() (ver views.py), nunca a mano en
+        # create/update directo - el archivo real es la fuente de verdad.
+        read_only_fields = [
+            "id_kyc_doc",
+            "created_at",
+            "updated_at",
+            "link_documento",
+            "drive_file_id",
+            "mime_type",
+            "tamano_bytes",
+            "subido_en",
+        ]
 
 
 class PldContraparteKycSerializer(serializers.ModelSerializer):

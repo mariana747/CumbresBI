@@ -351,6 +351,21 @@ services:
       rentas-service-db:
         condition: service_healthy
 
+  drive-service:
+    build:
+      context: .
+      dockerfile: services/drive-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./services/drive-service:/app
+    ports:
+      - "8009:8080"
+    # Sin base de datos propia (proxy stateless hacia Drive, ver
+    # config/settings.py) - sin dependencia de <servicio>-db, mismo criterio
+    # que api-gateway.
+
 # Escalar: cada futuro microservicio (contrapartes-service,
 # facturacion-cfdi-service, tickets-service, etc. - ver docs/architecture/
 # README.md sec. 1.1) se agrega aqui como un bloque <servicio> + <servicio>-db
