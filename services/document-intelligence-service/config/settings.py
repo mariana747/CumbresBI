@@ -134,3 +134,26 @@ DOCINT_USE_VERTEX = env.bool("DOCINT_USE_VERTEX", default=False)
 GEMINI_API_KEY = env("GEMINI_API_KEY", default=None)  # solo si DOCINT_USE_VERTEX=False
 VERTEX_PROJECT_ID = env("VERTEX_PROJECT_ID", default=None)  # solo si DOCINT_USE_VERTEX=True
 VERTEX_LOCATION = env("VERTEX_LOCATION", default="us-central1")
+
+# --- Analisis asincrono con Cloud Tasks (Fase 1: persistencia; ver
+# docs/architecture - plan de migracion async del motor documental) ---
+# Staging temporal del archivo antes de analizarlo (docint/storage.py).
+# "local" en dev/Docker Compose (sin GCP real), "gcs" en Cloud Run.
+DOCINT_STAGING_BACKEND = env("DOCINT_STAGING_BACKEND", default="local")
+DOCINT_STAGING_BUCKET = env("DOCINT_STAGING_BUCKET", default=None)  # solo si backend=gcs
+DOCINT_STAGING_LOCAL_DIR = env("DOCINT_STAGING_LOCAL_DIR", default="/tmp/docint-staging")
+
+# Reintentos de aplicacion dentro de /analyze/<id>/procesar (Fase 2+) -
+# separado de los reintentos de transporte que configura la propia cola de
+# Cloud Tasks (maxAttempts, fuera de este codigo).
+DOCINT_MAX_INTENTOS_ANALISIS = env.int("DOCINT_MAX_INTENTOS_ANALISIS", default=3)
+
+# Fase 2+: integracion real con Cloud Tasks. DOCINT_TASKS_ENABLED=False (dev)
+# ejecuta el analisis in-process en vez de encolar de verdad - mismo patron
+# que DOCINT_USE_VERTEX para no depender de GCP real en desarrollo local.
+DOCINT_TASKS_ENABLED = env.bool("DOCINT_TASKS_ENABLED", default=False)
+DOCINT_CLOUD_TASKS_PROJECT = env("DOCINT_CLOUD_TASKS_PROJECT", default=None)
+DOCINT_CLOUD_TASKS_LOCATION = env("DOCINT_CLOUD_TASKS_LOCATION", default="us-central1")
+DOCINT_CLOUD_TASKS_QUEUE = env("DOCINT_CLOUD_TASKS_QUEUE", default="docint-analysis")
+DOCINT_CLOUD_TASKS_SERVICE_ACCOUNT = env("DOCINT_CLOUD_TASKS_SERVICE_ACCOUNT", default=None)
+DOCINT_SELF_BASE_URL = env("DOCINT_SELF_BASE_URL", default="http://localhost:8080")
