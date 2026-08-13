@@ -6,6 +6,18 @@ from docint.contracts import DocumentAnalysisRequest, DocumentAnalysisResult
 from docint.prompts import PROMPTS
 from .base import DocumentIntelligenceProvider
 
+# Codigos de la API de Gemini que son transitorios (saturacion, error del
+# lado de Google) - se relanzan como RetryableProviderError para que
+# processing.ejecutar_con_reintentos los reintente en vez de mostrarselos
+# directo al usuario. Cualquier otro codigo (400 imagen invalida, 401/403
+# credenciales, 404) no es reintentable - reintentar no lo arregla.
+_CODIGOS_REINTENTABLES = {429, 500, 502, 503, 504}
+
+
+class RetryableProviderError(Exception):
+    """Fallo transitorio del proveedor (ver _CODIGOS_REINTENTABLES) - se deja
+    subir para que ejecutar_con_reintentos decida si reintentar o no."""
+
 
 class GeminiProvider(DocumentIntelligenceProvider):
     """Un solo provider para AI Studio (dev, documentos ficticios) y Vertex AI
@@ -61,12 +73,17 @@ class GeminiProvider(DocumentIntelligenceProvider):
                 raise ValueError(f"respuesta vacia del modelo (finish_reason={finish_reason})")
             payload = json.loads(response.text)
         except errors.APIError as exc:
+            if exc.code in _CODIGOS_REINTENTABLES:
+                raise RetryableProviderError(
+                    "El servicio de analisis esta saturado o no disponible temporalmente "
+                    f"(codigo {exc.code}). Se reintentara automaticamente."
+                ) from exc
             return DocumentAnalysisResult(
                 detected_document_type=None,
                 matches_expected_type=False,
                 confidence=0.0,
                 extracted_data={},
-                validation_errors=[f"Error de la API de Gemini: {exc}"],
+                validation_errors=[f"No se pudo analizar el documento: {exc.message or exc.status or exc}"],
                 warnings=[],
             )
         except (json.JSONDecodeError, KeyError, ValueError) as exc:

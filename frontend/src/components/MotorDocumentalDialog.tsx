@@ -30,7 +30,13 @@ import {
 } from "@mui/material";
 import { CheckCircle2, ChevronDown, FolderSearch, X as CloseIcon } from "lucide-react";
 import { DriveArchivo, listDriveFiles } from "@/lib/drive";
-import { analyzeDocument, DocumentAnalysisResult, guessDocumentTypeFromFilename } from "@/lib/docint";
+import {
+  analyzeDocument,
+  AnalysisStatus,
+  DocumentAnalysisResult,
+  guessDocumentTypeFromFilename,
+  pollAnalysis,
+} from "@/lib/docint";
 import { PLD_CAMPOS_CONFIRMABLES, PldContraparteKyc, confirmarExtraccionKyc, listKyc } from "@/lib/pld";
 
 // Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
@@ -71,6 +77,12 @@ interface DocumentResult {
   expectedDocumentType: string;
   result?: DocumentAnalysisResult;
   error?: string;
+  // Estado del analisis async (docint/models.py::AnalysisJob) -
+  // "PENDIENTE"/"PROCESANDO" mientras se hace polling, undefined antes de
+  // mandar a analizar. analysisId solo sirve para el polling en curso, no
+  // se muestra en la UI.
+  estadoAnalisis?: AnalysisStatus;
+  analysisId?: string;
   extraccionConfirmadaEn?: string;
   extraccionError?: string;
 }
@@ -202,42 +214,69 @@ export default function MotorDocumentalDialog({
     }
   }
 
+  // "loading" solo cubre el encolado inicial (rapido, 202 por archivo) - una
+  // vez encolados, cada archivo hace su propio polling independiente
+  // (estadoAnalisis por indice) sin bloquear a los demas ni al boton de
+  // enviar. Antes (sincrono) un archivo lento tumbaba a todos con el
+  // timeout del gateway - ver docint/views.py::AnalyzeView.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const elegidos = driveFiles.filter((a) => seleccionados.has(a.file_id));
     if (elegidos.length === 0) return;
     setLoading(true);
     try {
-      const analyzed = await Promise.all(
-        elegidos.map(async (archivo) => {
-          const expectedDocumentType = guessDocumentTypeFromFilename(archivo.nombre);
+      const iniciales: DocumentResult[] = elegidos.map((archivo) => ({
+        archivo,
+        expectedDocumentType: guessDocumentTypeFromFilename(archivo.nombre),
+      }));
+      setDocuments(iniciales);
+
+      await Promise.all(
+        iniciales.map(async (doc, index) => {
           try {
-            const result = await analyzeDocument({
-              driveFileId: archivo.file_id,
+            const { analysisId, status } = await analyzeDocument({
+              driveFileId: doc.archivo.file_id,
               carpeta,
               permKey,
-              nombreArchivo: archivo.nombre,
-              mimeType: archivo.mime_type ?? undefined,
-              expectedDocumentType,
+              nombreArchivo: doc.archivo.nombre,
+              mimeType: doc.archivo.mime_type ?? undefined,
+              expectedDocumentType: doc.expectedDocumentType,
               servicioSolicitante: servicioSolicitante || "desconocido",
             });
-            return { archivo, expectedDocumentType, result, error: undefined };
+            setDocuments((prev) =>
+              prev.map((d, i) => (i === index ? { ...d, analysisId, estadoAnalisis: status, error: undefined } : d))
+            );
+
+            const final = await pollAnalysis(analysisId);
+            setDocuments((prev) =>
+              prev.map((d, i) =>
+                i === index
+                  ? {
+                      ...d,
+                      estadoAnalisis: final.status,
+                      result: final.result ?? undefined,
+                      error: final.error ?? undefined,
+                    }
+                  : d
+              )
+            );
           } catch (err) {
-            return {
-              archivo,
-              expectedDocumentType,
-              error: err instanceof Error ? err.message : "Error desconocido",
-            };
+            setDocuments((prev) =>
+              prev.map((d, i) =>
+                i === index
+                  ? { ...d, estadoAnalisis: "ERROR", error: err instanceof Error ? err.message : "Error desconocido" }
+                  : d
+              )
+            );
           }
         })
       );
-      setDocuments(analyzed);
     } finally {
       setLoading(false);
     }
   }
 
-  const hasResults = documents.some((doc) => doc.result || doc.error);
+  const hasResults = documents.some((doc) => doc.result || doc.error || doc.estadoAnalisis);
 
   // Cerrar el dialogo (X, Escape o clic afuera) NO debe perder lo ya
   // extraido - volver a analizar cuesta tokens de la IA. Por eso "cerrar" y
@@ -390,6 +429,14 @@ export default function MotorDocumentalDialog({
                     <Typography variant="body2" noWrap sx={{ flex: 1 }}>
                       {doc.archivo.nombre}
                     </Typography>
+                    {!doc.result && !doc.error && (doc.estadoAnalisis === "PENDIENTE" || doc.estadoAnalisis === "PROCESANDO") && (
+                      <Chip
+                        size="small"
+                        icon={<CircularProgress size={12} color="inherit" />}
+                        label="Procesando"
+                        sx={{ "& .MuiChip-icon": { ml: 1 } }}
+                      />
+                    )}
                     {doc.result && (
                       <Chip
                         size="small"
@@ -401,6 +448,11 @@ export default function MotorDocumentalDialog({
                   </Stack>
                 </AccordionSummary>
                 <AccordionDetails>
+                  {!doc.result && !doc.error && (doc.estadoAnalisis === "PENDIENTE" || doc.estadoAnalisis === "PROCESANDO") && (
+                    <Typography variant="body2" color="text.secondary">
+                      Analizando documento con IA, puede tardar unos segundos…
+                    </Typography>
+                  )}
                   {doc.error && <Alert severity="error">{doc.error}</Alert>}
 
                   {doc.result && (

@@ -1,9 +1,10 @@
 // Cliente del Motor Inteligente de Procesamiento Documental (docint).
 // Contrato: services/document-intelligence-service/docint/views.py (POST /analyze).
-// Modo actual = dev sin Drive: el archivo se sube directo en el body
-// multipart. Cuando la integracion con Google Drive este lista (bloqueada
-// por Actividad 1, ver docint/drive.py), este campo cambia de `file` a un
-// identificador de Drive sin que la UI del formulario deba rediseñarse.
+// El archivo ya NO se sube directo del navegador (decision de Mariana,
+// 12/Ago/2026, ver memoria de sesion "motor-documental-seleccion-archivos-
+// drive"): el analista lo sube el mismo en drive.google.com; aqui solo se
+// manda la referencia (driveFileId/carpeta/permKey). El analisis en si es
+// async (202 + polling, ver pollAnalysis mas abajo).
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
@@ -18,12 +19,19 @@ export interface DocumentAnalysisResult {
   matched_by_filename: boolean | null;
 }
 
-// Ya NO se manda el archivo directo del navegador (decision de Mariana,
-// 12/Ago/2026, ver memoria de sesion
-// "motor-documental-seleccion-archivos-drive"): el analista sube el
-// archivo el mismo en drive.google.com; aqui solo se manda la referencia
-// (driveFileId/carpeta) + el perm_key que drive-service va a exigir para
-// dejarlo leer esa carpeta.
+// Espejo de docint/models.py::AnalysisJob.ESTADOS.
+export type AnalysisStatus = "PENDIENTE" | "PROCESANDO" | "COMPLETADO" | "ERROR";
+
+export interface AnalysisStatusResponse {
+  analysis_id: string;
+  status: AnalysisStatus;
+  result: DocumentAnalysisResult | null;
+  error: string | null;
+}
+
+// El analista sube el archivo el mismo en drive.google.com; aqui solo se
+// manda la referencia (driveFileId/carpeta) + el perm_key que drive-service
+// va a exigir para dejarlo leer esa carpeta.
 export interface AnalyzeDocumentParams {
   driveFileId: string;
   carpeta: string;
@@ -83,6 +91,9 @@ export function guessDocumentTypeFromFilename(filename: string): string {
   return "generic";
 }
 
+// Encola el analisis y regresa de inmediato (202 + analysis_id) - ya NO
+// espera el resultado, ver docint/views.py::AnalyzeView. Usar junto con
+// pollAnalysis.
 export async function analyzeDocument({
   driveFileId,
   carpeta,
@@ -92,7 +103,7 @@ export async function analyzeDocument({
   expectedDocumentType,
   servicioSolicitante,
   metadata,
-}: AnalyzeDocumentParams): Promise<DocumentAnalysisResult> {
+}: AnalyzeDocumentParams): Promise<{ analysisId: string; status: AnalysisStatus }> {
   const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -112,5 +123,46 @@ export async function analyzeDocument({
     throw await friendlyApiError("DOCINT", response);
   }
 
+  const body = await response.json();
+  return { analysisId: body.analysis_id, status: body.status };
+}
+
+export async function getAnalysisStatus(analysisId: string): Promise<AnalysisStatusResponse> {
+  const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze/${analysisId}/status`, {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    throw await friendlyApiError("DOCINT", response);
+  }
+
   return response.json();
+}
+
+// Backoff simple (2s, 3s, 5s, luego cada 5s) hasta ver COMPLETADO/ERROR o
+// agotar timeoutMs - un analisis real con Gemini rara vez tarda mas de
+// unos segundos, pero el limite evita que el usuario se quede viendo
+// "Procesando" para siempre si algo se atoro sin marcarse ERROR.
+const BACKOFF_MS = [2000, 3000, 5000];
+
+export async function pollAnalysis(
+  analysisId: string,
+  { timeoutMs = 120_000 }: { timeoutMs?: number } = {}
+): Promise<AnalysisStatusResponse> {
+  const start = Date.now();
+  let intento = 0;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const estado = await getAnalysisStatus(analysisId);
+    if (estado.status === "COMPLETADO" || estado.status === "ERROR") {
+      return estado;
+    }
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("El análisis está tardando más de lo esperado. Intenta de nuevo. (DOCINT-timeout)");
+    }
+    const espera = BACKOFF_MS[Math.min(intento, BACKOFF_MS.length - 1)];
+    intento += 1;
+    await new Promise((resolve) => setTimeout(resolve, espera));
+  }
 }

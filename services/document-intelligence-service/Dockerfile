@@ -28,4 +28,10 @@ COPY services/document-intelligence-service/ .
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2"]
+
+# --timeout 120: default de gunicorn es 30s, insuficiente para un analisis
+# real con Gemini sobre un documento grande - sin esto, gunicorn mata al
+# worker a medio analisis (SystemExit, conexion cortada sin respuesta al
+# cliente). Parche temporal mientras la Fase 3 (async con Cloud Tasks, ver
+# plan) deja de correr el analisis dentro del ciclo de vida del worker HTTP.
+CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2 --timeout 120"]
