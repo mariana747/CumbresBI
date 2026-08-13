@@ -37,6 +37,14 @@ SERVICIOS = [
     "rrhh",
     "tickets",
     "audit",
+    # Motor Documental (document-intelligence-service) - transversal, no es
+    # negocio de un solo modulo (PLD hoy, compras/tesoreria/rrhh a futuro
+    # via SERVICIOS_SOLICITANTES en el frontend). "C"=encolar un analisis
+    # nuevo (docint.crear), "L"=consultar su estado/resultado (docint.leer,
+    # GET /analyze/<id>/status) - mismo criterio letra->accion que el resto,
+    # sin inventar una accion nueva (13/Ago/2026, fase 4 de la migracion
+    # async con Cloud Tasks).
+    "docint",
 ]
 
 ACCION_POR_LETRA = {"L": "leer", "C": "crear", "E": "editar", "A": "aprobar"}
@@ -46,12 +54,12 @@ ROLE_ACCESS = {
         "iam": "LCEA", "contrapartes": "LCEA", "pld-compliance": "LCEA",
         "ventas-vivienda": "LCEA", "materiales": "LCEA", "rentas": "LCEA",
         "tesoreria": "LCEA", "facturacion-cfdi": "LCEA", "compras": "LCEA",
-        "rrhh": "LCEA", "tickets": "LCEA", "audit": "L",
+        "rrhh": "LCEA", "tickets": "LCEA", "audit": "L", "docint": "LC",
     },
     "IAM_ADMIN": {"iam": "LCEA", "audit": "L"},
     "AUDITOR": {s: "L" for s in SERVICIOS},
-    "PLD_ANALISTA": {"iam": "L", "contrapartes": "L", "pld-compliance": "LCE"},
-    "PLD_APROBADOR": {"iam": "L", "contrapartes": "L", "pld-compliance": "LEA"},
+    "PLD_ANALISTA": {"iam": "L", "contrapartes": "L", "pld-compliance": "LCE", "docint": "LC"},
+    "PLD_APROBADOR": {"iam": "L", "contrapartes": "L", "pld-compliance": "LEA", "docint": "LC"},
     "VENTAS_ASESOR": {
         "iam": "L", "contrapartes": "L", "ventas-vivienda": "LCE", "materiales": "L",
     },
