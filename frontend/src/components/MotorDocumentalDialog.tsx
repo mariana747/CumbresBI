@@ -8,6 +8,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -19,14 +20,16 @@ import {
   InputLabel,
   List,
   ListItem,
+  ListItemButton,
+  ListItemIcon,
   ListItemText,
   MenuItem,
   Select,
   Stack,
   Typography,
 } from "@mui/material";
-import { CheckCircle2, ChevronDown, CloudUpload, UploadCloud, X as CloseIcon } from "lucide-react";
-import { confirmarEnvioDrive } from "@/lib/audit";
+import { CheckCircle2, ChevronDown, FolderSearch, X as CloseIcon } from "lucide-react";
+import { DriveArchivo, listDriveFiles } from "@/lib/drive";
 import { analyzeDocument, DocumentAnalysisResult, guessDocumentTypeFromFilename } from "@/lib/docint";
 import { PLD_CAMPOS_CONFIRMABLES, PldContraparteKyc, confirmarExtraccionKyc, listKyc } from "@/lib/pld";
 
@@ -50,11 +53,10 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
 // el analisis para el log operacional (AnalysisRequestLog.servicio_solicitante)
 // - no afecta el resultado del analisis, solo trazabilidad de quien llamo.
 //
-// TODO(auth): esta lista debe filtrarse por el EffectiveScope/rol del usuario
-// en sesion (ver docs/architecture/roles-y-permisos.md) - ej. un usuario con
-// solo PLD_ANALISTA no deberia poder elegir "rrhh-service" aqui. No
-// implementado todavia porque el login sigue siendo un placeholder (Fase 0,
-// sin JWT real llegando al frontend) - ver src/app/login/page.tsx.
+// Solo "pld-service" tiene hoy una carpeta de Drive real resuelta (ver
+// `carpeta` mas abajo, PLD/<id_contraparte>) - los demas quedan listados
+// para trazabilidad pero sin carpeta que listar todavia (memoria de sesion
+// "motor-documental-seleccion-archivos-drive").
 const SERVICIOS_SOLICITANTES = [
   "pld-service",
   "compras-tesoreria-service",
@@ -65,35 +67,25 @@ const SERVICIOS_SOLICITANTES = [
 ] as const;
 
 interface DocumentResult {
-  file: File;
+  archivo: DriveArchivo;
   expectedDocumentType: string;
   result?: DocumentAnalysisResult;
   error?: string;
-  driveConfirmadoEn?: string;
-  // Expediente KYC elegido para volcar los datos ya validados (solo aplica
-  // a servicioSolicitante === "pld-service", ver confirmar_extraccion en
-  // pld-service). undefined mientras el analista no elige uno.
-  kycSeleccionado?: string;
   extraccionConfirmadaEn?: string;
   extraccionError?: string;
 }
 
 // Motor Inteligente de Procesamiento Documental (docint) - ver
-// docs/architecture/README.md sec. 10. Fase 0: modo dev sin Drive, el
-// archivo se sube directo (ver services/document-intelligence-service/
-// docint/views.py). Solo usar con documentos ficticios.
+// docs/architecture/README.md sec. 10. Decision de Mariana (12/Ago/2026,
+// ver memoria de sesion "motor-documental-seleccion-archivos-drive"): ya
+// NO se suben archivos locales - el analista sube el archivo el mismo en
+// drive.google.com (a la carpeta correspondiente); este dialogo solo
+// LISTA lo que ya esta ahi y lo manda a analizar por referencia
+// (streaming Drive->Gemini, ver docint/drive.py).
 //
 // Modulo emergente (confirmado por el cliente): se invoca como dialogo desde
-// cualquier pantalla que necesite analizar un documento (ej. un formulario de
-// PLD o Compras con boton "Analizar documento"), no como una pagina propia -
-// por eso vive en components/ y no en app/.
-//
-// Carga multiple (confirmado por el cliente): para armar el expediente de una
-// persona (INE, CURP, comprobante, etc.) de un jalon, se seleccionan varios
-// archivos a la vez y cada uno se etiqueta solo (autodeteccion por nombre,
-// ver guessDocumentTypeFromFilename) - sin pedirle al usuario que capture el
-// tipo archivo por archivo. El backend sigue recibiendo un POST /analyze por
-// archivo (no soporta batch), asi que aqui se hace un fetch por documento.
+// cualquier pantalla que necesite analizar un documento, no como una pagina
+// propia - por eso vive en components/ y no en app/.
 export default function MotorDocumentalDialog({
   open,
   onClose,
@@ -101,7 +93,6 @@ export default function MotorDocumentalDialog({
   open: boolean;
   onClose: () => void;
 }) {
-  const [documents, setDocuments] = useState<DocumentResult[]>([]);
   // Tipado explicito: SERVICIOS_SOLICITANTES es "as const" (tupla de
   // literales), asi que SERVICIOS_SOLICITANTES[0] solo, sin el generic,
   // infiere el tipo mas angosto ("pld-service" a secas) - el setter
@@ -111,11 +102,24 @@ export default function MotorDocumentalDialog({
   );
   const [loading, setLoading] = useState(false);
 
-  // Expedientes KYC existentes, para que el analista elija a cual volcar los
-  // datos ya validados (solo tiene sentido cuando servicioSolicitante ===
-  // "pld-service" - es el unico consumidor con endpoint de confirmacion
-  // hoy, ver services/pld-service/pld/views.py::confirmar_extraccion).
+  // Expedientes KYC existentes - determinan la carpeta de Drive a listar
+  // (PLD/<id_contraparte>/) y, mas adelante, a cual expediente se
+  // confirman los datos ya validados. Solo aplica a "pld-service", el
+  // unico consumidor con carpeta real resuelta hoy.
   const [kycOptions, setKycOptions] = useState<PldContraparteKyc[]>([]);
+  const [kycSeleccionado, setKycSeleccionado] = useState("");
+
+  const carpeta = kycSeleccionado
+    ? `PLD/${kycOptions.find((k) => k.id_kyc === kycSeleccionado)?.id_contraparte}`
+    : "";
+  const permKey = "pld-compliance.crear";
+
+  const [driveFiles, setDriveFiles] = useState<DriveArchivo[]>([]);
+  const [loadingDriveFiles, setLoadingDriveFiles] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+
+  const [documents, setDocuments] = useState<DocumentResult[]>([]);
 
   useEffect(() => {
     if (!open || servicioSolicitante !== "pld-service") return;
@@ -124,31 +128,45 @@ export default function MotorDocumentalDialog({
       .catch(() => setKycOptions([]));
   }, [open, servicioSolicitante]);
 
-  function handleFilesSelected(fileList: FileList | null) {
-    if (!fileList) return;
-    const newDocuments = Array.from(fileList).map((file) => ({
-      file,
-      expectedDocumentType: guessDocumentTypeFromFilename(file.name),
-    }));
-    setDocuments((prev) => [...prev, ...newDocuments]);
+  async function handleVerArchivosDrive() {
+    if (!carpeta) return;
+    setLoadingDriveFiles(true);
+    setDriveError(null);
+    try {
+      const archivos = await listDriveFiles(carpeta, permKey);
+      setDriveFiles(archivos);
+      setSeleccionados(new Set());
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : "Error al listar archivos de Drive");
+    } finally {
+      setLoadingDriveFiles(false);
+    }
   }
 
-  function handleKycSeleccionado(index: number, kycId: string) {
-    setDocuments((prev) =>
-      prev.map((d, i) => (i === index ? { ...d, kycSeleccionado: kycId, extraccionError: undefined } : d))
-    );
+  function toggleSeleccionado(fileId: string) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
+    });
   }
 
-  // Reemplaza la descarga local de JSON (docs/architecture/README.md sec.
-  // 1.1 dejo de aplicar: ya existe confirmar_extraccion en pld-service).
-  // Solo manda las llaves de extracted_data que el expediente realmente
-  // puede guardar (PLD_CAMPOS_CONFIRMABLES, espejo de
+  function handleBorrarTodo() {
+    setDocuments([]);
+    setDriveFiles([]);
+    setSeleccionados(new Set());
+  }
+
+  // Reemplaza la descarga local de JSON: solo manda las llaves de
+  // extracted_data que el expediente realmente puede guardar
+  // (PLD_CAMPOS_CONFIRMABLES, espejo de
   // PldContraparteKycViewSet.CAMPOS_CONFIRMABLES) - el resto (ej.
   // "nombre_completo", "clave_elector") no tiene columna propia en este
   // modelo y se descarta aqui mismo, antes de llamar al backend.
   async function handleConfirmarExtraccion(index: number) {
     const doc = documents[index];
-    if (!doc.result || !doc.kycSeleccionado) return;
+    if (!doc.result || !kycSeleccionado) return;
 
     const campos = Object.fromEntries(
       Object.entries(doc.result.extracted_data).filter(
@@ -167,7 +185,7 @@ export default function MotorDocumentalDialog({
     }
 
     try {
-      await confirmarExtraccionKyc(doc.kycSeleccionado, campos);
+      await confirmarExtraccionKyc(kycSeleccionado, campos);
       setDocuments((prev) =>
         prev.map((d, i) =>
           i === index ? { ...d, extraccionConfirmadaEn: new Date().toISOString(), extraccionError: undefined } : d
@@ -184,47 +202,32 @@ export default function MotorDocumentalDialog({
     }
   }
 
-  // Confirmacion de envio a Drive (docs/architecture/README.md sec. 10:
-  // streaming via Drive API todavia bloqueado por falta del proyecto GCP,
-  // ver docint/drive.py). NO sube nada real a Drive - solo registra en la
-  // bitacora de auditoria que el usuario confirmo la intencion, con formato
-  // (PDF) y la fecha/hora en que se consulto el documento. Reemplazar por
-  // el envio real cuando exista esa integracion.
-  async function handleConfirmarDrive(index: number) {
-    const doc = documents[index];
-    const consultadoEn = new Date().toISOString();
-    try {
-      await confirmarEnvioDrive({ entidadId: doc.file.name, consultadoEn });
-      setDocuments((prev) =>
-        prev.map((d, i) => (i === index ? { ...d, driveConfirmadoEn: consultadoEn } : d))
-      );
-    } catch (err) {
-      setDocuments((prev) =>
-        prev.map((d, i) =>
-          i === index
-            ? { ...d, error: err instanceof Error ? err.message : "Error al confirmar envío a Drive" }
-            : d
-        )
-      );
-    }
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (documents.length === 0) return;
+    const elegidos = driveFiles.filter((a) => seleccionados.has(a.file_id));
+    if (elegidos.length === 0) return;
     setLoading(true);
     try {
       const analyzed = await Promise.all(
-        documents.map(async (doc) => {
+        elegidos.map(async (archivo) => {
+          const expectedDocumentType = guessDocumentTypeFromFilename(archivo.nombre);
           try {
             const result = await analyzeDocument({
-              file: doc.file,
-              expectedDocumentType: doc.expectedDocumentType,
+              driveFileId: archivo.file_id,
+              carpeta,
+              permKey,
+              nombreArchivo: archivo.nombre,
+              mimeType: archivo.mime_type ?? undefined,
+              expectedDocumentType,
               servicioSolicitante: servicioSolicitante || "desconocido",
             });
-            return { ...doc, result, error: undefined };
+            return { archivo, expectedDocumentType, result, error: undefined };
           } catch (err) {
-            return { ...doc, error: err instanceof Error ? err.message : "Error desconocido" };
+            return {
+              archivo,
+              expectedDocumentType,
+              error: err instanceof Error ? err.message : "Error desconocido",
+            };
           }
         })
       );
@@ -238,18 +241,13 @@ export default function MotorDocumentalDialog({
 
   // Cerrar el dialogo (X, Escape o clic afuera) NO debe perder lo ya
   // extraido - volver a analizar cuesta tokens de la IA. Por eso "cerrar" y
-  // "borrar" son acciones distintas: cerrar solo oculta el dialogo
-  // (el estado sigue vivo en este componente, sin desmontarse, mientras el
+  // "borrar" son acciones distintas: cerrar solo oculta el dialogo (el
+  // estado sigue vivo en este componente, sin desmontarse, mientras el
   // padre no cambie `open`); "Borrar todo" es la unica accion que limpia
-  // `documents` de verdad.
+  // el estado de verdad.
   function handleClose(_event?: unknown, reason?: "backdropClick" | "escapeKeyDown") {
     if (reason === "backdropClick" || reason === "escapeKeyDown") return;
     onClose();
-  }
-
-  function handleBorrarTodo() {
-    setDocuments([]);
-    setServicioSolicitante(SERVICIOS_SOLICITANTES[0]);
   }
 
   return (
@@ -262,56 +260,12 @@ export default function MotorDocumentalDialog({
       </DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Análisis de documentos con IA — modo desarrollo (subida directa, sin
-          integración con Google Drive todavía). Usar solo con documentos
-          ficticios. Puedes seleccionar varios archivos a la vez (ej. INE,
-          CURP y comprobante de la misma persona); el tipo se autodetecta por
-          el nombre del archivo.
+          Análisis de documentos con IA — los archivos viven en Google Drive
+          (el analista los sube ahí directamente); aquí solo se eligen y se
+          analizan.
         </Typography>
 
         <Stack component="form" spacing={2} onSubmit={handleSubmit}>
-          <Button
-            component="label"
-            variant="outlined"
-            startIcon={<UploadCloud size={18} strokeWidth={1.5} />}
-            sx={{ justifyContent: "flex-start" }}
-          >
-            {documents.length > 0
-              ? `${documents.length} archivo(s) seleccionado(s)`
-              : "Seleccionar archivos"}
-            <input
-              type="file"
-              hidden
-              multiple
-              onChange={(e) => handleFilesSelected(e.target.files)}
-            />
-          </Button>
-
-          {documents.length > 0 && (
-            <List dense sx={{ bgcolor: "background.default", borderRadius: 1 }}>
-              {documents.map((doc, index) => (
-                <ListItem
-                  key={`${doc.file.name}-${index}`}
-                  secondaryAction={
-                    <IconButton
-                      edge="end"
-                      size="small"
-                      aria-label="Quitar"
-                      onClick={() => setDocuments((prev) => prev.filter((_, i) => i !== index))}
-                    >
-                      <CloseIcon size={16} strokeWidth={1.5} />
-                    </IconButton>
-                  }
-                >
-                  <ListItemText
-                    primary={doc.file.name}
-                    secondary={DOCUMENT_TYPE_LABELS[doc.expectedDocumentType] ?? doc.expectedDocumentType}
-                  />
-                </ListItem>
-              ))}
-            </List>
-          )}
-
           <FormControl size="small" fullWidth>
             <InputLabel id="servicio-solicitante-label">Servicio solicitante</InputLabel>
             <Select
@@ -332,13 +286,89 @@ export default function MotorDocumentalDialog({
             </Typography>
           </FormControl>
 
-          <Button type="submit" variant="contained" disabled={loading || documents.length === 0}>
-            {loading ? (
-              <CircularProgress size={20} color="inherit" />
-            ) : (
-              `Analizar ${documents.length > 1 ? `${documents.length} documentos` : "documento"}`
-            )}
-          </Button>
+          {servicioSolicitante !== "pld-service" ? (
+            <Alert severity="info">
+              Este servicio todavía no tiene una carpeta de Drive resuelta —
+              por ahora solo "pld-service" puede listar/analizar documentos.
+            </Alert>
+          ) : (
+            <>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="kyc-select-label">Expediente KYC</InputLabel>
+                <Select
+                  labelId="kyc-select-label"
+                  label="Expediente KYC"
+                  value={kycSeleccionado}
+                  onChange={(e) => setKycSeleccionado(e.target.value)}
+                >
+                  {kycOptions.map((kyc) => (
+                    <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
+                      {kyc.id_contraparte} ({kyc.id_kyc})
+                    </MenuItem>
+                  ))}
+                </Select>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
+                  Determina la carpeta de Drive a listar (CumbresBI/PLD/&lt;contraparte&gt;/).
+                </Typography>
+              </FormControl>
+
+              <Button
+                variant="outlined"
+                startIcon={
+                  loadingDriveFiles ? <CircularProgress size={18} /> : <FolderSearch size={18} strokeWidth={1.5} />
+                }
+                disabled={!kycSeleccionado || loadingDriveFiles}
+                onClick={handleVerArchivosDrive}
+                sx={{ justifyContent: "flex-start" }}
+              >
+                Ver archivos en Drive
+              </Button>
+
+              {driveError && <Alert severity="error">{driveError}</Alert>}
+
+              {driveFiles.length > 0 && (
+                <List dense sx={{ bgcolor: "background.default", borderRadius: 1 }}>
+                  {driveFiles.map((archivo) => (
+                    <ListItem key={archivo.file_id} disablePadding>
+                      <ListItemButton onClick={() => toggleSeleccionado(archivo.file_id)} dense>
+                        <ListItemIcon sx={{ minWidth: 36 }}>
+                          <Checkbox
+                            edge="start"
+                            checked={seleccionados.has(archivo.file_id)}
+                            tabIndex={-1}
+                            disableRipple
+                            size="small"
+                          />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={archivo.nombre}
+                          secondary={
+                            DOCUMENT_TYPE_LABELS[guessDocumentTypeFromFilename(archivo.nombre)] ??
+                            guessDocumentTypeFromFilename(archivo.nombre)
+                          }
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+
+              {driveFiles.length === 0 && !loadingDriveFiles && kycSeleccionado && (
+                <Typography variant="caption" color="text.secondary">
+                  Sin archivos listados todavía — clic en "Ver archivos en
+                  Drive" (o la carpeta está vacía).
+                </Typography>
+              )}
+
+              <Button type="submit" variant="contained" disabled={loading || seleccionados.size === 0}>
+                {loading ? (
+                  <CircularProgress size={20} color="inherit" />
+                ) : (
+                  `Analizar ${seleccionados.size > 1 ? `${seleccionados.size} documentos` : "documento"}`
+                )}
+              </Button>
+            </>
+          )}
         </Stack>
 
         {hasResults && (
@@ -354,11 +384,11 @@ export default function MotorDocumentalDialog({
             </Stack>
 
             {documents.map((doc, index) => (
-              <Accordion key={`${doc.file.name}-${index}`} defaultExpanded={documents.length === 1}>
+              <Accordion key={`${doc.archivo.file_id}-${index}`} defaultExpanded={documents.length === 1}>
                 <AccordionSummary expandIcon={<ChevronDown size={18} strokeWidth={1.5} />}>
                   <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
                     <Typography variant="body2" noWrap sx={{ flex: 1 }}>
-                      {doc.file.name}
+                      {doc.archivo.nombre}
                     </Typography>
                     {doc.result && (
                       <Chip
@@ -409,59 +439,25 @@ export default function MotorDocumentalDialog({
                         {JSON.stringify(doc.result.extracted_data, null, 2)}
                       </Box>
 
-                      {servicioSolicitante === "pld-service" &&
-                        (doc.extraccionConfirmadaEn ? (
-                          <Alert severity="success">
-                            Datos confirmados en el expediente el{" "}
-                            {new Date(doc.extraccionConfirmadaEn).toLocaleString("es-MX")}.
-                          </Alert>
-                        ) : (
-                          <Stack spacing={1}>
-                            <FormControl size="small" fullWidth>
-                              <InputLabel id={`kyc-select-${index}`}>Expediente KYC destino</InputLabel>
-                              <Select
-                                labelId={`kyc-select-${index}`}
-                                label="Expediente KYC destino"
-                                value={doc.kycSeleccionado ?? ""}
-                                onChange={(e) => handleKycSeleccionado(index, e.target.value)}
-                              >
-                                {kycOptions.map((kyc) => (
-                                  <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
-                                    {kyc.id_contraparte} ({kyc.id_kyc})
-                                  </MenuItem>
-                                ))}
-                              </Select>
-                            </FormControl>
-                            {doc.extraccionError && <Alert severity="error">{doc.extraccionError}</Alert>}
-                            <Button
-                              size="small"
-                              variant="contained"
-                              startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
-                              disabled={!doc.kycSeleccionado}
-                              onClick={() => handleConfirmarExtraccion(index)}
-                              sx={{ alignSelf: "flex-start" }}
-                            >
-                              Confirmar y guardar en el expediente
-                            </Button>
-                          </Stack>
-                        ))}
-
-                      {doc.driveConfirmadoEn ? (
-                        <Alert severity="info">
-                          Envío a Drive confirmado el{" "}
-                          {new Date(doc.driveConfirmadoEn).toLocaleString("es-MX")} (como PDF) — pendiente
-                          de conexión real con Google Drive.
+                      {doc.extraccionConfirmadaEn ? (
+                        <Alert severity="success">
+                          Datos confirmados en el expediente el{" "}
+                          {new Date(doc.extraccionConfirmadaEn).toLocaleString("es-MX")}.
                         </Alert>
                       ) : (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<CloudUpload size={16} strokeWidth={1.5} />}
-                          onClick={() => handleConfirmarDrive(index)}
-                          sx={{ alignSelf: "flex-start" }}
-                        >
-                          Confirmar envío a Drive
-                        </Button>
+                        <Stack spacing={1}>
+                          {doc.extraccionError && <Alert severity="error">{doc.extraccionError}</Alert>}
+                          <Button
+                            size="small"
+                            variant="contained"
+                            startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
+                            disabled={!kycSeleccionado}
+                            onClick={() => handleConfirmarExtraccion(index)}
+                            sx={{ alignSelf: "flex-start" }}
+                          >
+                            Confirmar y guardar en el expediente
+                          </Button>
+                        </Stack>
                       )}
                     </Stack>
                   )}

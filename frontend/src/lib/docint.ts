@@ -18,8 +18,18 @@ export interface DocumentAnalysisResult {
   matched_by_filename: boolean | null;
 }
 
+// Ya NO se manda el archivo directo del navegador (decision de Mariana,
+// 12/Ago/2026, ver memoria de sesion
+// "motor-documental-seleccion-archivos-drive"): el analista sube el
+// archivo el mismo en drive.google.com; aqui solo se manda la referencia
+// (driveFileId/carpeta) + el perm_key que drive-service va a exigir para
+// dejarlo leer esa carpeta.
 export interface AnalyzeDocumentParams {
-  file: File;
+  driveFileId: string;
+  carpeta: string;
+  permKey: string;
+  nombreArchivo: string;
+  mimeType?: string;
   expectedDocumentType: string;
   servicioSolicitante: string;
   metadata?: Record<string, unknown>;
@@ -74,22 +84,28 @@ export function guessDocumentTypeFromFilename(filename: string): string {
 }
 
 export async function analyzeDocument({
-  file,
+  driveFileId,
+  carpeta,
+  permKey,
+  nombreArchivo,
+  mimeType,
   expectedDocumentType,
   servicioSolicitante,
   metadata,
 }: AnalyzeDocumentParams): Promise<DocumentAnalysisResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("expected_document_type", expectedDocumentType);
-  formData.append("servicio_solicitante", servicioSolicitante);
-  if (metadata) {
-    formData.append("metadata", JSON.stringify(metadata));
-  }
-
   const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze`, {
     method: "POST",
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      drive_file_id: driveFileId,
+      carpeta,
+      perm_key: permKey,
+      nombre_archivo: nombreArchivo,
+      mime_type: mimeType,
+      expected_document_type: expectedDocumentType,
+      servicio_solicitante: servicioSolicitante,
+      metadata: metadata ? JSON.stringify(metadata) : undefined,
+    }),
   });
 
   if (!response.ok) {
