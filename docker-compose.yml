@@ -366,6 +366,20 @@ services:
     # config/settings.py) - sin dependencia de <servicio>-db, mismo criterio
     # que api-gateway.
 
+  mail-service:
+    build:
+      context: .
+      dockerfile: services/mail-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./services/mail-service:/app
+    ports:
+      - "8010:8080"
+    # Sin base de datos propia (proxy stateless hacia Gmail API) - mismo
+    # criterio que drive-service.
+
 # Escalar: cada futuro microservicio (contrapartes-service,
 # facturacion-cfdi-service, tickets-service, etc. - ver docs/architecture/
 # README.md sec. 1.1) se agrega aqui como un bloque <servicio> + <servicio>-db
