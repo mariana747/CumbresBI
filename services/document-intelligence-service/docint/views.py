@@ -1,5 +1,6 @@
 import json
 
+from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny
@@ -30,6 +31,7 @@ class AnalyzeView(APIView):
     """
 
     parser_classes = [MultiPartParser]
+    permission_classes = [require_permission("docint.crear")]
 
     def post(self, request, *args, **kwargs):
         uploaded_file = request.FILES.get("file")
@@ -78,9 +80,9 @@ class AnalyzeView(APIView):
 class AnalysisStatusView(APIView):
     """GET /analyze/<id>/status - polling del resultado (Fase 3, ver plan).
     El frontend consulta esto cada pocos segundos hasta ver COMPLETADO o
-    ERROR (docint.ts::pollAnalysis). Sin permission_classes propio todavia -
-    igual que AnalyzeView, el perm_key docint.analizar se agrega en la
-    Fase 4 junto con el resto de hardening."""
+    ERROR (docint.ts::pollAnalysis)."""
+
+    permission_classes = [require_permission("docint.leer")]
 
     def get(self, request, analysis_id, *args, **kwargs):
         try:
