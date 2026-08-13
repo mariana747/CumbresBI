@@ -27,7 +27,13 @@ import {
 } from "@mui/material";
 import { CheckCircle2, ChevronDown, CloudUpload, UploadCloud, X as CloseIcon } from "lucide-react";
 import { confirmarEnvioDrive } from "@/lib/audit";
-import { analyzeDocument, DocumentAnalysisResult, guessDocumentTypeFromFilename } from "@/lib/docint";
+import {
+  analyzeDocument,
+  AnalysisStatus,
+  DocumentAnalysisResult,
+  guessDocumentTypeFromFilename,
+  pollAnalysis,
+} from "@/lib/docint";
 import { PLD_CAMPOS_CONFIRMABLES, PldContraparteKyc, confirmarExtraccionKyc, listKyc } from "@/lib/pld";
 
 // Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
@@ -69,6 +75,12 @@ interface DocumentResult {
   expectedDocumentType: string;
   result?: DocumentAnalysisResult;
   error?: string;
+  // Estado del analisis async (docint/models.py::AnalysisJob, Fase 3 de la
+  // migracion a Cloud Tasks) - "PENDIENTE"/"PROCESANDO" mientras se hace
+  // polling, undefined antes de mandar a analizar. analysisId solo sirve
+  // para el polling en curso, no se muestra en la UI.
+  estadoAnalisis?: AnalysisStatus;
+  analysisId?: string;
   driveConfirmadoEn?: string;
   // Expediente KYC elegido para volcar los datos ya validados (solo aplica
   // a servicioSolicitante === "pld-service", ver confirmar_extraccion en
@@ -209,32 +221,59 @@ export default function MotorDocumentalDialog({
     }
   }
 
+  // "loading" solo cubre el encolado inicial (rapido, 202 por archivo) - una
+  // vez encolados, cada archivo hace su propio polling independiente
+  // (estadoAnalisis por indice) sin bloquear a los demas ni al boton de
+  // enviar. Antes (sincrono) un archivo lento tumbaba a todos con el
+  // timeout del gateway - ver docint/views.py::AnalyzeView, Fase 3 del plan
+  // de migracion a Cloud Tasks.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (documents.length === 0) return;
     setLoading(true);
     try {
-      const analyzed = await Promise.all(
-        documents.map(async (doc) => {
+      await Promise.all(
+        documents.map(async (doc, index) => {
           try {
-            const result = await analyzeDocument({
+            const { analysisId, status } = await analyzeDocument({
               file: doc.file,
               expectedDocumentType: doc.expectedDocumentType,
               servicioSolicitante: servicioSolicitante || "desconocido",
             });
-            return { ...doc, result, error: undefined };
+            setDocuments((prev) =>
+              prev.map((d, i) => (i === index ? { ...d, analysisId, estadoAnalisis: status, error: undefined } : d))
+            );
+
+            const final = await pollAnalysis(analysisId);
+            setDocuments((prev) =>
+              prev.map((d, i) =>
+                i === index
+                  ? {
+                      ...d,
+                      estadoAnalisis: final.status,
+                      result: final.result ?? undefined,
+                      error: final.error ?? undefined,
+                    }
+                  : d
+              )
+            );
           } catch (err) {
-            return { ...doc, error: err instanceof Error ? err.message : "Error desconocido" };
+            setDocuments((prev) =>
+              prev.map((d, i) =>
+                i === index
+                  ? { ...d, estadoAnalisis: "ERROR", error: err instanceof Error ? err.message : "Error desconocido" }
+                  : d
+              )
+            );
           }
         })
       );
-      setDocuments(analyzed);
     } finally {
       setLoading(false);
     }
   }
 
-  const hasResults = documents.some((doc) => doc.result || doc.error);
+  const hasResults = documents.some((doc) => doc.result || doc.error || doc.estadoAnalisis);
 
   // Cerrar el dialogo (X, Escape o clic afuera) NO debe perder lo ya
   // extraido - volver a analizar cuesta tokens de la IA. Por eso "cerrar" y
@@ -360,6 +399,14 @@ export default function MotorDocumentalDialog({
                     <Typography variant="body2" noWrap sx={{ flex: 1 }}>
                       {doc.file.name}
                     </Typography>
+                    {!doc.result && !doc.error && (doc.estadoAnalisis === "PENDIENTE" || doc.estadoAnalisis === "PROCESANDO") && (
+                      <Chip
+                        size="small"
+                        icon={<CircularProgress size={12} color="inherit" />}
+                        label="Procesando"
+                        sx={{ "& .MuiChip-icon": { ml: 1 } }}
+                      />
+                    )}
                     {doc.result && (
                       <Chip
                         size="small"
@@ -371,6 +418,11 @@ export default function MotorDocumentalDialog({
                   </Stack>
                 </AccordionSummary>
                 <AccordionDetails>
+                  {!doc.result && !doc.error && (doc.estadoAnalisis === "PENDIENTE" || doc.estadoAnalisis === "PROCESANDO") && (
+                    <Typography variant="body2" color="text.secondary">
+                      Analizando documento con IA, puede tardar unos segundos…
+                    </Typography>
+                  )}
                   {doc.error && <Alert severity="error">{doc.error}</Alert>}
 
                   {doc.result && (
