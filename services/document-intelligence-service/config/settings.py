@@ -134,3 +134,8 @@ DOCINT_USE_VERTEX = env.bool("DOCINT_USE_VERTEX", default=False)
 GEMINI_API_KEY = env("GEMINI_API_KEY", default=None)  # solo si DOCINT_USE_VERTEX=False
 VERTEX_PROJECT_ID = env("VERTEX_PROJECT_ID", default=None)  # solo si DOCINT_USE_VERTEX=True
 VERTEX_LOCATION = env("VERTEX_LOCATION", default="us-central1")
+
+# URL interna de drive-service - docint/drive.py le pide los bytes del
+# documento ahi (streaming Drive->Gemini, ver docint/views.py::AnalyzeView).
+# Mismo patron que services/pld-service/config/settings.py.
+DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
