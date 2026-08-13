@@ -10,3 +10,4 @@ google-cloud-storage==2.18.2
 google-cloud-tasks==2.16.4
 /libs/cumbresbi-scope
 cryptography==43.0.1
+requests==2.32.3

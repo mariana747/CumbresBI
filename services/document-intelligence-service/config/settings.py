@@ -135,6 +135,11 @@ GEMINI_API_KEY = env("GEMINI_API_KEY", default=None)  # solo si DOCINT_USE_VERTE
 VERTEX_PROJECT_ID = env("VERTEX_PROJECT_ID", default=None)  # solo si DOCINT_USE_VERTEX=True
 VERTEX_LOCATION = env("VERTEX_LOCATION", default="us-central1")
 
+# URL interna de drive-service - docint/drive.py le pide los bytes del
+# documento ahi (streaming Drive->Gemini, ver docint/views.py::AnalyzeView).
+# Mismo patron que services/pld-service/config/settings.py.
+DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
+
 # --- Analisis asincrono con Cloud Tasks (Fase 1: persistencia; ver
 # docs/architecture - plan de migracion async del motor documental) ---
 # Staging temporal del archivo antes de analizarlo (docint/storage.py).

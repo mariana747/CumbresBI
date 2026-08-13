@@ -1,9 +1,10 @@
 // Cliente del Motor Inteligente de Procesamiento Documental (docint).
 // Contrato: services/document-intelligence-service/docint/views.py (POST /analyze).
-// Modo actual = dev sin Drive: el archivo se sube directo en el body
-// multipart. Cuando la integracion con Google Drive este lista (bloqueada
-// por Actividad 1, ver docint/drive.py), este campo cambia de `file` a un
-// identificador de Drive sin que la UI del formulario deba rediseñarse.
+// El archivo ya NO se sube directo del navegador (decision de Mariana,
+// 12/Ago/2026, ver memoria de sesion "motor-documental-seleccion-archivos-
+// drive"): el analista lo sube el mismo en drive.google.com; aqui solo se
+// manda la referencia (driveFileId/carpeta/permKey). El analisis en si es
+// async (202 + polling, ver pollAnalysis mas abajo).
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
@@ -28,8 +29,15 @@ export interface AnalysisStatusResponse {
   error: string | null;
 }
 
+// El analista sube el archivo el mismo en drive.google.com; aqui solo se
+// manda la referencia (driveFileId/carpeta) + el perm_key que drive-service
+// va a exigir para dejarlo leer esa carpeta.
 export interface AnalyzeDocumentParams {
-  file: File;
+  driveFileId: string;
+  carpeta: string;
+  permKey: string;
+  nombreArchivo: string;
+  mimeType?: string;
   expectedDocumentType: string;
   servicioSolicitante: string;
   metadata?: Record<string, unknown>;
@@ -84,25 +92,31 @@ export function guessDocumentTypeFromFilename(filename: string): string {
 }
 
 // Encola el analisis y regresa de inmediato (202 + analysis_id) - ya NO
-// espera el resultado, ver docint/views.py::AnalyzeView (Fase 3 del plan de
-// migracion a async con Cloud Tasks). Usar junto con pollAnalysis.
+// espera el resultado, ver docint/views.py::AnalyzeView. Usar junto con
+// pollAnalysis.
 export async function analyzeDocument({
-  file,
+  driveFileId,
+  carpeta,
+  permKey,
+  nombreArchivo,
+  mimeType,
   expectedDocumentType,
   servicioSolicitante,
   metadata,
 }: AnalyzeDocumentParams): Promise<{ analysisId: string; status: AnalysisStatus }> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("expected_document_type", expectedDocumentType);
-  formData.append("servicio_solicitante", servicioSolicitante);
-  if (metadata) {
-    formData.append("metadata", JSON.stringify(metadata));
-  }
-
   const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze`, {
     method: "POST",
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      drive_file_id: driveFileId,
+      carpeta,
+      perm_key: permKey,
+      nombre_archivo: nombreArchivo,
+      mime_type: mimeType,
+      expected_document_type: expectedDocumentType,
+      servicio_solicitante: servicioSolicitante,
+      metadata: metadata ? JSON.stringify(metadata) : undefined,
+    }),
   });
 
   if (!response.ok) {
