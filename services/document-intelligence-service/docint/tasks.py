@@ -54,8 +54,17 @@ def _ejecutar_in_process(job_id: str) -> None:
     ni por el endpoint /procesar (que sigue existiendo para cuando
     DOCINT_TASKS_ENABLED=True). Aplica el mismo manejo de reintentos/errores
     que usaria /procesar via Cloud Tasks - ver processing.ejecutar_con_reintentos,
-    compartida para no duplicar la logica."""
+    compartida para no duplicar la logica.
+
+    ejecutar_con_reintentos regresa False cuando el fallo fue transitorio y
+    aun quedan intentos - en produccion eso lo resuelve Cloud Tasks
+    reentregando la tarea; aqui no hay cola que lo haga, asi que se reintenta
+    en el momento con un backoff corto para no dejar el job atorado en
+    PENDIENTE para siempre."""
+    import time
+
     from .processing import ejecutar_con_reintentos
 
     job = AnalysisJob.objects.get(id=job_id)
-    ejecutar_con_reintentos(job)
+    while not ejecutar_con_reintentos(job):
+        time.sleep(1.5)

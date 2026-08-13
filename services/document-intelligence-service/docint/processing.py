@@ -94,6 +94,9 @@ def ejecutar_con_reintentos(job: AnalysisJob) -> bool:
             return False
 
         job.status = AnalysisJob.ERROR
-        job.error_mensaje = str(exc)
+        job.error_mensaje = (
+            "No se pudo analizar el documento despues de varios intentos. "
+            "El servicio de analisis no esta disponible en este momento, intenta de nuevo mas tarde."
+        )
         job.save(update_fields=["status", "error_mensaje", "updated_at"])
         return True
