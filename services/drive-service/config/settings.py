@@ -83,6 +83,17 @@ DRIVE_SERVICE_ACCOUNT_JSON = env("DRIVE_SERVICE_ACCOUNT_JSON", default="")
 # este usuario, que debe ser dueno/tener acceso a la carpeta CumbresBI/).
 DRIVE_IMPERSONATE_SUBJECT = env("DRIVE_IMPERSONATE_SUBJECT", default="")
 
+# Secreto compartido servicio-a-servicio (ver services/pld-service/config/
+# settings.py, mismo comentario del otro lado): PldTicketClienteViewSet.
+# subir_documento es un endpoint PUBLICO (formulario externo sin sesion,
+# sin JWT que reenviar) - cuando una llamada a este servicio trae este
+# secreto en el header X-Internal-Secret (en vez de un JWT de usuario en
+# Authorization), se confia en que ya viene de otro microservicio interno
+# que ya validó lo que tenia que validar (token del cliente + reCAPTCHA) y
+# se le deja pasar sin exigir perm_key. Vacio en dev por default (nadie
+# puede usar este bypass hasta configurarlo explicitamente en ambos lados).
+DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
+
 # ID de la carpeta raiz "CumbresBI/" en Drive (se resuelve una vez y se
 # fija aqui - ver pld-fase2-alcance.md sec. 1.3 y memoria de sesion
 # "drive-estructura-carpetas-grupos": estructura de carpetas por modulo,
