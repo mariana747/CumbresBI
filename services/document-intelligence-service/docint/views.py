@@ -14,16 +14,13 @@ from .tasks import encolar_analisis
 
 
 class AnalyzeView(APIView):
-    """POST /analyze - Fase 2 de la migracion a async con Cloud Tasks (ver
-    plan): el archivo se persiste en staging (Fase 1) y el analisis se
-    delega a docint.tasks.encolar_analisis en vez de llamarse inline.
-
-    Contrato publico SIN CAMBIOS todavia (sigue respondiendo 200 con el
-    resultado) - en dev (DOCINT_TASKS_ENABLED=False) encolar_analisis corre
-    el analisis in-process de inmediato, asi que el resultado ya esta listo
-    cuando se responde. El cambio a 202 + polling (GET /analyze/<id>/status)
-    es la Fase 3, junto con el frontend (MotorDocumentalDialog.tsx) - separar
-    esto evita tocar frontend y Cloud Tasks en el mismo paso.
+    """POST /analyze - Fase 3 de la migracion a async con Cloud Tasks (ver
+    plan): responde 202 de inmediato con {analysis_id, status} en vez de
+    esperar el resultado - el archivo ya se persistio en staging (Fase 1) y
+    el analisis se encola (Fase 2, docint.tasks.encolar_analisis corre en
+    un hilo aparte incluso en dev, ver tasks.py). El cliente (frontend,
+    MotorDocumentalDialog.tsx) hace polling a GET /analyze/<id>/status hasta
+    ver COMPLETADO o ERROR.
 
     Modo actual (dev, sin GCP real via Drive API): recibe el archivo directo
     en el body multipart (campo 'file') en vez de un DriveFileRef, ver
@@ -74,26 +71,31 @@ class AnalyzeView(APIView):
         )
 
         encolar_analisis(job.id)
-        job.refresh_from_db()
 
-        if job.status == AnalysisJob.ERROR:
-            return Response(
-                {"error": f"Error al analizar el documento: {job.error_mensaje}", "analysis_id": job.id},
-                status=502,
-            )
-        if job.status != AnalysisJob.COMPLETADO:
-            # No deberia pasar en dev (in-process es sincrono); en real con
-            # Cloud Tasks encolar_analisis no espera el resultado - esto se
-            # resuelve en la Fase 3 (202 + polling). Se deja explicito para
-            # no responder un resultado vacio como si fuera exito.
-            return Response(
-                {"analysis_id": job.id, "status": job.status, "detail": "Analisis en curso, todavia sin resultado."},
-                status=202,
-            )
+        return Response({"analysis_id": job.id, "status": job.status}, status=202)
 
-        payload = dict(job.resultado)
-        payload["analysis_id"] = job.id
-        return Response(payload)
+
+class AnalysisStatusView(APIView):
+    """GET /analyze/<id>/status - polling del resultado (Fase 3, ver plan).
+    El frontend consulta esto cada pocos segundos hasta ver COMPLETADO o
+    ERROR (docint.ts::pollAnalysis). Sin permission_classes propio todavia -
+    igual que AnalyzeView, el perm_key docint.analizar se agrega en la
+    Fase 4 junto con el resto de hardening."""
+
+    def get(self, request, analysis_id, *args, **kwargs):
+        try:
+            job = AnalysisJob.objects.get(id=analysis_id)
+        except AnalysisJob.DoesNotExist:
+            return Response({"error": "analysis_id no encontrado"}, status=404)
+
+        return Response(
+            {
+                "analysis_id": job.id,
+                "status": job.status,
+                "result": job.resultado,
+                "error": job.error_mensaje or None,
+            }
+        )
 
 
 class ProcesarAnalisisView(APIView):

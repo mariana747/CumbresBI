@@ -50,21 +50,33 @@ def encolar_analisis(job_id: str) -> str:
 
 
 def _ejecutar_in_process(job_id: str) -> None:
-    """Modo dev: corre el analisis de inmediato, sin pasar por una cola real
-    ni por el endpoint /procesar (que sigue existiendo para cuando
-    DOCINT_TASKS_ENABLED=True). Aplica el mismo manejo de reintentos/errores
-    que usaria /procesar via Cloud Tasks - ver processing.ejecutar_con_reintentos,
-    compartida para no duplicar la logica.
+    """Modo dev: corre el analisis en un hilo aparte (fire-and-forget), sin
+    pasar por una cola real ni por el endpoint /procesar (que sigue
+    existiendo para cuando DOCINT_TASKS_ENABLED=True). Debe ser NO
+    bloqueante (Fase 3, ver plan): AnalyzeView ya responde 202 de inmediato,
+    igual que en produccion con Cloud Tasks - si esto bloqueara, dev
+    tendria un comportamiento distinto al real y el polling nunca veria
+    'PROCESANDO'.
 
-    ejecutar_con_reintentos regresa False cuando el fallo fue transitorio y
-    aun quedan intentos - en produccion eso lo resuelve Cloud Tasks
-    reentregando la tarea; aqui no hay cola que lo haga, asi que se reintenta
-    en el momento con un backoff corto para no dejar el job atorado en
-    PENDIENTE para siempre."""
+    Aplica el mismo manejo de reintentos/errores que usaria /procesar via
+    Cloud Tasks - ver processing.ejecutar_con_reintentos, compartida para no
+    duplicar la logica. ejecutar_con_reintentos regresa False cuando el
+    fallo fue transitorio y aun quedan intentos - en produccion eso lo
+    resuelve Cloud Tasks reentregando la tarea; aqui no hay cola que lo
+    haga, asi que se reintenta dentro del mismo hilo con un backoff corto."""
+    import threading
     import time
+
+    from django.db import close_old_connections
 
     from .processing import ejecutar_con_reintentos
 
-    job = AnalysisJob.objects.get(id=job_id)
-    while not ejecutar_con_reintentos(job):
-        time.sleep(1.5)
+    def _run():
+        try:
+            job = AnalysisJob.objects.get(id=job_id)
+            while not ejecutar_con_reintentos(job):
+                time.sleep(1.5)
+        finally:
+            close_old_connections()  # el hilo no reusa la conexion del request original
+
+    threading.Thread(target=_run, daemon=True).start()
