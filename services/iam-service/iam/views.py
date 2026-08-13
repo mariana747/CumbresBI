@@ -11,6 +11,7 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from .audit_utils import emitir_evento_auditoria
 from .magic_link_utils import generate_token, hash_token, issue_external_jwt
+from .mail_utils import enviar_correo_magic_link
 from .models import (
     GeneralSociedad,
     IamGroup,
@@ -408,11 +409,13 @@ class IamMagicLinkViewSet(ModelViewSet):
     """Magic Links de un solo uso para usuarios externos (Fase 1, Semana 4;
     docs/architecture/README.md sec. 6.2).
 
-    MODO DEV: no hay envio de correo real todavia (pendiente confirmar con
-    Arturo el envio desde una cuenta de Workspace) - por eso "crear" regresa
-    el token en claro y el link completo en la respuesta, en vez de solo
-    enviarlo por correo. Quitar ese campo de la respuesta es el unico
-    cambio necesario cuando exista el envio real (ver magic_link_utils.py).
+    Envio real por correo (13/Ago/2026, ver mail_utils.py): al crear un
+    link (uno a uno o masivo por CSV) o reenviarlo, se manda de verdad a
+    la bandeja del invitado via mail-service/Gmail API. El token/
+    magic_link_url se siguen regresando en la respuesta como respaldo (el
+    analista puede copiarlo a mano si el correo no llega o mail-service
+    todavia esta en modo simulado sin credencial real) - "correo_enviado"
+    en la respuesta indica si el envio real funciono.
 
     DELETE no esta permitido: un magic link no se borra, se revoca (mismo
     criterio que iam_user_roles) - usa POST /api/magic-links/{id}/revocar/.
@@ -468,11 +471,16 @@ class IamMagicLinkViewSet(ModelViewSet):
             },
         )
 
+        magic_link_url = f"/magic-link/{token}"
+        correo_enviado = enviar_correo_magic_link(request, magic_link.email, magic_link_url)
+
         data = self.get_serializer(magic_link).data
-        # Modo dev sin correo real (ver docstring de la clase) - remover
-        # "token" y "magic_link_url" de aqui cuando exista el envio real.
+        # token/magic_link_url se quedan como respaldo (ver docstring de la
+        # clase) - no reemplazan el envio real, solo cubren el caso de que
+        # falle o mail-service siga en modo simulado.
         data["token"] = token
-        data["magic_link_url"] = f"/magic-link/{token}"
+        data["magic_link_url"] = magic_link_url
+        data["correo_enviado"] = correo_enviado
         return Response(data, status=201)
 
     @action(detail=False, methods=["post"])
@@ -544,9 +552,13 @@ class IamMagicLinkViewSet(ModelViewSet):
                 },
             )
 
+            magic_link_url = f"/magic-link/{token}"
+            correo_enviado = enviar_correo_magic_link(request, magic_link.email, magic_link_url)
+
             data = self.get_serializer(magic_link).data
             data["token"] = token
-            data["magic_link_url"] = f"/magic-link/{token}"
+            data["magic_link_url"] = magic_link_url
+            data["correo_enviado"] = correo_enviado
             creados.append(data)
 
         return Response({"creados": creados, "errores": errores}, status=201)
@@ -642,9 +654,13 @@ class IamMagicLinkViewSet(ModelViewSet):
             valores_nuevos={"email": nuevo.email, "expires_at": nuevo.expires_at.isoformat()},
         )
 
+        magic_link_url = f"/magic-link/{token}"
+        correo_enviado = enviar_correo_magic_link(request, nuevo.email, magic_link_url)
+
         data = self.get_serializer(nuevo).data
         data["token"] = token
-        data["magic_link_url"] = f"/magic-link/{token}"
+        data["magic_link_url"] = magic_link_url
+        data["correo_enviado"] = correo_enviado
         return Response(data, status=201)
 
 
