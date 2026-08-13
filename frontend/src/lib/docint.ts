@@ -18,6 +18,16 @@ export interface DocumentAnalysisResult {
   matched_by_filename: boolean | null;
 }
 
+// Espejo de docint/models.py::AnalysisJob.ESTADOS.
+export type AnalysisStatus = "PENDIENTE" | "PROCESANDO" | "COMPLETADO" | "ERROR";
+
+export interface AnalysisStatusResponse {
+  analysis_id: string;
+  status: AnalysisStatus;
+  result: DocumentAnalysisResult | null;
+  error: string | null;
+}
+
 export interface AnalyzeDocumentParams {
   file: File;
   expectedDocumentType: string;
@@ -73,12 +83,15 @@ export function guessDocumentTypeFromFilename(filename: string): string {
   return "generic";
 }
 
+// Encola el analisis y regresa de inmediato (202 + analysis_id) - ya NO
+// espera el resultado, ver docint/views.py::AnalyzeView (Fase 3 del plan de
+// migracion a async con Cloud Tasks). Usar junto con pollAnalysis.
 export async function analyzeDocument({
   file,
   expectedDocumentType,
   servicioSolicitante,
   metadata,
-}: AnalyzeDocumentParams): Promise<DocumentAnalysisResult> {
+}: AnalyzeDocumentParams): Promise<{ analysisId: string; status: AnalysisStatus }> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("expected_document_type", expectedDocumentType);
@@ -96,5 +109,46 @@ export async function analyzeDocument({
     throw await friendlyApiError("DOCINT", response);
   }
 
+  const body = await response.json();
+  return { analysisId: body.analysis_id, status: body.status };
+}
+
+export async function getAnalysisStatus(analysisId: string): Promise<AnalysisStatusResponse> {
+  const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze/${analysisId}/status`, {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    throw await friendlyApiError("DOCINT", response);
+  }
+
   return response.json();
+}
+
+// Backoff simple (2s, 3s, 5s, luego cada 5s) hasta ver COMPLETADO/ERROR o
+// agotar timeoutMs - un analisis real con Gemini rara vez tarda mas de
+// unos segundos, pero el limite evita que el usuario se quede viendo
+// "Procesando" para siempre si algo se atoro sin marcarse ERROR.
+const BACKOFF_MS = [2000, 3000, 5000];
+
+export async function pollAnalysis(
+  analysisId: string,
+  { timeoutMs = 120_000 }: { timeoutMs?: number } = {}
+): Promise<AnalysisStatusResponse> {
+  const start = Date.now();
+  let intento = 0;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const estado = await getAnalysisStatus(analysisId);
+    if (estado.status === "COMPLETADO" || estado.status === "ERROR") {
+      return estado;
+    }
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("El análisis está tardando más de lo esperado. Intenta de nuevo. (DOCINT-timeout)");
+    }
+    const espera = BACKOFF_MS[Math.min(intento, BACKOFF_MS.length - 1)];
+    intento += 1;
+    await new Promise((resolve) => setTimeout(resolve, espera));
+  }
 }
