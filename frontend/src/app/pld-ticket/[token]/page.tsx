@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { Box, CircularProgress, Paper, Stack, Typography, useTheme } from "@mui/material";
-import { ShieldAlert, ShieldCheck } from "lucide-react";
-import { validarTicketCliente } from "@/lib/pld";
+import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography, useTheme } from "@mui/material";
+import { CheckCircle2, ShieldAlert, ShieldCheck, UploadCloud } from "lucide-react";
+import { subirDocumentoPublico, validarTicketCliente } from "@/lib/pld";
 import { PublicNavbar } from "@/components/PublicNavbar";
+import RecaptchaV2 from "@/components/RecaptchaV2";
 
 // Pagina publica (sin AppShell) - a donde llega el cliente externo real al
 // abrir el link recibido (hoy, en modo dev, mostrado directo en
@@ -14,21 +15,29 @@ import { PublicNavbar } from "@/components/PublicNavbar";
 // tiene llave privada - no hay JWT que mostrar, solo confirma el acceso y
 // el expediente asociado.
 //
-// Sin formulario de destino todavia (docs/CumbresBI_estado.md, Fase 2:
-// "Formularios públicos con reCAPTCHA + Drive API" sigue sin construir) -
-// por eso esta pagina solo confirma el acceso, no redirige a un formulario
-// real todavia.
+// Formulario de subida (docs/architecture/pld-fase2-alcance.md sec. 2,
+// decision de Mariana 12/Ago/2026): solo sube documentos (sin campos de
+// datos personales) + reCAPTCHA v2 - el archivo va al mismo flujo de
+// Drive que usaria un analista interno (ver pld/views.py::subir_documento).
 export default function PldTicketPage() {
   const theme = useTheme();
   const params = useParams<{ token: string }>();
   const [estado, setEstado] = useState<"cargando" | "valido" | "invalido">("cargando");
   const [error, setError] = useState<string | null>(null);
   const [idContraparte, setIdContraparte] = useState<string | null>(null);
+  const [tieneExpediente, setTieneExpediente] = useState(false);
+
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
+  const [subiendo, setSubiendo] = useState(false);
+  const [subidaError, setSubidaError] = useState<string | null>(null);
+  const [subidaOk, setSubidaOk] = useState<string | null>(null);
 
   useEffect(() => {
     validarTicketCliente(params.token)
       .then((resultado) => {
         setIdContraparte(resultado.kyc?.id_contraparte ?? null);
+        setTieneExpediente(Boolean(resultado.kyc));
         setEstado("valido");
       })
       .catch((err) => {
@@ -36,6 +45,24 @@ export default function PldTicketPage() {
         setEstado("invalido");
       });
   }, [params.token]);
+
+  async function handleSubir(e: React.FormEvent) {
+    e.preventDefault();
+    if (!archivo || !recaptchaToken) return;
+    setSubiendo(true);
+    setSubidaError(null);
+    setSubidaOk(null);
+    try {
+      await subirDocumentoPublico({ token: params.token, recaptchaToken, file: archivo });
+      setSubidaOk(`"${archivo.name}" se subió correctamente.`);
+      setArchivo(null);
+      setRecaptchaToken(null);
+    } catch (err) {
+      setSubidaError(err instanceof Error ? err.message : "Error al subir el documento.");
+    } finally {
+      setSubiendo(false);
+    }
+  }
 
   return (
     <Box
@@ -61,7 +88,7 @@ export default function PldTicketPage() {
           sx={{
             p: { xs: 3, sm: 4 },
             width: "100%",
-            maxWidth: 420,
+            maxWidth: 460,
             border: "1px solid",
             borderColor: "divider",
           }}
@@ -76,19 +103,48 @@ export default function PldTicketPage() {
           )}
 
           {estado === "valido" && (
-            <Stack spacing={2} alignItems="center" textAlign="center">
-              <ShieldCheck size={32} strokeWidth={1.5} color={theme.palette.success.main} />
-              <Typography variant="subtitle1" fontWeight={600}>
-                Acceso verificado
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {idContraparte
-                  ? `Tu enlace es válido para el expediente ${idContraparte}.`
-                  : "Tu enlace es válido."}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Modo desarrollo — el formulario público de expediente todavía no está conectado.
-              </Typography>
+            <Stack spacing={2.5}>
+              <Stack spacing={2} alignItems="center" textAlign="center">
+                <ShieldCheck size={32} strokeWidth={1.5} color={theme.palette.success.main} />
+                <Typography variant="subtitle1" fontWeight={600}>
+                  Acceso verificado
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {idContraparte
+                    ? `Tu enlace es válido para el expediente ${idContraparte}.`
+                    : "Tu enlace es válido."}
+                </Typography>
+              </Stack>
+
+              {!tieneExpediente ? (
+                <Alert severity="info">Este enlace no tiene un expediente asociado para subir documentos.</Alert>
+              ) : (
+                <Stack component="form" spacing={2} onSubmit={handleSubir}>
+                  <Typography variant="subtitle2">Subir documento</Typography>
+
+                  <Button component="label" variant="outlined" startIcon={<UploadCloud size={18} strokeWidth={1.5} />}>
+                    {archivo ? archivo.name : "Seleccionar archivo"}
+                    <input
+                      type="file"
+                      hidden
+                      onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
+                    />
+                  </Button>
+
+                  <RecaptchaV2 onChange={setRecaptchaToken} />
+
+                  {subidaError && <Alert severity="error">{subidaError}</Alert>}
+                  {subidaOk && (
+                    <Alert severity="success" icon={<CheckCircle2 size={20} strokeWidth={1.5} />}>
+                      {subidaOk}
+                    </Alert>
+                  )}
+
+                  <Button type="submit" variant="contained" disabled={!archivo || !recaptchaToken || subiendo}>
+                    {subiendo ? <CircularProgress size={20} color="inherit" /> : "Subir documento"}
+                  </Button>
+                </Stack>
+              )}
             </Stack>
           )}
 

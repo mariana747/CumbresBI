@@ -227,6 +227,33 @@ export async function validarTicketCliente(
   return { ticket, kyc };
 }
 
+// Formulario publico de KYC externo (docs/architecture/pld-fase2-alcance.md
+// sec. 2): el cliente sube un documento sin sesion, canjeando el mismo
+// token del link. No consume el "uso" del ticket (eso ya lo maneja
+// validarTicketCliente, llamado al cargar la pagina) - ver
+// services/pld-service/pld/views.py::subir_documento.
+export async function subirDocumentoPublico(params: {
+  token: string;
+  recaptchaToken: string;
+  file: File;
+  denominacion?: string;
+}): Promise<PldContraparteDoc> {
+  const formData = new FormData();
+  formData.append("token", params.token);
+  formData.append("recaptcha_token", params.recaptchaToken);
+  formData.append("file", params.file);
+  if (params.denominacion) formData.append("denominacion", params.denominacion);
+
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/subir_documento/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
 export async function revocarTicketCliente(idPldTicket: string): Promise<PldTicketCliente> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/${idPldTicket}/revocar/`, {
     method: "POST",
