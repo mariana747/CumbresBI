@@ -240,6 +240,14 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      # Google Picker real sobre el Drive personal del analista (ver
+      # lib/googlePicker.ts, 13/Ago/2026) - vacios hasta que Mariana cree la
+      # API Key (restringida a "Google Picker API") y agregue el scope
+      # drive.readonly al Client ID de OAuth ya usado por el login. Mientras
+      # esten vacios, el boton "Elegir desde mi Drive personal" muestra un
+      # error claro en vez de fallar a medias.
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+      NEXT_PUBLIC_GOOGLE_PICKER_API_KEY: ${NEXT_PUBLIC_GOOGLE_PICKER_API_KEY:-}
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules

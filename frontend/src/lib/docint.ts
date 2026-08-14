@@ -127,6 +127,34 @@ export async function analyzeDocument({
   return { analysisId: body.analysis_id, status: body.status };
 }
 
+// Modo 2 de docint/views.py::AnalyzeView - para archivos que el navegador
+// ya trajo del Drive PERSONAL del usuario via Google Picker real
+// (lib/googlePicker.ts::openGooglePicker) con su propio OAuth token. La
+// cuenta de servicio nunca se entera de este archivo - por eso va como
+// multipart normal (bytes ya en el navegador) en vez de drive_file_id.
+export async function analyzeUploadedFile(
+  file: File,
+  { expectedDocumentType, servicioSolicitante, metadata }: Omit<AnalyzeDocumentParams, "driveFileId" | "carpeta" | "permKey" | "nombreArchivo" | "mimeType">
+): Promise<{ analysisId: string; status: AnalysisStatus }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("expected_document_type", expectedDocumentType);
+  formData.append("servicio_solicitante", servicioSolicitante);
+  if (metadata) formData.append("metadata", JSON.stringify(metadata));
+
+  const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw await friendlyApiError("DOCINT", response);
+  }
+
+  const body = await response.json();
+  return { analysisId: body.analysis_id, status: body.status };
+}
+
 export async function getAnalysisStatus(analysisId: string): Promise<AnalysisStatusResponse> {
   const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze/${analysisId}/status`, {
     method: "GET",

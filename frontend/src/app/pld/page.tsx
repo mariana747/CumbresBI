@@ -8,6 +8,7 @@ import {
   CircularProgress,
   FormControl,
   Grid,
+  IconButton,
   InputAdornment,
   InputLabel,
   MenuItem,
@@ -23,8 +24,9 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CheckCircle2, FileSearch, FolderOpen, Search, UploadCloud } from "lucide-react";
+import { CheckCircle2, Eye, FileSearch, FolderOpen, Search, UploadCloud } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import KycDetalleDialog from "@/components/KycDetalleDialog";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -66,6 +68,10 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [aprobando, setAprobando] = useState<string | null>(null);
+  // Ver detalle de un expediente (13/Ago/2026) - la tabla solo muestra CURP
+  // en columna, el resto de los campos que confirma el Motor Documental
+  // (domicilio, fecha de nacimiento, etc.) no tenia ninguna pantalla.
+  const [kycDetalle, setKycDetalle] = useState<PldContraparteKyc | null>(null);
   const [reactivando, setReactivando] = useState<string | null>(null);
 
   function cargar() {
@@ -226,6 +232,9 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   <TableCell>{new Date(kyc.created_at).toLocaleDateString("es-MX")}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={1} justifyContent="flex-end">
+                      <IconButton size="small" aria-label="Ver detalle" onClick={() => setKycDetalle(kyc)}>
+                        <Eye size={16} strokeWidth={1.5} />
+                      </IconButton>
                       {kyc.estado_llenado_manual && (
                         <Button
                           size="small"
@@ -255,6 +264,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
           </TableBody>
         </Table>
       </TableContainer>
+      <KycDetalleDialog kyc={kycDetalle} open={kycDetalle !== null} onClose={() => setKycDetalle(null)} />
     </Paper>
   );
 }

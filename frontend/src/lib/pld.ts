@@ -22,14 +22,46 @@ export interface PldContraparteDoc {
   updated_at: string;
 }
 
-// Superset del tipo minimo usado en admin/invitaciones/page.tsx (pestaña "Temporales") - mismo
-// contrato de API, aqui se listan todos los campos que la tabla de
-// expedientes necesita mostrar.
+// Espejo completo de PldContraparteKycSerializer (pld/serializers.py) - antes
+// solo traia el subconjunto que la tabla de /pld mostraba en columnas; se
+// completo el 13/Ago/2026 para la vista de detalle (KycDetalleDialog.tsx),
+// que si necesita todos los campos que el Motor Documental puede llenar.
 export interface PldContraparteKyc {
   id_kyc: string;
   id_contraparte: string;
+  fecha_nac_const: string | null;
+  pais_nac_const: string | null;
+  folio_mercantil: string | null;
+  objeto_social: string | null;
   curp: string | null;
   nacionalidad: string | null;
+  ocupacion_act_economica: string | null;
+  dom_calle: string | null;
+  dom_numero_ext: string | null;
+  dom_numero_int: string | null;
+  dom_colonia: string | null;
+  dom_municipio_alcaldia: string | null;
+  dom_estado: string | null;
+  dom_cp: string | null;
+  dom_pais: string | null;
+  tipo_identificacion: string | null;
+  autoridad_identificacion: string | null;
+  numero_identificacion: string | null;
+  dom_corresp_dom_calle: string | null;
+  dom_corresp_dom_numero_ext: string | null;
+  dom_corresp_dom_numero_int: string | null;
+  dom_corresp_dom_colonia: string | null;
+  dom_corresp_dom_municipio_alcaldia: string | null;
+  dom_corresp_dom_estado: string | null;
+  dom_corresp_dom_cp: string | null;
+  dom_corresp_dom_pais: string | null;
+  telefono_fijo: string | null;
+  telefono_sms: string | null;
+  estado_civil: string | null;
+  ident_fideicomiso: string | null;
+  link_carpeta: string | null;
+  link_plantillas: string | null;
+  link_documento_pld: string | null;
   estado_llenado: PldEstadoLlenado;
   // Workflow hibrido (pld/signals.py): true si el analista edito
   // estado_llenado a mano - a partir de ahi deja de recalcularse solo
@@ -40,7 +72,9 @@ export interface PldContraparteKyc {
   comentarios: string | null;
   documentos: PldContraparteDoc[];
   created_at: string;
+  created_by: string | null;
   updated_at: string;
+  updated_by: string | null;
   fecha_vencimiento: string | null;
 }
 

@@ -8,7 +8,6 @@ import {
   Alert,
   Box,
   Button,
-  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -18,25 +17,21 @@ import {
   FormControl,
   IconButton,
   InputLabel,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
   MenuItem,
   Select,
   Stack,
   Typography,
 } from "@mui/material";
-import { CheckCircle2, ChevronDown, FolderSearch, X as CloseIcon } from "lucide-react";
-import { DriveArchivo, listDriveFiles } from "@/lib/drive";
+import { CheckCircle2, ChevronDown, HardDriveUpload, X as CloseIcon } from "lucide-react";
+import { DriveArchivo } from "@/lib/drive";
 import {
-  analyzeDocument,
+  analyzeUploadedFile,
   AnalysisStatus,
   DocumentAnalysisResult,
   guessDocumentTypeFromFilename,
   pollAnalysis,
 } from "@/lib/docint";
+import { openGooglePicker } from "@/lib/googlePicker";
 import { PLD_CAMPOS_CONFIRMABLES, PldContraparteKyc, confirmarExtraccionKyc, listKyc } from "@/lib/pld";
 
 // Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
@@ -58,11 +53,6 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
 // Microservicios consumidores actuales (services/*), identifican quien pide
 // el analisis para el log operacional (AnalysisRequestLog.servicio_solicitante)
 // - no afecta el resultado del analisis, solo trazabilidad de quien llamo.
-//
-// Solo "pld-service" tiene hoy una carpeta de Drive real resuelta (ver
-// `carpeta` mas abajo, PLD/<id_contraparte>) - los demas quedan listados
-// para trazabilidad pero sin carpeta que listar todavia (memoria de sesion
-// "motor-documental-seleccion-archivos-drive").
 const SERVICIOS_SOLICITANTES = [
   "pld-service",
   "compras-tesoreria-service",
@@ -88,12 +78,12 @@ interface DocumentResult {
 }
 
 // Motor Inteligente de Procesamiento Documental (docint) - ver
-// docs/architecture/README.md sec. 10. Decision de Mariana (12/Ago/2026,
-// ver memoria de sesion "motor-documental-seleccion-archivos-drive"): ya
-// NO se suben archivos locales - el analista sube el archivo el mismo en
-// drive.google.com (a la carpeta correspondiente); este dialogo solo
-// LISTA lo que ya esta ahi y lo manda a analizar por referencia
-// (streaming Drive->Gemini, ver docint/drive.py).
+// docs/architecture/README.md sec. 10. Un solo boton "Agregar desde Drive"
+// que abre el Google Picker real (lib/googlePicker.ts) - el selector
+// nativo de Google con sus propias pestañas (Recientes/Mi unidad/
+// Compartidos), sin que nosotros dividamos "Drive personal" vs "Unidad
+// compartida" en flujos separados (decision de Mariana, 13/Ago/2026). El
+// archivo elegido se analiza de inmediato, sin un paso extra de "enviar".
 //
 // Modulo emergente (confirmado por el cliente): se invoca como dialogo desde
 // cualquier pantalla que necesite analizar un documento, no como una pagina
@@ -112,24 +102,11 @@ export default function MotorDocumentalDialog({
   const [servicioSolicitante, setServicioSolicitante] = useState<(typeof SERVICIOS_SOLICITANTES)[number]>(
     SERVICIOS_SOLICITANTES[0]
   );
-  const [loading, setLoading] = useState(false);
 
-  // Expedientes KYC existentes - determinan la carpeta de Drive a listar
-  // (PLD/<id_contraparte>/) y, mas adelante, a cual expediente se
-  // confirman los datos ya validados. Solo aplica a "pld-service", el
-  // unico consumidor con carpeta real resuelta hoy.
+  // Expedientes KYC existentes - solo para elegir a cual expediente se
+  // confirman los datos ya validados despues de analizar.
   const [kycOptions, setKycOptions] = useState<PldContraparteKyc[]>([]);
   const [kycSeleccionado, setKycSeleccionado] = useState("");
-
-  const carpeta = kycSeleccionado
-    ? `PLD/${kycOptions.find((k) => k.id_kyc === kycSeleccionado)?.id_contraparte}`
-    : "";
-  const permKey = "pld-compliance.crear";
-
-  const [driveFiles, setDriveFiles] = useState<DriveArchivo[]>([]);
-  const [loadingDriveFiles, setLoadingDriveFiles] = useState(false);
-  const [driveError, setDriveError] = useState<string | null>(null);
-  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
 
   const [documents, setDocuments] = useState<DocumentResult[]>([]);
 
@@ -140,34 +117,8 @@ export default function MotorDocumentalDialog({
       .catch(() => setKycOptions([]));
   }, [open, servicioSolicitante]);
 
-  async function handleVerArchivosDrive() {
-    if (!carpeta) return;
-    setLoadingDriveFiles(true);
-    setDriveError(null);
-    try {
-      const archivos = await listDriveFiles(carpeta, permKey);
-      setDriveFiles(archivos);
-      setSeleccionados(new Set());
-    } catch (err) {
-      setDriveError(err instanceof Error ? err.message : "Error al listar archivos de Drive");
-    } finally {
-      setLoadingDriveFiles(false);
-    }
-  }
-
-  function toggleSeleccionado(fileId: string) {
-    setSeleccionados((prev) => {
-      const next = new Set(prev);
-      if (next.has(fileId)) next.delete(fileId);
-      else next.add(fileId);
-      return next;
-    });
-  }
-
   function handleBorrarTodo() {
     setDocuments([]);
-    setDriveFiles([]);
-    setSeleccionados(new Set());
   }
 
   // Reemplaza la descarga local de JSON: solo manda las llaves de
@@ -214,65 +165,75 @@ export default function MotorDocumentalDialog({
     }
   }
 
-  // "loading" solo cubre el encolado inicial (rapido, 202 por archivo) - una
-  // vez encolados, cada archivo hace su propio polling independiente
-  // (estadoAnalisis por indice) sin bloquear a los demas ni al boton de
-  // enviar. Antes (sincrono) un archivo lento tumbaba a todos con el
-  // timeout del gateway - ver docint/views.py::AnalyzeView.
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const elegidos = driveFiles.filter((a) => seleccionados.has(a.file_id));
-    if (elegidos.length === 0) return;
-    setLoading(true);
+  // Actualiza un documento por su file_id (llave estable, no indice) - un
+  // archivo puede seguir en polling mientras el usuario ya agrego otros.
+  function actualizarDoc(fileId: string, patch: Partial<DocumentResult>) {
+    setDocuments((prev) => prev.map((d) => (d.archivo.file_id === fileId ? { ...d, ...patch } : d)));
+  }
+
+  async function esperarResultado(fileId: string, analysisId: string, status: AnalysisStatus) {
+    actualizarDoc(fileId, { analysisId, estadoAnalisis: status, error: undefined });
     try {
-      const iniciales: DocumentResult[] = elegidos.map((archivo) => ({
-        archivo,
-        expectedDocumentType: guessDocumentTypeFromFilename(archivo.nombre),
+      const final = await pollAnalysis(analysisId);
+      actualizarDoc(fileId, {
+        estadoAnalisis: final.status,
+        result: final.result ?? undefined,
+        error: final.error ?? undefined,
+      });
+    } catch (err) {
+      actualizarDoc(fileId, {
+        estadoAnalisis: "ERROR",
+        error: err instanceof Error ? err.message : "Error desconocido",
+      });
+    }
+  }
+
+  // Google Picker real (lib/googlePicker.ts) - un solo boton para elegir
+  // de cualquier parte de Drive (Recientes/Mi unidad/Compartidos, las
+  // pestañas nativas de Google, no algo que dividimos nosotros). El
+  // navegador ya trae los bytes con el OAuth del propio usuario, asi que
+  // se manda como multipart (analyzeUploadedFile) en vez de por
+  // drive_file_id/cuenta de servicio.
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
+
+  async function handleAgregarDesdeDrive() {
+    setPickerLoading(true);
+    setPickerError(null);
+    try {
+      const elegidos = await openGooglePicker();
+      if (elegidos.length === 0) return;
+
+      const iniciales: DocumentResult[] = elegidos.map(({ file, nombre }) => ({
+        archivo: {
+          file_id: `picker-${nombre}-${crypto.randomUUID()}`,
+          nombre,
+          mime_type: file.type,
+        },
+        expectedDocumentType: guessDocumentTypeFromFilename(nombre),
       }));
-      setDocuments(iniciales);
+      setDocuments((prev) => [...prev, ...iniciales]);
 
       await Promise.all(
-        iniciales.map(async (doc, index) => {
+        iniciales.map(async (doc, i) => {
           try {
-            const { analysisId, status } = await analyzeDocument({
-              driveFileId: doc.archivo.file_id,
-              carpeta,
-              permKey,
-              nombreArchivo: doc.archivo.nombre,
-              mimeType: doc.archivo.mime_type ?? undefined,
+            const { analysisId, status } = await analyzeUploadedFile(elegidos[i].file, {
               expectedDocumentType: doc.expectedDocumentType,
               servicioSolicitante: servicioSolicitante || "desconocido",
             });
-            setDocuments((prev) =>
-              prev.map((d, i) => (i === index ? { ...d, analysisId, estadoAnalisis: status, error: undefined } : d))
-            );
-
-            const final = await pollAnalysis(analysisId);
-            setDocuments((prev) =>
-              prev.map((d, i) =>
-                i === index
-                  ? {
-                      ...d,
-                      estadoAnalisis: final.status,
-                      result: final.result ?? undefined,
-                      error: final.error ?? undefined,
-                    }
-                  : d
-              )
-            );
+            await esperarResultado(doc.archivo.file_id, analysisId, status);
           } catch (err) {
-            setDocuments((prev) =>
-              prev.map((d, i) =>
-                i === index
-                  ? { ...d, estadoAnalisis: "ERROR", error: err instanceof Error ? err.message : "Error desconocido" }
-                  : d
-              )
-            );
+            actualizarDoc(doc.archivo.file_id, {
+              estadoAnalisis: "ERROR",
+              error: err instanceof Error ? err.message : "Error desconocido",
+            });
           }
         })
       );
+    } catch (err) {
+      setPickerError(err instanceof Error ? err.message : "Error al abrir el selector de Drive");
     } finally {
-      setLoading(false);
+      setPickerLoading(false);
     }
   }
 
@@ -299,12 +260,11 @@ export default function MotorDocumentalDialog({
       </DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Análisis de documentos con IA — los archivos viven en Google Drive
-          (el analista los sube ahí directamente); aquí solo se eligen y se
-          analizan.
+          Análisis de documentos con IA — elige un archivo de tu Drive y se
+          analiza automáticamente.
         </Typography>
 
-        <Stack component="form" spacing={2} onSubmit={handleSubmit}>
+        <Stack spacing={2}>
           <FormControl size="small" fullWidth>
             <InputLabel id="servicio-solicitante-label">Servicio solicitante</InputLabel>
             <Select
@@ -325,89 +285,38 @@ export default function MotorDocumentalDialog({
             </Typography>
           </FormControl>
 
-          {servicioSolicitante !== "pld-service" ? (
-            <Alert severity="info">
-              Este servicio todavía no tiene una carpeta de Drive resuelta —
-              por ahora solo "pld-service" puede listar/analizar documentos.
-            </Alert>
-          ) : (
-            <>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="kyc-select-label">Expediente KYC</InputLabel>
-                <Select
-                  labelId="kyc-select-label"
-                  label="Expediente KYC"
-                  value={kycSeleccionado}
-                  onChange={(e) => setKycSeleccionado(e.target.value)}
-                >
-                  {kycOptions.map((kyc) => (
-                    <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
-                      {kyc.id_contraparte} ({kyc.id_kyc})
-                    </MenuItem>
-                  ))}
-                </Select>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
-                  Determina la carpeta de Drive a listar (CumbresBI/PLD/&lt;contraparte&gt;/).
-                </Typography>
-              </FormControl>
-
-              <Button
-                variant="outlined"
-                startIcon={
-                  loadingDriveFiles ? <CircularProgress size={18} /> : <FolderSearch size={18} strokeWidth={1.5} />
-                }
-                disabled={!kycSeleccionado || loadingDriveFiles}
-                onClick={handleVerArchivosDrive}
-                sx={{ justifyContent: "flex-start" }}
+          {servicioSolicitante === "pld-service" && (
+            <FormControl size="small" fullWidth>
+              <InputLabel id="kyc-select-label">Expediente KYC destino</InputLabel>
+              <Select
+                labelId="kyc-select-label"
+                label="Expediente KYC destino"
+                value={kycSeleccionado}
+                onChange={(e) => setKycSeleccionado(e.target.value)}
               >
-                Ver archivos en Drive
-              </Button>
-
-              {driveError && <Alert severity="error">{driveError}</Alert>}
-
-              {driveFiles.length > 0 && (
-                <List dense sx={{ bgcolor: "background.default", borderRadius: 1 }}>
-                  {driveFiles.map((archivo) => (
-                    <ListItem key={archivo.file_id} disablePadding>
-                      <ListItemButton onClick={() => toggleSeleccionado(archivo.file_id)} dense>
-                        <ListItemIcon sx={{ minWidth: 36 }}>
-                          <Checkbox
-                            edge="start"
-                            checked={seleccionados.has(archivo.file_id)}
-                            tabIndex={-1}
-                            disableRipple
-                            size="small"
-                          />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={archivo.nombre}
-                          secondary={
-                            DOCUMENT_TYPE_LABELS[guessDocumentTypeFromFilename(archivo.nombre)] ??
-                            guessDocumentTypeFromFilename(archivo.nombre)
-                          }
-                        />
-                      </ListItemButton>
-                    </ListItem>
-                  ))}
-                </List>
-              )}
-
-              {driveFiles.length === 0 && !loadingDriveFiles && kycSeleccionado && (
-                <Typography variant="caption" color="text.secondary">
-                  Sin archivos listados todavía — clic en "Ver archivos en
-                  Drive" (o la carpeta está vacía).
-                </Typography>
-              )}
-
-              <Button type="submit" variant="contained" disabled={loading || seleccionados.size === 0}>
-                {loading ? (
-                  <CircularProgress size={20} color="inherit" />
-                ) : (
-                  `Analizar ${seleccionados.size > 1 ? `${seleccionados.size} documentos` : "documento"}`
-                )}
-              </Button>
-            </>
+                {kycOptions.map((kyc) => (
+                  <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
+                    {kyc.id_contraparte} ({kyc.id_kyc})
+                  </MenuItem>
+                ))}
+              </Select>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
+                A qué expediente se guardan los datos ya validados después de analizar.
+              </Typography>
+            </FormControl>
           )}
+
+          <Button
+            variant="contained"
+            startIcon={
+              pickerLoading ? <CircularProgress size={18} color="inherit" /> : <HardDriveUpload size={18} strokeWidth={1.5} />
+            }
+            disabled={pickerLoading}
+            onClick={handleAgregarDesdeDrive}
+          >
+            Agregar desde Drive
+          </Button>
+          {pickerError && <Alert severity="error">{pickerError}</Alert>}
         </Stack>
 
         {hasResults && (
