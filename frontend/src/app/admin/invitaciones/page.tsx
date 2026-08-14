@@ -24,18 +24,23 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Copy, Link2, UploadCloud, UserPlus } from "lucide-react";
+import { Copy, Link2, ShieldOff, UploadCloud, UserPlus } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
+  IamExternalCollaborator,
   IamInvitation,
   IamMagicLink,
   IamMagicLinkMasivoError,
+  createExternalCollaborator,
   createInvitation,
   createMagicLink,
   createMagicLinksMasivo,
+  listExternalCollaborators,
   listInvitations,
   listMagicLinks,
+  resendExternalCollaborator,
+  revokeExternalCollaborator,
   revokeInvitation,
   revokeMagicLink,
 } from "@/lib/iam";
@@ -60,21 +65,18 @@ export default function InvitacionesPage() {
       <Typography variant="h5" gutterBottom>
         Invitaciones
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Dos formas de dejar entrar a alguien que todavía no es parte de CumbresBI: un acceso
-        temporal sin cuenta de Workspace, o el alta formal de un colaborador nuevo.
-      </Typography>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
         <Tab icon={<Link2 size={16} strokeWidth={1.5} />} iconPosition="start" label="Temporales" />
         <Tab icon={<UserPlus size={16} strokeWidth={1.5} />} iconPosition="start" label="Colaboradores" />
+        
       </Tabs>
 
       <Box role="tabpanel" hidden={tab !== 0}>
         {tab === 0 && <InvitacionesTemporalesTab session={session} />}
       </Box>
       <Box role="tabpanel" hidden={tab !== 1}>
-        {tab === 1 && <ColaboradoresNuevosTab session={session} />}
+        {tab === 1 && <ColaboradoresTab session={session} />}
       </Box>
     </AppShell>
   );
@@ -260,11 +262,27 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     }
   }
 
+  // Mismo vocabulario que los otros 3 tipos (pedido explicito 14/Ago/2026:
+  // "en temporal igual pendiente, aceptado, expirado, revocado y aparte
+  // mostrar el tiempo que le queda") - "Usado"/"Activo" antes no calzaban
+  // con "Aceptada"/"Pendiente" de invitaciones y acceso externo.
   function estadoDe(link: IamMagicLink): { label: string; color: "success" | "default" | "error" | "warning" } {
     if (link.revoked_at) return { label: "Revocado", color: "error" };
     if (new Date(link.expires_at) < new Date()) return { label: "Expirado", color: "warning" };
-    if (link.uses_count >= link.max_uses) return { label: "Usado", color: "default" };
-    return { label: "Activo", color: "success" };
+    if (link.uses_count >= link.max_uses) return { label: "Aceptado", color: "success" };
+    return { label: "Pendiente", color: "default" };
+  }
+
+  // Tiempo que le queda a un link todavia pendiente antes de expirar -
+  // solo tiene sentido mostrarlo mientras no este ya revocado/expirado/
+  // aceptado (estadoDe ya cubre esos casos aparte).
+  function tiempoRestante(expiresAt: string): string {
+    const minutos = Math.round((new Date(expiresAt).getTime() - Date.now()) / 60000);
+    if (minutos <= 0) return "menos de 1 min";
+    if (minutos < 60) return `${minutos} min`;
+    const horas = Math.floor(minutos / 60);
+    const restoMin = minutos % 60;
+    return restoMin > 0 ? `${horas} h ${restoMin} min` : `${horas} h`;
   }
 
   // Apodo del recurso para la columna de la tabla - usa el catalogo ya
@@ -525,10 +543,17 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
                         {link.uses_count}/{link.max_uses}
                       </TableCell>
                       <TableCell>
-                        <Chip size="small" label={estado.label} color={estado.color} />
+                        <Stack spacing={0.25}>
+                          <Chip size="small" label={estado.label} color={estado.color} sx={{ width: "fit-content" }} />
+                          {estado.label === "Pendiente" && (
+                            <Typography variant="caption" color="text.secondary">
+                              Queda {tiempoRestante(link.expires_at)}
+                            </Typography>
+                          )}
+                        </Stack>
                       </TableCell>
                       <TableCell align="right">
-                        {estado.label === "Activo" && (
+                        {estado.label === "Pendiente" && (
                           <Button
                             size="small"
                             variant="outlined"
@@ -552,105 +577,311 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
   );
 }
 
-// --- Tab 2: Colaboradores nuevos (IamInvitation, gate real) -------------
+// --- Tab 2: Colaboradores (IamInvitation + IamExternalCollaborator) -----
 
-// Alta formal de un empleado nuevo (decision hibrida 10/Ago/2026, ver
-// iam/auth_views.py y memoria de sesion "iam-invitacion-alcance-incierto"):
-// a diferencia de la pestaña anterior, aqui no hay token ni link que
-// copiar - el correo simplemente ya puede iniciar sesion con Google en
-// cuanto existe esta fila pendiente (el gate real vive en el backend,
-// _upsert_identity).
-function ColaboradoresNuevosTab({ session }: { session: SessionUser | null }) {
+// Unifica los dos mecanismos de alta de "colaborador" (14/Ago/2026, ver
+// memoria de sesion "tercer-tipo-invitacion-externo-sin-workspace"): dos
+// recuadros de alta distintos (uno para quien SI tiene correo de
+// Workspace, otro para quien NO), pero un solo historial abajo - ambos
+// terminan siendo "un colaborador de CumbresBI", solo cambia como entra.
+// - Invitación Workspace (IamInvitation): sin token ni link, el correo
+//   simplemente ya puede iniciar sesión con Google (gate real en
+//   auth_views._upsert_identity).
+// - Acceso externo (IamExternalCollaborator): SI crea un IamUser real
+//   desde ya (para asignarle roles en /admin/directorio) y manda un link
+//   que no vence por tiempo, solo se revoca a mano.
+type FilaColaborador = {
+  key: string;
+  tipo: "Workspace" | "Externo";
+  email: string;
+  invitadoPorEmail: string | null;
+  invitadoEl: string;
+  estado: { label: string; color: "success" | "default" | "error" };
+  acciones: React.ReactNode;
+};
+
+function ColaboradoresTab({ session }: { session: SessionUser | null }) {
   const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
-  const [email, setEmail] = useState("");
-  const [creando, setCreando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // --- Alta Workspace ---
+  const [emailWorkspace, setEmailWorkspace] = useState("");
+  const [creandoWorkspace, setCreandoWorkspace] = useState(false);
+  const [ultimaInvitacionCreada, setUltimaInvitacionCreada] = useState<IamInvitation | null>(null);
   const [invitaciones, setInvitaciones] = useState<IamInvitation[]>([]);
+
+  // --- Alta externa ---
+  const [emailExterno, setEmailExterno] = useState("");
+  const [displayNameExterno, setDisplayNameExterno] = useState("");
+  const [creandoExterno, setCreandoExterno] = useState(false);
+  const [ultimoAccesoGenerado, setUltimoAccesoGenerado] = useState<IamExternalCollaborator | null>(null);
+  const [accesosExternos, setAccesosExternos] = useState<IamExternalCollaborator[]>([]);
+  const [reenviando, setReenviando] = useState<string | null>(null);
+
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  function refrescarLista() {
+  function refrescarListas() {
     setLoading(true);
-    listInvitations()
-      .then(setInvitaciones)
+    Promise.all([listInvitations(), listExternalCollaborators()])
+      .then(([invs, accesos]) => {
+        setInvitaciones(invs);
+        setAccesosExternos(accesos);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    refrescarLista();
+    refrescarListas();
   }, []);
 
-  async function handleInvitar(e: React.FormEvent) {
+  async function handleInvitarWorkspace(e: React.FormEvent) {
     e.preventDefault();
-    setCreando(true);
+    setCreandoWorkspace(true);
     setError(null);
     try {
-      await createInvitation(email);
-      setEmail("");
-      refrescarLista();
+      const nueva = await createInvitation(emailWorkspace);
+      setUltimaInvitacionCreada(nueva);
+      setEmailWorkspace("");
+      refrescarListas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al invitar");
     } finally {
-      setCreando(false);
+      setCreandoWorkspace(false);
     }
   }
 
-  async function handleRevocar(invitationId: string) {
+  async function handleRevocarInvitacion(invitationId: string) {
     try {
       await revokeInvitation(invitationId);
-      refrescarLista();
+      refrescarListas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al revocar");
     }
   }
 
-  function estadoDe(inv: IamInvitation): { label: string; color: "success" | "default" | "error" } {
+  async function handleCrearExterno(e: React.FormEvent) {
+    e.preventDefault();
+    setCreandoExterno(true);
+    setError(null);
+    try {
+      const nuevo = await createExternalCollaborator({ email: emailExterno, displayName: displayNameExterno });
+      setUltimoAccesoGenerado(nuevo);
+      setEmailExterno("");
+      setDisplayNameExterno("");
+      refrescarListas();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al crear el acceso externo");
+    } finally {
+      setCreandoExterno(false);
+    }
+  }
+
+  async function handleRevocarExterno(externalAccessId: string) {
+    try {
+      await revokeExternalCollaborator(externalAccessId);
+      refrescarListas();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al revocar");
+    }
+  }
+
+  async function handleReenviarExterno(externalAccessId: string) {
+    setReenviando(externalAccessId);
+    setError(null);
+    try {
+      const actualizado = await resendExternalCollaborator(externalAccessId);
+      setUltimoAccesoGenerado(actualizado);
+      refrescarListas();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reenviar");
+    } finally {
+      setReenviando(null);
+    }
+  }
+
+  function estadoInvitacion(inv: IamInvitation): { label: string; color: "success" | "default" | "error" } {
     if (inv.revoked_at) return { label: "Revocada", color: "error" };
     if (inv.accepted_at) return { label: "Aceptada", color: "default" };
     return { label: "Pendiente", color: "success" };
   }
 
+  // Mismo vocabulario que las otras 3 (Pendiente/Aceptado/Expirado/
+  // Revocado, pedido explicito 14/Ago/2026) - "Activo"/"Sin usar" antes no
+  // eran consistentes con "Aceptada" de la invitacion Workspace.
+  function estadoExterno(acceso: IamExternalCollaborator): { label: string; color: "success" | "default" | "error" } {
+    if (acceso.revoked_at) return { label: "Revocado", color: "error" };
+    if (acceso.last_used_at) return { label: "Aceptado", color: "success" };
+    return { label: "Pendiente", color: "default" };
+  }
+
+  // Historial unico, mas reciente primero - combina ambos mecanismos
+  // (misma fila visual, columna "Tipo" distingue de cual se trata).
+  const filas: FilaColaborador[] = [
+    ...invitaciones.map((inv) => {
+      const estado = estadoInvitacion(inv);
+      return {
+        key: `inv-${inv.invitation_id}`,
+        tipo: "Workspace" as const,
+        email: inv.email,
+        invitadoPorEmail: inv.invited_by_email,
+        invitadoEl: inv.invited_at,
+        estado,
+        acciones:
+          estado.label === "Pendiente" ? (
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              onClick={() => handleRevocarInvitacion(inv.invitation_id)}
+              disabled={!puedeEditar}
+            >
+              Revocar
+            </Button>
+          ) : null,
+      };
+    }),
+    ...accesosExternos.map((acceso) => {
+      const estado = estadoExterno(acceso);
+      return {
+        key: `ext-${acceso.external_access_id}`,
+        tipo: "Externo" as const,
+        email: acceso.email,
+        invitadoPorEmail: acceso.invited_by_email,
+        invitadoEl: acceso.invited_at,
+        estado,
+        acciones: !acceso.revoked_at ? (
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => handleReenviarExterno(acceso.external_access_id)}
+              disabled={!puedeEditar || reenviando === acceso.external_access_id}
+            >
+              {reenviando === acceso.external_access_id ? <CircularProgress size={16} /> : "Reenviar"}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              onClick={() => handleRevocarExterno(acceso.external_access_id)}
+              disabled={!puedeEditar}
+            >
+              Revocar
+            </Button>
+          </Stack>
+        ) : null,
+      };
+    }),
+  ].sort((a, b) => new Date(b.invitadoEl).getTime() - new Date(a.invitadoEl).getTime());
+
   return (
     <>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Un correo que todavía no forma parte de CumbresBI no puede iniciar sesión hasta que un
-        Admin lo invite aquí — no hace falta enviarle ningún link, en cuanto queda pendiente ya
-        puede entrar con su cuenta de Google Workspace.
-      </Typography>
-
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
       )}
 
-      {puedeCrear && (
-      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          Invitar colaborador nuevo
-        </Typography>
-        <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleInvitar}>
-          <TextField
-            size="small"
-            label="Correo del colaborador (Google Workspace)"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            sx={{ flex: 1 }}
-          />
-          <Button
-            type="submit"
-            variant="contained"
-            startIcon={<UserPlus size={16} strokeWidth={1.5} />}
-            disabled={creando}
-          >
-            {creando ? <CircularProgress size={20} color="inherit" /> : "Invitar"}
-          </Button>
-        </Stack>
-      </Paper>
-      )}
+      <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 3 }} alignItems="stretch">
+        {puedeCrear && (
+        <Paper variant="outlined" sx={{ p: 3, flex: 1 }}>
+          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+            Invitar colaborador Workspace
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Un correo que todavía no forma parte de CumbresBI no puede iniciar sesión hasta que un
+            Admin lo invite aquí — no hace falta enviarle ningún link, en cuanto queda pendiente ya
+            puede entrar con su cuenta de Google Workspace.
+          </Typography>
+          <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleInvitarWorkspace}>
+            <TextField
+              size="small"
+              label="Correo (Google Workspace)"
+              type="email"
+              required
+              value={emailWorkspace}
+              onChange={(e) => setEmailWorkspace(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              startIcon={<UserPlus size={16} strokeWidth={1.5} />}
+              disabled={creandoWorkspace}
+            >
+              {creandoWorkspace ? <CircularProgress size={20} color="inherit" /> : "Invitar"}
+            </Button>
+          </Stack>
+
+          {ultimaInvitacionCreada && (
+            <Alert
+              severity={ultimaInvitacionCreada.correo_enviado ? "success" : "warning"}
+              sx={{ mt: 2 }}
+            >
+              {ultimaInvitacionCreada.correo_enviado
+                ? `Se avisó por correo a ${ultimaInvitacionCreada.email} que ya puede iniciar sesión con Google.`
+                : `Invitación creada para ${ultimaInvitacionCreada.email}, pero el correo de aviso no se pudo enviar — ya puede entrar con Google de todas formas.`}
+            </Alert>
+          )}
+        </Paper>
+        )}
+
+        {puedeCrear && (
+        <Paper variant="outlined" sx={{ p: 3, flex: 1 }}>
+          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+            Dar acceso a un colaborador externo
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Para quien no tiene correo de Google Workspace pero necesita entrar a secciones reales
+            (roles/permisos asignados desde /admin/directorio). El link no vence por tiempo — solo
+            se revoca a mano.
+          </Typography>
+          <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleCrearExterno}>
+            <TextField
+              size="small"
+              label="Correo del colaborador"
+              type="email"
+              required
+              value={emailExterno}
+              onChange={(e) => setEmailExterno(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              size="small"
+              label="Nombre (opcional)"
+              value={displayNameExterno}
+              onChange={(e) => setDisplayNameExterno(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              startIcon={<ShieldOff size={16} strokeWidth={1.5} />}
+              disabled={creandoExterno}
+            >
+              {creandoExterno ? <CircularProgress size={20} color="inherit" /> : "Crear acceso"}
+            </Button>
+          </Stack>
+
+          {ultimoAccesoGenerado && (
+            <Alert severity="info" sx={{ mt: 2 }} icon={<Copy size={18} strokeWidth={1.5} />}>
+              Acceso{" "}
+              {ultimoAccesoGenerado.correo_enviado ? "generado y enviado" : "generado (el correo no se pudo enviar)"}{" "}
+              para <strong>{ultimoAccesoGenerado.email}</strong>:
+              <Typography
+                component="pre"
+                variant="caption"
+                sx={{ mt: 1, wordBreak: "break-all", whiteSpace: "pre-wrap" }}
+              >
+                {ultimoAccesoGenerado.acceso_url}
+              </Typography>
+            </Alert>
+          )}
+        </Paper>
+        )}
+      </Stack>
 
       <Paper variant="outlined">
         <TableContainer>
@@ -658,6 +889,7 @@ function ColaboradoresNuevosTab({ session }: { session: SessionUser | null }) {
             <TableHead>
               <TableRow>
                 <TableCell>Correo</TableCell>
+                <TableCell>Tipo</TableCell>
                 <TableCell>Invitado por</TableCell>
                 <TableCell>Invitado el</TableCell>
                 <TableCell>Estado</TableCell>
@@ -667,45 +899,38 @@ function ColaboradoresNuevosTab({ session }: { session: SessionUser | null }) {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                     <CircularProgress size={24} />
                   </TableCell>
                 </TableRow>
-              ) : invitaciones.length === 0 ? (
+              ) : filas.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
-                      Sin invitaciones todavía.
+                      Sin colaboradores todavía.
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                invitaciones.map((inv) => {
-                  const estado = estadoDe(inv);
-                  return (
-                    <TableRow key={inv.invitation_id} hover>
-                      <TableCell>{inv.email}</TableCell>
-                      <TableCell>{inv.invited_by_email ?? "—"}</TableCell>
-                      <TableCell>{new Date(inv.invited_at).toLocaleString("es-MX")}</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={estado.label} color={estado.color} />
-                      </TableCell>
-                      <TableCell align="right">
-                        {estado.label === "Pendiente" && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="error"
-                            onClick={() => handleRevocar(inv.invitation_id)}
-                            disabled={!puedeEditar}
-                          >
-                            Revocar
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
+                filas.map((fila) => (
+                  <TableRow key={fila.key} hover>
+                    <TableCell>{fila.email}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={fila.tipo}
+                        color={fila.tipo === "Externo" ? "info" : "default"}
+                      />
+                    </TableCell>
+                    <TableCell>{fila.invitadoPorEmail ?? "—"}</TableCell>
+                    <TableCell>{new Date(fila.invitadoEl).toLocaleString("es-MX")}</TableCell>
+                    <TableCell>
+                      <Chip size="small" label={fila.estado.label} color={fila.estado.color} />
+                    </TableCell>
+                    <TableCell align="right">{fila.acciones}</TableCell>
+                  </TableRow>
+                ))
               )}
             </TableBody>
           </Table>

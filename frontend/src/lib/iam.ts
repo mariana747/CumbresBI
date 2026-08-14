@@ -51,12 +51,16 @@ export async function listUsers({
   status,
   role,
   group,
+  accessMode,
   sinRol,
 }: {
   search?: string;
   status?: string;
   role?: string;
   group?: string;
+  // Interno (STANDARD, Workspace) vs externo (RESTRICTED, ver
+  // IamExternalCollaboratorViewSet.create) - filtro del directorio.
+  accessMode?: string;
   // Decision de producto: acceso de empleados nuevos via login libre, no
   // invitacion formal - ver memoria de sesion "iam-invitacion-alcance-incierto".
   sinRol?: boolean;
@@ -66,9 +70,62 @@ export async function listUsers({
   if (status) params.set("status", status);
   if (role) params.set("role", role);
   if (group) params.set("group", group);
+  if (accessMode) params.set("access_mode", accessMode);
   if (sinRol) params.set("sin_rol", "true");
 
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/users/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+// Borrado logico (14/Ago/2026, pedido explicito tras encontrar un usuario
+// de prueba atorado en SUSPENDED sin forma de quitarlo del directorio -
+// ver iam/views.py, IamUserViewSet.eliminar). NO borra la fila real
+// (varias FKs con on_delete=PROTECT apuntan a IamUser) - pone
+// status=DELETED y revoca sus roles activos. actorUserId es quien hace
+// clic en "Eliminar", no el usuario a eliminar - el backend rechaza que
+// alguien se elimine a si mismo.
+export async function deleteUser(userId: string, actorUserId?: string): Promise<IamUser> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/users/${userId}/eliminar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+// Reactivar un usuario suspendido (14/Ago/2026, pedido explicito: al
+// suspender se le desactivan sus funciones - login/canje rechazados en
+// auth_views.py - hace falta un boton para revertirlo). Solo funciona
+// desde SUSPENDED, no desde DELETED (ver iam/views.py, docstring de
+// IamUserViewSet.reactivar).
+export async function reactivateUser(userId: string, actorUserId?: string): Promise<IamUser> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/users/${userId}/reactivar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+// Suspender un usuario activo (14/Ago/2026, pedido explicito: a un
+// colaborador Workspace ya aceptado no se le puede "revocar la
+// invitación" - IamInvitationViewSet.revocar ya lo rechaza - asi que esta
+// es la forma real de cortarle el acceso; reversible con reactivateUser().
+export async function suspendUser(userId: string, actorUserId?: string): Promise<IamUser> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/users/${userId}/suspender/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId }),
+  });
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
   }
@@ -474,6 +531,10 @@ export interface IamInvitation {
   invited_at: string;
   accepted_at: string | null;
   revoked_at: string | null;
+  // Aviso "ya puedes entrar" (14/Ago/2026, ver iam/mail_utils.py
+  // enviar_correo_invitacion_workspace) - solo viaja en la respuesta de
+  // create(), no es un campo persistido del modelo.
+  correo_enviado?: boolean;
 }
 
 export async function listInvitations(): Promise<IamInvitation[]> {
@@ -500,6 +561,75 @@ export async function revokeInvitation(invitationId: string): Promise<IamInvitat
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/invitaciones/${invitationId}/revocar/`, {
     method: "POST",
   });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+// 3er tipo de acceso externo (14/Ago/2026, ver iam/models.py
+// IamExternalCollaborator y memoria de sesion
+// "tercer-tipo-invitacion-externo-sin-workspace"): a diferencia de Magic
+// Link (accion puntual, vence en minutos) e IamInvitation (correo de
+// Workspace, canjea iniciando sesion con Google), aqui el colaborador NO
+// tiene Workspace - el link no vence por tiempo, solo se revoca a mano, y
+// al canjearlo obtiene una sesion real (con sus roles/permisos
+// asignados via /admin/directorio, no un JWT de alcance limitado).
+export interface IamExternalCollaborator {
+  external_access_id: string;
+  user: string;
+  email: string;
+  invited_by: string | null;
+  invited_by_email: string | null;
+  invited_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  token?: string;
+  acceso_url?: string;
+  correo_enviado?: boolean;
+}
+
+export async function listExternalCollaborators(): Promise<IamExternalCollaborator[]> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/acceso-externo/`);
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function createExternalCollaborator(params: {
+  email: string;
+  displayName?: string;
+}): Promise<IamExternalCollaborator> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/acceso-externo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: params.email, display_name: params.displayName || null }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function revokeExternalCollaborator(externalAccessId: string): Promise<IamExternalCollaborator> {
+  const response = await apiFetch(
+    "IAM",
+    `${IAM_API_BASE_URL}/api/acceso-externo/${externalAccessId}/revocar/`,
+    { method: "POST" }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function resendExternalCollaborator(externalAccessId: string): Promise<IamExternalCollaborator> {
+  const response = await apiFetch(
+    "IAM",
+    `${IAM_API_BASE_URL}/api/acceso-externo/${externalAccessId}/reenviar/`,
+    { method: "POST" }
+  );
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
   }

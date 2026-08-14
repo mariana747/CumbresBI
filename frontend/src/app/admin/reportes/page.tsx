@@ -52,6 +52,7 @@ const SUB_REPORTES = [
   { label: "Historial de cambios de roles", value: "historial" },
   { label: "Matriz de acceso", value: "matriz" },
   { label: "Bitácora de auditoría", value: "auditoria" },
+  { label: "Usuarios eliminados", value: "eliminados" },
 ] as const;
 
 function HistorialCambios() {
@@ -206,6 +207,83 @@ function MatrizAcceso() {
                         )}
                       </Stack>
                     </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+    </>
+  );
+}
+
+// Usuarios eliminados (14/Ago/2026, pedido explicito: "no es necesario
+// tener para mostrar los usuarios borrados [en el Directorio], eso solo
+// en reportes en una sus secciones") - borrado logico (status=DELETED,
+// ver IamUserViewSet.eliminar), solo lectura. El Directorio de
+// /admin/usuarios ya los excluye por defecto; este es el unico lugar
+// donde se ven ahora.
+function UsuariosEliminados() {
+  const [users, setUsers] = useState<IamUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    listUsers({ status: "DELETED" })
+      .then(setUsers)
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Usuarios con borrado lógico — ya no pueden iniciar sesión ni aparecen en el Directorio.
+        Solo vuelven a entrar si se les crea una invitación o acceso externo nuevo.
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      <Paper variant="outlined">
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Nombre</TableCell>
+                <TableCell>Correo</TableCell>
+                <TableCell>Tipo</TableCell>
+                <TableCell>Eliminado el</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={4} align="center" sx={{ py: 4 }}>
+                    <CircularProgress size={24} />
+                  </TableCell>
+                </TableRow>
+              ) : users.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Sin usuarios eliminados.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                users.map((user) => (
+                  <TableRow key={user.user_id} hover>
+                    <TableCell>{user.display_name || "—"}</TableCell>
+                    <TableCell>{user.primary_email}</TableCell>
+                    <TableCell>{user.access_mode === "RESTRICTED" ? "Externo" : "Interno"}</TableCell>
+                    <TableCell>{new Date(user.updated_at).toLocaleString("es-MX")}</TableCell>
                   </TableRow>
                 ))
               )}
@@ -464,6 +542,8 @@ function ReportesContent() {
         <HistorialCambios />
       ) : subReporte === "matriz" ? (
         <MatrizAcceso />
+      ) : subReporte === "eliminados" ? (
+        <UsuariosEliminados />
       ) : (
         <BitacoraAuditoria />
       )}

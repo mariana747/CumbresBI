@@ -5,30 +5,59 @@ import { useSearchParams } from "next/navigation";
 import {
   Alert,
   Avatar,
+  Box,
+  Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Divider,
   FormControl,
   IconButton,
   InputAdornment,
   InputLabel,
+  Menu,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Search } from "lucide-react";
+import { Ban, Building2, Clock, PencilLine, RotateCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import AppShell, { notifySinRolChanged } from "@/components/AppShell";
 import EmpresaAssignmentDialog from "@/components/EmpresaAssignmentDialog";
 import RoleAssignmentDialog from "@/components/RoleAssignmentDialog";
-import { IamGroup, IamRole, IamUser, listGroups, listRoles, listUsers, scopeChipColor } from "@/lib/iam";
+import { getSession, SessionUser } from "@/lib/auth";
+import {
+  IamExternalCollaborator,
+  IamGroup,
+  IamInvitation,
+  IamRole,
+  IamUser,
+  deleteUser,
+  listExternalCollaborators,
+  listGroups,
+  listInvitations,
+  listRoles,
+  listUsers,
+  reactivateUser,
+  revokeExternalCollaborator,
+  suspendUser,
+  revokeInvitation,
+  scopeChipColor,
+} from "@/lib/iam";
 
 const STATUS_LABELS: Record<IamUser["status"], string> = {
   ACTIVE: "Activo",
@@ -40,6 +69,21 @@ const STATUS_COLORS: Record<IamUser["status"], "success" | "warning" | "default"
   ACTIVE: "success",
   SUSPENDED: "warning",
   DELETED: "default",
+};
+
+// Tipo de colaborador segun access_mode (ver iam/models.py, IamUser):
+// STANDARD = interno (login con Google Workspace, alta via IamInvitation
+// o ya existente), RESTRICTED = externo sin Workspace (alta via
+// IamExternalCollaborator, ver /admin/invitaciones pestaña "Externos sin
+// Workspace"). No es lo mismo que IamMagicLink (ese no crea IamUser).
+const ACCESS_MODE_LABELS: Record<IamUser["access_mode"], string> = {
+  STANDARD: "Interno",
+  RESTRICTED: "Externo",
+};
+
+const ACCESS_MODE_COLORS: Record<IamUser["access_mode"], "default" | "info"> = {
+  STANDARD: "default",
+  RESTRICTED: "info",
 };
 
 // Directorio de usuarios (Fase 1, docs/architecture/CumbresBI_V2_Plan_de_
@@ -64,12 +108,51 @@ const SIN_ROL_VALUE = "__SIN_ROL__";
 export default function DirectorioUsuariosPage() {
   return (
     <Suspense fallback={null}>
-      <DirectorioUsuariosContent />
+      <DirectorioUsuariosPageContent />
     </Suspense>
   );
 }
 
-function DirectorioUsuariosContent() {
+// Dividido en apartados (14/Ago/2026, pedido explicito): "Directorio"
+// (usuarios reales, IamUser ya existente), "Pendientes" (invitaciones
+// Workspace sin aceptar + accesos externos sin canjear todavia - ninguno
+// de los dos tiene el mismo peso que un usuario real) y "Suspendidos"
+// (usuarios reales con status=SUSPENDED - se les desactivan sus funciones,
+// ver gate en auth_views.py, y necesitan un boton de reactivar explicito).
+function DirectorioUsuariosPageContent() {
+  const [tab, setTab] = useState(0);
+  const [session, setSession] = useState<SessionUser | null>(null);
+
+  useEffect(() => {
+    getSession().then(setSession);
+  }, []);
+
+  return (
+    <AppShell>
+      <Typography variant="h5" gutterBottom>
+        Usuarios
+      </Typography>
+
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+        <Tab icon={<Users size={16} strokeWidth={1.5} />} iconPosition="start" label="Directorio" />
+        <Tab icon={<Clock size={16} strokeWidth={1.5} />} iconPosition="start" label="Pendientes" />
+        <Tab icon={<Ban size={16} strokeWidth={1.5} />} iconPosition="start" label="Suspendidos" />
+      </Tabs>
+
+      <Box role="tabpanel" hidden={tab !== 0}>
+        {tab === 0 && <DirectorioUsuariosContent session={session} />}
+      </Box>
+      <Box role="tabpanel" hidden={tab !== 1}>
+        {tab === 1 && <PendientesTab session={session} />}
+      </Box>
+      <Box role="tabpanel" hidden={tab !== 2}>
+        {tab === 2 && <SuspendidosTab session={session} />}
+      </Box>
+    </AppShell>
+  );
+}
+
+function DirectorioUsuariosContent({ session }: { session: SessionUser | null }) {
   const searchParams = useSearchParams();
   const [users, setUsers] = useState<IamUser[]>([]);
   const [roles, setRoles] = useState<IamRole[]>([]);
@@ -81,10 +164,29 @@ function DirectorioUsuariosContent() {
     searchParams.get("sinRol") === "true" ? SIN_ROL_VALUE : ""
   );
   const [group, setGroup] = useState("");
+  const [accessMode, setAccessMode] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managingUser, setManagingUser] = useState<IamUser | null>(null);
   const [managingEmpresaUser, setManagingEmpresaUser] = useState<IamUser | null>(null);
+  const [eliminando, setEliminando] = useState<string | null>(null);
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState<IamUser | null>(null);
+  const [confirmandoSuspender, setConfirmandoSuspender] = useState<IamUser | null>(null);
+  // Menu unificado de "Editar" por fila (14/Ago/2026, pedido explicito:
+  // antes habia un lapiz suelto en Empresa, otro en Roles y un boton de
+  // eliminar aparte en Acciones - ahora un solo boton abre las 3 acciones
+  // juntas). menuAnchor+menuUser van de la mano: cual fila esta abierta.
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [menuUser, setMenuUser] = useState<IamUser | null>(null);
+
+  function cerrarMenu() {
+    setMenuAnchor(null);
+    setMenuUser(null);
+  }
+
+  // Mismo criterio de permiso que RoleAssignmentDialog/EmpresaAssignmentDialog
+  // (iam.editar) - eliminar un usuario es tan "editar" como cambiarle el rol.
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
 
   const sinRol = roleFilter === SIN_ROL_VALUE;
   const role = sinRol ? "" : roleFilter;
@@ -104,11 +206,67 @@ function DirectorioUsuariosContent() {
       status: status || undefined,
       role: role || undefined,
       group: group || undefined,
+      accessMode: accessMode || undefined,
       sinRol,
     }).then(setUsers);
     // Asignar/revocar un rol puede cambiar quien aparece en "sin rol
     // asignado" - se lo hacemos saber a la campana de AppShell.tsx.
     notifySinRolChanged();
+  }
+
+  // Confirmar en un dialogo propio en vez de window.confirm() (14/Ago/2026,
+  // pedido explicito de un "seguro" antes de eliminar) - un confirm()
+  // nativo del navegador es facil de tronar sin querer con Enter/doble
+  // clic y no explica la consecuencia (revocar roles) con el mismo detalle
+  // que un dialogo real.
+  async function confirmarEliminar() {
+    if (!confirmandoEliminar) return;
+    const user = confirmandoEliminar;
+    setConfirmandoEliminar(null);
+    setEliminando(user.user_id);
+    setError(null);
+    try {
+      await deleteUser(user.user_id, session?.user_id);
+      refreshUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setEliminando(null);
+    }
+  }
+
+  async function handleReactivar(user: IamUser) {
+    setEliminando(user.user_id); // reusa el mismo indicador de "fila ocupada"
+    setError(null);
+    try {
+      await reactivateUser(user.user_id, session?.user_id);
+      refreshUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reactivar");
+    } finally {
+      setEliminando(null);
+    }
+  }
+
+  // Suspender (14/Ago/2026, pedido explicito): a un colaborador Workspace
+  // ya aceptado no se le puede revocar la invitacion (ver
+  // IamInvitationViewSet.revocar) - esta es la forma real de cortarle el
+  // acceso, reversible desde la pestaña "Suspendidos". Mismo criterio de
+  // confirmar en dialogo propio que eliminar (pedido explicito).
+  async function confirmarSuspender() {
+    if (!confirmandoSuspender) return;
+    const user = confirmandoSuspender;
+    setConfirmandoSuspender(null);
+    setEliminando(user.user_id);
+    setError(null);
+    try {
+      await suspendUser(user.user_id, session?.user_id);
+      refreshUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al suspender");
+    } finally {
+      setEliminando(null);
+    }
   }
 
   useEffect(() => {
@@ -125,6 +283,7 @@ function DirectorioUsuariosContent() {
         status: status || undefined,
         role: role || undefined,
         group: group || undefined,
+        accessMode: accessMode || undefined,
         sinRol,
       })
         .then(setUsers)
@@ -132,13 +291,10 @@ function DirectorioUsuariosContent() {
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timeout);
-  }, [search, status, role, group, sinRol]);
+  }, [search, status, role, group, accessMode, sinRol]);
 
   return (
-    <AppShell>
-      <Typography variant="h5" gutterBottom>
-        Directorio de usuarios
-      </Typography>
+    <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Usuarios registrados en iam-service. Búsqueda por correo/nombre y
         filtros por estado, rol y empresa.
@@ -170,7 +326,6 @@ function DirectorioUsuariosContent() {
             <MenuItem value="">Todos</MenuItem>
             <MenuItem value="ACTIVE">Activo</MenuItem>
             <MenuItem value="SUSPENDED">Suspendido</MenuItem>
-            <MenuItem value="DELETED">Eliminado</MenuItem>
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 200 }}>
@@ -203,6 +358,19 @@ function DirectorioUsuariosContent() {
             ))}
           </Select>
         </FormControl>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel id="access-mode-filter-label">Tipo</InputLabel>
+          <Select
+            labelId="access-mode-filter-label"
+            label="Tipo"
+            value={accessMode}
+            onChange={(e) => setAccessMode(e.target.value)}
+          >
+            <MenuItem value="">Todos</MenuItem>
+            <MenuItem value="STANDARD">Interno</MenuItem>
+            <MenuItem value="RESTRICTED">Externo</MenuItem>
+          </Select>
+        </FormControl>
       </Stack>
 
       {error && (
@@ -220,20 +388,22 @@ function DirectorioUsuariosContent() {
                 <TableCell>Nombre</TableCell>
                 <TableCell>Correo</TableCell>
                 <TableCell>Estado</TableCell>
+                <TableCell>Tipo</TableCell>
                 <TableCell>Empresa</TableCell>
                 <TableCell>Roles</TableCell>
+                <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     <CircularProgress size={24} />
                   </TableCell>
                 </TableRow>
               ) : users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin resultados.
                     </Typography>
@@ -253,6 +423,14 @@ function DirectorioUsuariosContent() {
                       <Chip size="small" label={STATUS_LABELS[user.status]} color={STATUS_COLORS[user.status]} />
                     </TableCell>
                     <TableCell>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={ACCESS_MODE_LABELS[user.access_mode]}
+                        color={ACCESS_MODE_COLORS[user.access_mode]}
+                      />
+                    </TableCell>
+                    <TableCell>
                       <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
                         {user.empresas.length > 0 ? (
                           user.empresas.map((e) => (
@@ -265,13 +443,6 @@ function DirectorioUsuariosContent() {
                             Sin empresa
                           </Typography>
                         )}
-                        <IconButton
-                          size="small"
-                          aria-label="Cambiar empresa"
-                          onClick={() => setManagingEmpresaUser(user)}
-                        >
-                          <Pencil size={13} strokeWidth={1.5} />
-                        </IconButton>
                       </Stack>
                     </TableCell>
                     <TableCell>
@@ -294,10 +465,19 @@ function DirectorioUsuariosContent() {
                             Sin rol
                           </Typography>
                         )}
-                        <IconButton size="small" aria-label="Gestionar roles" onClick={() => setManagingUser(user)}>
-                          <Pencil size={13} strokeWidth={1.5} />
-                        </IconButton>
                       </Stack>
+                    </TableCell>
+                    <TableCell align="right">
+                      <IconButton
+                        size="small"
+                        aria-label="Editar usuario"
+                        onClick={(e) => {
+                          setMenuAnchor(e.currentTarget);
+                          setMenuUser(user);
+                        }}
+                      >
+                        <PencilLine size={14} strokeWidth={1.5} />
+                      </IconButton>
                     </TableCell>
                   </TableRow>
                 ))
@@ -306,6 +486,70 @@ function DirectorioUsuariosContent() {
           </Table>
         </TableContainer>
       </Paper>
+
+      <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={cerrarMenu}>
+        <MenuItem
+          onClick={() => {
+            if (menuUser) setManagingEmpresaUser(menuUser);
+            cerrarMenu();
+          }}
+        >
+          <Building2 size={15} strokeWidth={1.5} style={{ marginRight: 10 }} />
+          Cambiar empresa
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (menuUser) setManagingUser(menuUser);
+            cerrarMenu();
+          }}
+        >
+          <ShieldCheck size={15} strokeWidth={1.5} style={{ marginRight: 10 }} />
+          Gestionar roles
+        </MenuItem>
+        {menuUser && menuUser.status === "ACTIVE" && (
+          <MenuItem
+            disabled={!puedeEditar || eliminando === menuUser.user_id}
+            onClick={() => {
+              const user = menuUser;
+              cerrarMenu();
+              if (user) setConfirmandoSuspender(user);
+            }}
+          >
+            <Ban size={15} strokeWidth={1.5} style={{ marginRight: 10 }} />
+            Suspender usuario
+          </MenuItem>
+        )}
+        {menuUser && menuUser.status === "SUSPENDED" && (
+          <MenuItem
+            disabled={!puedeEditar || eliminando === menuUser.user_id}
+            onClick={() => {
+              const user = menuUser;
+              cerrarMenu();
+              if (user) handleReactivar(user);
+            }}
+          >
+            <RotateCcw size={15} strokeWidth={1.5} style={{ marginRight: 10 }} />
+            Reactivar usuario
+          </MenuItem>
+        )}
+        {menuUser && menuUser.status !== "DELETED" && (
+          <>
+            <Divider />
+            <MenuItem
+              sx={{ color: "error.main" }}
+              disabled={!puedeEditar || eliminando === menuUser.user_id}
+              onClick={() => {
+                const user = menuUser;
+                cerrarMenu();
+                if (user) setConfirmandoEliminar(user);
+              }}
+            >
+              <Trash2 size={15} strokeWidth={1.5} style={{ marginRight: 10 }} />
+              Eliminar usuario
+            </MenuItem>
+          </>
+        )}
+      </Menu>
 
       {managingUser && (
         <RoleAssignmentDialog
@@ -328,6 +572,321 @@ function DirectorioUsuariosContent() {
           onChanged={refreshUsers}
         />
       )}
-    </AppShell>
+
+      <Dialog open={!!confirmandoEliminar} onClose={() => setConfirmandoEliminar(null)}>
+        <DialogTitle>¿Eliminar usuario?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Vas a eliminar a{" "}
+            <strong>
+              {confirmandoEliminar?.display_name || confirmandoEliminar?.primary_email}
+            </strong>
+            . Se revocarán sus roles activos y no podrá volver a iniciar sesión hasta que
+            se le invite de nuevo. Esta acción se puede revertir solo desde el backend.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmandoEliminar(null)}>Cancelar</Button>
+          <Button color="error" variant="contained" onClick={confirmarEliminar}>
+            Eliminar usuario
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!confirmandoSuspender} onClose={() => setConfirmandoSuspender(null)}>
+        <DialogTitle>¿Suspender usuario?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Vas a suspender a{" "}
+            <strong>
+              {confirmandoSuspender?.display_name || confirmandoSuspender?.primary_email}
+            </strong>
+            . Se revocarán sus roles activos y no podrá iniciar sesión hasta que lo
+            reactives desde la pestaña "Suspendidos".
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmandoSuspender(null)}>Cancelar</Button>
+          <Button color="warning" variant="contained" onClick={confirmarSuspender}>
+            Suspender usuario
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
+// --- Pestaña "Pendientes": invitaciones Workspace sin aceptar + accesos
+// externos sin canjear todavia. Ninguno de los dos tiene fila real en el
+// Directorio con el mismo peso (IamInvitation ni siquiera crea un IamUser
+// hasta que se acepta) - viven aparte para no mezclar "ya es alguien"
+// con "todavia no ha hecho nada". Mismas fuentes de datos que la pestaña
+// "Colaboradores" de /admin/invitaciones, aqui solo se filtran a lo
+// realmente pendiente (sin aceptar/sin canjear) en vez de mostrar todo
+// el historial.
+type FilaPendiente = {
+  key: string;
+  tipo: "Workspace" | "Externo";
+  email: string;
+  invitadoPorEmail: string | null;
+  invitadoEl: string;
+  onRevocar: () => void;
+};
+
+function PendientesTab({ session }: { session: SessionUser | null }) {
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
+  const [invitaciones, setInvitaciones] = useState<IamInvitation[]>([]);
+  const [accesos, setAccesos] = useState<IamExternalCollaborator[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [revocando, setRevocando] = useState<string | null>(null);
+
+  function refrescar() {
+    setLoading(true);
+    Promise.all([listInvitations(), listExternalCollaborators()])
+      .then(([invs, accs]) => {
+        setInvitaciones(invs.filter((i) => !i.accepted_at && !i.revoked_at));
+        setAccesos(accs.filter((a) => !a.last_used_at && !a.revoked_at));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    refrescar();
+  }, []);
+
+  async function handleRevocarInvitacion(id: string) {
+    setRevocando(id);
+    setError(null);
+    try {
+      await revokeInvitation(id);
+      refrescar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al revocar");
+    } finally {
+      setRevocando(null);
+    }
+  }
+
+  async function handleRevocarExterno(id: string) {
+    setRevocando(id);
+    setError(null);
+    try {
+      await revokeExternalCollaborator(id);
+      refrescar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al revocar");
+    } finally {
+      setRevocando(null);
+    }
+  }
+
+  const filas: FilaPendiente[] = [
+    ...invitaciones.map((inv) => ({
+      key: `inv-${inv.invitation_id}`,
+      tipo: "Workspace" as const,
+      email: inv.email,
+      invitadoPorEmail: inv.invited_by_email,
+      invitadoEl: inv.invited_at,
+      onRevocar: () => handleRevocarInvitacion(inv.invitation_id),
+    })),
+    ...accesos.map((acc) => ({
+      key: `ext-${acc.external_access_id}`,
+      tipo: "Externo" as const,
+      email: acc.email,
+      invitadoPorEmail: acc.invited_by_email,
+      invitadoEl: acc.invited_at,
+      onRevocar: () => handleRevocarExterno(acc.external_access_id),
+    })),
+  ].sort((a, b) => new Date(b.invitadoEl).getTime() - new Date(a.invitadoEl).getTime());
+
+  return (
+    <>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Invitaciones Workspace que aún no se han aceptado (nadie ha iniciado sesión todavía) y
+        accesos externos que aún no se han canjeado — ninguno de los dos es un usuario activo
+        hasta que la persona entre por primera vez.
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      <Paper variant="outlined">
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Correo</TableCell>
+                <TableCell>Tipo</TableCell>
+                <TableCell>Invitado por</TableCell>
+                <TableCell>Invitado el</TableCell>
+                <TableCell align="right">Acciones</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                    <CircularProgress size={24} />
+                  </TableCell>
+                </TableRow>
+              ) : filas.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Sin invitaciones ni accesos pendientes.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filas.map((fila) => (
+                  <TableRow key={fila.key} hover>
+                    <TableCell>{fila.email}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={fila.tipo}
+                        color={fila.tipo === "Externo" ? "info" : "default"}
+                      />
+                    </TableCell>
+                    <TableCell>{fila.invitadoPorEmail ?? "—"}</TableCell>
+                    <TableCell>{new Date(fila.invitadoEl).toLocaleString("es-MX")}</TableCell>
+                    <TableCell align="right">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        onClick={fila.onRevocar}
+                        disabled={!puedeEditar || revocando === fila.key.split("-")[1]}
+                      >
+                        Revocar
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+    </>
+  );
+}
+
+// --- Pestaña "Suspendidos": usuarios reales con status=SUSPENDED. Sus
+// funciones ya estan desactivadas de verdad (google_callback y
+// canjear_acceso_externo en auth_views.py rechazan a cualquiera que no
+// este ACTIVE) - esta pestaña es solo para encontrarlos rapido y
+// reactivarlos, sin tener que ir a buscar el filtro de Estado en el
+// Directorio.
+function SuspendidosTab({ session }: { session: SessionUser | null }) {
+  const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
+  const [users, setUsers] = useState<IamUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reactivando, setReactivando] = useState<string | null>(null);
+
+  function refrescar() {
+    setLoading(true);
+    listUsers({ status: "SUSPENDED" })
+      .then(setUsers)
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    refrescar();
+  }, []);
+
+  async function handleReactivar(user: IamUser) {
+    setReactivando(user.user_id);
+    setError(null);
+    try {
+      await reactivateUser(user.user_id, session?.user_id);
+      refrescar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reactivar");
+    } finally {
+      setReactivando(null);
+    }
+  }
+
+  return (
+    <>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Usuarios suspendidos no pueden iniciar sesión ni canjear su acceso hasta que se
+        reactiven aquí. Si la suspensión vino de revocar un acceso externo, reactivar solo
+        les devuelve el login — el enlace en sí necesita "Reenviar" desde Invitaciones.
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      <Paper variant="outlined">
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Nombre</TableCell>
+                <TableCell>Correo</TableCell>
+                <TableCell>Tipo</TableCell>
+                <TableCell align="right">Acciones</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={4} align="center" sx={{ py: 4 }}>
+                    <CircularProgress size={24} />
+                  </TableCell>
+                </TableRow>
+              ) : users.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Sin usuarios suspendidos.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                users.map((user) => (
+                  <TableRow key={user.user_id} hover>
+                    <TableCell>{user.display_name || "—"}</TableCell>
+                    <TableCell>{user.primary_email}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={ACCESS_MODE_LABELS[user.access_mode]}
+                        color={ACCESS_MODE_COLORS[user.access_mode]}
+                      />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<RotateCcw size={14} strokeWidth={1.5} />}
+                        onClick={() => handleReactivar(user)}
+                        disabled={!puedeEditar || reactivando === user.user_id}
+                      >
+                        {reactivando === user.user_id ? <CircularProgress size={14} /> : "Reactivar"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+    </>
   );
 }
