@@ -64,6 +64,25 @@ código corto y estable para ese servicio.
 texto en vez del genérico de la tabla — el código de referencia se agrega
 igual al final.
 
+## Códigos de `/login?error=...` (distintos, no son `IAM-xxx`)
+
+Estos no pasan por `apiFetch`/`friendlyApiError` — son un `redirect` de navegador que hace
+`auth_views.py` (login OIDC y canje de acceso externo), no una respuesta JSON de la API. `frontend/src/app/login/page.tsx`
+los traduce a un mensaje en `MENSAJES_ERROR`:
+
+| Código | Mensaje mostrado | Causa |
+|---|---|---|
+| `oidc` | "No se pudo iniciar sesión. Verifica que estés usando tu cuenta de Google Workspace de Cumbres." | Dominio no aprobado, `state`/PKCE inválido, token de Google inválido. |
+| `sin_invitacion` | "Tu invitación fue revocada o todavía no existe. Pide a un administrador que te invite de nuevo." | El correo no tiene `IamUser` (no `DELETED`) ni `IamInvitation` pendiente — ver `README.md` sec. 6.1. |
+| `cuenta_suspendida` | "Tu cuenta está suspendida. Contacta a un administrador para que la reactive." | `IamUser.status` es `SUSPENDED` o `DELETED` al momento de loguear con Google. |
+| `acceso_revocado` | "Este enlace de acceso fue revocado. Pide uno nuevo a un administrador." | El acceso externo (`IamExternalCollaborator`) ya está `revoked_at` o el `IamUser` no está `ACTIVE`. |
+| `acceso_invalido` | "Este enlace de acceso no es válido." | El token del link de acceso externo no existe (`hash_token` no coincide con ningún registro). |
+
+**Bug corregido 14/Ago/2026:** antes solo `oidc` se reconocía — cualquier otro código real que ya
+emitía el backend (los 4 de abajo) caía al `else` de `login/page.tsx` y **reintentaba el login con
+Google automáticamente**, que volvía a fallar y volvía a redirigir aquí — un bucle infinito sin mostrar
+nunca el motivo real al usuario.
+
 ## Cómo diagnosticar un código reportado
 
 1. **`<SERVICIO>-CONEXION-<ID>`** → ese contenedor no está corriendo o no es
