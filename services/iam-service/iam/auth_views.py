@@ -24,7 +24,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
 from .audit_utils import emitir_evento_auditoria
-from .models import IamIdentity, IamInvitation, IamUser
+from .magic_link_utils import hash_token
+from .models import IamExternalCollaborator, IamIdentity, IamInvitation, IamUser
 from .oidc_utils import (
     OidcError,
     build_authorization_url,
@@ -119,6 +120,18 @@ def google_callback(request):
         response.delete_cookie(settings.OIDC_PKCE_COOKIE_NAME)
         return response
 
+    # Gate de status (14/Ago/2026, hallazgo al construir "eliminar usuario"
+    # en /admin/usuarios): sin esto, suspender/eliminar a alguien desde el
+    # directorio no le cerraba la puerta de verdad si esa persona TAMBIEN
+    # tiene cuenta de Workspace - _upsert_identity la deja pasar por login
+    # libre sin fijarse en status. Mismo criterio que
+    # canjear_acceso_externo (auth_views.py) para el 3er tipo de invitacion.
+    if user.status != IamUser.STATUS_ACTIVE:
+        logger.warning("Login rechazado: %s tiene status=%s", user.primary_email, user.status)
+        response = redirect(_agregar_error_a_redirect(settings.OIDC_FRONTEND_ERROR_URL, "cuenta_suspendida"))
+        response.delete_cookie(settings.OIDC_PKCE_COOKIE_NAME)
+        return response
+
     session_jwt = issue_session_jwt(user)
     response = redirect(settings.OIDC_FRONTEND_SUCCESS_URL)
     response.set_cookie(
@@ -140,6 +153,52 @@ def google_callback(request):
     return response
 
 
+@require_GET
+def canjear_acceso_externo(request, token):
+    """Canje del 3er tipo de invitacion (colaborador externo sin
+    Workspace, ver models.IamExternalCollaborator y memoria de sesion
+    "tercer-tipo-invitacion-externo-sin-workspace"): a diferencia de
+    IamMagicLinkViewSet.validar (JSON, JWT de alcance limitado), esta
+    vista es de navegador - el link del correo apunta directo aqui, no a
+    una pantalla del frontend que luego llama a la API.
+
+    Emite la MISMA cookie de sesion que google_callback
+    (issue_session_jwt) porque el colaborador debe navegar la app normal
+    con sus roles/permisos reales, no solo probar un correo verificado
+    como el magic link. El link no vence por tiempo (no hay expires_at
+    aqui) - solo revocado a mano (IamExternalCollaboratorViewSet.revocar,
+    que tambien suspende el IamUser)."""
+    try:
+        acceso = IamExternalCollaborator.objects.select_related("user").get(token_hash=hash_token(token))
+    except IamExternalCollaborator.DoesNotExist:
+        return redirect(_agregar_error_a_redirect(settings.OIDC_FRONTEND_ERROR_URL, "acceso_invalido"))
+
+    if acceso.revoked_at is not None or acceso.user.status != IamUser.STATUS_ACTIVE:
+        return redirect(_agregar_error_a_redirect(settings.OIDC_FRONTEND_ERROR_URL, "acceso_revocado"))
+
+    acceso.last_used_at = timezone.now()
+    acceso.save(update_fields=["last_used_at"])
+
+    session_jwt = issue_session_jwt(acceso.user)
+    response = redirect(settings.OIDC_FRONTEND_SUCCESS_URL)
+    response.set_cookie(
+        settings.SESSION_COOKIE_NAME_JWT,
+        session_jwt,
+        max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
+        httponly=True,
+        samesite="Lax",
+    )
+
+    emitir_evento_auditoria(
+        "iam_external_collaborators.login",
+        "iam_external_collaborators",
+        acceso.external_access_id,
+        actor_user_id=acceso.user.user_id,
+        valores_nuevos={"email": acceso.email},
+    )
+    return response
+
+
 def _upsert_identity(claims: dict) -> IamUser:
     """Crea/actualiza iam_identities + iam_users (README.md sec. 6.1, paso
     7). email_verified/hd/picture se refrescan en cada login - son datos
@@ -152,11 +211,20 @@ def _upsert_identity(claims: dict) -> IamUser:
     un IAM Admin ya lo invito (IamInvitation pendiente, ni aceptada ni
     revocada); si no hay invitacion, se rechaza el login SIN crear el
     IamUser (antes de este gate, cualquier correo del dominio aprobado se
-    autocreaba en silencio - ver LoginRechazadoSinInvitacion arriba)."""
+    autocreaba en silencio - ver LoginRechazadoSinInvitacion arriba).
+
+    Reactivacion (14/Ago/2026, ver IamUserViewSet.eliminar): un IamUser
+    con status=DELETED se trata como "sin cuenta" para este gate (misma
+    logica que IamInvitationViewSet.create, que ya excluye DELETED del
+    chequeo de "ya existe una cuenta") - necesita invitacion nueva, y al
+    aceptarla se reactiva (status=ACTIVE) en vez de crear una fila
+    duplicada. Sin esto, un usuario eliminado quedaba en un callejon sin
+    salida: no podia loguearse (gate de status en google_callback) ni
+    volver a entrar por invitacion (esta fila ya "existia")."""
     email = claims["email"]
     now = timezone.now()
 
-    user = IamUser.objects.filter(primary_email__iexact=email).first()
+    user = IamUser.objects.filter(primary_email__iexact=email).exclude(status=IamUser.STATUS_DELETED).first()
     if not user:
         invitacion = IamInvitation.objects.filter(
             email__iexact=email, accepted_at__isnull=True, revoked_at__isnull=True
@@ -164,7 +232,13 @@ def _upsert_identity(claims: dict) -> IamUser:
         if not invitacion:
             raise LoginRechazadoSinInvitacion(email)
 
-        user = IamUser.objects.create(primary_email=email, display_name=claims.get("name"))
+        user = IamUser.objects.filter(primary_email__iexact=email, status=IamUser.STATUS_DELETED).first()
+        if user:
+            user.status = IamUser.STATUS_ACTIVE
+            user.display_name = claims.get("name")
+            user.save(update_fields=["status", "display_name"])
+        else:
+            user = IamUser.objects.create(primary_email=email, display_name=claims.get("name"))
         invitacion.accepted_at = now
         invitacion.save(update_fields=["accepted_at"])
 

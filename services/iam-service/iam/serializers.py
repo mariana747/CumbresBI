@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     GeneralSociedad,
+    IamExternalCollaborator,
     IamGroup,
     IamInvitation,
     IamMagicLink,
@@ -27,6 +28,13 @@ class IamUserSerializer(serializers.ModelSerializer):
     # "roles" (solo claves), aqui va el detalle de alcance por asignacion
     # activa, para poder armar la tabla usuario x rol x alcance.
     accesos = serializers.SerializerMethodField()
+    # Un colaborador externo (access_mode=RESTRICTED) queda ACTIVE desde
+    # que se le invita, aunque todavia no haya canjeado su link (14/Ago/2026,
+    # hallazgo: en /admin/invitaciones se ve "Pendiente" pero en
+    # /admin/usuarios el mismo correo se ve "Activo" - son cosas distintas,
+    # este campo distingue "la cuenta ya existe" de "ya entro alguna vez"
+    # para que el Directorio pueda avisarlo en vez de verse inconsistente).
+    externo_pendiente = serializers.SerializerMethodField()
 
     class Meta:
         model = IamUser
@@ -39,6 +47,7 @@ class IamUserSerializer(serializers.ModelSerializer):
             "roles",
             "empresas",
             "accesos",
+            "externo_pendiente",
             "created_at",
             "updated_at",
         ]
@@ -66,6 +75,10 @@ class IamUserSerializer(serializers.ModelSerializer):
             }
             for user_role in obj.user_roles.filter(revoked_at__isnull=True).select_related("role")
         ]
+
+    def get_externo_pendiente(self, obj):
+        acceso = getattr(obj, "external_access", None)
+        return bool(acceso and acceso.last_used_at is None and acceso.revoked_at is None)
 
 
 class IamPermissionSerializer(serializers.ModelSerializer):
@@ -246,6 +259,35 @@ class IamMagicLinkSerializer(serializers.ModelSerializer):
             # cliente para forzar que siempre pase por esa validacion.
             "expires_at": {"required": False}
         }
+
+
+class IamExternalCollaboratorSerializer(serializers.ModelSerializer):
+    """3er tipo de acceso externo (ver models.IamExternalCollaborator).
+    user_email denormalizado por el mismo criterio que invited_by_email
+    en IamInvitationSerializer."""
+
+    invited_by_email = serializers.EmailField(source="invited_by.primary_email", read_only=True)
+
+    class Meta:
+        model = IamExternalCollaborator
+        fields = [
+            "external_access_id",
+            "user",
+            "email",
+            "invited_by",
+            "invited_by_email",
+            "invited_at",
+            "last_used_at",
+            "revoked_at",
+        ]
+        read_only_fields = [
+            "external_access_id",
+            "user",
+            "invited_by_email",
+            "invited_at",
+            "last_used_at",
+            "revoked_at",
+        ]
 
 
 class IamInvitationSerializer(serializers.ModelSerializer):

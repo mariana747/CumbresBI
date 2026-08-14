@@ -341,6 +341,44 @@ class IamInvitation(models.Model):
         return self.email
 
 
+class IamExternalCollaborator(models.Model):
+    """3er tipo de acceso externo (14/Ago/2026, ver memoria de sesion
+    "tercer-tipo-invitacion-externo-sin-workspace"): colaborador que NO
+    tiene correo de Workspace pero necesita entrar a secciones reales de
+    la app como un colaborador normal - a diferencia de:
+    - `IamMagicLink`: un solo uso/accion puntual, vence en minutos.
+    - `IamInvitation`: para gente que SI tiene/tendra correo de Workspace,
+      se canjea iniciando sesion con Google (sin token propio).
+
+    Aqui el link NO vence por tiempo - solo se revoca a mano
+    (`revoked_at`) cuando el colaborador ya no debe tener acceso. Por eso
+    si tiene `user` (a diferencia de IamMagicLink): se crea un `IamUser`
+    real desde el momento de la invitacion, para que un IAM Admin le
+    asigne roles/permisos de una vez via `iam_user_roles` (mismo sistema
+    de siempre, sin permisos paralelos) - el token solo reemplaza el paso
+    de "iniciar sesion con Google" (ver auth_views.canjear_acceso_externo,
+    que emite la MISMA cookie de sesion que /auth/google/callback via
+    issue_session_jwt, no el JWT de alcance limitado de los magic links).
+    """
+
+    external_access_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    user = models.OneToOneField(IamUser, on_delete=models.CASCADE, related_name="external_access")
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    invited_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="external_access_issued"
+    )
+    invited_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_external_collaborators"
+
+    def __str__(self):
+        return f"{self.external_access_id} ({self.email})"
+
+
 class IamUserCentroAccess(models.Model):
     """Grant plano de alcance CENTRO (columna real del ERD, schema.csv) -
     a diferencia de SOCIEDAD/PROYECTO, CENTRO no vive en
