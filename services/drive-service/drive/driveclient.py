@@ -205,6 +205,66 @@ def iter_download(file_id: str, carpeta: str | None = None, chunk_size: int = 25
         raise DriveError(f"No se pudo descargar el archivo '{file_id}' de Drive: {exc}") from exc
 
 
+_MIME_CARPETA = "application/vnd.google-apps.folder"
+
+
+def list_children(carpeta_id: str | None) -> list[dict]:
+    """Lista TODO (archivos y subcarpetas) dentro de `carpeta_id`, para que
+    el frontend pueda navegar la Unidad compartida como un explorador en
+    vez de depender de una ruta fija por modulo (decision de Mariana,
+    13/Ago/2026). `carpeta_id=None` (o vacio) = raiz de la Unidad
+    compartida (settings.DRIVE_ROOT_FOLDER_ID en real, _SIMULADO_ROOT en
+    simulado).
+
+    A diferencia de list_files (que resuelve/crea una ruta tipo
+    "PLD/<x>" por NOMBRE y descarta carpetas), esta funcion navega por ID
+    y regresa ambos tipos con `es_carpeta` para que el cliente decida si
+    entrar (carpeta) o seleccionar para analizar (archivo)."""
+    if not _modo_real():
+        base = Path(carpeta_id) if carpeta_id else _SIMULADO_ROOT
+        base.mkdir(parents=True, exist_ok=True)
+        items = []
+        for p in base.iterdir():
+            if p.is_dir():
+                items.append({"file_id": str(p), "nombre": p.name, "es_carpeta": True, "mime_type": None, "web_view_link": None})
+            else:
+                nombre = p.name.split("__", 1)[1] if "__" in p.name else p.name
+                file_id = p.name.split("__", 1)[0] if "__" in p.name else p.name
+                items.append({"file_id": file_id, "nombre": nombre, "es_carpeta": False, "mime_type": None, "web_view_link": f"file://{p}"})
+        return items
+
+    servicio = _servicio_real()
+    padre_id = carpeta_id or settings.DRIVE_ROOT_FOLDER_ID
+    if not padre_id:
+        raise DriveError("DRIVE_ROOT_FOLDER_ID no configurado - falta resolver la carpeta CumbresBI/ raiz")
+
+    try:
+        resultado = (
+            servicio.files()
+            .list(
+                q=f"'{padre_id}' in parents and trashed = false",
+                fields="files(id, name, mimeType, size, webViewLink)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                orderBy="folder,name",
+            )
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise DriveError(f"No se pudo listar la carpeta: {exc}") from exc
+
+    return [
+        {
+            "file_id": f["id"],
+            "nombre": f["name"],
+            "es_carpeta": f.get("mimeType") == _MIME_CARPETA,
+            "mime_type": f.get("mimeType"),
+            "web_view_link": f.get("webViewLink"),
+        }
+        for f in resultado.get("files", [])
+    ]
+
+
 def list_files(carpeta: str) -> list[dict]:
     """Lista los archivos (no subcarpetas) dentro de `carpeta`."""
     if not _modo_real():

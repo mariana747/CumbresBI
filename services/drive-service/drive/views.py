@@ -82,6 +82,31 @@ class DownloadView(APIView):
         return StreamingHttpResponse(generador(), content_type="application/octet-stream")
 
 
+class BrowseView(APIView):
+    """GET /api/browse/?carpeta_id=<id, vacio=raiz>&perm=pld-compliance.crear
+    - explorador real de la Unidad compartida (a diferencia de
+    ListFilesView, que resuelve/crea una ruta fija por nombre y solo
+    regresa archivos): esta vista navega por ID y regresa TANTO archivos
+    como subcarpetas (campo `es_carpeta`), para que el frontend arme un
+    explorador con "entrar"/"regresar" en vez de una ruta fija por modulo
+    (decision de Mariana, 13/Ago/2026)."""
+
+    def get(self, request, *args, **kwargs):
+        perm_key = request.query_params.get("perm")
+        if not perm_key:
+            return Response({"detail": "Falta ?perm=<perm_key> requerido por el llamador"}, status=400)
+        if not require_permission(perm_key)().has_permission(request, self):
+            return Response({"detail": f"Falta el permiso '{perm_key}'"}, status=403)
+
+        carpeta_id = request.query_params.get("carpeta_id") or None
+        try:
+            items = driveclient.list_children(carpeta_id)
+        except driveclient.DriveError as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        return Response({"items": items})
+
+
 class ListFilesView(APIView):
     """GET /api/list/?carpeta=PLD/<id_contraparte>&perm=pld-compliance.leer"""
 
