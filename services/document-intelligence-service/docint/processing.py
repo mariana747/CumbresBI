@@ -55,7 +55,13 @@ def ejecutar_analisis(job: AnalysisJob) -> AnalysisJob:
         "internal_prompt_key_used": job.internal_prompt_key,
         "matched_by_filename": job.matched_by_filename,
     }
-    job.save(update_fields=["status", "resultado", "updated_at"])
+    # Limpia cualquier error_mensaje que haya quedado de un intento previo
+    # fallido (ejecutar_con_reintentos lo llena en PENDIENTE mientras
+    # reintenta) - sin esto, un analisis que al final SI tuvo exito seguia
+    # mostrando el mensaje viejo de "se reintentara automaticamente" junto
+    # con el resultado bueno (hallazgo 14/Ago/2026, reporte de Mariana).
+    job.error_mensaje = ""
+    job.save(update_fields=["status", "resultado", "error_mensaje", "updated_at"])
 
     AnalysisRequestLog.objects.create(
         servicio_solicitante=job.servicio_solicitante,
