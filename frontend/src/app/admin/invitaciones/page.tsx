@@ -196,7 +196,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     setCreando(true);
     setError(null);
     try {
-      const nuevo = await createMagicLink({ email, recursoTipo, recursoId });
+      const nuevo = await createMagicLink({ email, recursoTipo, recursoId, actorUserId: session?.user_id });
       setUltimoGenerado(nuevo);
       setEmail("");
       setRecursoTipo("");
@@ -243,6 +243,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
         emails,
         recursoTipo: recursoTipoMasivo,
         recursoId: recursoIdMasivo,
+        actorUserId: session?.user_id,
       });
       setResultadoMasivo(resultado);
       refrescarLista();
@@ -255,7 +256,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
 
   async function handleRevocar(magicLinkId: string) {
     try {
-      await revokeMagicLink(magicLinkId);
+      await revokeMagicLink(magicLinkId, session?.user_id);
       refrescarLista();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al revocar");
@@ -641,7 +642,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
     setCreandoWorkspace(true);
     setError(null);
     try {
-      const nueva = await createInvitation(emailWorkspace);
+      const nueva = await createInvitation(emailWorkspace, session?.user_id);
       setUltimaInvitacionCreada(nueva);
       setEmailWorkspace("");
       refrescarListas();
@@ -654,7 +655,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
 
   async function handleRevocarInvitacion(invitationId: string) {
     try {
-      await revokeInvitation(invitationId);
+      await revokeInvitation(invitationId, session?.user_id);
       refrescarListas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al revocar");
@@ -666,7 +667,11 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
     setCreandoExterno(true);
     setError(null);
     try {
-      const nuevo = await createExternalCollaborator({ email: emailExterno, displayName: displayNameExterno });
+      const nuevo = await createExternalCollaborator({
+        email: emailExterno,
+        displayName: displayNameExterno,
+        actorUserId: session?.user_id,
+      });
       setUltimoAccesoGenerado(nuevo);
       setEmailExterno("");
       setDisplayNameExterno("");
@@ -680,7 +685,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
 
   async function handleRevocarExterno(externalAccessId: string) {
     try {
-      await revokeExternalCollaborator(externalAccessId);
+      await revokeExternalCollaborator(externalAccessId, session?.user_id);
       refrescarListas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al revocar");
@@ -691,7 +696,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
     setReenviando(externalAccessId);
     setError(null);
     try {
-      const actualizado = await resendExternalCollaborator(externalAccessId);
+      const actualizado = await resendExternalCollaborator(externalAccessId, session?.user_id);
       setUltimoAccesoGenerado(actualizado);
       refrescarListas();
     } catch (err) {

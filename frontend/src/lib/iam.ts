@@ -447,6 +447,7 @@ export async function createMagicLink(params: {
   email: string;
   recursoTipo?: string;
   recursoId?: string;
+  actorUserId?: string;
 }): Promise<IamMagicLink> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/`, {
     method: "POST",
@@ -455,6 +456,7 @@ export async function createMagicLink(params: {
       email: params.email,
       recurso_tipo: params.recursoTipo || null,
       recurso_id: params.recursoId || null,
+      issued_by: params.actorUserId || null,
     }),
   });
   if (!response.ok) {
@@ -475,6 +477,7 @@ export async function createMagicLinksMasivo(params: {
   emails: string[];
   recursoTipo?: string;
   recursoId?: string;
+  actorUserId?: string;
 }): Promise<{ creados: IamMagicLink[]; errores: IamMagicLinkMasivoError[] }> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/masivo/`, {
     method: "POST",
@@ -483,6 +486,7 @@ export async function createMagicLinksMasivo(params: {
       emails: params.emails,
       recurso_tipo: params.recursoTipo || null,
       recurso_id: params.recursoId || null,
+      issued_by: params.actorUserId || null,
     }),
   });
   if (!response.ok) {
@@ -508,9 +512,11 @@ export async function validateMagicLink(token: string): Promise<{ magic_link: Ia
   return response.json();
 }
 
-export async function revokeMagicLink(magicLinkId: string): Promise<IamMagicLink> {
+export async function revokeMagicLink(magicLinkId: string, actorUserId?: string): Promise<IamMagicLink> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/magic-links/${magicLinkId}/revocar/`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId || null }),
   });
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
@@ -545,11 +551,11 @@ export async function listInvitations(): Promise<IamInvitation[]> {
   return response.json();
 }
 
-export async function createInvitation(email: string): Promise<IamInvitation> {
+export async function createInvitation(email: string, actorUserId?: string): Promise<IamInvitation> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/invitaciones/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, invited_by: actorUserId || null }),
   });
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
@@ -557,9 +563,11 @@ export async function createInvitation(email: string): Promise<IamInvitation> {
   return response.json();
 }
 
-export async function revokeInvitation(invitationId: string): Promise<IamInvitation> {
+export async function revokeInvitation(invitationId: string, actorUserId?: string): Promise<IamInvitation> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/invitaciones/${invitationId}/revocar/`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId || null }),
   });
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
@@ -600,11 +608,16 @@ export async function listExternalCollaborators(): Promise<IamExternalCollaborat
 export async function createExternalCollaborator(params: {
   email: string;
   displayName?: string;
+  actorUserId?: string;
 }): Promise<IamExternalCollaborator> {
   const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/acceso-externo/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: params.email, display_name: params.displayName || null }),
+    body: JSON.stringify({
+      email: params.email,
+      display_name: params.displayName || null,
+      invited_by: params.actorUserId || null,
+    }),
   });
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
@@ -612,11 +625,18 @@ export async function createExternalCollaborator(params: {
   return response.json();
 }
 
-export async function revokeExternalCollaborator(externalAccessId: string): Promise<IamExternalCollaborator> {
+export async function revokeExternalCollaborator(
+  externalAccessId: string,
+  actorUserId?: string
+): Promise<IamExternalCollaborator> {
   const response = await apiFetch(
     "IAM",
     `${IAM_API_BASE_URL}/api/acceso-externo/${externalAccessId}/revocar/`,
-    { method: "POST" }
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor_user_id: actorUserId || null }),
+    }
   );
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
@@ -624,11 +644,18 @@ export async function revokeExternalCollaborator(externalAccessId: string): Prom
   return response.json();
 }
 
-export async function resendExternalCollaborator(externalAccessId: string): Promise<IamExternalCollaborator> {
+export async function resendExternalCollaborator(
+  externalAccessId: string,
+  actorUserId?: string
+): Promise<IamExternalCollaborator> {
   const response = await apiFetch(
     "IAM",
     `${IAM_API_BASE_URL}/api/acceso-externo/${externalAccessId}/reenviar/`,
-    { method: "POST" }
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor_user_id: actorUserId || null }),
+    }
   );
   if (!response.ok) {
     throw await friendlyApiError("IAM", response);
