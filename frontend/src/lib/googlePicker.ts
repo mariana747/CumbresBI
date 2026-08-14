@@ -116,7 +116,13 @@ export async function openGooglePicker(): Promise<ArchivoElegido[]> {
     // sola vista con setEnableDrives(true) termina mostrando SOLO
     // Unidades compartidas (lo que se vio en la primera prueba), hay que
     // agregar "Mi unidad" y "Compartido conmigo" por separado.
-    const construirVista = () => new google.picker.DocsView(google.picker.ViewId.DOCS).setMimeTypes(MIME_TYPES_PERMITIDOS).setIncludeFolders(false);
+    // setIncludeFolders(true): sin esto las carpetas quedan ocultas por
+    // completo (no solo no-seleccionables) - "CumbresBI" en Unidades
+    // compartidas solo tiene subcarpetas (PLD, Auditoria, etc.), asi que
+    // se veia "No documents" aunque si hubiera contenido mas adentro
+    // (reporte de Mariana, 14/Ago/2026). El filtro de mimeTypes ya se
+    // encarga de que solo los ARCHIVOS que califican sean seleccionables.
+    const construirVista = () => new google.picker.DocsView(google.picker.ViewId.DOCS).setMimeTypes(MIME_TYPES_PERMITIDOS).setIncludeFolders(true).setSelectFolderEnabled(false);
 
     // setParent("root") se quito - "root" es un alias que usa la API REST
     // de Drive, pero el Picker espera un ID de carpeta real; con ese alias
