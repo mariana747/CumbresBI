@@ -240,6 +240,18 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      # reCAPTCHA v2 real (17/Ago/2026, registrado en "Default Gemini
+      # Project" - no importa funcionalmente en que proyecto GCP viva, ver
+      # memoria de sesion "recaptcha-pendiente-proyecto-gcp"). Site key es
+      # publica por diseno (RecaptchaV2.tsx).
+      NEXT_PUBLIC_RECAPTCHA_SITE_KEY: "6LcB_IotAAAAAFXTN4Yah2NlS-lHFYOJ4VZAAiDN"
+      # Docker Desktop en Windows no propaga bien los eventos de sistema de
+      # archivos del volumen montado (bind mount Windows -> contenedor
+      # Linux) - sin esto, Next.js/webpack nunca "ve" los cambios guardados
+      # y el hot-reload se queda pegado en la version vieja del codigo
+      # (detectado 17/Ago/2026: cambios en pld-ticket/[token]/page.tsx no
+      # se reflejaban pese a que el archivo si tenia el contenido nuevo).
+      WATCHPACK_POLLING: "true"
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
