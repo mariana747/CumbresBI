@@ -41,7 +41,9 @@ export interface PldContraparteKyc {
   comentarios: string | null;
   documentos: PldContraparteDoc[];
   created_at: string;
+  created_by: string;
   updated_at: string;
+  updated_by: string;
   fecha_vencimiento: string | null;
 }
 
