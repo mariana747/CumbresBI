@@ -19,6 +19,7 @@ const SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
 declare global {
   interface Window {
     grecaptcha?: {
+      ready: (callback: () => void) => void;
       render: (
         container: HTMLElement,
         params: { sitekey: string; callback: (token: string) => void; "expired-callback": () => void }
@@ -33,15 +34,24 @@ export default function RecaptchaV2({ onChange }: { onChange: (token: string | n
   const [scriptReady, setScriptReady] = useState(false);
 
   useEffect(() => {
-    if (!SITE_KEY || !scriptReady || renderedRef.current || !containerRef.current || !window.grecaptcha) {
+    if (!SITE_KEY || !scriptReady || renderedRef.current || !containerRef.current) {
       return;
     }
-    window.grecaptcha.render(containerRef.current, {
-      sitekey: SITE_KEY,
-      callback: onChange,
-      "expired-callback": () => onChange(null),
+    // window.grecaptcha existe como un "stub" en cuanto el script empieza a
+    // cargar, pero .render() (y el resto de la API real) solo esta
+    // disponible despues de que Google termine de inicializar
+    // internamente - grecaptcha.ready() espera ese momento en vez de
+    // asumir que ya esta listo solo porque el <script> ya cargo
+    // (detectado 17/Ago/2026: "window.grecaptcha.render is not a function").
+    window.grecaptcha?.ready(() => {
+      if (renderedRef.current || !containerRef.current || !window.grecaptcha) return;
+      window.grecaptcha.render(containerRef.current, {
+        sitekey: SITE_KEY,
+        callback: onChange,
+        "expired-callback": () => onChange(null),
+      });
+      renderedRef.current = true;
     });
-    renderedRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scriptReady]);
 
