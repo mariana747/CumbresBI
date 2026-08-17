@@ -9,6 +9,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Divider,
   Grid,
   Paper,
   Stack,
@@ -73,22 +74,62 @@ const ESTADO_CUENTA_COLOR: Record<string, "success" | "warning" | "error"> = {
 // módulo de Tesorería respectivamente, ninguno construido todavía (ver
 // memoria de sesión "pld-validacion-externa-kyc-pendiente").
 
-const CAMPOS_GENERAL: { campo: keyof PldDatosEditables; label: string }[] = [
-  { campo: "curp", label: "CURP" },
-  { campo: "nacionalidad", label: "Nacionalidad" },
-  { campo: "pais_nac_const", label: "País de nacimiento / constitución" },
-  { campo: "fecha_nac_const", label: "Fecha de nacimiento / constitución" },
-  { campo: "estado_civil", label: "Estado civil" },
-  { campo: "ocupacion_act_economica", label: "Ocupación / actividad económica" },
-  { campo: "telefono_fijo", label: "Teléfono fijo" },
-  { campo: "telefono_sms", label: "Teléfono para SMS" },
-  { campo: "dom_calle", label: "Calle" },
-  { campo: "dom_numero_ext", label: "Número exterior" },
-  { campo: "dom_colonia", label: "Colonia" },
-  { campo: "dom_municipio_alcaldia", label: "Municipio / alcaldía" },
-  { campo: "dom_estado", label: "Estado" },
-  { campo: "dom_cp", label: "Código postal" },
-  { campo: "dom_pais", label: "País" },
+// Agrupado en secciones (17/Ago/2026, combinando con KycDetalleDialog.tsx
+// de feature/pld-drive-explorador - esa rama tenia mas campos que esta
+// vista, ver memoria de sesion "pld-detalle-expediente-comparacion"):
+// Identificacion/Domicilio/Domicilio de correspondencia/Contacto, mismo
+// whitelist que PLD_CAMPOS_CONFIRMABLES.
+const GRUPOS_CAMPOS_GENERAL: { titulo: string; campos: { campo: keyof PldDatosEditables; label: string }[] }[] = [
+  {
+    titulo: "Identificación",
+    campos: [
+      { campo: "curp", label: "CURP" },
+      { campo: "nacionalidad", label: "Nacionalidad" },
+      { campo: "pais_nac_const", label: "País de nacimiento / constitución" },
+      { campo: "fecha_nac_const", label: "Fecha de nacimiento / constitución" },
+      { campo: "folio_mercantil", label: "Folio mercantil" },
+      { campo: "objeto_social", label: "Objeto social" },
+      { campo: "ocupacion_act_economica", label: "Ocupación / actividad económica" },
+      { campo: "tipo_identificacion", label: "Tipo de identificación" },
+      { campo: "autoridad_identificacion", label: "Autoridad emisora" },
+      { campo: "numero_identificacion", label: "Número de identificación" },
+      { campo: "estado_civil", label: "Estado civil" },
+      { campo: "ident_fideicomiso", label: "Fideicomiso" },
+    ],
+  },
+  {
+    titulo: "Domicilio",
+    campos: [
+      { campo: "dom_calle", label: "Calle" },
+      { campo: "dom_numero_ext", label: "Número exterior" },
+      { campo: "dom_numero_int", label: "Número interior" },
+      { campo: "dom_colonia", label: "Colonia" },
+      { campo: "dom_municipio_alcaldia", label: "Municipio / alcaldía" },
+      { campo: "dom_estado", label: "Estado" },
+      { campo: "dom_cp", label: "Código postal" },
+      { campo: "dom_pais", label: "País" },
+    ],
+  },
+  {
+    titulo: "Domicilio de correspondencia",
+    campos: [
+      { campo: "dom_corresp_dom_calle", label: "Calle" },
+      { campo: "dom_corresp_dom_numero_ext", label: "Número exterior" },
+      { campo: "dom_corresp_dom_numero_int", label: "Número interior" },
+      { campo: "dom_corresp_dom_colonia", label: "Colonia" },
+      { campo: "dom_corresp_dom_municipio_alcaldia", label: "Municipio / alcaldía" },
+      { campo: "dom_corresp_dom_estado", label: "Estado" },
+      { campo: "dom_corresp_dom_cp", label: "Código postal" },
+      { campo: "dom_corresp_dom_pais", label: "País" },
+    ],
+  },
+  {
+    titulo: "Contacto",
+    campos: [
+      { campo: "telefono_fijo", label: "Teléfono fijo" },
+      { campo: "telefono_sms", label: "Teléfono / SMS" },
+    ],
+  },
 ];
 
 export default function PldExpedienteDetallePage() {
@@ -234,16 +275,80 @@ export default function PldExpedienteDetallePage() {
 
               <Box sx={{ p: 3 }}>
                 {tab === 0 && (
-                  <Grid container spacing={2}>
-                    {CAMPOS_GENERAL.map(({ campo, label }) => (
-                      <Grid item xs={12} sm={6} key={campo}>
-                        <Typography variant="body2" color="text.secondary" display="block">
-                          {label}
+                  <Stack spacing={3}>
+                    {GRUPOS_CAMPOS_GENERAL.map((grupo) => (
+                      <Box key={grupo.titulo}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          {grupo.titulo}
                         </Typography>
-                        <Typography variant="body1">{kyc[campo] || "—"}</Typography>
-                      </Grid>
+                        <Grid container spacing={2}>
+                          {grupo.campos.map(({ campo, label }) => (
+                            <Grid item xs={12} sm={6} key={campo}>
+                              <Typography variant="body2" color="text.secondary" display="block">
+                                {label}
+                              </Typography>
+                              <Typography variant="body1">{kyc[campo] || "—"}</Typography>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Box>
                     ))}
-                  </Grid>
+
+                    <Divider />
+
+                    {/* Auditoria (17/Ago/2026, combinando con
+                    KycDetalleDialog.tsx de feature/pld-drive-explorador -
+                    esa rama si mostraba esto, esta vista no lo tenia). */}
+                    <Box>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Estado y auditoría
+                      </Typography>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="body2" color="text.secondary" display="block">
+                            Aprobado por
+                          </Typography>
+                          <Typography variant="body1">{kyc.aprobado_por || "—"}</Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="body2" color="text.secondary" display="block">
+                            Aprobado en
+                          </Typography>
+                          <Typography variant="body1">
+                            {kyc.aprobado_en ? new Date(kyc.aprobado_en).toLocaleString("es-MX") : "—"}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="body2" color="text.secondary" display="block">
+                            Vencimiento
+                          </Typography>
+                          <Typography variant="body1">{kyc.fecha_vencimiento || "—"}</Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="body2" color="text.secondary" display="block">
+                            Comentarios
+                          </Typography>
+                          <Typography variant="body1">{kyc.comentarios || "—"}</Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="body2" color="text.secondary" display="block">
+                            Creado
+                          </Typography>
+                          <Typography variant="body1">
+                            {new Date(kyc.created_at).toLocaleString("es-MX")} — {kyc.created_by}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="body2" color="text.secondary" display="block">
+                            Última actualización
+                          </Typography>
+                          <Typography variant="body1">
+                            {new Date(kyc.updated_at).toLocaleString("es-MX")} — {kyc.updated_by}
+                          </Typography>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  </Stack>
                 )}
 
                 {tab === 1 && (
