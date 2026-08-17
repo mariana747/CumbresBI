@@ -7,6 +7,7 @@ import {
   Avatar,
   Badge,
   Box,
+  Chip,
   Collapse,
   Divider,
   Drawer,
@@ -94,6 +95,29 @@ const AUDITAR_ITEM: NavChild = { label: "Bitácora", href: "/admin/reportes?tab=
 // reconocer su propia etiqueta ahi. Sin rol especifico de ese modulo
 // (ej. SUPER_ADMIN, que no es "un" PLD_ANALISTA) se queda el nombre
 // generico del modulo.
+// Nombres amigables (17/Ago/2026, menu de la carita de perfil) - espejo de
+// los role_name del seed (iam-service/iam/migrations/0002_seed_roles_grupos.py),
+// para no mostrarle al usuario la clave cruda tipo "SUPER_ADMIN".
+const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: "Super Admin",
+  IAM_ADMIN: "Administrador IAM",
+  AUDITOR: "Auditor / Compliance Officer",
+  PLD_ANALISTA: "Analista PLD/KYC",
+  PLD_APROBADOR: "Aprobador PLD (Compliance Manager)",
+  VENTAS_ASESOR: "Asesor de Ventas",
+  VENTAS_GERENTE: "Gerente de Ventas/Proyecto",
+  OBRA_COORDINADOR: "Coordinador de Obra",
+  FINANZAS_MANAGER: "Finance Manager",
+  TESORERIA_ANALISTA: "Analista de Tesorería",
+  COMPRAS_ANALISTA: "Comprador / Analista de Compras",
+  CONTRALOR: "Contralor / CFO",
+  RRHH_SUPERVISOR_CENTRO: "Supervisor de Centro",
+  RRHH_ADMIN: "Administrador RRHH",
+  EMPLEADO_SELF: "Empleado (portal MiCumbres)",
+  TICKETS_RESPONSABLE: "Responsable de Proyecto",
+  TICKETS_PARTICIPANTE: "Participante de Ticket",
+};
+
 function etiquetaAdminIam(session: SessionUser | null): string {
   if (session?.role_keys.includes("SUPER_ADMIN")) return "Super Admin";
   if (session?.role_keys.includes("IAM_ADMIN")) return "Admin IAM";
@@ -126,9 +150,13 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Usuarios", href: "/admin/usuarios", icon: UserRound },
         { label: "Invitaciones", href: "/admin/invitaciones", icon: UserPlus },
         { label: "Permisos", href: "/admin/permisos", icon: KeyRound },
-        { label: "Reportes", href: "/admin/reportes", icon: ClipboardList },
+        // "Reportes" y "Bitácora" eran dos entradas de menú separadas para
+        // la MISMA pantalla (/admin/reportes) - la pestaña "Bitácora de
+        // auditoría" ya vive ahi dentro (ver SUB_REPORTES en
+        // admin/reportes/page.tsx), asi que tener las dos era redundante
+        // (hallazgo 17/Ago/2026). Unificado en una sola entrada.
+        { label: "Auditoría", href: "/admin/reportes", icon: ClipboardList },
         { label: "Organización", href: "/admin/organizacion", icon: Building2 },
-        AUDITAR_ITEM,
       ],
     });
   } else if (session?.role_keys.includes("AUDITOR")) {
@@ -399,12 +427,20 @@ function Header({
           ) : (
             [
               <MenuItem key="titulo" disabled sx={{ opacity: "1 !important" }}>
-                <Typography variant="caption" fontWeight={600} color="text.secondary">
+                <Typography variant="caption" fontWeight={600} color="text.primary">
                   {count} usuario(s) sin rol asignado
                 </Typography>
               </MenuItem>,
+              // Clic directo en el usuario (17/Ago/2026, pedido de Mariana) -
+              // antes solo estaban listados (disabled) y habia que usar
+              // "Ver todos en el directorio" incluso para ver a uno solo.
               ...sinRolUsers.slice(0, 5).map((user) => (
-                <MenuItem key={user.user_id} disabled>
+                <MenuItem
+                  key={user.user_id}
+                  component="a"
+                  href={`/admin/usuarios?search=${encodeURIComponent(user.primary_email)}`}
+                  onClick={() => setAnchorEl(null)}
+                >
                   {user.display_name || user.primary_email}
                 </MenuItem>
               )),
@@ -440,12 +476,30 @@ function Header({
         cual sesion se esta probando, sin tener que consultar la BD. */}
         <Menu anchorEl={avatarAnchorEl} open={Boolean(avatarAnchorEl)} onClose={() => setAvatarAnchorEl(null)}>
           <MenuItem disabled sx={{ opacity: 1 }}>
-            <Stack>
-              <Typography variant="body2">{session?.email ?? "—"}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                {session?.role_keys.length ? session.role_keys.join(", ") : "Sin rol asignado"}
+            <Stack spacing={0.75}>
+              <Typography variant="body2" fontWeight={600} sx={{ color: "#000" }}>
+                {session?.email ?? "—"}
               </Typography>
+              {session?.role_keys.length ? (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {session.role_keys.map((key) => (
+                    <Chip key={key} size="small" label={ROLE_LABELS[key] ?? key} sx={{ color: "#000" }} />
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="caption" sx={{ color: "#000" }}>
+                  Sin rol asignado
+                </Typography>
+              )}
             </Stack>
+          </MenuItem>
+          <Divider />
+          {/* Acceso directo a MiCumbres desde la carita de perfil
+          (17/Ago/2026, pedido de Mariana) - todos los usuarios con sesion
+          ven este item, MiCumbres siempre esta en el sidebar tambien (ver
+          buildNavItems, ultimo item) - esto es solo un atajo. */}
+          <MenuItem component="a" href="/micumbres" onClick={() => setAvatarAnchorEl(null)}>
+            Ir a Mi Cumbres
           </MenuItem>
         </Menu>
       </Toolbar>

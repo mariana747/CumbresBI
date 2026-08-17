@@ -198,6 +198,10 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
   // vez que cambian los parametros de la URL, sin depender del montaje.
   useEffect(() => {
     if (searchParams.get("sinRol") === "true") setRoleFilter(SIN_ROL_VALUE);
+    // ?search=<correo> (17/Ago/2026) - clic directo en un usuario desde la
+    // campana de notificaciones (AppShell.tsx) en vez de solo "Ver todos".
+    const search = searchParams.get("search");
+    if (search) setSearch(search);
   }, [searchParams]);
 
   function refreshUsers() {

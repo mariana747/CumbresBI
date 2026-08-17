@@ -46,7 +46,7 @@ function hijos(item: NavItem | undefined): readonly { label: string; href: strin
 }
 
 describe("buildNavItems - Admin (IAM)", () => {
-  it("con iam.crear o iam.editar muestra el menu completo (Reportes + Auditar incluidos)", () => {
+  it("con iam.crear o iam.editar muestra el menu completo (Auditoria incluida, unifica Reportes+Bitacora)", () => {
     for (const roleKey of Object.keys(ROLES)) {
       const perms = ROLES[roleKey];
       if (!perms.includes("iam.crear") && !perms.includes("iam.editar")) continue;
@@ -55,8 +55,10 @@ describe("buildNavItems - Admin (IAM)", () => {
       const admin = buscar(items, "/admin/usuarios");
       expect(admin, `${roleKey} deberia tener el apartado Admin(IAM)`).toBeDefined();
       const labels = hijos(admin).map((c) => c.label);
-      expect(labels, `${roleKey}: menu completo debe incluir Reportes`).toContain("Reportes");
-      expect(labels, `${roleKey}: menu completo debe incluir Bitácora`).toContain("Bitácora");
+      // "Reportes" y "Bitácora" se unificaron en una sola entrada
+      // "Auditoría" (17/Ago/2026, hallazgo: apuntaban a la misma pantalla
+      // /admin/reportes con distinta pestaña inicial).
+      expect(labels, `${roleKey}: menu completo debe incluir Auditoría`).toContain("Auditoría");
     }
   });
 
@@ -74,11 +76,8 @@ describe("buildNavItems - Admin (IAM)", () => {
       const admin = buscar(items, "/admin/usuarios");
       expect(admin, `${roleKey} deberia tener Admin(IAM) de solo lectura`).toBeDefined();
       const labels = hijos(admin).map((c) => c.label);
-      expect(labels, `${roleKey}: version solo-lectura NO debe incluir Reportes`).not.toContain(
-        "Reportes"
-      );
-      expect(labels, `${roleKey}: version solo-lectura NO debe incluir Bitácora`).not.toContain(
-        "Bitácora"
+      expect(labels, `${roleKey}: version solo-lectura NO debe incluir Auditoría`).not.toContain(
+        "Auditoría"
       );
     }
   });
@@ -258,7 +257,7 @@ describe("Suma de permisos - varios roles activos en la misma sesion", () => {
     expect(puedeAdministrarIam(sesion)).toBe(true);
     const items = buildNavItems(sesion);
     const admin = buscar(items, "/admin/usuarios");
-    expect(hijos(admin).map((c) => c.label)).toContain("Reportes");
+    expect(hijos(admin).map((c) => c.label)).toContain("Auditoría");
     expect(buscar(items, "/ventas-vivienda"), "no debe perder Ventas por tener IAM_ADMIN tambien").toBeDefined();
   });
 });
