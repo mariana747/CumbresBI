@@ -2,6 +2,7 @@ import re
 from datetime import timedelta
 
 from cumbresbi_scope.permissions import require_permission
+from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import action
@@ -11,8 +12,14 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from .audit_utils import emitir_evento_auditoria
 from .magic_link_utils import generate_token, hash_token, issue_external_jwt
+from .mail_utils import (
+    enviar_correo_acceso_externo,
+    enviar_correo_invitacion_workspace,
+    enviar_correo_magic_link,
+)
 from .models import (
     GeneralSociedad,
+    IamExternalCollaborator,
     IamGroup,
     IamInvitation,
     IamMagicLink,
@@ -27,6 +34,7 @@ from .models import (
 )
 from .serializers import (
     GeneralSociedadSerializer,
+    IamExternalCollaboratorSerializer,
     IamGroupSerializer,
     IamInvitationSerializer,
     IamMagicLinkSerializer,
@@ -88,6 +96,14 @@ class IamUserViewSet(ReadOnlyModelViewSet):
         status_param = self.request.query_params.get("status")
         if status_param:
             queryset = queryset.filter(status=status_param.upper())
+        else:
+            # Eliminado (14/Ago/2026, ver IamUserViewSet.eliminar) no debe
+            # aparecer en el directorio por defecto - solo se ve si alguien
+            # filtra a proposito por ?status=DELETED (mismo criterio que
+            # "Eliminado" ya en el selector de /admin/usuarios). Es borrado
+            # logico, no real, asi que sigue existiendo la fila, solo no
+            # estorba la vista normal del dia a dia.
+            queryset = queryset.exclude(status=IamUser.STATUS_DELETED)
         role_param = self.request.query_params.get("role")
         if role_param:
             queryset = queryset.filter(
@@ -98,6 +114,12 @@ class IamUserViewSet(ReadOnlyModelViewSet):
             queryset = queryset.filter(
                 user_groups__group_id=group_param, user_groups__removed_at__isnull=True
             ).distinct()
+        # Interno (STANDARD, Workspace) vs externo (RESTRICTED, ver
+        # IamExternalCollaboratorViewSet.create) - filtro pedido para el
+        # directorio, ver /admin/usuarios.
+        access_mode_param = self.request.query_params.get("access_mode")
+        if access_mode_param:
+            queryset = queryset.filter(access_mode=access_mode_param.upper())
         if self.request.query_params.get("sin_rol") == "true":
             # exclude(user_roles__revoked_at__isnull=True) NO sirve aqui: el
             # LEFT OUTER JOIN implicito genera una fila con revoked_at=NULL
@@ -109,6 +131,123 @@ class IamUserViewSet(ReadOnlyModelViewSet):
                 roles_activos=Count("user_roles", filter=Q(user_roles__revoked_at__isnull=True))
             ).filter(roles_activos=0)
         return queryset
+
+    def get_permissions(self):
+        if self.action in ("eliminar", "reactivar", "suspender"):
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["post"])
+    def suspender(self, request, pk=None):
+        """Suspende un usuario ACTIVE (14/Ago/2026, pedido explicito:
+        "para los pertenecientes al workspace no se deben poder revocar
+        las invitacion, pero si suspender" - IamInvitationViewSet.revocar
+        ya rechaza revocar una invitacion ya aceptada (ver docstring de esa
+        accion), asi que para cortarle el acceso a alguien que YA es
+        colaborador Workspace hacia falta este boton en vez de intentar
+        revocar algo que ya no se puede.
+
+        A diferencia de eliminar() (borrado logico, requiere invitacion
+        nueva para volver), esto es reversible con un clic via reactivar()
+        - pensado para suspensiones temporales, no para dar de baja.
+
+        NO revoca roles (14/Ago/2026, ajustado - pedido explicito: "al
+        volver a activar al usuario se debe dar sus roles el automatico").
+        A diferencia de eliminar(), aqui los roles se quedan intactos -
+        el gate real ya vive en el status (google_callback/
+        canjear_acceso_externo rechazan a cualquiera que no este ACTIVE),
+        asi que no hace falta revocarlos para que dejen de funcionar, y
+        reactivar() los recupera "solos" porque nunca se tocaron."""
+        user = self.get_object()
+        if user.user_id == request.data.get("actor_user_id"):
+            return Response({"detail": "No puedes suspender tu propio usuario."}, status=400)
+        if user.status != IamUser.STATUS_ACTIVE:
+            return Response({"detail": "Solo se puede suspender un usuario activo."}, status=400)
+
+        user.status = IamUser.STATUS_SUSPENDED
+        user.save(update_fields=["status"])
+
+        emitir_evento_auditoria(
+            "iam_users.suspend",
+            "iam_users",
+            user.user_id,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"email": user.primary_email},
+        )
+        return Response(self.get_serializer(user).data)
+
+    @action(detail=True, methods=["post"])
+    def eliminar(self, request, pk=None):
+        """Borrado logico (14/Ago/2026, pedido explicito de Mariana tras
+        encontrar un usuario de prueba atorado en SUSPENDED sin forma de
+        quitarlo del directorio). NO es un DELETE de fila real: hay
+        FKs con on_delete=PROTECT hacia IamUser desde media tabla del
+        sistema (created_by/issued_by/granted_by/invited_by en varios
+        modelos) - borrar la fila de verdad tronaria en cuanto ese usuario
+        hubiera creado/otorgado/invitado algo. STATUS_DELETED ya existia
+        como choice del modelo (y en el filtro de /admin/usuarios) pero
+        nada lo emitia todavia - esta accion es lo que faltaba.
+
+        Revoca tambien cualquier rol activo (mismo criterio que
+        canjear_acceso_externo/google_callback en auth_views.py, que ya
+        rechazan login a quien no este ACTIVE): un usuario eliminado no
+        debe conservar accesos vigentes solo porque nadie los revoco a
+        mano."""
+        user = self.get_object()
+        if user.user_id == request.data.get("actor_user_id"):
+            return Response({"detail": "No puedes eliminar tu propio usuario."}, status=400)
+        if user.status == IamUser.STATUS_DELETED:
+            return Response(self.get_serializer(user).data)
+
+        user.status = IamUser.STATUS_DELETED
+        user.save(update_fields=["status"])
+        IamUserRole.objects.filter(user=user, revoked_at__isnull=True).update(revoked_at=timezone.now())
+
+        emitir_evento_auditoria(
+            "iam_users.delete",
+            "iam_users",
+            user.user_id,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"email": user.primary_email},
+        )
+        return Response(self.get_serializer(user).data)
+
+    @action(detail=True, methods=["post"])
+    def reactivar(self, request, pk=None):
+        """Reactiva un usuario SUSPENDED (14/Ago/2026, pedido explicito:
+        "cuando un usuario esta suspendido se le desactivan sus funciones
+        y se debe tener un boton para activarlo nuevamente"). El gate real
+        de "funciones desactivadas" ya vive en auth_views.py
+        (google_callback/canjear_acceso_externo rechazan a cualquiera que
+        no este ACTIVE) - esta accion es el boton para deshacerlo.
+
+        Solo desde SUSPENDED, no desde DELETED: un usuario eliminado tiene
+        su propio camino de vuelta (invitacion nueva -> _upsert_identity lo
+        reactiva al aceptar, ver auth_views.py) porque ahi si hace falta
+        confirmar que sigue siendo alguien que debe tener acceso - un
+        simple boton de "reactivar" seria demasiado facil para deshacer un
+        borrado a proposito.
+
+        NO reactiva por si sola un IamExternalCollaborator revocado (si la
+        suspension vino de ahi, ver IamExternalCollaboratorViewSet.revocar)
+        - el admin todavia necesita "Reenviar" ese acceso para darle un
+        link usable de nuevo; reactivar aqui solo le devuelve a un usuario
+        Workspace su login libre normal."""
+        user = self.get_object()
+        if user.status != IamUser.STATUS_SUSPENDED:
+            return Response({"detail": "Solo se puede reactivar un usuario suspendido."}, status=400)
+
+        user.status = IamUser.STATUS_ACTIVE
+        user.save(update_fields=["status"])
+
+        emitir_evento_auditoria(
+            "iam_users.reactivate",
+            "iam_users",
+            user.user_id,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"email": user.primary_email},
+        )
+        return Response(self.get_serializer(user).data)
 
 
 class IamRoleViewSet(ModelViewSet):
@@ -408,11 +547,13 @@ class IamMagicLinkViewSet(ModelViewSet):
     """Magic Links de un solo uso para usuarios externos (Fase 1, Semana 4;
     docs/architecture/README.md sec. 6.2).
 
-    MODO DEV: no hay envio de correo real todavia (pendiente confirmar con
-    Arturo el envio desde una cuenta de Workspace) - por eso "crear" regresa
-    el token en claro y el link completo en la respuesta, en vez de solo
-    enviarlo por correo. Quitar ese campo de la respuesta es el unico
-    cambio necesario cuando exista el envio real (ver magic_link_utils.py).
+    Envio real por correo (13/Ago/2026, ver mail_utils.py): al crear un
+    link (uno a uno o masivo por CSV) o reenviarlo, se manda de verdad a
+    la bandeja del invitado via mail-service/Gmail API. El token/
+    magic_link_url se siguen regresando en la respuesta como respaldo (el
+    analista puede copiarlo a mano si el correo no llega o mail-service
+    todavia esta en modo simulado sin credencial real) - "correo_enviado"
+    en la respuesta indica si el envio real funciono.
 
     DELETE no esta permitido: un magic link no se borra, se revoca (mismo
     criterio que iam_user_roles) - usa POST /api/magic-links/{id}/revocar/.
@@ -468,11 +609,16 @@ class IamMagicLinkViewSet(ModelViewSet):
             },
         )
 
+        magic_link_url = f"/magic-link/{token}"
+        correo_enviado = enviar_correo_magic_link(request, magic_link.email, magic_link_url)
+
         data = self.get_serializer(magic_link).data
-        # Modo dev sin correo real (ver docstring de la clase) - remover
-        # "token" y "magic_link_url" de aqui cuando exista el envio real.
+        # token/magic_link_url se quedan como respaldo (ver docstring de la
+        # clase) - no reemplazan el envio real, solo cubren el caso de que
+        # falle o mail-service siga en modo simulado.
         data["token"] = token
-        data["magic_link_url"] = f"/magic-link/{token}"
+        data["magic_link_url"] = magic_link_url
+        data["correo_enviado"] = correo_enviado
         return Response(data, status=201)
 
     @action(detail=False, methods=["post"])
@@ -544,9 +690,13 @@ class IamMagicLinkViewSet(ModelViewSet):
                 },
             )
 
+            magic_link_url = f"/magic-link/{token}"
+            correo_enviado = enviar_correo_magic_link(request, magic_link.email, magic_link_url)
+
             data = self.get_serializer(magic_link).data
             data["token"] = token
-            data["magic_link_url"] = f"/magic-link/{token}"
+            data["magic_link_url"] = magic_link_url
+            data["correo_enviado"] = correo_enviado
             creados.append(data)
 
         return Response({"creados": creados, "errores": errores}, status=201)
@@ -642,9 +792,13 @@ class IamMagicLinkViewSet(ModelViewSet):
             valores_nuevos={"email": nuevo.email, "expires_at": nuevo.expires_at.isoformat()},
         )
 
+        magic_link_url = f"/magic-link/{token}"
+        correo_enviado = enviar_correo_magic_link(request, nuevo.email, magic_link_url)
+
         data = self.get_serializer(nuevo).data
         data["token"] = token
-        data["magic_link_url"] = f"/magic-link/{token}"
+        data["magic_link_url"] = magic_link_url
+        data["correo_enviado"] = correo_enviado
         return Response(data, status=201)
 
 
@@ -687,7 +841,33 @@ class IamInvitationViewSet(ModelViewSet):
         email = (request.data.get("email") or "").strip()
         if not email:
             return Response({"email": ["Este campo es requerido."]}, status=400)
-        if IamUser.objects.filter(primary_email__iexact=email).exists():
+        # Solo dominios de Workspace aprobados (14/Ago/2026, pedido
+        # explicito de Mariana): la invitacion formal (IamInvitation) es
+        # para quien SI tiene/tendra cuenta real de Google Workspace y
+        # entra por OIDC (dominio_aprobado en oidc_utils.py exige lo
+        # mismo en el login) - alguien de otro dominio nunca podria
+        # canjearla, es un colaborador externo (IamExternalCollaborator,
+        # pestaña "Externos sin Workspace" en /admin/invitaciones).
+        dominio = email.rsplit("@", 1)[-1].lower() if "@" in email else ""
+        if dominio not in [d.lower() for d in settings.OIDC_APPROVED_DOMAINS]:
+            return Response(
+                {
+                    "email": [
+                        f"'{dominio or email}' no es un dominio de Workspace aprobado. "
+                        "Si esta persona no tiene correo de Workspace, usa "
+                        "'Externos sin Workspace' en vez de esta invitación."
+                    ]
+                },
+                status=400,
+            )
+        # exclude(status=DELETED) (14/Ago/2026, hallazgo al agregar
+        # IamUserViewSet.eliminar): un usuario eliminado no debe quedar en
+        # un callejon sin salida (no puede loguearse por el gate de status
+        # en google_callback, pero tampoco se le podia volver a invitar
+        # porque esta fila con status=DELETED seguia contando como "ya
+        # existe una cuenta"). _upsert_identity reactiva el status al
+        # aceptar (ver mas abajo).
+        if IamUser.objects.filter(primary_email__iexact=email).exclude(status=IamUser.STATUS_DELETED).exists():
             return Response(
                 {"email": ["Ya existe una cuenta con este correo, no necesita invitación."]}, status=400
             )
@@ -707,7 +887,11 @@ class IamInvitationViewSet(ModelViewSet):
             actor_user_id=request.data.get("invited_by"),
             valores_nuevos={"email": invitation.email},
         )
-        return Response(self.get_serializer(invitation).data, status=201)
+
+        correo_enviado = enviar_correo_invitacion_workspace(request, invitation.email)
+        data = self.get_serializer(invitation).data
+        data["correo_enviado"] = correo_enviado
+        return Response(data, status=201)
 
     @action(detail=True, methods=["post"])
     def revocar(self, request, pk=None):
@@ -725,3 +909,150 @@ class IamInvitationViewSet(ModelViewSet):
                 valores_nuevos={"email": invitation.email},
             )
         return Response(self.get_serializer(invitation).data)
+
+
+class IamExternalCollaboratorViewSet(ModelViewSet):
+    """3er tipo de acceso externo (14/Ago/2026, ver models.py y memoria de
+    sesion "tercer-tipo-invitacion-externo-sin-workspace"): colaborador sin
+    correo de Workspace, entra a secciones reales via roles/permisos
+    normales, con un link que NO vence por tiempo (solo revocar()).
+
+    A diferencia de IamMagicLinkViewSet, "canjear" el token no vive aqui -
+    ese paso emite la cookie de sesion real (mismo mecanismo que
+    /auth/google/callback) y por eso es una vista de navegador en
+    auth_views.canjear_acceso_externo, no una accion de este ViewSet.
+
+    DELETE no esta permitido: se revoca, mismo criterio que magic
+    links/invitaciones.
+    """
+
+    http_method_names = ["get", "post", "head", "options"]
+    queryset = IamExternalCollaborator.objects.all().order_by("-invited_at")
+    serializer_class = IamExternalCollaboratorSerializer
+
+    def get_permissions(self):
+        if self.action in ("create", "list", "retrieve"):
+            return [require_permission("iam.crear")()]
+        if self.action in ("revocar", "reenviar"):
+            return [require_permission("iam.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        email_param = self.request.query_params.get("email")
+        if email_param:
+            queryset = queryset.filter(email__iexact=email_param)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        email = (request.data.get("email") or "").strip()
+        if not email:
+            return Response({"email": ["Este campo es requerido."]}, status=400)
+        if not EMAIL_RE.match(email):
+            return Response({"email": ["No parece un correo válido, revisa que esté bien escrito."]}, status=400)
+        # exclude(status=DELETED) (14/Ago/2026, mismo hallazgo que
+        # IamInvitationViewSet.create): un usuario eliminado no debe
+        # bloquear un acceso externo nuevo para el mismo correo - se crea
+        # un IamUser nuevo (el eliminado se queda como historial muerto,
+        # sin OneToOne con el IamExternalCollaborator nuevo).
+        if IamUser.objects.filter(primary_email__iexact=email).exclude(status=IamUser.STATUS_DELETED).exists():
+            return Response({"email": ["Ya existe una cuenta con este correo."]}, status=400)
+        if IamExternalCollaborator.objects.filter(email__iexact=email, revoked_at__isnull=True).exists():
+            return Response({"email": ["Ya hay un acceso externo activo para este correo."]}, status=400)
+
+        display_name = request.data.get("display_name") or None
+        invited_by = request.data.get("invited_by") or None
+
+        # access_mode RESTRICTED: es un colaborador externo, no un
+        # empleado interno - documenta la intencion aunque hoy
+        # ScopedManager no distinga por access_mode (gap ya conocido, ver
+        # IamUser.access_mode en models.py).
+        user = IamUser.objects.create(
+            primary_email=email,
+            display_name=display_name,
+            access_mode=IamUser.ACCESS_RESTRICTED,
+        )
+
+        token, token_hash = generate_token()
+        acceso = IamExternalCollaborator.objects.create(
+            user=user,
+            email=email,
+            token_hash=token_hash,
+            invited_by_id=invited_by,
+        )
+
+        emitir_evento_auditoria(
+            "iam_external_collaborators.create",
+            "iam_external_collaborators",
+            acceso.external_access_id,
+            actor_user_id=invited_by,
+            valores_nuevos={"email": acceso.email, "user_id": user.user_id},
+        )
+
+        acceso_url = f"/acceso-externo/{token}"
+        correo_enviado = enviar_correo_acceso_externo(request, acceso.email, acceso_url)
+
+        data = self.get_serializer(acceso).data
+        # token/acceso_url se quedan como respaldo, mismo criterio que
+        # IamMagicLinkViewSet.create (correo_enviado indica si el envio
+        # real funciono).
+        data["token"] = token
+        data["acceso_url"] = acceso_url
+        data["correo_enviado"] = correo_enviado
+        return Response(data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def revocar(self, request, pk=None):
+        """Revocar el acceso externo elimina al usuario de una vez (14/Ago/2026,
+        pedido explicito: "al revocar invitacion se elimina de la lista de
+        usuarios automaticamente") - a diferencia de suspender (reversible
+        con un clic), aqui no tiene sentido "reactivar" sin antes darle un
+        link nuevo (reenviar()), asi que el borrado logico es el estado
+        correcto: desaparece del Directorio por defecto (ver
+        IamUserViewSet.get_queryset, excluye DELETED) y revoca sus roles
+        activos, igual que IamUserViewSet.eliminar()."""
+        acceso = self.get_object()
+        if acceso.revoked_at is None:
+            acceso.revoked_at = timezone.now()
+            acceso.save(update_fields=["revoked_at"])
+            acceso.user.status = IamUser.STATUS_DELETED
+            acceso.user.save(update_fields=["status"])
+            IamUserRole.objects.filter(user=acceso.user, revoked_at__isnull=True).update(revoked_at=timezone.now())
+            emitir_evento_auditoria(
+                "iam_external_collaborators.revoke",
+                "iam_external_collaborators",
+                acceso.external_access_id,
+                actor_user_id=request.data.get("actor_user_id"),
+                valores_nuevos={"email": acceso.email},
+            )
+        return Response(self.get_serializer(acceso).data)
+
+    @action(detail=True, methods=["post"])
+    def reenviar(self, request, pk=None):
+        """Rota el token (revoca el link viejo, emite uno nuevo para el
+        MISMO usuario/rol ya asignado) - util si el link se comparte por
+        error. No crea un IamUser nuevo, solo cambia el token_hash."""
+        anterior = self.get_object()
+        if anterior.revoked_at is not None:
+            return Response({"detail": "Este acceso ya esta revocado, no se puede reenviar."}, status=400)
+
+        token, token_hash = generate_token()
+        anterior.token_hash = token_hash
+        anterior.save(update_fields=["token_hash"])
+
+        emitir_evento_auditoria(
+            "iam_external_collaborators.resend",
+            "iam_external_collaborators",
+            anterior.external_access_id,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"email": anterior.email},
+        )
+
+        acceso_url = f"/acceso-externo/{token}"
+        correo_enviado = enviar_correo_acceso_externo(request, anterior.email, acceso_url)
+
+        data = self.get_serializer(anterior).data
+        data["token"] = token
+        data["acceso_url"] = acceso_url
+        data["correo_enviado"] = correo_enviado
+        return Response(data, status=200)

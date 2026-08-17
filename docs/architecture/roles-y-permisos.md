@@ -32,7 +32,8 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Empleado (portal MiCumbres) | `EMPLEADO_SELF` | `rrhh-service` | **IDENTIDAD** (ver hallazgo §1) | Ve únicamente su propio expediente/nómina — nunca el de otro empleado, sin importar su alcance jerárquico |
 | Responsable de Proyecto (Tickets) | `TICKETS_RESPONSABLE` | `tickets-service` | PROYECTO | `tickets_proyectos.responsable` / `tickets_subproyectos.responsable` |
 | Participante de Ticket | `TICKETS_PARTICIPANTE` | `tickets-service` | **IDENTIDAD** + PROYECTO | Ve los tickets donde `asignado_a` = su propio `user_id`, dentro de los proyectos donde participa |
-| Cliente / Prospecto (externo) | *(no es un rol de `iam_roles`)* | `pld-compliance-service`, `ventas-vivienda-service` | Acotado por token (Magic Link), no por `scope_type` | Autenticación vía `pld_ticket_cliente` o equivalente — fuera del sistema de roles interno |
+| Cliente / Prospecto (externo, acción puntual) | *(no es un rol de `iam_roles`)* | `pld-compliance-service`, `ventas-vivienda-service` | Acotado por token (Magic Link, `IamMagicLink`), no por `scope_type` | Autenticación vía `pld_ticket_cliente`/Magic Link — sin `IamUser` real, fuera del sistema de roles interno |
+| Colaborador externo (14/Ago/2026, `IamExternalCollaborator`) | Cualquier rol existente (ej. hipotético "Contador") | El que se le asigne | El que se le asigne (GLOBAL/SOCIEDAD/PROYECTO/CENTRO, igual que un colaborador interno) | A diferencia del Magic Link, este mecanismo **sí** crea un `IamUser` real (`access_mode=RESTRICTED`) — un IAM Admin le asigna roles reales en `/admin/usuarios`, no está "fuera del sistema de roles interno". Link permanente, revocable a mano — ver `docs/architecture/README.md` sec. 6.3 |
 <!--| Proveedor (externo) | *(no es un rol de `iam_roles`)* | `compras-service` | Acotado por token (Magic Link), si aplica | A confirmar si Compras expone algún formulario público para proveedores (no está explícito en el plan) |-->
 ## 3. Matriz de permisos por servicio (resumen)
 
@@ -97,7 +98,7 @@ Vía definitiva (ya no interina): el rol `CONTRALOR` recibe alcance `sociedad_rf
 4. **¿El portal MiCumbres requiere que el empleado vea también documentos de terceros relacionados** (ej. un supervisor que además es empleado viendo su propio expediente Y los de su equipo en la misma sesión), o son dos roles y dos vistas completamente separadas? Afecta si `SCOPE_FIELD_IDENTITY` y `SCOPE_FIELD_CENTRO` deben poder combinarse en el mismo usuario simultáneamente (como en el ejemplo de "Participante de Ticket" arriba).
 
 
-5. **¿Los clientes/proveedores externos (Magic Link) necesitan algún permiso granular más allá de "ver/completar su propio expediente"**, o el modelo de token de un solo uso ya cubre el 100% de sus casos de uso? Confirma si Compras requiere un formulario público para proveedores (no estaba explícito en el Plan de Trabajo).
+5. ~~¿Los clientes/proveedores externos (Magic Link) necesitan algún permiso granular más allá de "ver/completar su propio expediente"?~~ **Respondido parcialmente (14/Ago/2026):** para quien sí necesita permisos granulares reales (no solo una acción puntual), existe `IamExternalCollaborator` — crea un `IamUser` real con roles asignables normalmente, ver sección 2 y `README.md` sec. 6.3. Magic Link se queda para la acción puntual sin cuenta. Sigue pendiente: confirmar si Compras requiere un formulario público para proveedores (no estaba explícito en el Plan de Trabajo).
 6. **Segregación de funciones en PLD** (Analista vs. Aprobador) y en Compras (Comprador vs. quien autoriza el pago en Tesorería) — ¿son roles obligatoriamente distintos por política interna de Cumbres, o pueden recaer en la misma persona en equipos pequeños? Afecta si el sistema debe *impedir* técnicamente que un mismo usuario tenga ambos roles sobre el mismo registro, o solo registrarlo en auditoría.
 
 ---
@@ -210,8 +211,12 @@ botón que va a fallar con 403:
 | `/admin/organizacion` | Nueva sociedad | `iam.crear` | Oculto |
 | `/admin/organizacion` | Editar / Borrar | `iam.editar` | Visible-deshabilitado |
 | `/admin/permisos` | Switch "Modo edición" + otorgar/revocar en la matriz | `iam.editar` | Oculto |
-| `/admin/invitaciones` | Generar Magic Link / Carga masiva / Invitar colaborador | `iam.crear` | Oculto |
-| `/admin/invitaciones` | Revocar | `iam.editar` | Visible-deshabilitado |
+| `/admin/invitaciones` (14/Ago/2026, reorganizado en 3 pestañas: Temporales/Colaboradores) | Generar Magic Link / Carga masiva / Invitar Workspace / Dar acceso externo | `iam.crear` | Oculto |
+| `/admin/invitaciones` | Revocar / Reenviar | `iam.editar` | Visible-deshabilitado |
+| `/admin/usuarios` (3 pestañas: Directorio/Pendientes/Suspendidos) | Menú "Editar" (Cambiar empresa, Gestionar roles) | — (los diálogos internos gatean por su cuenta) | Siempre visible |
+| `/admin/usuarios` | Suspender / Eliminar / Reactivar (menú "Editar", con diálogo de confirmación) | `iam.editar` | Visible-deshabilitado |
+| `/admin/usuarios` (pestaña Pendientes) | Revocar (invitación o acceso externo pendiente) | `iam.editar` | Visible-deshabilitado |
+| `/admin/reportes` (pestaña "Usuarios eliminados", 14/Ago/2026) | — solo lectura | — | Sin gate propio (mismo criterio que el resto de Reportes) |
 | `RoleAssignmentDialog` / `EmpresaAssignmentDialog` | Otorgar / Revocar rol o empresa | `iam.crear` / `iam.editar` | Visible-deshabilitado |
 | `/pld` | Cargar documento | `pld-compliance.crear` | Oculto |
 | `/pld` | Aprobar expediente | `pld-compliance.aprobar` | Visible-deshabilitado |

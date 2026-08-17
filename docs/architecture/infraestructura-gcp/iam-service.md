@@ -30,6 +30,13 @@ Pendiente hasta que exista la contraseña real del usuario de BD de `iam-service
 secreto `IAM_DB_PASSWORD` y otorgar el rol "Usuario con acceso a secreto" únicamente a
 `iam-service-956@...`.
 
-Los secretos de OIDC (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`) sí se crearon en Fase 0 — ver
-[`oidc-login.md`](oidc-login.md) — con acceso otorgado también a `iam-service-956@...`, aunque el
-código que los consuma (flujo Authorization Code + PKCE) sigue pendiente para Fase 1.
+Los secretos de OIDC (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`) se crearon en Fase 0 — ver
+[`oidc-login.md`](oidc-login.md) — con acceso otorgado también a `iam-service-956@...`. El código que los
+consume (flujo Authorization Code + PKCE, `auth_views.py`) ya está implementado, no pendiente.
+
+## Envío real de correo (mail-service)
+
+`iam-service` no tiene credencial propia de Gmail — le pide el envío a `mail-service` vía HTTP
+(`POST /api/send/?perm=iam.crear`, ver `iam/mail_utils.py`), reenviando el JWT/cookie de quien generó el
+link. La cuenta de servicio, el Secret Manager y la domain-wide delegation de Gmail viven documentados
+en [`mail-service.md`](mail-service.md), no aquí.

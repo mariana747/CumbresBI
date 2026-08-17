@@ -86,6 +86,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "link_carpeta",
             "link_plantillas",
             "link_documento_pld",
+            "estado_cuenta",
             "estado_llenado",
             "estado_llenado_manual",
             "aprobado_por",
@@ -105,6 +106,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id_kyc",
             "estado_llenado_manual",
+            "estado_cuenta",
             "aprobado_por",
             "aprobado_en",
             "created_at",

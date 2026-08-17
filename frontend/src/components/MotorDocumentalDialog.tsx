@@ -101,9 +101,23 @@ interface DocumentResult {
 export default function MotorDocumentalDialog({
   open,
   onClose,
+  kycPreseleccionado,
+  onDatosActualizados,
 }: {
   open: boolean;
   onClose: () => void;
+  // Se dispara justo despues de confirmar una extraccion con exito
+  // (17/Ago/2026) - para que la pantalla que abrio el dialogo (ej. la
+  // pestaña "Informacion general" de /pld/[idKyc]) pueda refrescar sus
+  // propios datos sin esperar a que el usuario cierre el dialogo o
+  // recargue la pagina a mano.
+  onDatosActualizados?: () => void;
+  // Cuando se abre desde el detalle de un expediente (/pld/[idKyc],
+  // 17/Ago/2026) - se salta el selector de servicio/expediente por
+  // completo, ya se sabe de que cliente se trata. Sin esto (uso desde
+  // cualquier otra pantalla, si algun dia aplica), se comporta como antes:
+  // el analista elige servicio + expediente a mano.
+  kycPreseleccionado?: { id_kyc: string; id_contraparte: string };
 }) {
   // Tipado explicito: SERVICIOS_SOLICITANTES es "as const" (tupla de
   // literales), asi que SERVICIOS_SOLICITANTES[0] solo, sin el generic,
@@ -117,13 +131,20 @@ export default function MotorDocumentalDialog({
   // Expedientes KYC existentes - determinan la carpeta de Drive a listar
   // (PLD/<id_contraparte>/) y, mas adelante, a cual expediente se
   // confirman los datos ya validados. Solo aplica a "pld-service", el
-  // unico consumidor con carpeta real resuelta hoy.
+  // unico consumidor con carpeta real resuelta hoy. Si viene
+  // kycPreseleccionado, no hace falta cargar la lista completa - ya se
+  // sabe exactamente cual expediente es.
   const [kycOptions, setKycOptions] = useState<PldContraparteKyc[]>([]);
-  const [kycSeleccionado, setKycSeleccionado] = useState("");
+  const [kycSeleccionado, setKycSeleccionado] = useState(kycPreseleccionado?.id_kyc ?? "");
 
-  const carpeta = kycSeleccionado
-    ? `PLD/${kycOptions.find((k) => k.id_kyc === kycSeleccionado)?.id_contraparte}`
-    : "";
+  // "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): mismo prefijo que
+  // pld/views.py (subir/subir_documento) - subcarpeta fija dentro de la
+  // Unidad compartida PLD_CumbresBI, no la raiz directa.
+  const carpeta = kycPreseleccionado
+    ? `PLD/Nuevos Clientes/${kycPreseleccionado.id_contraparte}`
+    : kycSeleccionado
+      ? `PLD/Nuevos Clientes/${kycOptions.find((k) => k.id_kyc === kycSeleccionado)?.id_contraparte}`
+      : "";
   const permKey = "pld-compliance.crear";
 
   const [driveFiles, setDriveFiles] = useState<DriveArchivo[]>([]);
@@ -134,11 +155,11 @@ export default function MotorDocumentalDialog({
   const [documents, setDocuments] = useState<DocumentResult[]>([]);
 
   useEffect(() => {
-    if (!open || servicioSolicitante !== "pld-service") return;
+    if (!open || kycPreseleccionado || servicioSolicitante !== "pld-service") return;
     listKyc()
       .then(setKycOptions)
       .catch(() => setKycOptions([]));
-  }, [open, servicioSolicitante]);
+  }, [open, servicioSolicitante, kycPreseleccionado]);
 
   async function handleVerArchivosDrive() {
     if (!carpeta) return;
@@ -203,6 +224,7 @@ export default function MotorDocumentalDialog({
           i === index ? { ...d, extraccionConfirmadaEn: new Date().toISOString(), extraccionError: undefined } : d
         )
       );
+      onDatosActualizados?.();
     } catch (err) {
       setDocuments((prev) =>
         prev.map((d, i) =>
@@ -305,51 +327,61 @@ export default function MotorDocumentalDialog({
         </Typography>
 
         <Stack component="form" spacing={2} onSubmit={handleSubmit}>
-          <FormControl size="small" fullWidth>
-            <InputLabel id="servicio-solicitante-label">Servicio solicitante</InputLabel>
-            <Select
-              labelId="servicio-solicitante-label"
-              label="Servicio solicitante"
-              value={servicioSolicitante}
-              onChange={(e) => setServicioSolicitante(e.target.value as (typeof SERVICIOS_SOLICITANTES)[number])}
-            >
-              {SERVICIOS_SOLICITANTES.map((servicio) => (
-                <MenuItem key={servicio} value={servicio}>
-                  {servicio}
-                </MenuItem>
-              ))}
-            </Select>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
-              Microservicio interno que pide el análisis (para trazabilidad del
-              log, no afecta el resultado) — ej. quién validará este documento.
-            </Typography>
-          </FormControl>
+          {kycPreseleccionado && (
+            <Alert severity="info" variant="outlined">
+              Analizando documentos del expediente <strong>{kycPreseleccionado.id_contraparte}</strong>.
+            </Alert>
+          )}
 
-          {servicioSolicitante !== "pld-service" ? (
+          {!kycPreseleccionado && (
+            <FormControl size="small" fullWidth>
+              <InputLabel id="servicio-solicitante-label">Servicio solicitante</InputLabel>
+              <Select
+                labelId="servicio-solicitante-label"
+                label="Servicio solicitante"
+                value={servicioSolicitante}
+                onChange={(e) => setServicioSolicitante(e.target.value as (typeof SERVICIOS_SOLICITANTES)[number])}
+              >
+                {SERVICIOS_SOLICITANTES.map((servicio) => (
+                  <MenuItem key={servicio} value={servicio}>
+                    {servicio}
+                  </MenuItem>
+                ))}
+              </Select>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
+                Microservicio interno que pide el análisis (para trazabilidad del
+                log, no afecta el resultado) — ej. quién validará este documento.
+              </Typography>
+            </FormControl>
+          )}
+
+          {!kycPreseleccionado && servicioSolicitante !== "pld-service" ? (
             <Alert severity="info">
               Este servicio todavía no tiene una carpeta de Drive resuelta —
               por ahora solo "pld-service" puede listar/analizar documentos.
             </Alert>
           ) : (
             <>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="kyc-select-label">Expediente KYC</InputLabel>
-                <Select
-                  labelId="kyc-select-label"
-                  label="Expediente KYC"
-                  value={kycSeleccionado}
-                  onChange={(e) => setKycSeleccionado(e.target.value)}
-                >
-                  {kycOptions.map((kyc) => (
-                    <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
-                      {kyc.id_contraparte} ({kyc.id_kyc})
-                    </MenuItem>
-                  ))}
-                </Select>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
-                  Determina la carpeta de Drive a listar (CumbresBI/PLD/&lt;contraparte&gt;/).
-                </Typography>
-              </FormControl>
+              {!kycPreseleccionado && (
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="kyc-select-label">Expediente KYC</InputLabel>
+                  <Select
+                    labelId="kyc-select-label"
+                    label="Expediente KYC"
+                    value={kycSeleccionado}
+                    onChange={(e) => setKycSeleccionado(e.target.value)}
+                  >
+                    {kycOptions.map((kyc) => (
+                      <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
+                        {kyc.id_contraparte} ({kyc.id_kyc})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
+                    Determina la carpeta de Drive a listar (CumbresBI/PLD/&lt;contraparte&gt;/).
+                  </Typography>
+                </FormControl>
+              )}
 
               <Button
                 variant="outlined"

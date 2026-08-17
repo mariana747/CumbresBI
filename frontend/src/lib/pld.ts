@@ -30,6 +30,7 @@ export interface PldContraparteKyc {
   id_contraparte: string;
   curp: string | null;
   nacionalidad: string | null;
+  estado_cuenta: "ACTIVA" | "SOSPECHOSA" | "CONGELADA";
   estado_llenado: PldEstadoLlenado;
   // Workflow hibrido (pld/signals.py): true si el analista edito
   // estado_llenado a mano - a partir de ahi deja de recalcularse solo
@@ -40,7 +41,9 @@ export interface PldContraparteKyc {
   comentarios: string | null;
   documentos: PldContraparteDoc[];
   created_at: string;
+  created_by: string;
   updated_at: string;
+  updated_by: string;
   fecha_vencimiento: string | null;
 }
 
@@ -56,6 +59,41 @@ export async function listKyc(params?: {
   const qs = query.toString();
 
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${qs ? `?${qs}` : ""}`);
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export async function getKyc(idKyc: string): Promise<PldContraparteKyc & PldDatosEditables> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/`);
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Expediente minimo/autonomo (17/Ago/2026, Opcion B - ver memoria de sesion
+// "pld-crear-expediente-opcion-b"): el analista solo da de alta el
+// contenedor vacio (opcionalmente ligado a una sociedad); id_contraparte se
+// autogenera en el backend si no se manda. El resto de los datos del
+// cliente los llena el cliente mismo despues via el link publico
+// (pld-ticket/[token]/page.tsx, actualizarDatosPublico).
+export async function createKyc(params: {
+  createdBy: string;
+  sociedadRfc?: string;
+  idContraparte?: string;
+}): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      created_by: params.createdBy,
+      updated_by: params.createdBy,
+      sociedad_rfc: params.sociedadRfc || undefined,
+      id_contraparte: params.idContraparte || undefined,
+    }),
+  });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);
   }
@@ -100,6 +138,13 @@ export const PLD_CAMPOS_CONFIRMABLES = [
   "comentarios",
 ] as const;
 
+// Los campos editables por el cliente (mismo conjunto que
+// PLD_CAMPOS_CONFIRMABLES) como tipo, para el formulario publico de
+// pld-ticket/[token]/page.tsx - el serializer real regresa todos los
+// campos del modelo, PldContraparteKyc arriba solo tiene el subconjunto
+// que usan las pantallas internas.
+export type PldDatosEditables = Partial<Record<(typeof PLD_CAMPOS_CONFIRMABLES)[number], string | null>>;
+
 // Confirma en el expediente los datos ya revisados por el analista (Motor
 // Documental -> docint/analyze -> correccion en pantalla -> este endpoint).
 // Ver services/pld-service/pld/views.py::confirmar_extraccion.
@@ -142,6 +187,20 @@ export async function aprobarKyc(idKyc: string, aprobadoPor: string): Promise<Pl
   }
   return response.json();
 }
+
+// Semaforo de estado_cuenta (17/Ago/2026, vista de detalle) - mismo peso de
+// decision que aprobarKyc, mismo permiso (pld-compliance.aprobar).
+async function cambiarEstadoCuenta(idKyc: string, accion: "marcar_sospechoso" | "congelar" | "reactivar_cuenta") {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/${accion}/`, { method: "POST" });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export const marcarSospechosoKyc = (idKyc: string) => cambiarEstadoCuenta(idKyc, "marcar_sospechoso");
+export const congelarKyc = (idKyc: string) => cambiarEstadoCuenta(idKyc, "congelar");
+export const reactivarCuentaKyc = (idKyc: string) => cambiarEstadoCuenta(idKyc, "reactivar_cuenta");
 
 // Ticket de cliente externo para KYC (Fase 2, Semana 9) - mismo patron que
 // IamMagicLink (iam-service, ver src/lib/iam.ts), pero sin JWT propio:
@@ -211,7 +270,7 @@ export async function createTicketCliente(params: {
 // si tiene expediente asociado, el KYC anidado directamente.
 export async function validarTicketCliente(
   token: string
-): Promise<{ ticket: PldTicketCliente; kyc?: PldContraparteKyc }> {
+): Promise<{ ticket: PldTicketCliente; kyc?: PldContraparteKyc & PldDatosEditables }> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/validar/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -225,6 +284,65 @@ export async function validarTicketCliente(
   const data = await response.json();
   const { kyc, ...ticket } = data;
   return { ticket, kyc };
+}
+
+// Formulario publico de KYC externo (docs/architecture/pld-fase2-alcance.md
+// sec. 2): el cliente sube un documento sin sesion, canjeando el mismo
+// token del link. No consume el "uso" del ticket (eso ya lo maneja
+// validarTicketCliente, llamado al cargar la pagina) - ver
+// services/pld-service/pld/views.py::subir_documento.
+export type ResultadoSubidaDocumento =
+  | ({ nombre_archivo: string; ok: true } & PldContraparteDoc)
+  | { nombre_archivo: string; ok: false; detail?: string };
+
+// Acepta uno o varios archivos en la misma petición - un solo reCAPTCHA
+// cubre todo el lote (decision 17/Ago/2026, ver pld/views.py::subir_documento:
+// un reCAPTCHA real de Google solo es valido una vez, pedirlo por archivo
+// seria mala experiencia). La respuesta trae un resultado por archivo -
+// algunos pueden fallar aunque otros si se hayan subido, no es atomico.
+export async function subirDocumentosPublico(params: {
+  token: string;
+  recaptchaToken: string;
+  files: File[];
+  denominacion?: string;
+}): Promise<ResultadoSubidaDocumento[]> {
+  const formData = new FormData();
+  formData.append("token", params.token);
+  formData.append("recaptcha_token", params.recaptchaToken);
+  params.files.forEach((file) => formData.append("file", file));
+  if (params.denominacion) formData.append("denominacion", params.denominacion);
+
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/subir_documento/`, {
+    method: "POST",
+    body: formData,
+  });
+  // 201 (todos ok) y 207 (parcial) traen el mismo shape - solo un error de
+  // verdad (token/recaptcha invalidos, etc.) no trae "resultados".
+  if (!response.ok && response.status !== 207) {
+    throw await friendlyApiError("PLD", response);
+  }
+  const data = await response.json();
+  return data.resultados;
+}
+
+// Formulario publico de datos del expediente (17/Ago/2026, mismo link que
+// subirDocumentosPublico): el cliente escribe/corrige sus propios datos de
+// KYC sin sesion. Solo campos en PLD_CAMPOS_CONFIRMABLES - el backend
+// ignora silenciosamente cualquier otra llave (ver
+// pld/views.py::actualizar_datos).
+export async function actualizarDatosPublico(params: {
+  token: string;
+  campos: PldDatosEditables;
+}): Promise<PldContraparteKyc & PldDatosEditables> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/actualizar_datos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: params.token, campos: params.campos }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
 }
 
 export async function revocarTicketCliente(idPldTicket: string): Promise<PldTicketCliente> {

@@ -14,17 +14,36 @@ import { BRAND } from "@/theme/theme";
 // intermedia" es literal, asi que el camino feliz normal NUNCA llega
 // aqui - lo intercepta src/middleware.ts (corre en el servidor, antes de
 // pintar nada) y redirige 302 directo a /auth/google/start. Esta pagina
-// solo se ve en dos casos borde: (a) iam-service regreso con
-// ?error=oidc (dominio no aprobado, token invalido, etc. - ver
-// auth_views.py), donde si hace falta un boton "Reintentar" explicito; o
-// (b) AppShell detecto una cookie presente pero invalida/expirada
-// (GET /api/me devolvio 401) y empujo aqui - en ese caso, sin ?error, el
-// useEffect de abajo reintenta el redirect automatico igual que haria el
-// middleware.
+// solo se ve en casos borde: (a) iam-service regreso con algun ?error=
+// (dominio no aprobado, invitacion revocada, cuenta suspendida, etc. -
+// ver auth_views.py), donde si hace falta un boton "Reintentar" explicito
+// en vez de reintentar solo; o (b) AppShell detecto una cookie presente
+// pero invalida/expirada (GET /api/me devolvio 401) y empujo aqui - en
+// ese caso, sin ?error, el useEffect de abajo reintenta el redirect
+// automatico igual que haria el middleware.
+//
+// Mensajes por codigo (14/Ago/2026, hallazgo: antes solo "oidc" se
+// reconocia como error - cualquier otro codigo real que ya emitia el
+// backend (sin_invitacion/cuenta_suspendida/acceso_revocado/
+// acceso_invalido) caia al else y reintentaba el login solo, que volvia a
+// fallar y volvia a redirigir aqui - un bucle infinito sin mostrar nunca
+// el motivo real).
+const MENSAJES_ERROR: Record<string, string> = {
+  sin_invitacion:
+    "Tu invitación fue revocada o todavía no existe. Pide a un administrador que te invite de nuevo.",
+  cuenta_suspendida:
+    "Tu cuenta está suspendida. Contacta a un administrador para que la reactive.",
+  acceso_revocado: "Este enlace de acceso fue revocado. Pide uno nuevo a un administrador.",
+  acceso_invalido: "Este enlace de acceso no es válido.",
+};
+const MENSAJE_DEFAULT =
+  "No se pudo iniciar sesión. Verifica que estés usando tu cuenta de Google Workspace de Cumbres.";
 
 function LoginContent() {
   const searchParams = useSearchParams();
-  const hasError = searchParams.get("error") === "oidc";
+  const errorCode = searchParams.get("error");
+  const hasError = !!errorCode;
+  const mensajeError = errorCode ? (MENSAJES_ERROR[errorCode] ?? MENSAJE_DEFAULT) : "";
 
   useEffect(() => {
     if (!hasError) {
@@ -78,10 +97,7 @@ function LoginContent() {
 
           {hasError ? (
             <>
-              <Alert severity="error">
-                No se pudo iniciar sesión. Verifica que estés usando tu cuenta de Google Workspace de
-                Cumbres.
-              </Alert>
+              <Alert severity="error">{mensajeError}</Alert>
               <Button
                 variant="contained"
                 fullWidth

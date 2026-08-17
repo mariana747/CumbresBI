@@ -17,6 +17,12 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
 # iam/audit_utils.py) mientras no exista Pub/Sub real.
 AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8001")
 
+# mail-service (envio real de Magic Links via Gmail API, ver
+# iam/mail_utils.py) y la URL base del frontend para construir el link
+# completo que se manda por correo (ej. "https://cumbresbi.mx/magic-link/<token>").
+MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
+FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

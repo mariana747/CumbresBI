@@ -33,8 +33,32 @@ class PldContraparteKyc(models.Model):
         (CIVIL_CASADO, "Casado"),
     ]
 
+    # Estado de cuenta (17/Ago/2026, vista de detalle del expediente) -
+    # independiente de estado_llenado (que es sobre que tan lleno esta el
+    # expediente) y de aprobado_en/aprobado_por (aprobacion formal). Este es
+    # el semaforo operativo del dossier: activa por default, un analista
+    # puede marcarla sospechosa o congelarla - ver acciones
+    # marcar_sospechoso/congelar/reactivar_cuenta en views.py, mismo nivel
+    # de permiso que aprobar (pld-compliance.aprobar), son decisiones de
+    # cumplimiento del mismo peso.
+    CUENTA_ACTIVA = "ACTIVA"
+    CUENTA_SOSPECHOSA = "SOSPECHOSA"
+    CUENTA_CONGELADA = "CONGELADA"
+    ESTADO_CUENTA_CHOICES = [
+        (CUENTA_ACTIVA, "Activa"),
+        (CUENTA_SOSPECHOSA, "Marcada como sospechosa"),
+        (CUENTA_CONGELADA, "Congelada"),
+    ]
+
     id_kyc = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    id_contraparte = models.CharField(max_length=8)
+    # Contraparte propia y autonoma de PLD para esta fase (docs/
+    # CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md, Semana 7): PLD no
+    # depende de que otro modulo (Ventas/Tesoreria) exista todavia para dar
+    # de alta un cliente - este campo es la referencia externa reservada
+    # que se reconciliara con la contraparte maestra compartida hasta la
+    # Fase 4. default=_short_id (17/Ago/2026) para que el analista no tenga
+    # que inventar un identificador a mano al crear un expediente nuevo.
+    id_contraparte = models.CharField(max_length=8, default=_short_id)
     # FK real a general_sociedades.rfc (iam-service) - referencia laxa, ver
     # nota de clase arriba. Columna real de alcance (punto 2 del plan de
     # Fase 1, RLS real) - que sociedad de Cumbres es la duena de este
@@ -42,21 +66,27 @@ class PldContraparteKyc(models.Model):
     # porque los expedientes creados antes de esta columna no tienen valor
     # todavia (backfill pendiente).
     sociedad_rfc = models.CharField(max_length=13, blank=True, null=True)
-    fecha_nac_const = models.DateField()
-    pais_nac_const = models.CharField(max_length=100)
+    # A partir de aqui, los campos de "datos del cliente" son opcionales al
+    # crear (decision 17/Ago/2026, Opcion B: expediente minimo autonomo -
+    # ver memoria de sesion "pld-crear-expediente-opcion-b"): el analista
+    # da de alta un expediente vacio y el propio cliente los llena despues
+    # via el link publico (pld-ticket/[token]/page.tsx, actualizar_datos).
+    # Antes eran obligatorios porque no existia ese formulario publico.
+    fecha_nac_const = models.DateField(blank=True, null=True)
+    pais_nac_const = models.CharField(max_length=100, blank=True, null=True)
     folio_mercantil = models.CharField(max_length=250, blank=True, null=True)
     objeto_social = models.CharField(max_length=250, blank=True, null=True)
     curp = models.CharField(max_length=18, blank=True, null=True)
-    nacionalidad = models.CharField(max_length=100)
-    ocupacion_act_economica = models.CharField(max_length=100)
-    dom_calle = models.CharField(max_length=150)
-    dom_numero_ext = models.CharField(max_length=50)
-    dom_numero_int = models.CharField(max_length=50)
-    dom_colonia = models.CharField(max_length=100)
-    dom_municipio_alcaldia = models.CharField(max_length=255)
-    dom_estado = models.CharField(max_length=255)
-    dom_cp = models.CharField(max_length=10)
-    dom_pais = models.CharField(max_length=100)
+    nacionalidad = models.CharField(max_length=100, blank=True, null=True)
+    ocupacion_act_economica = models.CharField(max_length=100, blank=True, null=True)
+    dom_calle = models.CharField(max_length=150, blank=True, null=True)
+    dom_numero_ext = models.CharField(max_length=50, blank=True, null=True)
+    dom_numero_int = models.CharField(max_length=50, blank=True, null=True)
+    dom_colonia = models.CharField(max_length=100, blank=True, null=True)
+    dom_municipio_alcaldia = models.CharField(max_length=255, blank=True, null=True)
+    dom_estado = models.CharField(max_length=255, blank=True, null=True)
+    dom_cp = models.CharField(max_length=10, blank=True, null=True)
+    dom_pais = models.CharField(max_length=100, blank=True, null=True)
     tipo_identificacion = models.CharField(max_length=100, blank=True, null=True)
     autoridad_identificacion = models.CharField(max_length=250, blank=True, null=True)
     numero_identificacion = models.CharField(max_length=250, blank=True, null=True)
@@ -68,13 +98,14 @@ class PldContraparteKyc(models.Model):
     dom_corresp_dom_estado = models.CharField(max_length=255, blank=True, null=True)
     dom_corresp_dom_cp = models.CharField(max_length=10, blank=True, null=True)
     dom_corresp_dom_pais = models.CharField(max_length=100, blank=True, null=True)
-    telefono_fijo = models.CharField(max_length=10)
-    telefono_sms = models.CharField(max_length=10)
-    estado_civil = models.CharField(max_length=20, choices=ESTADO_CIVIL_CHOICES)
-    ident_fideicomiso = models.CharField(max_length=100)
+    telefono_fijo = models.CharField(max_length=10, blank=True, null=True)
+    telefono_sms = models.CharField(max_length=10, blank=True, null=True)
+    estado_civil = models.CharField(max_length=20, choices=ESTADO_CIVIL_CHOICES, blank=True, null=True)
+    ident_fideicomiso = models.CharField(max_length=100, blank=True, null=True)
     link_carpeta = models.CharField(max_length=2083, blank=True, null=True)
     link_plantillas = models.CharField(max_length=2083, blank=True, null=True)
     link_documento_pld = models.CharField(max_length=2083, blank=True, null=True)
+    estado_cuenta = models.CharField(max_length=20, choices=ESTADO_CUENTA_CHOICES, default=CUENTA_ACTIVA)
     estado_llenado = models.CharField(
         max_length=20, choices=ESTADO_LLENADO_CHOICES, default=ESTADO_PENDIENTE
     )
@@ -94,7 +125,9 @@ class PldContraparteKyc(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
-    fecha_vencimiento = models.DateField()
+    # Opcional al crear (mismo criterio de la Opcion B, ver arriba) - se
+    # define cuando el analista aprueba el expediente, no antes.
+    fecha_vencimiento = models.DateField(blank=True, null=True)
 
     # SCOPE_FIELD_SOCIEDAD ya resuelto (punto 2 del plan de Fase 1, ver
     # sociedad_rfc arriba). Un usuario de alcance SOCIEDAD ya puede ver los

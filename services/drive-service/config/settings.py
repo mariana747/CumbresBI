@@ -83,10 +83,33 @@ DRIVE_SERVICE_ACCOUNT_JSON = env("DRIVE_SERVICE_ACCOUNT_JSON", default="")
 # este usuario, que debe ser dueno/tener acceso a la carpeta CumbresBI/).
 DRIVE_IMPERSONATE_SUBJECT = env("DRIVE_IMPERSONATE_SUBJECT", default="")
 
+# Secreto compartido servicio-a-servicio (ver services/pld-service/config/
+# settings.py, mismo comentario del otro lado): PldTicketClienteViewSet.
+# subir_documento es un endpoint PUBLICO (formulario externo sin sesion,
+# sin JWT que reenviar) - cuando una llamada a este servicio trae este
+# secreto en el header X-Internal-Secret (en vez de un JWT de usuario en
+# Authorization), se confia en que ya viene de otro microservicio interno
+# que ya validó lo que tenia que validar (token del cliente + reCAPTCHA) y
+# se le deja pasar sin exigir perm_key. Vacio en dev por default (nadie
+# puede usar este bypass hasta configurarlo explicitamente en ambos lados).
+DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
+
 # ID de la carpeta raiz "CumbresBI/" en Drive (se resuelve una vez y se
 # fija aqui - ver pld-fase2-alcance.md sec. 1.3 y memoria de sesion
 # "drive-estructura-carpetas-grupos": estructura de carpetas por modulo,
-# CumbresBI/PLD/, CumbresBI/RRHH/, CumbresBI/Vivienda/, CumbresBI/Compras/,
+# CumbresBI/RRHH/, CumbresBI/Vivienda/, CumbresBI/Compras/,
 # CumbresBI/Tesoreria/ - decision 12/Ago/2026 reemplazo la mencion original
-# a Contratos/Excels).
+# a Contratos/Excels). Sigue siendo el fallback para los modulos que NO
+# tienen todavia su propia Unidad compartida (ver DRIVE_MODULE_FOLDER_IDS).
 DRIVE_ROOT_FOLDER_ID = env("DRIVE_ROOT_FOLDER_ID", default="")
+
+# Mapeo modulo -> ID de su propia Unidad compartida, para modulos migrados
+# de "CumbresBI/<modulo>/" a una Unidad compartida independiente (decision
+# 14/Ago/2026, memoria "drive-grupos-automatizacion-permisos": permite dar
+# de alta un grupo de Google como miembro de la Unidad compartida completa
+# -y que le aparezca en "Unidades compartidas"- en vez de depender del
+# toggle fragil de "restringir acceso" por subcarpeta. PLD es el primer
+# modulo migrado; los que no aparecen aqui siguen resolviendose como
+# subcarpeta de DRIVE_ROOT_FOLDER_ID (comportamiento viejo, ver
+# ensure_folder_path en driveclient.py).
+DRIVE_MODULE_FOLDER_IDS = env.json("DRIVE_MODULE_FOLDER_IDS", default={})

@@ -7,8 +7,10 @@ datos del otro").
 """
 
 import datetime
+from unittest.mock import Mock, patch
 
 from cumbresbi_scope.scope import EffectiveScope
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
@@ -426,3 +428,104 @@ class ConfirmarExtraccionTests(TestCase):
     def test_rechaza_body_vacio(self):
         response = self._confirmar({})
         self.assertEqual(response.status_code, 400)
+
+
+class SubirDocumentoPublicoTests(TestCase):
+    """Formulario publico de KYC externo (docs/architecture/
+    pld-fase2-alcance.md sec. 2, memoria de sesion
+    "motor-documental-seleccion-archivos-drive"): subir_documento es
+    publico (sin sesion), verifica reCAPTCHA y sube a Drive usando el
+    secreto interno servicio-a-servicio, no un JWT de usuario."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000070", RFC_TIZARA)
+        self.ticket = PldTicketCliente.objects.create(
+            kyc=self.kyc,
+            email="cliente@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-valido"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=5,
+        )
+        self.view = PldTicketClienteViewSet.as_view({"post": "subir_documento"})
+
+    def _subir(self, token="token-valido", recaptcha_token="cualquier-cosa", archivo=None):
+        archivo = archivo or SimpleUploadedFile("ine.pdf", b"contenido-fake", content_type="application/pdf")
+        request = self.factory.post(
+            "/api/ticket-cliente/subir_documento/",
+            {"token": token, "recaptcha_token": recaptcha_token, "file": archivo},
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        return self.view(request)
+
+    def test_es_publico_sin_sesion(self):
+        with patch("pld.views.recaptcha.verificar", return_value=True), patch("pld.views.requests.post") as mock_post:
+            mock_post.return_value = Mock(
+                status_code=201,
+                json=lambda: {
+                    "file_id": "abc123",
+                    "web_view_link": "https://drive/abc123",
+                    "mime_type": "application/pdf",
+                    "tamano_bytes": 14,
+                },
+            )
+            response = self._subir()
+        self.assertEqual(response.status_code, 201)
+
+    def test_token_invalido_da_404(self):
+        response = self._subir(token="no-existe")
+        self.assertEqual(response.status_code, 404)
+
+    def test_recaptcha_invalido_rechaza(self):
+        with patch("pld.views.recaptcha.verificar", return_value=False):
+            response = self._subir()
+        self.assertEqual(response.status_code, 400)
+
+    def test_sin_expediente_asociado_rechaza(self):
+        ticket_sin_kyc = PldTicketCliente.objects.create(
+            email="otro@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-sin-kyc"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=5,
+        )
+        with patch("pld.views.recaptcha.verificar", return_value=True):
+            response = self._subir(token="token-sin-kyc")
+        self.assertEqual(response.status_code, 400)
+        ticket_sin_kyc.refresh_from_db()
+
+    def test_no_consume_uses_count_del_ticket(self):
+        """A diferencia de validar(), subir varios documentos bajo el mismo
+        link no debe agotarlo - eso lo controla el paso de "validar" al
+        cargar la pagina, no cada subida individual."""
+        with patch("pld.views.recaptcha.verificar", return_value=True), patch("pld.views.requests.post") as mock_post:
+            mock_post.return_value = Mock(
+                status_code=201,
+                json=lambda: {
+                    "file_id": "abc123",
+                    "web_view_link": "https://drive/abc123",
+                    "mime_type": "application/pdf",
+                    "tamano_bytes": 14,
+                },
+            )
+            self._subir()
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.uses_count, 0)
+
+    def test_guarda_el_documento_con_los_datos_de_drive(self):
+        with patch("pld.views.recaptcha.verificar", return_value=True), patch("pld.views.requests.post") as mock_post:
+            mock_post.return_value = Mock(
+                status_code=201,
+                json=lambda: {
+                    "file_id": "abc123",
+                    "web_view_link": "https://drive/abc123",
+                    "mime_type": "application/pdf",
+                    "tamano_bytes": 14,
+                },
+            )
+            self._subir()
+        doc = PldContraparteDoc.objects.get(kyc=self.kyc)
+        self.assertEqual(doc.drive_file_id, "abc123")
+        self.assertEqual(doc.status, PldContraparteDoc.STATUS_ENTREGADO)
+        self.assertEqual(doc.created_by, "externo")

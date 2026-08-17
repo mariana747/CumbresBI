@@ -3,6 +3,7 @@ import io
 import logging
 
 import requests
+from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
 from django.utils import timezone
 from rest_framework.decorators import action
@@ -104,14 +105,7 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
             )
         contenido = buffer.getvalue().encode("utf-8")
 
-        headers = {}
-        auth_header = request.META.get("HTTP_AUTHORIZATION")
-        if auth_header:
-            headers["Authorization"] = auth_header
-        cookie_name = getattr(settings, "CUMBRESBI_SCOPE_SESSION_COOKIE_NAME", "cumbresbi_session")
-        cookies = {}
-        if request.COOKIES.get(cookie_name):
-            cookies[cookie_name] = request.COOKIES[cookie_name]
+        headers, cookies = forward_auth_headers(request)
 
         nombre_archivo = f"bitacora_auditoria_{timezone.now().strftime('%Y%m%d%H%M%S')}.csv"
         try:

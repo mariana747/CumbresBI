@@ -4,9 +4,10 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
-from iam.auth_views import google_callback, google_start, logout, me
+from iam.auth_views import canjear_acceso_externo, google_callback, google_start, logout, me
 from iam.views import (
     GeneralSociedadViewSet,
+    IamExternalCollaboratorViewSet,
     IamGroupViewSet,
     IamInvitationViewSet,
     IamMagicLinkViewSet,
@@ -31,6 +32,7 @@ router.register("user-centro-access", IamUserCentroAccessViewSet, basename="iamu
 router.register("user-contrato-access", IamUserContratoAccessViewSet, basename="iamusercontratoaccess")
 router.register("magic-links", IamMagicLinkViewSet, basename="iammagiclink")
 router.register("invitaciones", IamInvitationViewSet, basename="iaminvitation")
+router.register("acceso-externo", IamExternalCollaboratorViewSet, basename="iamexternalcollaborator")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -41,6 +43,7 @@ urlpatterns = [
     path("auth/google/start", google_start, name="oidc-start"),
     path("auth/google/callback", google_callback, name="oidc-callback"),
     path("auth/logout", logout, name="oidc-logout"),
+    path("auth/acceso-externo/<str:token>", canjear_acceso_externo, name="canjear-acceso-externo"),
 ]
 
 # TEMPORAL (ver iam/dev_views.py) - ni siquiera se registra la ruta si

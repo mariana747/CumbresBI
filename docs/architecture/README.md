@@ -55,7 +55,7 @@ Nueve servicios existentes + dos planeados = **11 despliegues Cloud Run** por am
 
 ### 1.2 Reglas no negociables (ahora en contexto distribuido)
 
-1. **Cero contraseñas** — OIDC (internos) / Magic Links (externos), resuelto por `iam-service`.
+1. **Cero contraseñas** — OIDC (internos), Magic Links (acción externa puntual) o acceso de colaborador externo (`IamExternalCollaborator`, link permanente revocable), los tres resueltos por `iam-service` — ver sección 6.
 2. **RLS por alcance** (GLOBAL/SOCIEDAD/PROYECTO/CENTRO/CONTRATO) — ya no es un middleware local de un monolito: es un **JWT firmado por `iam-service`** con los claims de alcance, validado por el API Gateway y aplicado en cada servicio mediante una **librería Python compartida** (`cumbresbi-scope`) — ver sección 8.
 3. **Auditoría inmutable append-only** — cada servicio publica eventos de auditoría (patrón *Transactional Outbox*) a un tópico Pub/Sub consumido por `audit-service`, único escritor de `bitacora_auditoria` — ver sección 9.
 4. **Secretos únicamente en Google Secret Manager** — ahora con 11 cuentas de servicio distintas, cada una con acceso de mínimo privilegio solo a sus propios secretos.
@@ -310,17 +310,27 @@ sequenceDiagram
     G->>IAMS: Redirige a /auth/google/callback?code=...
     IAMS->>G: Intercambia code por tokens (valida code_verifier)
     alt claim "hd" en dominios Workspace aprobados
-        IAMS->>IAMS: Crea/actualiza iam_identities + iam_users<br/>calcula EffectiveScope
-        IAMS-->>W: Cookie de sesión (JWT firmado RS256, claims de alcance)<br/>HttpOnly; Secure; SameSite=Lax
-        W->>GW: GET /api/me
-        GW->>IAMS: valida JWT, reenvía
-        IAMS-->>W: Perfil + alcance efectivo
+        IAMS->>IAMS: _upsert_identity: ¿ya existe IamUser (no DELETED)?<br/>si no, requiere IamInvitation pendiente (si no hay, rechaza)<br/>crea/actualiza iam_identities + iam_users<br/>calcula EffectiveScope
+        alt user.status != ACTIVE (SUSPENDED/DELETED)
+            IAMS-->>W: Redirige a /login?error=cuenta_suspendida<br/>(o ?error=sin_invitacion si no hay IamUser ni invitación)<br/>sin sesión emitida
+        else status == ACTIVE
+            IAMS-->>W: Cookie de sesión (JWT firmado RS256, claims de alcance)<br/>HttpOnly; Secure; SameSite=Lax
+            W->>GW: GET /api/me
+            GW->>IAMS: valida JWT, reenvía
+            IAMS-->>W: Perfil + alcance efectivo
+        end
     else dominio no aprobado
-        IAMS-->>W: HTTP 403 — sin sesión emitida
+        IAMS-->>W: Redirige a /login?error=oidc — sin sesión emitida
     end
 ```
 
+Gate de invitación formal (`IamInvitation`, decisión híbrida 10/Ago/2026): un correo que **ya tiene** `IamUser` (no `DELETED`) entra con login libre de siempre. Uno nuevo necesita que un IAM Admin lo haya invitado primero (fila `IamInvitation` pendiente) — solo entonces `_upsert_identity` crea el `IamUser`. Un `IamUser` en `DELETED` que acepta una invitación **nueva** se reactiva (`status=ACTIVE`) en vez de crear una fila duplicada.
+
+Solo dominios en `OIDC_APPROVED_DOMAINS` (`cypcumbres.mx`, `cypcumbres.com`) pueden recibir una `IamInvitation` — `IamInvitationViewSet.create()` rechaza (400) cualquier otro dominio; esas personas usan el mecanismo de acceso externo (6.3).
+
 ### 6.2 Usuarios externos — Magic Link de un solo uso
+
+Para una **acción puntual sin cuenta** (ej. que un proveedor suba un documento a un expediente KYC) — vence en minutos (30 por defecto), un solo uso, y NO crea un `IamUser` real: quien lo canjea nunca aparece en el directorio de usuarios.
 
 ```mermaid
 sequenceDiagram
@@ -329,23 +339,51 @@ sequenceDiagram
     participant IAMS as iam-service
     participant DB as tabla de tokens<br/>(patrón de pld_ticket_cliente)
 
-    U->>W: Abre /magic-link/[token] (recibido por correo)
-    W->>IAMS: Valida token
+    U->>W: Abre /magic-link/[token] (recibido por correo real, ver mail-service)
+    W->>IAMS: Valida token (POST /api/magic-links/validar/)
     IAMS->>DB: ¿hash coincide? ¿no expirado (30 min)?<br/>¿uses_count < max_uses? ¿revoked_at IS NULL?
     alt token válido
         DB-->>IAMS: OK
         IAMS->>DB: Marca uso (uses_count++, last_used_at)
-        IAMS-->>W: JWT de alcance externo limitado
+        IAMS-->>W: JWT de alcance externo limitado (sin claims de scope real)
         W-->>U: Redirige a la vista pública correspondiente (ej. KYC)
-    else token inválido o expirado
+    else token inválido, expirado o revocado
         DB-->>IAMS: Rechazado
         IAMS-->>W: Error + opción de reenvío
     end
 ```
 
+### 6.3 Colaborador externo sin Workspace — acceso permanente revocable (`IamExternalCollaborator`)
+
+3er mecanismo (14/Ago/2026), distinto de los dos anteriores: para alguien que **no tiene correo de Workspace** pero necesita navegar secciones reales de la app con roles/permisos propios (ej. un contador externo) — no una sola acción puntual como el Magic Link. A diferencia de ambos, **sí crea un `IamUser` real** (`access_mode=RESTRICTED`) desde el momento de la invitación, para que un IAM Admin le asigne roles reales en `/admin/usuarios` de inmediato (incluso antes de que la persona haya entrado — ver `IamUserSerializer.externo_pendiente`, que distingue "la cuenta ya existe" de "ya canjeó su acceso alguna vez"). El link **no vence por tiempo**, solo se revoca a mano.
+
+```mermaid
+sequenceDiagram
+    actor U as Colaborador externo
+    participant W as Next.js
+    participant IAMS as iam-service
+
+    U->>W: Abre /auth/acceso-externo/[token] (recibido por correo real)
+    W->>IAMS: GET /auth/acceso-externo/[token] (vista de navegador, no JSON)
+    alt token válido, no revocado, IamUser ACTIVE
+        IAMS->>IAMS: Marca last_used_at<br/>issue_session_jwt(user) — MISMA cookie real que 6.1, con claims de alcance de verdad
+        IAMS-->>W: Cookie de sesión + redirect a la app
+    else token inválido o revocado
+        IAMS-->>W: Redirige a /login?error=acceso_revocado (o acceso_invalido)
+    end
+```
+
+Revocar el acceso (`POST /api/acceso-externo/{id}/revocar/`) también suspende el `IamUser` (`status=SUSPENDED`) — un admin lo reactiva desde `/admin/usuarios` (pestaña "Suspendidos"), y si además quiere darle un link nuevo usable, usa "Reenviar" en `/admin/invitaciones`.
+
 📄 Editable: [`diagrams/05-flujo-oidc.drawio`](diagrams/05-flujo-oidc.drawio)
 
-**Cambio clave respecto al monolito:** el JWT ya no es solo una cookie de sesión — lleva los **claims de alcance** (`is_global`, `sociedad_rfcs`, `proyecto_ids`, `centro_ids`, `contrato_ids`) firmados por `iam-service`, con TTL corto (≈15 min) para limitar el daño de una revocación tardía. Una revocación forzada (ej. baja de un empleado) se propaga vía el evento `iam.scope.revocado` en Pub/Sub, que cada servicio escucha para invalidar su caché local del claim antes de que expire el TTL — ver sección 8.
+**Cambio clave respecto al monolito:** el JWT ya no es solo una cookie de sesión — lleva los **claims de alcance** (`is_global`, `sociedad_rfcs`, `proyecto_ids`, `centro_ids`, `contrato_ids`) firmados por `iam-service`, con TTL corto (≈15 min) para limitar el daño de una revocación tardía. Una revocación forzada (ej. baja de un empleado) se propaga vía el evento `iam.scope.revocado` en Pub/Sub, que cada servicio escucha para invalidar su caché local del claim antes de que expire el TTL — ver sección 8. El Magic Link (6.2) es la excepción: su JWT es de alcance limitado, sin estos claims de scope real.
+
+**Estados de `IamUser.status`** (`ACTIVE` / `SUSPENDED` / `DELETED`) — los tres mecanismos de arriba los respetan como gate de entrada:
+- `SUSPENDED`: revocar un acceso externo (6.3) lo pone así automáticamente; también hay un botón manual "Suspender" en `/admin/usuarios` para colaboradores Workspace ya aceptados (a los que ya no se les puede revocar la invitación, solo suspender). No revoca sus roles — se reactiva con un clic (`POST /api/users/{id}/reactivar/`) y los recupera intactos.
+- `DELETED`: borrado lógico (`POST /api/users/{id}/eliminar/`), sí revoca roles activos. Solo vuelve a entrar si se le crea una `IamInvitation` nueva (6.1) o un acceso externo nuevo (6.3) — no hay botón directo de "deseliminar".
+
+**Envío real de correo (mail-service, Gmail API):** los tres mecanismos mandan su correo real (antes solo se mostraba el link/token en pantalla en modo dev) vía un microservicio dedicado (`mail-service`, mismo patrón que `drive-service`: una sola cuenta de servicio con domain-wide delegation en el Workspace de `cypcumbres.mx`, autorizada 14/Ago/2026 para el scope `gmail.send`). `iam-service` llama a `POST /api/send/?perm=iam.crear` reenviando el JWT/cookie de quien generó el link, para que el permiso lo siga decidiendo `mail-service`, no una credencial de servicio propia.
 
 ---
 

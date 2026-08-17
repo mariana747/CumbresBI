@@ -129,3 +129,40 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # "pld-service puede subir lo que sea". Nombre de servicio de docker-compose,
 # resuelto por la red interna de Docker - mismo patron que GATEWAY_ROUTE_*.
 DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
+
+# mail-service (envio real de tickets de cliente via Gmail API, ver
+# pld/mail_utils.py) y la URL base del frontend para construir el link
+# completo del ticket (ej. "https://cumbresbi.mx/pld-ticket/<token>").
+MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
+FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
+
+# Secreto compartido servicio-a-servicio (docs/architecture/README.md sec.
+# 11: "secretos gestionados... secret key de reCAPTCHA"; este es distinto,
+# ver mas abajo) - PldTicketClienteViewSet.subir_documento es PUBLICO (sin
+# sesion, el cliente externo no trae JWT, ver ticket_utils.py) pero SI
+# necesita que drive-service acepte la subida. En vez de fabricar un JWT
+# falso, drive-service reconoce este secreto como llamada de confianza
+# servicio-a-servicio (ver drive/views.py) - nunca se expone al cliente,
+# solo viaja entre contenedores. Vacio en dev por default (drive-service
+# hace lo mismo) - en un ambiente real viene de Secret Manager, igual que
+# los demas secretos de servicio.
+DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
+
+# Secret key de reCAPTCHA v2 (docs/architecture/README.md sec. 11) - para
+# verificar del lado del servidor el token que manda el widget del
+# formulario publico (pld-ticket/[token]/page.tsx). Vacio en dev (modo
+# simulado: cualquier token se acepta, ver PldTicketClienteViewSet.
+# subir_documento) para poder probar sin cuenta real de reCAPTCHA.
+RECAPTCHA_SECRET_KEY = env("RECAPTCHA_SECRET_KEY", default="")
+
+# Rate limiting del formulario publico (docs/architecture/pld-fase2-alcance.md
+# sec. 2, pregunta abierta #4: "paginas publicas... necesitan limite de
+# solicitudes" - mismo patron sugerido para Vivienda en CumbresBI_estado.md).
+# Solo aplica al scope "pld-ticket-subir" (ver
+# PldTicketClienteViewSet.get_throttles) - por IP, ya que el cliente
+# externo no tiene sesion.
+REST_FRAMEWORK = {
+    "DEFAULT_THROTTLE_RATES": {
+        "pld-ticket-subir": "10/hour",
+    },
+}

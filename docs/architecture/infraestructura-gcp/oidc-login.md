@@ -47,15 +47,22 @@ Ambos con acceso otorgado únicamente a `iam-service-956@cyp-cumbres-461220.iam.
 cuenta correcta para este proyecto — ver la nota sobre la cuenta duplicada `iam-service@...` en
 [`iam-service.md`](iam-service.md)).
 
-## Pendiente
+## Estado del código (actualizado)
 
-`iam-service` todavía no lee `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` desde Secret Manager ni implementa el
-flujo Authorization Code + PKCE — el login interno sigue siendo una sesión simulada en localStorage
-(`docs/CumbresBI_estado.md`, Fase 1). Ese código, junto con el ajuste de producto ya confirmado de que
-el login sea **SSO silencioso sin botón intermedio** para usuarios internos, queda para cuando arranque
-formalmente la Fase 1.
+El flujo Authorization Code + PKCE ya está implementado en `iam-service` (`auth_views.py`:
+`google_start`/`google_callback`/`_upsert_identity`), con SSO silencioso sin botón intermedio para
+usuarios internos (`google_start` salta directo a Google, sin pantalla propia — ver README.md sec. 6.1).
 
-## Drive (relacionado, en pausa)
+Gate adicional sobre `IamUser.status` (14/Ago/2026): `google_callback` rechaza el login
+(`redirect ?error=cuenta_suspendida`) si el usuario existente no está `ACTIVE` (`SUSPENDED`/`DELETED`),
+además del gate de invitación formal ya documentado (`?error=sin_invitacion` si no hay `IamUser` ni
+`IamInvitation` pendiente). Ver README.md sec. 6 para el diagrama completo y los tres mecanismos de
+acceso (OIDC interno, Magic Link, colaborador externo `IamExternalCollaborator`).
 
-La integración de `document-intelligence-service` con Google Drive API debe usar esa misma cuenta de
-Workspace de Cumbres (no un Drive personal) — en pausa, no urgente hasta Fase 2.
+## Drive y Gmail (misma cuenta de Workspace)
+
+Tanto `document-intelligence-service`/`drive-service` (Google Drive API) como `mail-service` (Gmail API,
+envío real de Magic Links/accesos externos/avisos de invitación) usan cuentas de servicio con
+domain-wide delegation sobre este mismo Workspace de Cumbres (`cypcumbres.mx`), no un Drive/correo
+personal. Drive ya corre en modo real (confirmado 13/Ago/2026); Gmail se autorizó el 14/Ago/2026 (scope
+`gmail.send`, client ID `100894706899601697748`) — ver [`iam-service.md`](iam-service.md).

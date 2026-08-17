@@ -59,6 +59,8 @@ jobs:
             tesoreria-service,
             rentas-service,
             document-intelligence-service,
+            drive-service,
+            mail-service,
             api-gateway,
           ]
     steps:
@@ -125,6 +127,8 @@ jobs:
             tesoreria-service,
             rentas-service,
             document-intelligence-service,
+            drive-service,
+            mail-service,
           ]
     steps:
       - id: auth
