@@ -6,6 +6,7 @@ sin duplicar el codigo que llama al provider."""
 
 from django.conf import settings
 
+from .audit_utils import emitir_evento_auditoria
 from .contracts import DocumentAnalysisRequest, DriveFileRef
 from .models import AnalysisJob, AnalysisRequestLog
 from .providers import get_provider
@@ -68,6 +69,25 @@ def ejecutar_analisis(job: AnalysisJob) -> AnalysisJob:
         advertencias=result.warnings,
     )
 
+    # Bitacora de cumplimiento real (17/Ago/2026) - entidad_id es la carpeta
+    # de Drive analizada (ej. "PLD/Nuevos Clientes/<id_contraparte>"), la
+    # unica referencia al cliente que este servicio conoce (no tiene acceso
+    # directo a pld_contrapartes_kyc, ver README.md sec. 1.1).
+    emitir_evento_auditoria(
+        "analizar_documento",
+        "documento_kyc",
+        job.metadata.get("carpeta", job.id),
+        actor_user_id=job.solicitado_por,
+        valores_nuevos={
+            "nombre_archivo": job.metadata.get("nombre_archivo"),
+            "tipo_documento_esperado": job.expected_document_type,
+            "tipo_documento_detectado": result.detected_document_type,
+            "coincide_tipo_esperado": result.matches_expected_type,
+            "confianza": result.confidence,
+            "servicio_solicitante": job.servicio_solicitante,
+        },
+    )
+
     return job
 
 
@@ -99,4 +119,20 @@ def ejecutar_con_reintentos(job: AnalysisJob) -> bool:
             "El servicio de analisis no esta disponible en este momento, intenta de nuevo mas tarde."
         )
         job.save(update_fields=["status", "error_mensaje", "updated_at"])
+
+        # Falla definitiva tambien queda en la bitacora (17/Ago/2026) - un
+        # analisis que nunca se completo es informacion de cumplimiento
+        # igual de relevante que uno exitoso (ej. detectar patrones de
+        # documentos que consistentemente fallan).
+        emitir_evento_auditoria(
+            "analizar_documento_fallido",
+            "documento_kyc",
+            job.metadata.get("carpeta", job.id),
+            actor_user_id=job.solicitado_por,
+            valores_nuevos={
+                "nombre_archivo": job.metadata.get("nombre_archivo"),
+                "intentos": job.intentos,
+                "error_mensaje": job.error_mensaje,
+            },
+        )
         return True

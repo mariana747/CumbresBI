@@ -140,6 +140,12 @@ VERTEX_LOCATION = env("VERTEX_LOCATION", default="us-central1")
 # Mismo patron que services/pld-service/config/settings.py.
 DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
 
+# URL interna de audit-service - docint/audit_utils.py registra ahi cada
+# analisis (17/Ago/2026, ver docint/models.py: la bitacora real via
+# Pub/Sub estaba solo mencionada en un comentario, nunca implementada).
+# Mismo patron que services/iam-service/iam/audit_utils.py.
+AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
+
 # --- Analisis asincrono con Cloud Tasks (Fase 1: persistencia; ver
 # docs/architecture - plan de migracion async del motor documental) ---
 # Staging temporal del archivo antes de analizarlo (docint/storage.py).
