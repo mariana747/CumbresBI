@@ -39,11 +39,20 @@ def _resultado_fake():
 def _esperar_job_terminal(job_id, timeout=2.0):
     """El modo dev ejecuta el analisis en un hilo aparte (fire-and-forget,
     ver docint/tasks.py::_ejecutar_in_process) - las pruebas deben esperar a
-    que termine antes de revisar el resultado."""
+    que termine antes de revisar el resultado.
+
+    Espera tambien a que exista el AnalysisRequestLog (17/Ago/2026, CI
+    flaky): ejecutar_analisis guarda job.status=COMPLETADO ANTES de crear
+    el AnalysisRequestLog (ver processing.py) - en un runner lento/cargado
+    el hilo podia quedar justo entre esas dos lineas cuando esta funcion ya
+    veia COMPLETADO, y la prueba afirmaba AnalysisRequestLog.count()==1
+    antes de que existiera de verdad."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         job = AnalysisJob.objects.get(id=job_id)
-        if job.status in (AnalysisJob.COMPLETADO, AnalysisJob.ERROR):
+        if job.status == AnalysisJob.ERROR:
+            return job
+        if job.status == AnalysisJob.COMPLETADO and AnalysisRequestLog.objects.exists():
             return job
         time.sleep(0.05)
     raise AssertionError(f"job {job_id} no termino a tiempo (status={job.status})")
