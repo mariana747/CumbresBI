@@ -15,7 +15,7 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
 # dev; en Cloud Run seria la URL real del servicio) - usada para el
 # registro sincrono interino de eventos de auditoria (ver
 # iam/audit_utils.py) mientras no exista Pub/Sub real.
-AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8001")
+AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
 
 # mail-service (envio real de Magic Links via Gmail API, ver
 # iam/mail_utils.py) y la URL base del frontend para construir el link
