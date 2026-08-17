@@ -64,13 +64,20 @@ def _servicio_real():
 
 
 def ensure_folder_path(ruta: str) -> str:
-    """Resuelve (creando si hace falta) una ruta tipo "PLD/<id_contraparte>"
-    relativa a settings.DRIVE_ROOT_FOLDER_ID ("CumbresBI/"). Regresa el
-    file_id (real o simulado) de la carpeta final.
+    """Resuelve (creando si hace falta) una ruta tipo "PLD/<id_contraparte>".
+    El primer segmento es el modulo: si tiene su propia Unidad compartida en
+    settings.DRIVE_MODULE_FOLDER_IDS (ver comentario ahi - PLD desde
+    14/Ago/2026), el resto de la ruta se resuelve directamente bajo esa
+    Unidad (el nombre del modulo NO se vuelve una subcarpeta, ya es la
+    raiz). Si el modulo no esta en ese mapeo, cae al comportamiento viejo:
+    toda la ruta (incluido el modulo) se resuelve como subcarpetas de
+    settings.DRIVE_ROOT_FOLDER_ID ("CumbresBI/"). Regresa el file_id (real o
+    simulado) de la carpeta final.
 
-    IMPORTANTE: DRIVE_ROOT_FOLDER_ID vive en una Unidad compartida, no en
-    "Mi unidad" - la API de Drive por default asume "Mi unidad" y regresa
-    404 "File not found" para IDs de una Unidad compartida si no se manda
+    IMPORTANTE: tanto DRIVE_ROOT_FOLDER_ID como cualquier ID de
+    DRIVE_MODULE_FOLDER_IDS viven en una Unidad compartida, no en "Mi
+    unidad" - la API de Drive por default asume "Mi unidad" y regresa 404
+    "File not found" para IDs de una Unidad compartida si no se manda
     supportsAllDrives=True (y includeItemsFromAllDrives=True en list()) en
     CADA llamada que toca esa jerarquia - list, create, get_media. Se
     detecto probando contra el Drive real (12/Ago/2026): sin este parametro
@@ -83,9 +90,15 @@ def ensure_folder_path(ruta: str) -> str:
         return str(destino)
 
     servicio = _servicio_real()
-    padre_id = settings.DRIVE_ROOT_FOLDER_ID
-    if not padre_id:
-        raise DriveError("DRIVE_ROOT_FOLDER_ID no configurado - falta resolver la carpeta CumbresBI/ raiz")
+
+    modulo = partes[0] if partes else None
+    if modulo and modulo in settings.DRIVE_MODULE_FOLDER_IDS:
+        padre_id = settings.DRIVE_MODULE_FOLDER_IDS[modulo]
+        partes = partes[1:]
+    else:
+        padre_id = settings.DRIVE_ROOT_FOLDER_ID
+        if not padre_id:
+            raise DriveError("DRIVE_ROOT_FOLDER_ID no configurado - falta resolver la carpeta CumbresBI/ raiz")
 
     for nombre in partes:
         query = (
