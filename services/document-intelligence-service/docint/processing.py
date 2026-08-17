@@ -6,6 +6,7 @@ sin duplicar el codigo que llama al provider."""
 
 from django.conf import settings
 
+from .audit_utils import emitir_evento_auditoria
 from .contracts import DocumentAnalysisRequest, DriveFileRef
 from .models import AnalysisJob, AnalysisRequestLog
 from .providers import get_provider
@@ -55,7 +56,12 @@ def ejecutar_analisis(job: AnalysisJob) -> AnalysisJob:
         "internal_prompt_key_used": job.internal_prompt_key,
         "matched_by_filename": job.matched_by_filename,
     }
-    job.save(update_fields=["status", "resultado", "updated_at"])
+    # Limpiar error_mensaje de un intento previo fallido (17/Ago/2026) - si no
+    # se limpia, un job que fallo con 503 y luego se completo en el reintento
+    # se queda mostrando el mensaje de error viejo junto con el resultado
+    # exitoso (ver bug reportado: INE.png con "Coincide" + "Error" a la vez).
+    job.error_mensaje = ""
+    job.save(update_fields=["status", "resultado", "error_mensaje", "updated_at"])
 
     AnalysisRequestLog.objects.create(
         servicio_solicitante=job.servicio_solicitante,
@@ -66,6 +72,25 @@ def ejecutar_analisis(job: AnalysisJob) -> AnalysisJob:
         proveedor_usado="vertex-ai" if settings.DOCINT_USE_VERTEX else "ai-studio",
         errores_validacion=result.validation_errors,
         advertencias=result.warnings,
+    )
+
+    # Bitacora de cumplimiento real (17/Ago/2026) - entidad_id es la carpeta
+    # de Drive analizada (ej. "PLD/Nuevos Clientes/<id_contraparte>"), la
+    # unica referencia al cliente que este servicio conoce (no tiene acceso
+    # directo a pld_contrapartes_kyc, ver README.md sec. 1.1).
+    emitir_evento_auditoria(
+        "analizar_documento",
+        "documento_kyc",
+        job.metadata.get("carpeta", job.id),
+        actor_user_id=job.solicitado_por,
+        valores_nuevos={
+            "nombre_archivo": job.metadata.get("nombre_archivo"),
+            "tipo_documento_esperado": job.expected_document_type,
+            "tipo_documento_detectado": result.detected_document_type,
+            "coincide_tipo_esperado": result.matches_expected_type,
+            "confianza": result.confidence,
+            "servicio_solicitante": job.servicio_solicitante,
+        },
     )
 
     return job
@@ -99,4 +124,20 @@ def ejecutar_con_reintentos(job: AnalysisJob) -> bool:
             "El servicio de analisis no esta disponible en este momento, intenta de nuevo mas tarde."
         )
         job.save(update_fields=["status", "error_mensaje", "updated_at"])
+
+        # Falla definitiva tambien queda en la bitacora (17/Ago/2026) - un
+        # analisis que nunca se completo es informacion de cumplimiento
+        # igual de relevante que uno exitoso (ej. detectar patrones de
+        # documentos que consistentemente fallan).
+        emitir_evento_auditoria(
+            "analizar_documento_fallido",
+            "documento_kyc",
+            job.metadata.get("carpeta", job.id),
+            actor_user_id=job.solicitado_por,
+            valores_nuevos={
+                "nombre_archivo": job.metadata.get("nombre_archivo"),
+                "intentos": job.intentos,
+                "error_mensaje": job.error_mensaje,
+            },
+        )
         return True

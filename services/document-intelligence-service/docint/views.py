@@ -59,6 +59,11 @@ class AnalyzeView(APIView):
             metadata = json.loads(request.data.get("metadata", "{}"))
         except json.JSONDecodeError:
             metadata = {}
+        # carpeta/nombre_archivo se guardan en metadata (17/Ago/2026) - antes
+        # solo se usaban de paso para leer los bytes de Drive y se perdian;
+        # ahora sobreviven hasta processing.py para poder auditar a que
+        # cliente/documento corresponde cada analisis (docint/audit_utils.py).
+        metadata = {**metadata, "carpeta": carpeta, "nombre_archivo": nombre_archivo}
 
         headers = {}
         auth_header = request.META.get("HTTP_AUTHORIZATION")
