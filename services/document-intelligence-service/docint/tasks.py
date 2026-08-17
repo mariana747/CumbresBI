@@ -11,9 +11,22 @@ servicio (DOCINT_SELF_BASE_URL) - Cloud Tasks es quien la invoca despues,
 no este proceso.
 """
 
+import threading
+
 from django.conf import settings
 
 from .models import AnalysisJob
+
+# Serializa el analisis in-process en dev (17/Ago/2026, ver bug reportado):
+# MotorDocumentalDialog.tsx manda varios archivos con Promise.all sin limite
+# de concurrencia, y sin este lock cada uno lanzaba su propio hilo que
+# llamaba a Gemini de inmediato - con la API key gratuita de AI Studio
+# (DOCINT_USE_VERTEX=False, cuota muy baja) eso saturaba el rate limit al
+# instante (429/503 en varios documentos a la vez, con reintentos que
+# tambien chocaban entre si). Un solo lock global es suficiente para dev
+# (un worker Django, sin Cloud Tasks real) - en produccion (Cloud Tasks) la
+# propia cola limita cuantas tareas corren a la vez (maxConcurrentDispatches).
+_ANALYSIS_LOCK = threading.Lock()
 
 
 def encolar_analisis(job_id: str) -> str:
@@ -64,7 +77,6 @@ def _ejecutar_in_process(job_id: str) -> None:
     fallo fue transitorio y aun quedan intentos - en produccion eso lo
     resuelve Cloud Tasks reentregando la tarea; aqui no hay cola que lo
     haga, asi que se reintenta dentro del mismo hilo con un backoff corto."""
-    import threading
     import time
 
     from django.db import close_old_connections
@@ -73,9 +85,10 @@ def _ejecutar_in_process(job_id: str) -> None:
 
     def _run():
         try:
-            job = AnalysisJob.objects.get(id=job_id)
-            while not ejecutar_con_reintentos(job):
-                time.sleep(1.5)
+            with _ANALYSIS_LOCK:  # un analisis a la vez contra Gemini, ver comentario arriba
+                job = AnalysisJob.objects.get(id=job_id)
+                while not ejecutar_con_reintentos(job):
+                    time.sleep(1.5)
         finally:
             close_old_connections()  # el hilo no reusa la conexion del request original
 

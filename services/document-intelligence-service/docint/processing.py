@@ -56,7 +56,12 @@ def ejecutar_analisis(job: AnalysisJob) -> AnalysisJob:
         "internal_prompt_key_used": job.internal_prompt_key,
         "matched_by_filename": job.matched_by_filename,
     }
-    job.save(update_fields=["status", "resultado", "updated_at"])
+    # Limpiar error_mensaje de un intento previo fallido (17/Ago/2026) - si no
+    # se limpia, un job que fallo con 503 y luego se completo en el reintento
+    # se queda mostrando el mensaje de error viejo junto con el resultado
+    # exitoso (ver bug reportado: INE.png con "Coincide" + "Error" a la vez).
+    job.error_mensaje = ""
+    job.save(update_fields=["status", "resultado", "error_mensaje", "updated_at"])
 
     AnalysisRequestLog.objects.create(
         servicio_solicitante=job.servicio_solicitante,
