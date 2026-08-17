@@ -50,7 +50,7 @@ class PldContraparteKycViewSet(ModelViewSet):
             return [require_permission("pld-compliance.crear")()]
         if self.action in ("update", "partial_update", "confirmar_extraccion", "reactivar_auto_estado"):
             return [require_permission("pld-compliance.editar")()]
-        if self.action == "aprobar":
+        if self.action in ("aprobar", "marcar_sospechoso", "congelar", "reactivar_cuenta"):
             return [require_permission("pld-compliance.aprobar")()]
         return super().get_permissions()
 
@@ -168,6 +168,31 @@ class PldContraparteKycViewSet(ModelViewSet):
         kyc.save(update_fields=["aprobado_por", "aprobado_en"])
         return Response(self.get_serializer(kyc).data)
 
+    # Tres acciones del "semaforo" de estado_cuenta (17/Ago/2026, vista de
+    # detalle del expediente) - mismo peso de decision que aprobar(), mismo
+    # permiso (pld-compliance.aprobar). No son mutuamente excluyentes con
+    # estado_llenado/aprobado_en: una cuenta puede estar "Aprobada" (KYC
+    # completo) y a la vez "Congelada" (decision operativa posterior, ej.
+    # actividad sospechosa detectada despues de aprobar).
+    def _set_estado_cuenta(self, request, nuevo_estado):
+        kyc = self.get_object()
+        kyc.estado_cuenta = nuevo_estado
+        kyc.save(update_fields=["estado_cuenta"])
+        return Response(self.get_serializer(kyc).data)
+
+    @action(detail=True, methods=["post"])
+    def marcar_sospechoso(self, request, pk=None):
+        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_SOSPECHOSA)
+
+    @action(detail=True, methods=["post"])
+    def congelar(self, request, pk=None):
+        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_CONGELADA)
+
+    @action(detail=True, methods=["post"])
+    def reactivar_cuenta(self, request, pk=None):
+        """Deshace marcar_sospechoso/congelar - vuelve la cuenta a ACTIVA."""
+        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_ACTIVA)
+
 
 class PldContraparteDocViewSet(ModelViewSet):
     """Documentos del expediente KYC (Fase 2, Semana 7). Estados del
@@ -215,7 +240,10 @@ class PldContraparteDocViewSet(ModelViewSet):
             return Response({"detail": "Campo 'file' requerido"}, status=400)
 
         headers, cookies = forward_auth_headers(request)
-        carpeta = f"PLD/{doc.kyc.id_contraparte}"
+        # "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): subcarpeta fija
+        # dentro de la Unidad compartida PLD_CumbresBI - antes se creaba la
+        # carpeta del cliente directo en la raiz.
+        carpeta = f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
@@ -263,10 +291,11 @@ class PldTicketClienteViewSet(ModelViewSet):
     serializer_class = PldTicketClienteSerializer
 
     def get_permissions(self):
-        # "validar" y "subir_documento" son publicos (el cliente externo
-        # canjea su ticket sin sesion, ver iam-magic-link-alcance) - crear/
-        # revocar el ticket es accion interna de PLD.
-        if self.action in ("validar", "subir_documento"):
+        # "validar", "subir_documento" y "actualizar_datos" son publicos (el
+        # cliente externo canjea su ticket sin sesion, ver
+        # iam-magic-link-alcance) - crear/revocar el ticket es accion
+        # interna de PLD.
+        if self.action in ("validar", "subir_documento", "actualizar_datos"):
             return []
         if self.action == "create":
             return [require_permission("pld-compliance.crear")()]
@@ -363,20 +392,29 @@ class PldTicketClienteViewSet(ModelViewSet):
     @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
     def subir_documento(self, request):
         """Formulario público de KYC externo (docs/architecture/
-        pld-fase2-alcance.md sec. 2): el cliente sube un documento sin
-        sesión, canjeando el mismo token del link (no consume `uses_count`
-        de nuevo aquí - eso ya lo maneja "validar", que la página pública
-        llama al cargar; subir varios documentos bajo un mismo link válido
-        no debe agotarlo de golpe).
+        pld-fase2-alcance.md sec. 2): el cliente sube uno o varios
+        documentos sin sesión, canjeando el mismo token del link (no
+        consume `uses_count` de nuevo aquí - eso ya lo maneja "validar",
+        que la página pública llama al cargar; subir varios documentos bajo
+        un mismo link válido no debe agotarlo de golpe).
 
-        Verifica reCAPTCHA v2 server-side (recaptcha.py) antes de aceptar
-        nada. El archivo se sube a Drive vía drive-service usando el
-        secreto interno servicio-a-servicio (no hay JWT de usuario que
-        reenviar - ver settings.DRIVE_INTERNAL_SECRET), a la misma carpeta
-        que usaría un analista interno (mismo flujo de Drive, decisión de
-        Mariana 12/Ago/2026). Crea el PldContraparteDoc en el momento
-        (denominación libre que manda el cliente), no requiere que un
-        analista lo haya pre-creado antes.
+        Acepta varios archivos en la misma petición (campo 'file' repetido,
+        ver request.FILES.getlist) - decisión de Mariana 17/Ago/2026: un
+        reCAPTCHA real de Google solo es válido una vez, así que pedirle al
+        cliente resolverlo por cada archivo sería mala experiencia. Se
+        verifica reCAPTCHA UNA sola vez para todo el lote, y cada archivo
+        sube a Drive y crea su propio PldContraparteDoc por separado - si
+        uno falla a la mitad, los que ya se subieron/crearon quedan (no es
+        atómico, ver 'resultados' en la respuesta para saber cuáles sí y
+        cuáles no).
+
+        El archivo se sube a Drive vía drive-service usando el secreto
+        interno servicio-a-servicio (no hay JWT de usuario que reenviar -
+        ver settings.DRIVE_INTERNAL_SECRET), a la misma carpeta que usaría
+        un analista interno (mismo flujo de Drive, decisión de Mariana
+        12/Ago/2026). Crea el PldContraparteDoc en el momento (denominación
+        libre que manda el cliente), no requiere que un analista lo haya
+        pre-creado antes.
         """
         ticket, error = self._resolver_ticket(request.data.get("token"))
         if error:
@@ -387,47 +425,94 @@ class PldTicketClienteViewSet(ModelViewSet):
         if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
             return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
 
-        archivo = request.FILES.get("file")
-        if not archivo:
-            return Response({"detail": "Campo 'file' requerido"}, status=400)
+        archivos = request.FILES.getlist("file")
+        if not archivos:
+            return Response({"detail": "Campo 'file' requerido (al menos un archivo)"}, status=400)
 
-        carpeta = f"PLD/{ticket.kyc.id_contraparte}"
+        carpeta = f"PLD/Nuevos Clientes/{ticket.kyc.id_contraparte}"
         headers = {}
         if settings.DRIVE_INTERNAL_SECRET:
             headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
-        try:
-            upstream = requests.post(
-                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
-                params={"perm": "pld-compliance.crear"},
-                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
-                data={"carpeta": carpeta},
-                headers=headers,
-                timeout=30,
-            )
-        except requests.RequestException:
-            logger.warning("drive-service no respondio a la subida publica del ticket %s", ticket.id_pld_ticket, exc_info=True)
-            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
 
-        if upstream.status_code != 201:
+        resultados = []
+        for archivo in archivos:
+            try:
+                upstream = requests.post(
+                    f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                    params={"perm": "pld-compliance.crear"},
+                    files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                    data={"carpeta": carpeta},
+                    headers=headers,
+                    timeout=30,
+                )
+            except requests.RequestException:
+                logger.warning(
+                    "drive-service no respondio a la subida publica del ticket %s (%s)",
+                    ticket.id_pld_ticket, archivo.name, exc_info=True,
+                )
+                resultados.append({"nombre_archivo": archivo.name, "ok": False, "detail": "El servicio de Drive no respondió."})
+                continue
+
+            if upstream.status_code != 201:
+                detalle = upstream.json() if upstream.content else {"detail": "Error al subir a Drive"}
+                resultados.append({"nombre_archivo": archivo.name, "ok": False, **detalle})
+                continue
+
+            resultado = upstream.json()
+            doc = PldContraparteDoc.objects.create(
+                kyc=ticket.kyc,
+                denominacion=request.data.get("denominacion") or archivo.name,
+                status=PldContraparteDoc.STATUS_ENTREGADO,
+                drive_file_id=resultado["file_id"],
+                link_documento=resultado["web_view_link"],
+                mime_type=resultado["mime_type"],
+                tamano_bytes=resultado["tamano_bytes"],
+                subido_en=timezone.now(),
+                created_by="externo",
+                updated_by="externo",
+            )
+            resultados.append({"nombre_archivo": archivo.name, "ok": True, **PldContraparteDocSerializer(doc).data})
+
+        todos_ok = all(r["ok"] for r in resultados)
+        return Response({"resultados": resultados}, status=201 if todos_ok else 207)
+
+    @action(detail=False, methods=["post"])
+    def actualizar_datos(self, request):
+        """Formulario público de datos de KYC (17/Ago/2026, mismo link que
+        subir_documento): el cliente escribe/corrige sus propios datos
+        (domicilio, teléfono, CURP, etc.) sin sesión, canjeando el token.
+
+        Reusa PldContraparteKycViewSet.CAMPOS_CONFIRMABLES como whitelist -
+        son exactamente los campos de "datos de negocio" del cliente,
+        deliberadamente excluidos los internos (aprobado_por, aprobado_en,
+        estado_llenado, sociedad_rfc, etc. - esos solo los toca un analista
+        desde el panel interno, nunca este endpoint público).
+
+        Body: {"token": ..., "campos": {<nombre_de_campo>: <valor>, ...}} -
+        cualquier llave fuera de la whitelist se ignora silenciosamente,
+        igual que confirmar_extraccion."""
+        ticket, error = self._resolver_ticket(request.data.get("token"))
+        if error:
+            return error
+        if not ticket.kyc_id:
+            return Response({"detail": "Este link no tiene un expediente KYC asociado."}, status=400)
+
+        campos = request.data.get("campos")
+        if not isinstance(campos, dict) or not campos:
+            return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
+
+        datos_validos = {
+            k: v for k, v in campos.items() if k in PldContraparteKycViewSet.CAMPOS_CONFIRMABLES
+        }
+        if not datos_validos:
             return Response(
-                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
-                status=upstream.status_code,
+                {"detail": "Ninguno de los campos enviados es editable por el cliente."}, status=400
             )
 
-        resultado = upstream.json()
-        doc = PldContraparteDoc.objects.create(
-            kyc=ticket.kyc,
-            denominacion=request.data.get("denominacion") or archivo.name,
-            status=PldContraparteDoc.STATUS_ENTREGADO,
-            drive_file_id=resultado["file_id"],
-            link_documento=resultado["web_view_link"],
-            mime_type=resultado["mime_type"],
-            tamano_bytes=resultado["tamano_bytes"],
-            subido_en=timezone.now(),
-            created_by="externo",
-            updated_by="externo",
-        )
-        return Response(PldContraparteDocSerializer(doc).data, status=201)
+        serializer = PldContraparteKycSerializer(ticket.kyc, data=datos_validos, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(updated_by="externo")
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
     def revocar(self, request, pk=None):
