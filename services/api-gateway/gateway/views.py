@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 _HOP_BY_HOP_REQUEST = {"host", "content-length"}
 _HOP_BY_HOP_RESPONSE = {"content-encoding", "transfer-encoding", "connection", "content-length"}
 _TIMEOUT_SEGUNDOS = 20
+# docint/analyze llama a Gemini API + streaming de Drive (docint/drive.py) -
+# puede tardar mas que el resto de los endpoints del sistema, sobre todo con
+# varios archivos o PDFs grandes. Detectado 17/Ago/2026: "El servicio no
+# respondio" (DOCINT-502) por ReadTimeout a los 20s con el timeout generico,
+# aunque docint seguia procesando de fondo. Los demas servicios se quedan en
+# el default - no hay motivo para darles mas margen todavia.
+_TIMEOUT_SEGUNDOS_POR_PREFIJO = {"docint": 90}
 
 
 @csrf_exempt
@@ -65,7 +72,7 @@ def proxy(request, path):
             data=request.body,
             cookies=request.COOKIES,
             allow_redirects=False,
-            timeout=_TIMEOUT_SEGUNDOS,
+            timeout=_TIMEOUT_SEGUNDOS_POR_PREFIJO.get(prefix, _TIMEOUT_SEGUNDOS),
         )
     except requests.RequestException:
         logger.warning("No se pudo alcanzar el servicio '%s' en %s", prefix, target_url, exc_info=True)
