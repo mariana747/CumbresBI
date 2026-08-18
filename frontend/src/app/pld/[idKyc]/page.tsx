@@ -20,7 +20,14 @@ import {
   Paper,
   Stack,
   Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Tabs,
+  TextField,
   Typography,
 } from "@mui/material";
 import {
@@ -31,22 +38,27 @@ import {
   Copy,
   FileText,
   Flag,
+  History,
+  Pencil,
   RefreshCw,
   ShieldQuestion,
   Snowflake,
   Trash2,
   UploadCloud,
+  X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
-import { SessionUser, getSession } from "@/lib/auth";
+import { SessionUser, getSession, puedeVerBitacora } from "@/lib/auth";
+import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora } from "@/lib/audit";
 import {
   PldContraparteDoc,
   PldContraparteKyc,
   PldDatosEditables,
   aprobarKyc,
   congelarKyc,
+  editarKyc,
   eliminarDocumentoKyc,
   getKyc,
   marcarSospechosoKyc,
@@ -161,6 +173,16 @@ export default function PldExpedienteDetallePage() {
   const [verificarMensaje, setVerificarMensaje] = useState<string | null>(null);
   const [confirmandoEliminarDoc, setConfirmandoEliminarDoc] = useState<PldContraparteDoc | null>(null);
   const [eliminandoDoc, setEliminandoDoc] = useState(false);
+  const [historial, setHistorial] = useState<BitacoraEvento[] | null>(null);
+  const [historialLoading, setHistorialLoading] = useState(false);
+  const [historialError, setHistorialError] = useState<string | null>(null);
+  // Edicion manual del expediente (18/Ago/2026) - ver
+  // pld/audit_utils.py::contexto_kyc y views.py::update, ya auditado en el
+  // backend; esto es la UI que faltaba. editandoCampos es null cuando no
+  // esta en modo edicion.
+  const [editandoCampos, setEditandoCampos] = useState<PldDatosEditables | null>(null);
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const [errorEdicion, setErrorEdicion] = useState<string | null>(null);
 
   function cargar() {
     setLoading(true);
@@ -173,12 +195,33 @@ export default function PldExpedienteDetallePage() {
   useEffect(() => {
     cargar();
     getSession().then(setSession);
+    setHistorial(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.idKyc]);
 
   const puedeAprobar = session?.perm_keys.includes("pld-compliance.aprobar") ?? false;
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("pld-compliance.editar") ?? false;
+  const puedeVerHistorial = puedeVerBitacora(session);
+
+  // Historial de auditoria (18/Ago/2026) - reusa el mismo buscador
+  // unificado de audit-service (?search=), que ya encuentra tanto eventos
+  // de pld-service (entidad_id = id_kyc) como de docint (entidad_id =
+  // carpeta de Drive que incluye id_contraparte) porque busca tambien
+  // dentro del JSON valores_nuevos/valores_previos - ver
+  // audit-service/auditoria/views.py::get_queryset. Carga perezosa: solo
+  // al abrir la pestana, y solo si el usuario tiene el mismo gate que la
+  // bitacora general (GLOBAL o rol AUDITOR).
+  useEffect(() => {
+    if (tab !== 4 || !kyc || !puedeVerHistorial || historial !== null) return;
+    setHistorialLoading(true);
+    setHistorialError(null);
+    listBitacora({ search: kyc.id_contraparte })
+      .then(setHistorial)
+      .catch((err) => setHistorialError(err instanceof Error ? err.message : "Error al cargar el historial"))
+      .finally(() => setHistorialLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, kyc, puedeVerHistorial]);
 
   // Duplicados (18/Ago/2026, hallazgo real de Mariana): mismo nombre de
   // archivo subido mas de una vez para este expediente - solo un aviso
@@ -205,6 +248,41 @@ export default function PldExpedienteDetallePage() {
       setError(err instanceof Error ? err.message : "Error al aprobar el expediente");
     } finally {
       setAprobando(false);
+    }
+  }
+
+  function handleIniciarEdicion() {
+    if (!kyc) return;
+    // Copia solo los campos editables (GRUPOS_CAMPOS_GENERAL) - no todo el
+    // objeto kyc, que trae campos de solo lectura (id_kyc, estado_cuenta,
+    // documentos, etc.) que no deben viajar en el PATCH.
+    const campos: PldDatosEditables = {};
+    for (const grupo of GRUPOS_CAMPOS_GENERAL) {
+      for (const { campo } of grupo.campos) {
+        campos[campo] = kyc[campo] ?? "";
+      }
+    }
+    setEditandoCampos(campos);
+    setErrorEdicion(null);
+  }
+
+  function handleCancelarEdicion() {
+    setEditandoCampos(null);
+    setErrorEdicion(null);
+  }
+
+  async function handleGuardarEdicion() {
+    if (!editandoCampos) return;
+    setGuardandoEdicion(true);
+    setErrorEdicion(null);
+    try {
+      await editarKyc(params.idKyc, editandoCampos, session?.user_id);
+      setEditandoCampos(null);
+      cargar();
+    } catch (err) {
+      setErrorEdicion(err instanceof Error ? err.message : "Error al guardar los cambios");
+    } finally {
+      setGuardandoEdicion(false);
     }
   }
 
@@ -334,6 +412,97 @@ export default function PldExpedienteDetallePage() {
                   </Typography>
                 </Box>
               </Stack>
+
+              <Divider sx={{ my: 2.5 }} />
+
+              {/* Control puramente visual (17/Ago/2026, pedido de Mariana:
+              "que no haga nada las partes faltantes") - ajustar
+              calificacion de riesgo requiere el motor de scoring EBR, que
+              no existe todavia (ver
+              docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Fase 2
+              Semana 10 y memoria "pld-validacion-externa-kyc-pendiente").
+              Deshabilitado a proposito, no decorativo-enganoso: el cursor
+              "not-allowed" y el texto atenuado dejan claro que no responde.
+              Movido a la columna izquierda (18/Ago/2026, pedido de
+              Mariana: antes vivia a ancho completo hasta abajo de la
+              pagina, requeria scroll para actuar sobre la cuenta). */}
+              <Box
+                sx={{
+                  p: 1.5,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  opacity: 0.6,
+                  cursor: "not-allowed",
+                  bgcolor: "background.default",
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="caption" fontWeight={600} sx={{ whiteSpace: "nowrap" }}>
+                  Riesgo
+                </Typography>
+                <Button size="small" disabled sx={{ minWidth: 0, px: 0.5 }}>
+                  <ChevronLeft size={16} strokeWidth={1.5} />
+                </Button>
+                <Typography variant="caption" color="text.disabled" sx={{ flex: 1, textAlign: "center" }}>
+                  No disponible
+                </Typography>
+                <Button size="small" disabled sx={{ minWidth: 0, px: 0.5 }}>
+                  <ChevronRight size={16} strokeWidth={1.5} />
+                </Button>
+              </Box>
+
+              {puedeAprobar && (
+                <Stack spacing={1} sx={{ mt: 2 }}>
+                  {!kyc.aprobado_en && (
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      color="success"
+                      startIcon={<CheckCircle2 size={18} strokeWidth={1.5} />}
+                      disabled={aprobando || cambiandoEstadoCuenta}
+                      onClick={handleAprobar}
+                    >
+                      {aprobando ? <CircularProgress size={20} color="inherit" /> : "Aprobar expediente"}
+                    </Button>
+                  )}
+
+                  {kyc.estado_cuenta !== "SOSPECHOSA" && (
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      color="warning"
+                      startIcon={<Flag size={18} strokeWidth={1.5} />}
+                      disabled={aprobando || cambiandoEstadoCuenta}
+                      onClick={() => handleCambiarEstadoCuenta("marcar_sospechoso")}
+                    >
+                      Marcar como sospechoso
+                    </Button>
+                  )}
+
+                  {kyc.estado_cuenta === "CONGELADA" ? (
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      disabled={aprobando || cambiandoEstadoCuenta}
+                      onClick={() => handleCambiarEstadoCuenta("reactivar_cuenta")}
+                    >
+                      Reactivar cuenta
+                    </Button>
+                  ) : (
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      color="error"
+                      startIcon={<Snowflake size={18} strokeWidth={1.5} />}
+                      disabled={aprobando || cambiandoEstadoCuenta}
+                      onClick={() => handleCambiarEstadoCuenta("congelar")}
+                    >
+                      Congelar cuenta
+                    </Button>
+                  )}
+                </Stack>
+              )}
             </Paper>
           </Grid>
 
@@ -345,25 +514,83 @@ export default function PldExpedienteDetallePage() {
                 <Tab label="Análisis de riesgo" />
                 <Tab label="Documentos KYC" />
                 <Tab label="Historial de transacciones" />
+                {puedeVerHistorial && <Tab label="Historial de auditoría" icon={<History size={16} strokeWidth={1.5} />} iconPosition="start" />}
               </Tabs>
 
-              <Box sx={{ p: 3 }}>
+              <Box sx={{ p: 2.5, pt: 2 }}>
                 {tab === 0 && (
-                  <Stack spacing={3}>
-                    {GRUPOS_CAMPOS_GENERAL.map((grupo) => (
+                  <Stack spacing={2}>
+                    {errorEdicion && <Alert severity="error">{errorEdicion}</Alert>}
+
+                    {GRUPOS_CAMPOS_GENERAL.map((grupo, indiceGrupo) => (
                       <Box key={grupo.titulo}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          {grupo.titulo}
-                        </Typography>
-                        <Grid container spacing={2}>
-                          {grupo.campos.map(({ campo, label }) => (
-                            <Grid item xs={12} sm={6} key={campo}>
-                              <Typography variant="body2" color="text.secondary" display="block">
-                                {label}
-                              </Typography>
-                              <Typography variant="body1">{kyc[campo] || "—"}</Typography>
-                            </Grid>
-                          ))}
+                        <Stack direction="row" justifyContent="space-between" alignItems="center">
+                          <Typography variant="subtitle2" gutterBottom>
+                            {grupo.titulo}
+                          </Typography>
+                          {/* Botones de edicion junto al primer titulo (18/Ago/2026:
+                          antes era una fila aparte, ancho completo, con espacio
+                          vacio a su izquierda - mejor junto al encabezado que ya
+                          existe). */}
+                          {indiceGrupo === 0 &&
+                            (editandoCampos === null ? (
+                              puedeEditar && (
+                                <Button
+                                  size="small"
+                                  startIcon={<Pencil size={16} strokeWidth={1.5} />}
+                                  onClick={handleIniciarEdicion}
+                                >
+                                  Editar
+                                </Button>
+                              )
+                            ) : (
+                              <Stack direction="row" spacing={1}>
+                                <Button
+                                  size="small"
+                                  color="inherit"
+                                  startIcon={<CloseIcon size={16} strokeWidth={1.5} />}
+                                  onClick={handleCancelarEdicion}
+                                  disabled={guardandoEdicion}
+                                >
+                                  Cancelar
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
+                                  onClick={handleGuardarEdicion}
+                                  disabled={guardandoEdicion}
+                                >
+                                  {guardandoEdicion ? "Guardando…" : "Guardar"}
+                                </Button>
+                              </Stack>
+                            ))}
+                        </Stack>
+                        <Grid container rowSpacing={0.75} columnSpacing={2}>
+                          {grupo.campos.map(({ campo, label }) =>
+                            editandoCampos !== null ? (
+                              <Grid item xs={12} sm={6} key={campo}>
+                                <TextField
+                                  size="small"
+                                  fullWidth
+                                  label={label}
+                                  value={editandoCampos[campo] ?? ""}
+                                  onChange={(e) =>
+                                    setEditandoCampos((prev) => (prev ? { ...prev, [campo]: e.target.value } : prev))
+                                  }
+                                />
+                              </Grid>
+                            ) : (
+                              <Grid item xs={12} sm={6} key={campo}>
+                                <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
+                                  {label}
+                                </Typography>
+                                <Typography variant="body2" sx={{ lineHeight: 1.3 }}>
+                                  {kyc[campo] || "—"}
+                                </Typography>
+                              </Grid>
+                            )
+                          )}
                         </Grid>
                       </Box>
                     ))}
@@ -377,46 +604,46 @@ export default function PldExpedienteDetallePage() {
                       <Typography variant="subtitle2" gutterBottom>
                         Estado y auditoría
                       </Typography>
-                      <Grid container spacing={2}>
+                      <Grid container rowSpacing={0.75} columnSpacing={2}>
                         <Grid item xs={12} sm={6}>
-                          <Typography variant="body2" color="text.secondary" display="block">
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                             Aprobado por
                           </Typography>
-                          <Typography variant="body1">{kyc.aprobado_por || "—"}</Typography>
+                          <Typography variant="body2" sx={{ lineHeight: 1.3 }}>{kyc.aprobado_por || "—"}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
-                          <Typography variant="body2" color="text.secondary" display="block">
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                             Aprobado en
                           </Typography>
-                          <Typography variant="body1">
+                          <Typography variant="body2" sx={{ lineHeight: 1.3 }}>
                             {kyc.aprobado_en ? new Date(kyc.aprobado_en).toLocaleString("es-MX") : "—"}
                           </Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
-                          <Typography variant="body2" color="text.secondary" display="block">
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                             Vencimiento
                           </Typography>
-                          <Typography variant="body1">{kyc.fecha_vencimiento || "—"}</Typography>
+                          <Typography variant="body2" sx={{ lineHeight: 1.3 }}>{kyc.fecha_vencimiento || "—"}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
-                          <Typography variant="body2" color="text.secondary" display="block">
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                             Comentarios
                           </Typography>
-                          <Typography variant="body1">{kyc.comentarios || "—"}</Typography>
+                          <Typography variant="body2" sx={{ lineHeight: 1.3 }}>{kyc.comentarios || "—"}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
-                          <Typography variant="body2" color="text.secondary" display="block">
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                             Creado
                           </Typography>
-                          <Typography variant="body1">
+                          <Typography variant="body2" sx={{ lineHeight: 1.3 }}>
                             {new Date(kyc.created_at).toLocaleString("es-MX")} — {kyc.created_by}
                           </Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
-                          <Typography variant="body2" color="text.secondary" display="block">
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                             Última actualización
                           </Typography>
-                          <Typography variant="body1">
+                          <Typography variant="body2" sx={{ lineHeight: 1.3 }}>
                             {new Date(kyc.updated_at).toLocaleString("es-MX")} — {kyc.updated_by}
                           </Typography>
                         </Grid>
@@ -530,102 +757,54 @@ export default function PldExpedienteDetallePage() {
                     Próximamente — depende del módulo de Tesorería, que todavía no existe.
                   </Alert>
                 )}
+
+                {tab === 4 && puedeVerHistorial && (
+                  <Stack spacing={2}>
+                    <Typography variant="body2" color="text.secondary">
+                      Todo lo que le ha pasado a este expediente y sus documentos, cruzando pld-service y el
+                      Motor Documental (docint) — quién aprobó, subió, eliminó o editó cada dato. Es la misma
+                      bitácora de Auditoría (Super Admin), filtrada solo a este cliente.
+                    </Typography>
+
+                    {historialLoading && (
+                      <Stack alignItems="center" sx={{ py: 4 }}>
+                        <CircularProgress size={24} />
+                      </Stack>
+                    )}
+                    {historialError && <Alert severity="error">{historialError}</Alert>}
+                    {!historialLoading && !historialError && historial?.length === 0 && (
+                      <Alert severity="info">Todavía no hay eventos de auditoría para este expediente.</Alert>
+                    )}
+                    {!historialLoading && !!historial?.length && (
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Fecha</TableCell>
+                              <TableCell>Servicio</TableCell>
+                              <TableCell>Acción</TableCell>
+                              <TableCell>Actor</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {historial.map((evento) => (
+                              <TableRow key={evento.event_id}>
+                                <TableCell>{new Date(evento.ocurrido_en).toLocaleString("es-MX")}</TableCell>
+                                <TableCell>{friendlyServiceName(evento.servicio_origen)}</TableCell>
+                                <TableCell>{friendlyActionName(evento.accion)}</TableCell>
+                                <TableCell>{evento.actor_user_id}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </Stack>
+                )}
               </Box>
             </Paper>
           </Grid>
 
-          {/* Control puramente visual (17/Ago/2026, pedido de Mariana: "que
-          no haga nada las partes faltantes") - ajustar calificacion de
-          riesgo requiere el motor de scoring EBR, que no existe todavia
-          (ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Fase 2
-          Semana 10 y memoria "pld-validacion-externa-kyc-pendiente").
-          Deshabilitado a proposito, no decorativo-enganoso: el cursor
-          "not-allowed" y el texto atenuado dejan claro que no responde. */}
-          <Grid item xs={12}>
-            <Paper
-              variant="outlined"
-              sx={{ p: 1.5, display: "flex", alignItems: "center", gap: 2, opacity: 0.6, cursor: "not-allowed" }}
-            >
-              <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: "nowrap" }}>
-                Ajustar calificación de riesgo
-              </Typography>
-              <Button size="small" disabled sx={{ minWidth: 0, px: 1 }}>
-                <ChevronLeft size={18} strokeWidth={1.5} />
-              </Button>
-              <Box
-                sx={{
-                  flex: 1,
-                  textAlign: "center",
-                  py: 1,
-                  bgcolor: "background.default",
-                  borderRadius: 1,
-                }}
-              >
-                <Typography variant="body2" fontWeight={600} color="text.disabled">
-                  No disponible — requiere motor de scoring EBR
-                </Typography>
-              </Box>
-              <Button size="small" disabled sx={{ minWidth: 0, px: 1 }}>
-                <ChevronRight size={18} strokeWidth={1.5} />
-              </Button>
-            </Paper>
-          </Grid>
-
-          {/* Acciones reales, ancho completo abajo (pedido de Mariana
-          17/Ago/2026: no en la columna izquierda). */}
-          {puedeAprobar && (
-            <Grid item xs={12}>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-                {!kyc.aprobado_en && (
-                  <Button
-                    fullWidth
-                    variant="contained"
-                    color="success"
-                    startIcon={<CheckCircle2 size={18} strokeWidth={1.5} />}
-                    disabled={aprobando || cambiandoEstadoCuenta}
-                    onClick={handleAprobar}
-                  >
-                    {aprobando ? <CircularProgress size={20} color="inherit" /> : "Aprobar expediente"}
-                  </Button>
-                )}
-
-                {kyc.estado_cuenta !== "SOSPECHOSA" && (
-                  <Button
-                    fullWidth
-                    variant="outlined"
-                    color="warning"
-                    startIcon={<Flag size={18} strokeWidth={1.5} />}
-                    disabled={aprobando || cambiandoEstadoCuenta}
-                    onClick={() => handleCambiarEstadoCuenta("marcar_sospechoso")}
-                  >
-                    Marcar como sospechoso
-                  </Button>
-                )}
-
-                {kyc.estado_cuenta === "CONGELADA" ? (
-                  <Button
-                    fullWidth
-                    variant="outlined"
-                    disabled={aprobando || cambiandoEstadoCuenta}
-                    onClick={() => handleCambiarEstadoCuenta("reactivar_cuenta")}
-                  >
-                    Reactivar cuenta
-                  </Button>
-                ) : (
-                  <Button
-                    fullWidth
-                    variant="outlined"
-                    color="error"
-                    startIcon={<Snowflake size={18} strokeWidth={1.5} />}
-                    disabled={aprobando || cambiandoEstadoCuenta}
-                    onClick={() => handleCambiarEstadoCuenta("congelar")}
-                  >
-                    Congelar cuenta
-                  </Button>
-                )}
-              </Stack>
-            </Grid>
-          )}
         </Grid>
       )}
 

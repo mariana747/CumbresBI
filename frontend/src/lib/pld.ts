@@ -174,6 +174,29 @@ export async function confirmarExtraccionKyc(
   return response.json();
 }
 
+// Edicion manual del expediente por el analista (18/Ago/2026) - PATCH
+// generico, ya auditado en el backend (ver
+// services/pld-service/pld/views.py::PldContraparteKycViewSet.update):
+// emite pld_contrapartes_kyc.editar con el diff real, actor resuelto de
+// "updated_by" (mismo campo que ya se manda aqui, no un actor_user_id
+// aparte). Requiere pld-compliance.editar - mismo permiso que
+// confirmar_extraccion.
+export async function editarKyc(
+  idKyc: string,
+  campos: PldDatosEditables,
+  updatedBy?: string | null
+): Promise<PldContraparteKyc & PldDatosEditables> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...campos, updated_by: updatedBy }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
 // Revisa contra Drive real si cada documento del expediente sigue
 // existiendo (18/Ago/2026, boton "Verificar en Drive" - hallazgo real: si
 // alguien borra un archivo directo en drive.google.com, la app se quedaba
