@@ -25,15 +25,17 @@ def emitir_evento_auditoria(
 ):
     """Registra un evento en la bitacora central (audit-service).
 
-    No propaga la excepcion si audit-service no responde - un fallo de
-    auditoria no debe tumbar la operacion de negocio real. Se registra en
-    el log local de iam-service para poder detectar el hueco despues (ver
-    riesgo documentado en README.md sec. 9: "un relay caido es un hueco de
-    auditoria silencioso" - aqui el equivalente es un fallo de red hacia
-    audit-service).
+    No propaga la excepcion ni el status de error - un fallo de auditoria
+    no debe tumbar la operacion de negocio real. Se registra en el log
+    local de iam-service para poder detectar el hueco despues (ver riesgo
+    documentado en README.md sec. 9: "un relay caido es un hueco de
+    auditoria silencioso"), tanto si falla la red como si audit-service
+    rechaza el evento con un 4xx/5xx - antes solo se atrapaba
+    RequestException y un rechazo por status se perdia sin dejar rastro
+    (18/Ago/2026, ver pld-service/pld/audit_utils.py, mismo hallazgo).
     """
     try:
-        requests.post(
+        response = requests.post(
             f"{settings.AUDIT_SERVICE_URL}/api/bitacora/registrar_evento/",
             json={
                 "servicio_origen": "iam-service",
@@ -49,3 +51,10 @@ def emitir_evento_auditoria(
         )
     except requests.RequestException:
         logger.warning("No se pudo registrar el evento de auditoria '%s' para %s", accion, entidad_id)
+        return
+
+    if not response.ok:
+        logger.warning(
+            "audit-service rechazo el evento de auditoria '%s' para %s (status %s): %s",
+            accion, entidad_id, response.status_code, response.text[:500],
+        )
