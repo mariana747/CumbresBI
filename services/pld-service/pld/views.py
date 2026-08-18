@@ -149,6 +149,55 @@ class PldContraparteKycViewSet(ModelViewSet):
             queryset = queryset.filter(estado_llenado=estado_llenado.upper())
         return queryset
 
+    def update(self, request, *args, **kwargs):
+        """Override del update/partial_update generico de DRF (18/Ago/2026)
+        para auditar la edicion manual del analista - hasta ahora era el
+        unico camino real de escritura del expediente sin ningun evento en
+        la bitacora (confirmar_extraccion y actualizar_datos ya se auditan,
+        ver pld/audit_utils.py). Solo audita si algo realmente cambio (un
+        PATCH que no modifica nada no genera ruido en la bitacora).
+
+        actor_user_id se resuelve de "updated_by" - mismo campo que el
+        cliente ya manda en el body para esta vista (ver
+        PldContraparteKycSerializer, escribible a proposito), no un
+        actor_user_id aparte."""
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        # Solo campos realmente escribibles del serializer (no "documentos"
+        # u otro campo read_only que el cliente pudiera mandar de vuelta sin
+        # que tenga efecto real).
+        campos_escribibles = {
+            nombre for nombre, campo in serializer.fields.items() if not campo.read_only
+        }
+        def _valor_serializable(valor):
+            # None se queda None (no "None" de texto) - las fechas/decimales
+            # si necesitan str() para viajar como JSON hacia audit-service.
+            return valor if valor is None else str(valor)
+
+        campos_tocados = [campo for campo in request.data if campo in campos_escribibles]
+        valores_previos = {campo: _valor_serializable(getattr(instance, campo)) for campo in campos_tocados}
+
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        instance.refresh_from_db()
+
+        cambios = {
+            campo: _valor_serializable(getattr(instance, campo))
+            for campo in campos_tocados
+            if _valor_serializable(getattr(instance, campo)) != valores_previos[campo]
+        }
+        if cambios:
+            emitir_evento_auditoria(
+                "pld_contrapartes_kyc.editar",
+                "pld_contrapartes_kyc",
+                str(instance.id_kyc),
+                actor_user_id=request.data.get("updated_by"),
+                valores_previos={k: v for k, v in valores_previos.items() if k in cambios},
+                valores_nuevos={**contexto_kyc(instance), "campos": cambios},
+            )
+        return Response(serializer.data)
+
     # Campos del expediente que el Motor Documental puede llenar con datos ya
     # validados por el analista (docint/prompts.py: los nombres de
     # extracted_data ya estan alineados a estas columnas a proposito, para

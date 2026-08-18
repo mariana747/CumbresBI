@@ -772,6 +772,62 @@ class AuditoriaMotorDocumentalTests(TestCase):
         self.assertEqual(payload["valores_previos"]["drive_file_id"], "abc999")
 
 
+class EdicionManualExpedienteTests(TestCase):
+    """update/partial_update generico de DRF (18/Ago/2026): hasta ahora era
+    el unico camino real de escritura del expediente sin auditar
+    (confirmar_extraccion y actualizar_datos ya se auditaban) - el analista
+    edita el expediente a mano via PATCH, ver views.py::update()."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        self.kyc = _kyc("cp000300", RFC_TIZARA)
+
+    def _editar(self, campos):
+        request = self.factory.patch(f"/api/kyc/{self.kyc.id_kyc}/", campos, format="json")
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+        return view(request, pk=self.kyc.id_kyc)
+
+    def test_editar_emite_evento_solo_con_los_campos_que_cambiaron(self):
+        with patch("pld.audit_utils.requests.post") as mock_post:
+            response = self._editar({"curp": "EDIT900101HDFRRL01", "updated_by": "usr00005"})
+        self.assertEqual(response.status_code, 200)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_kyc.editar")
+        self.assertEqual(payload["entidad_id"], str(self.kyc.id_kyc))
+        self.assertEqual(payload["actor_user_id"], "usr00005")
+        self.assertEqual(
+            payload["valores_nuevos"]["campos"], {"curp": "EDIT900101HDFRRL01", "updated_by": "usr00005"}
+        )
+        self.assertEqual(payload["valores_previos"]["curp"], self.kyc.curp)
+
+    def test_editar_sin_cambios_reales_no_emite_evento(self):
+        """Mandar el mismo valor que ya tenia el expediente no debe generar
+        ruido en la bitacora - solo se audita lo que de verdad cambio."""
+        with patch("pld.audit_utils.requests.post") as mock_post:
+            response = self._editar({"curp": self.kyc.curp})
+        self.assertEqual(response.status_code, 200)
+        mock_post.assert_not_called()
+
+    def test_no_puede_pisar_campos_protegidos_via_edicion_manual(self):
+        """estado_cuenta/aprobado_por son read_only en el serializer - la
+        auditoria tampoco debe reportarlos como "cambiados" aunque el
+        cliente los mande en el body (no tienen efecto real)."""
+        with patch("pld.audit_utils.requests.post") as mock_post:
+            response = self._editar({"estado_cuenta": "CONGELADA", "curp": "EDIT900101HDFRRL02"})
+        self.assertEqual(response.status_code, 200)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.estado_cuenta, PldContraparteKyc.CUENTA_ACTIVA)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertNotIn("estado_cuenta", payload["valores_nuevos"]["campos"])
+
+    def test_requiere_permiso_editar(self):
+        self.scope = EffectiveScope(is_global=True, perm_keys=())
+        response = self._editar({"curp": "EDIT900101HDFRRL01"})
+        self.assertEqual(response.status_code, 403)
+
+
 class EmitirEventoAuditoriaTests(TestCase):
     """18/Ago/2026: antes solo se atrapaba RequestException (red caida) - un
     4xx/5xx de audit-service rechazando el evento (ej. actor_user_id mas
