@@ -291,15 +291,30 @@ export default function PldExpedienteDetallePage() {
     setVerificarError(null);
     setVerificarMensaje(null);
     try {
-      const resultado = await verificarDocumentosKyc(params.idKyc);
+      const resultado = await verificarDocumentosKyc(params.idKyc, session?.user_id);
       const eliminados = resultado.documentos_eliminados;
-      setVerificarMensaje(
-        eliminados.length === 0
-          ? "Todos los documentos siguen en Drive."
-          : `Se quitaron ${eliminados.length} documento(s) que ya no están en Drive: ${eliminados
+      const agregados = resultado.documentos_agregados;
+
+      if (eliminados.length === 0 && agregados.length === 0) {
+        setVerificarMensaje("Todo sigue igual - sin cambios en Drive.");
+      } else {
+        const partes: string[] = [];
+        if (agregados.length > 0) {
+          partes.push(
+            `se encontraron ${agregados.length} documento(s) nuevo(s) subidos directo en Drive: ${agregados
               .map((d) => d.denominacion || "sin nombre")
-              .join(", ")}.`
-      );
+              .join(", ")}`
+          );
+        }
+        if (eliminados.length > 0) {
+          partes.push(
+            `se quitaron ${eliminados.length} documento(s) que ya no están en Drive: ${eliminados
+              .map((d) => d.denominacion || "sin nombre")
+              .join(", ")}`
+          );
+        }
+        setVerificarMensaje(`${partes.join("; ")}.`);
+      }
       cargar();
     } catch (err) {
       setVerificarError(err instanceof Error ? err.message : "Error al verificar los documentos en Drive");
