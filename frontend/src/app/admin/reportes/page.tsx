@@ -30,7 +30,6 @@ import AppShell from "@/components/AppShell";
 import { IamUser, IamUserRole, SCOPE_LABELS, listRoleHistory, listUsers, scopeChipColor } from "@/lib/iam";
 import {
   BitacoraEvento,
-  ENTITY_OPTIONS,
   SERVICE_OPTIONS,
   exportarBitacoraCsvADrive,
   friendlyActionName,
@@ -300,7 +299,6 @@ function BitacoraAuditoria() {
   const [eventos, setEventos] = useState<BitacoraEvento[]>([]);
   const [search, setSearch] = useState("");
   const [servicioOrigen, setServicioOrigen] = useState("");
-  const [entidad, setEntidad] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [loading, setLoading] = useState(true);
@@ -319,7 +317,6 @@ function BitacoraAuditoria() {
       const resultado = await exportarBitacoraCsvADrive({
         search: search || undefined,
         servicioOrigen: servicioOrigen || undefined,
-        entidad: entidad || undefined,
         desde: desde || undefined,
         hasta: hasta || undefined,
       });
@@ -355,7 +352,6 @@ function BitacoraAuditoria() {
       listBitacora({
         search: search || undefined,
         servicioOrigen: servicioOrigen || undefined,
-        entidad: entidad || undefined,
         desde: desde || undefined,
         hasta: hasta || undefined,
       })
@@ -364,7 +360,7 @@ function BitacoraAuditoria() {
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timeout);
-  }, [search, servicioOrigen, entidad, desde, hasta]);
+  }, [search, servicioOrigen, desde, hasta]);
 
   return (
     <>
@@ -401,22 +397,6 @@ function BitacoraAuditoria() {
           >
             <MenuItem value="">Todos</MenuItem>
             {SERVICE_OPTIONS.map((o) => (
-              <MenuItem key={o.value} value={o.value}>
-                {o.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel id="entidad-filter-label">Entidad</InputLabel>
-          <Select
-            labelId="entidad-filter-label"
-            label="Entidad"
-            value={entidad}
-            onChange={(e) => setEntidad(e.target.value)}
-          >
-            <MenuItem value="">Todas</MenuItem>
-            {ENTITY_OPTIONS.map((o) => (
               <MenuItem key={o.value} value={o.value}>
                 {o.label}
               </MenuItem>
