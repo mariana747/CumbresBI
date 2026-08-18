@@ -160,12 +160,13 @@ export type PldDatosEditables = Partial<Record<(typeof PLD_CAMPOS_CONFIRMABLES)[
 // Ver services/pld-service/pld/views.py::confirmar_extraccion.
 export async function confirmarExtraccionKyc(
   idKyc: string,
-  campos: Record<string, unknown>
+  campos: Record<string, unknown>,
+  actorUserId?: string | null
 ): Promise<PldContraparteKyc> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/confirmar_extraccion/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campos }),
+    body: JSON.stringify({ campos, actor_user_id: actorUserId }),
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);
@@ -207,9 +208,11 @@ export async function reactivarAutoEstadoKyc(idKyc: string): Promise<PldContrapa
 // duplicados se borran a mano, no automatico - "Verificar en Drive" solo
 // borra lo que ya no existe en Drive). Requiere pld-compliance.editar - ver
 // services/pld-service/pld/views.py::PldContraparteDocViewSet.get_permissions.
-export async function eliminarDocumentoKyc(idKycDoc: string): Promise<void> {
+export async function eliminarDocumentoKyc(idKycDoc: string, actorUserId?: string | null): Promise<void> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/`, {
     method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId }),
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);
@@ -230,17 +233,28 @@ export async function aprobarKyc(idKyc: string, aprobadoPor: string): Promise<Pl
 
 // Semaforo de estado_cuenta (17/Ago/2026, vista de detalle) - mismo peso de
 // decision que aprobarKyc, mismo permiso (pld-compliance.aprobar).
-async function cambiarEstadoCuenta(idKyc: string, accion: "marcar_sospechoso" | "congelar" | "reactivar_cuenta") {
-  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/${accion}/`, { method: "POST" });
+async function cambiarEstadoCuenta(
+  idKyc: string,
+  accion: "marcar_sospechoso" | "congelar" | "reactivar_cuenta",
+  actorUserId?: string | null
+) {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/${accion}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId }),
+  });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);
   }
   return response.json();
 }
 
-export const marcarSospechosoKyc = (idKyc: string) => cambiarEstadoCuenta(idKyc, "marcar_sospechoso");
-export const congelarKyc = (idKyc: string) => cambiarEstadoCuenta(idKyc, "congelar");
-export const reactivarCuentaKyc = (idKyc: string) => cambiarEstadoCuenta(idKyc, "reactivar_cuenta");
+export const marcarSospechosoKyc = (idKyc: string, actorUserId?: string | null) =>
+  cambiarEstadoCuenta(idKyc, "marcar_sospechoso", actorUserId);
+export const congelarKyc = (idKyc: string, actorUserId?: string | null) =>
+  cambiarEstadoCuenta(idKyc, "congelar", actorUserId);
+export const reactivarCuentaKyc = (idKyc: string, actorUserId?: string | null) =>
+  cambiarEstadoCuenta(idKyc, "reactivar_cuenta", actorUserId);
 
 // Ticket de cliente externo para KYC (Fase 2, Semana 9) - mismo patron que
 // IamMagicLink (iam-service, ver src/lib/iam.ts), pero sin JWT propio:

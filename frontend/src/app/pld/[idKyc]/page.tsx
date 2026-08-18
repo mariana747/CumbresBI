@@ -234,7 +234,7 @@ export default function PldExpedienteDetallePage() {
     if (!confirmandoEliminarDoc) return;
     setEliminandoDoc(true);
     try {
-      await eliminarDocumentoKyc(confirmandoEliminarDoc.id_kyc_doc);
+      await eliminarDocumentoKyc(confirmandoEliminarDoc.id_kyc_doc, session?.user_id);
       setConfirmandoEliminarDoc(null);
       cargar();
     } catch (err) {
@@ -251,7 +251,7 @@ export default function PldExpedienteDetallePage() {
       const accionFn = { marcar_sospechoso: marcarSospechosoKyc, congelar: congelarKyc, reactivar_cuenta: reactivarCuentaKyc }[
         accion
       ];
-      await accionFn(params.idKyc);
+      await accionFn(params.idKyc, session?.user_id);
       cargar();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al actualizar el estado de la cuenta");

@@ -27,6 +27,11 @@ export async function listBitacora({
   desde,
   hasta,
 }: {
+  // Un solo buscador (18/Ago/2026, auditoria especifica del Motor
+  // Documental dentro de PLD): ademas de accion/entidad/entidad_id, tambien
+  // busca id_contraparte/nombre_completo del cliente dentro del JSON
+  // valores_nuevos/valores_previos - ver
+  // audit-service/auditoria/views.py::get_queryset.
   search?: string;
   servicioOrigen?: string;
   entidad?: string;
@@ -161,6 +166,8 @@ const ACTION_VERB_LABELS: Record<string, string> = {
   subir: "Subió",
   eliminar: "Eliminó",
   eliminar_por_sincronia_drive: "Eliminó (ya no existía en Drive)",
+  confirmar_extraccion: "Confirmó datos extraídos",
+  actualizar_datos: "Actualizó sus datos",
 };
 
 // Acciones que ya son una frase completa por si solas - no se les concatena

@@ -38,6 +38,7 @@ import {
   pollAnalysis,
 } from "@/lib/docint";
 import { PLD_CAMPOS_CONFIRMABLES, PldContraparteKyc, confirmarExtraccionKyc, listKyc } from "@/lib/pld";
+import { getSession } from "@/lib/auth";
 
 // Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
 // docint/classifier.py, KEYWORD_TO_PROMPT_KEY) - solo para mostrar el tipo
@@ -154,6 +155,16 @@ export default function MotorDocumentalDialog({
 
   const [documents, setDocuments] = useState<DocumentResult[]>([]);
 
+  // Actor real de "confirmar_extraccion" para la auditoria del Motor
+  // Documental (ver pld/audit_utils.py) - este dialogo no llevaba sesion
+  // hasta ahora, asi que el evento se registraba sin analista identificado.
+  const [actorUserId, setActorUserId] = useState<string | null>(null);
+  useEffect(() => {
+    getSession()
+      .then((s) => setActorUserId(s?.user_id ?? null))
+      .catch(() => setActorUserId(null));
+  }, []);
+
   useEffect(() => {
     if (!open || kycPreseleccionado || servicioSolicitante !== "pld-service") return;
     listKyc()
@@ -218,7 +229,7 @@ export default function MotorDocumentalDialog({
     }
 
     try {
-      await confirmarExtraccionKyc(kycSeleccionado, campos);
+      await confirmarExtraccionKyc(kycSeleccionado, campos, actorUserId);
       setDocuments((prev) =>
         prev.map((d, i) =>
           i === index ? { ...d, extraccionConfirmadaEn: new Date().toISOString(), extraccionError: undefined } : d
