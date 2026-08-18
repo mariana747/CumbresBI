@@ -100,6 +100,28 @@ class DownloadView(APIView):
         return StreamingHttpResponse(generador(), content_type="application/octet-stream")
 
 
+class FileExistsView(APIView):
+    """GET /api/existe/<file_id>/?carpeta=PLD/<id_contraparte>&perm=... -
+    True/False si el archivo sigue en Drive (18/Ago/2026, ver
+    driveclient.file_exists) - lo usa pld-service para detectar documentos
+    borrados directo en drive.google.com sin pasar por la app."""
+
+    def get(self, request, file_id, *args, **kwargs):
+        perm_key = request.query_params.get("perm")
+        if not perm_key:
+            return Response({"detail": "Falta ?perm=<perm_key> requerido por el llamador"}, status=400)
+        if not _autorizado(request, self, perm_key):
+            return Response({"detail": f"Falta el permiso '{perm_key}'"}, status=403)
+
+        carpeta = request.query_params.get("carpeta")
+        try:
+            existe = driveclient.file_exists(file_id, carpeta=carpeta)
+        except driveclient.DriveError as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        return Response({"existe": existe})
+
+
 class ListFilesView(APIView):
     """GET /api/list/?carpeta=PLD/<id_contraparte>&perm=pld-compliance.leer"""
 

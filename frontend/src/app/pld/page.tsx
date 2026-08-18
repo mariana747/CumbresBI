@@ -195,6 +195,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
           <TableHead>
             <TableRow>
               <TableCell>Contraparte</TableCell>
+              <TableCell>Nombre / Razón social</TableCell>
               <TableCell>CURP</TableCell>
               <TableCell>Estado</TableCell>
               <TableCell>Documentos</TableCell>
@@ -206,13 +207,13 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                   <CircularProgress size={24} />
                 </TableCell>
               </TableRow>
             ) : expedientes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     Sin expedientes todavía.
                   </Typography>
@@ -222,6 +223,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
               expedientes.map((kyc) => (
                 <TableRow key={kyc.id_kyc} hover>
                   <TableCell>{kyc.id_contraparte}</TableCell>
+                  <TableCell>{kyc.nombre_completo || "—"}</TableCell>
                   <TableCell>{kyc.curp || "—"}</TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>

@@ -24,8 +24,16 @@ import {
   Typography,
   useTheme,
 } from "@mui/material";
-import { CheckCircle2, ChevronDown, ShieldAlert, ShieldCheck, UploadCloud } from "lucide-react";
-import { actualizarDatosPublico, PldDatosEditables, subirDocumentosPublico, validarTicketCliente } from "@/lib/pld";
+import { CheckCircle2, ChevronDown, FileText, ShieldAlert, ShieldCheck, UploadCloud } from "lucide-react";
+import {
+  actualizarDatosPublico,
+  DocumentoEliminadoResumen,
+  PldContraparteDoc,
+  PldDatosEditables,
+  ResultadoSubidaDocumento,
+  subirDocumentosPublico,
+  validarTicketCliente,
+} from "@/lib/pld";
 import { PublicNavbar } from "@/components/PublicNavbar";
 import RecaptchaV2 from "@/components/RecaptchaV2";
 
@@ -35,6 +43,7 @@ const GRUPOS_DATOS: { titulo: string; campos: { campo: keyof PldDatosEditables; 
   {
     titulo: "Identificación",
     campos: [
+      { campo: "nombre_completo", label: "Nombre completo / Razón social" },
       { campo: "curp", label: "CURP" },
       { campo: "nacionalidad", label: "Nacionalidad" },
       { campo: "pais_nac_const", label: "País de nacimiento / constitución" },
@@ -99,6 +108,18 @@ const GRUPOS_DATOS: { titulo: string; campos: { campo: keyof PldDatosEditables; 
 // decision de Mariana 12/Ago/2026): solo sube documentos (sin campos de
 // datos personales) + reCAPTCHA v2 - el archivo va al mismo flujo de
 // Drive que usaria un analista interno (ver pld/views.py::subir_documento).
+//
+// Limites del lote (18/Ago/2026, espejo de pld/views.py::
+// MAX_ARCHIVOS_POR_LOTE/MAX_TAMANO_ARCHIVO_MB) - antes no se avisaba nada y
+// el cliente solo veia un error generico al subir ("RequestDataTooBig" de
+// Django, disfrazado de "informacion invalida") si el lote pasaba de 2.5MB
+// combinados; ahora se avisa el limite de entrada y se valida antes de
+// intentar subir, para no gastar el reCAPTCHA en un lote que de todos
+// modos el backend va a rechazar.
+const MAX_ARCHIVOS_POR_LOTE = 5;
+const MAX_TAMANO_ARCHIVO_MB = 2;
+const MAX_TAMANO_ARCHIVO_BYTES = MAX_TAMANO_ARCHIVO_MB * 1024 * 1024;
+
 export default function PldTicketPage() {
   const theme = useTheme();
   const params = useParams<{ token: string }>();
@@ -113,6 +134,7 @@ export default function PldTicketPage() {
   // el selector del sistema operativo (ver toggleSeleccionado ahi).
   const [archivos, setArchivos] = useState<File[]>([]);
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+  const [errorSeleccion, setErrorSeleccion] = useState<string | null>(null);
   const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [subidaError, setSubidaError] = useState<string | null>(null);
@@ -126,6 +148,14 @@ export default function PldTicketPage() {
   const [guardadoError, setGuardadoError] = useState<string | null>(null);
   const [guardadoOk, setGuardadoOk] = useState(false);
 
+  // Documentos que el cliente ya subio antes con este mismo link (18/Ago/2026,
+  // decision de Mariana: la verificacion contra Drive debe pasar justo aqui,
+  // donde el usuario externo ve/sube sus documentos) - validarTicketCliente ya
+  // los limpia contra Drive real antes de regresarlos, asi que esta lista
+  // nunca muestra un documento que ya fue borrado directo en drive.google.com.
+  const [documentosExistentes, setDocumentosExistentes] = useState<PldContraparteDoc[]>([]);
+  const [documentosEliminados, setDocumentosEliminados] = useState<DocumentoEliminadoResumen[]>([]);
+
   useEffect(() => {
     validarTicketCliente(params.token)
       .then((resultado) => {
@@ -134,7 +164,9 @@ export default function PldTicketPage() {
         if (resultado.kyc) {
           const todosLosCampos = GRUPOS_DATOS.flatMap((g) => g.campos.map((c) => c.campo));
           setDatos(Object.fromEntries(todosLosCampos.map((c) => [c, resultado.kyc?.[c] ?? ""])));
+          setDocumentosExistentes(resultado.kyc.documentos ?? []);
         }
+        setDocumentosEliminados(resultado.documentosEliminados);
         setEstado("valido");
       })
       .catch((err) => {
@@ -180,6 +212,10 @@ export default function PldTicketPage() {
     try {
       const resultados = await subirDocumentosPublico({ token: params.token, recaptchaToken, files: elegidos });
       const fallidos = resultados.filter((r) => !r.ok);
+      const exitosos = resultados.filter(
+        (r): r is Extract<ResultadoSubidaDocumento, { ok: true }> => r.ok
+      );
+      setDocumentosExistentes((prev) => [...prev, ...exitosos]);
       if (fallidos.length === 0) {
         setSubidaOk(
           resultados.length === 1
@@ -322,7 +358,38 @@ export default function PldTicketPage() {
                   </Stack>
 
                   <Stack component="form" spacing={2} onSubmit={handleSubir} sx={{ flex: 1, minWidth: 0 }}>
+                    {documentosEliminados.length > 0 && (
+                      <Alert severity="warning">
+                        Estos documentos ya no están en Drive y hay que volver a subirlos:{" "}
+                        {documentosEliminados.map((d) => d.denominacion || "sin nombre").join(", ")}.
+                      </Alert>
+                    )}
+
+                    {documentosExistentes.length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2" gutterBottom>
+                          Documentos ya subidos
+                        </Typography>
+                        <List dense sx={{ bgcolor: "background.default", borderRadius: 1 }}>
+                          {documentosExistentes.map((doc) => (
+                            <ListItem key={doc.id_kyc_doc} disablePadding>
+                              <ListItemIcon sx={{ minWidth: 36 }}>
+                                <FileText size={18} strokeWidth={1.5} />
+                              </ListItemIcon>
+                              <ListItemText
+                                primary={doc.denominacion || "Documento sin nombre"}
+                                primaryTypographyProps={{ variant: "body2" }}
+                              />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Box>
+                    )}
+
                     <Typography variant="subtitle2">Subir documento</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Máximo {MAX_ARCHIVOS_POR_LOTE} archivos por lote, {MAX_TAMANO_ARCHIVO_MB}MB cada uno.
+                    </Typography>
 
                     <Button component="label" variant="outlined" startIcon={<UploadCloud size={18} strokeWidth={1.5} />}>
                     {archivos.length > 0
@@ -340,14 +407,41 @@ export default function PldTicketPage() {
                       onChange={(e) => {
                         const nuevos = Array.from(e.target.files ?? []);
                         if (nuevos.length === 0) return;
+                        setErrorSeleccion(null);
+
+                        const grandes = nuevos.filter((f) => f.size > MAX_TAMANO_ARCHIVO_BYTES);
+                        const validos = nuevos.filter((f) => f.size <= MAX_TAMANO_ARCHIVO_BYTES);
+
                         setArchivos((prev) => {
+                          // Corta en MAX_ARCHIVOS_POR_LOTE contando lo ya
+                          // seleccionado - mismo limite que valida el backend
+                          // (pld/views.py::MAX_ARCHIVOS_POR_LOTE), avisado
+                          // aqui para no dejar que el cliente arme un lote
+                          // que de todos modos se va a rechazar.
+                          const espacioDisponible = Math.max(0, MAX_ARCHIVOS_POR_LOTE - prev.length);
+                          const aceptados = validos.slice(0, espacioDisponible);
+                          const excedentes = validos.slice(espacioDisponible);
+
+                          const mensajes: string[] = [];
+                          if (grandes.length > 0) {
+                            mensajes.push(
+                              `No se agregaron (superan ${MAX_TAMANO_ARCHIVO_MB}MB): ${grandes.map((f) => f.name).join(", ")}.`
+                            );
+                          }
+                          if (excedentes.length > 0) {
+                            mensajes.push(
+                              `Máximo ${MAX_ARCHIVOS_POR_LOTE} archivos por lote - no se agregaron: ${excedentes.map((f) => f.name).join(", ")}.`
+                            );
+                          }
+                          if (mensajes.length > 0) setErrorSeleccion(mensajes.join(" "));
+
                           const base = prev.length;
                           setSeleccionados((prevSel) => {
                             const next = new Set(prevSel);
-                            nuevos.forEach((_, i) => next.add(base + i));
+                            aceptados.forEach((_, i) => next.add(base + i));
                             return next;
                           });
-                          return [...prev, ...nuevos];
+                          return [...prev, ...aceptados];
                         });
                         // Limpia el input para poder re-seleccionar el mismo
                         // archivo despues si lo quita y lo quiere agregar de nuevo.

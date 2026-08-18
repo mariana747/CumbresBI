@@ -26,6 +26,71 @@ from .ticket_utils import generate_token, hash_token
 logger = logging.getLogger(__name__)
 
 
+def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
+    """Revisa contra Drive real cada documento de `kyc` que tenga
+    drive_file_id y BORRA de la base de datos los que ya no existen -
+    alguien los elimino directo en drive.google.com sin pasar por la app
+    (18/Ago/2026, hallazgo real de Mariana: la plataforma se quedaba
+    mostrandolos como si siguieran ahi). Decision de Mariana: borrado real
+    del registro, no solo marcarlo/ocultarlo - un documento sin archivo
+    real detras no aporta nada al expediente.
+
+    Compartido entre el boton interno "Verificar en Drive"
+    (PldContraparteKycViewSet.verificar_documentos, con headers/cookies del
+    JWT del analista) y el canje del link publico
+    (PldTicketClienteViewSet.validar, con el secreto interno
+    servicio-a-servicio en headers - el cliente externo no tiene JWT que
+    reenviar) - la verificacion debe pasar justo donde el usuario externo
+    ve/sube sus documentos, no solo en la pantalla interna del analista.
+
+    Documentos sin drive_file_id (nunca se llego a subir el archivo real)
+    se omiten - no hay nada que verificar. Regresa la lista de documentos
+    borrados (para avisar en pantalla) - no lanza si drive-service no
+    responde, ese documento simplemente se deja como estaba (fail-safe: un
+    problema de red no debe borrar evidencia real por error)."""
+    carpeta = f"PLD/Nuevos Clientes/{kyc.id_contraparte}"
+    eliminados = []
+
+    for doc in kyc.documentos.exclude(drive_file_id__isnull=True).exclude(drive_file_id=""):
+        try:
+            upstream = requests.get(
+                f"{settings.DRIVE_SERVICE_URL}/api/existe/{doc.drive_file_id}/",
+                params={"perm": "pld-compliance.leer", "carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=15,
+            )
+        except requests.RequestException:
+            logger.warning(
+                "drive-service no respondio al verificar el documento %s", doc.id_kyc_doc, exc_info=True
+            )
+            continue
+
+        if upstream.status_code != 200:
+            continue
+
+        if not upstream.json().get("existe", True):
+            eliminados.append({"id_kyc_doc": doc.id_kyc_doc, "denominacion": doc.denominacion})
+            doc.delete()
+
+    return eliminados
+
+
+# Limites del lote publico de documentos (18/Ago/2026, ver
+# PldTicketClienteViewSet.subir_documento) - antes solo dependian del
+# default de Django (DATA_UPLOAD_MAX_MEMORY_SIZE=2.5MB para el cuerpo
+# COMPLETO del multipart, sumando todos los archivos), lo que rechazaba de
+# golpe cualquier lote de 2+ archivos reales (ej. INE 1MB + CURP 2MB) con un
+# "RequestDataTooBig" generico, sin explicarle nada al cliente - "subir uno
+# por uno" funcionaba de pura casualidad porque un solo archivo quedaba bajo
+# el limite. Ahora se valida explicito por cantidad y por archivo, con un
+# mensaje claro, y el limite global de Django (settings.py) se sube lo
+# suficiente para permitir el lote completo.
+MAX_ARCHIVOS_POR_LOTE = 5
+MAX_TAMANO_ARCHIVO_MB = 2
+MAX_TAMANO_ARCHIVO_BYTES = MAX_TAMANO_ARCHIVO_MB * 1024 * 1024
+
+
 class PldContraparteKycViewSet(ModelViewSet):
     """Expediente KYC (Fase 2, Semana 7: "Modelos de expediente KYC y
     contraparte propia"). Alcance real por sociedad ya conectado
@@ -48,7 +113,13 @@ class PldContraparteKycViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [require_permission("pld-compliance.crear")()]
-        if self.action in ("update", "partial_update", "confirmar_extraccion", "reactivar_auto_estado"):
+        if self.action in (
+            "update",
+            "partial_update",
+            "confirmar_extraccion",
+            "reactivar_auto_estado",
+            "verificar_documentos",
+        ):
             return [require_permission("pld-compliance.editar")()]
         if self.action in ("aprobar", "marcar_sospechoso", "congelar", "reactivar_cuenta"):
             return [require_permission("pld-compliance.aprobar")()]
@@ -71,6 +142,7 @@ class PldContraparteKycViewSet(ModelViewSet):
     # confirmar_extraccion escriba campos fuera de este conjunto (ej.
     # aprobado_por/aprobado_en, que tienen su propio flujo en aprobar()).
     CAMPOS_CONFIRMABLES = {
+        "nombre_completo",
         "fecha_nac_const",
         "pais_nac_const",
         "folio_mercantil",
@@ -104,6 +176,21 @@ class PldContraparteKycViewSet(ModelViewSet):
         "comentarios",
     }
 
+    # El Motor Documental extrae el nombre con una llave distinta segun el
+    # tipo de documento (docint/prompts.py): "nombre_completo" (INE/CURP/acta
+    # de nacimiento, persona fisica), "razon_social" (acta constitutiva) y
+    # "razon_social_o_nombre" (constancia de situacion fiscal) - las 3 se
+    # unifican en el mismo campo del modelo (nombre_completo), mismo criterio
+    # que fecha_nac_const/pais_nac_const ya unifican fisica/moral. Se
+    # traducen aqui, antes del filtro de CAMPOS_CONFIRMABLES, en vez de
+    # agregar 3 columnas que guardarian el mismo dato (18/Ago/2026, hallazgo:
+    # antes ninguna de las 3 se guardaba, "nombre_completo" era el ejemplo
+    # citado de "dato sin columna propia").
+    ALIAS_CAMPOS = {
+        "razon_social": "nombre_completo",
+        "razon_social_o_nombre": "nombre_completo",
+    }
+
     @action(detail=True, methods=["post"])
     def confirmar_extraccion(self, request, pk=None):
         """Guarda en el expediente los datos que salieron del Motor
@@ -113,15 +200,16 @@ class PldContraparteKycViewSet(ModelViewSet):
         un humano confirma antes de que el dato quede como verdad de negocio.
 
         Body: {"campos": {<nombre_de_campo>: <valor>, ...}} - solo se
-        aceptan campos en CAMPOS_CONFIRMABLES; cualquier otra llave se
-        ignora silenciosamente (ej. datos informativos de la extraccion que
-        no tienen columna propia en este modelo, como "nombre_completo").
+        aceptan campos en CAMPOS_CONFIRMABLES (traducidos primero via
+        ALIAS_CAMPOS); cualquier otra llave se ignora silenciosamente (datos
+        informativos de la extraccion sin columna propia en este modelo).
         Mismo permiso que editar el expediente a mano (pld-compliance.editar)
         - confirmar una extraccion es una forma de edicion, no una accion
         distinta con su propia regla de acceso."""
         campos = request.data.get("campos")
         if not isinstance(campos, dict) or not campos:
             return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
+        campos = {self.ALIAS_CAMPOS.get(k, k): v for k, v in campos.items()}
 
         datos_validos = {k: v for k, v in campos.items() if k in self.CAMPOS_CONFIRMABLES}
         if not datos_validos:
@@ -135,6 +223,27 @@ class PldContraparteKycViewSet(ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def verificar_documentos(self, request, pk=None):
+        """Botón interno "Verificar en Drive" - revisa contra Drive real
+        cada documento del expediente y BORRA los que ya no existen (ver
+        _limpiar_documentos_borrados_en_drive). Manual en vez de polling
+        automático - Drive no tiene webhooks configurados todavía y cada
+        documento implica una llamada aparte a drive-service, no algo para
+        correr en cada carga de pantalla.
+
+        Regresa el expediente actualizado (ya sin los documentos borrados)
+        más "documentos_eliminados" con lo que se quitó, para que el
+        frontend pueda avisarle al analista qué desapareció."""
+        kyc = self.get_object()
+        headers, cookies = forward_auth_headers(request)
+        eliminados = _limpiar_documentos_borrados_en_drive(kyc, headers, cookies)
+
+        kyc.refresh_from_db()
+        data = self.get_serializer(kyc).data
+        data["documentos_eliminados"] = eliminados
+        return Response(data)
 
     @action(detail=True, methods=["post"])
     def reactivar_auto_estado(self, request, pk=None):
@@ -209,7 +318,14 @@ class PldContraparteDocViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action in ("create", "subir"):
             return [require_permission("pld-compliance.crear")()]
-        if self.action in ("update", "partial_update"):
+        # "destroy" agregado 18/Ago/2026 (hallazgo real: no estaba en esta
+        # lista, asi que caia al default global de DRF - AllowAny, sin
+        # exigir NINGUN permiso ni sesion. Cualquiera podia borrar
+        # documentos del expediente). Mismo permiso que editar - borrar un
+        # documento (ej. un duplicado, decision de Mariana 18/Ago/2026: se
+        # borra manual, no automatico) es una forma de edicion del
+        # expediente, no una accion con su propia regla.
+        if self.action in ("update", "partial_update", "destroy"):
             return [require_permission("pld-compliance.editar")()]
         return super().get_permissions()
 
@@ -372,7 +488,19 @@ class PldTicketClienteViewSet(ModelViewSet):
         """Valida un token en claro (recibido en el link) y, si es válido,
         marca su uso. Regresa el ticket junto con el expediente KYC asociado
         (si tiene uno) para que el formulario público sepa sobre qué
-        expediente está trabajando."""
+        expediente está trabajando y qué documentos ya tiene subidos.
+
+        Limpieza contra Drive (18/Ago/2026, decisión de Mariana: la
+        verificación debe pasar justo donde el usuario externo ve/sube sus
+        documentos, no solo en la pantalla interna del analista) - cada vez
+        que el cliente abre su link, se revisan sus documentos contra Drive
+        real y se borran los que ya no existen (ver
+        _limpiar_documentos_borrados_en_drive), ANTES de serializar el kyc -
+        así "kyc.documentos" en la respuesta ya refleja el estado real, sin
+        registros fantasma de archivos borrados directo en drive.google.com.
+        Usa el secreto interno servicio-a-servicio (no hay JWT de usuario
+        que reenviar en este flujo público, mismo criterio que
+        subir_documento)."""
         ticket, error = self._resolver_ticket(request.data.get("token"))
         if error:
             return error
@@ -386,7 +514,13 @@ class PldTicketClienteViewSet(ModelViewSet):
 
         data = self.get_serializer(ticket).data
         if ticket.kyc_id:
+            headers = {}
+            if settings.DRIVE_INTERNAL_SECRET:
+                headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
+            documentos_eliminados = _limpiar_documentos_borrados_en_drive(ticket.kyc, headers, {})
+            ticket.kyc.refresh_from_db()
             data["kyc"] = PldContraparteKycSerializer(ticket.kyc).data
+            data["documentos_eliminados"] = documentos_eliminados
         return Response(data)
 
     @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
@@ -422,12 +556,30 @@ class PldTicketClienteViewSet(ModelViewSet):
         if not ticket.kyc_id:
             return Response({"detail": "Este link no tiene un expediente KYC asociado."}, status=400)
 
-        if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
-            return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
-
         archivos = request.FILES.getlist("file")
         if not archivos:
             return Response({"detail": "Campo 'file' requerido (al menos un archivo)"}, status=400)
+        # Validado ANTES del reCAPTCHA (18/Ago/2026) - un lote invalido no
+        # debe gastar el token, que solo sirve una vez (ver docstring de
+        # arriba). Mensaje explicito en vez de dejar que Django reviente con
+        # "RequestDataTooBig" generico al exceder DATA_UPLOAD_MAX_MEMORY_SIZE.
+        if len(archivos) > MAX_ARCHIVOS_POR_LOTE:
+            return Response(
+                {"detail": f"Puedes subir hasta {MAX_ARCHIVOS_POR_LOTE} archivos por lote (elegiste {len(archivos)})."},
+                status=400,
+            )
+        archivos_grandes = [a.name for a in archivos if a.size > MAX_TAMANO_ARCHIVO_BYTES]
+        if archivos_grandes:
+            return Response(
+                {
+                    "detail": f"Estos archivos superan el límite de {MAX_TAMANO_ARCHIVO_MB}MB por archivo: "
+                    + ", ".join(archivos_grandes)
+                },
+                status=400,
+            )
+
+        if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
+            return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
 
         carpeta = f"PLD/Nuevos Clientes/{ticket.kyc.id_contraparte}"
         headers = {}

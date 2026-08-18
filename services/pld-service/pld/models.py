@@ -72,6 +72,16 @@ class PldContraparteKyc(models.Model):
     # da de alta un expediente vacio y el propio cliente los llena despues
     # via el link publico (pld-ticket/[token]/page.tsx, actualizar_datos).
     # Antes eran obligatorios porque no existia ese formulario publico.
+    #
+    # nombre_completo (18/Ago/2026, hallazgo real): el expediente no tenia
+    # NINGUN campo para el nombre de la persona/razon social de la empresa -
+    # el Motor Documental ya lo extrae del INE/CURP/acta ("nombre_completo",
+    # "razon_social", "razon_social_o_nombre" segun el documento, ver
+    # docint/prompts.py) pero se descartaba en silencio en confirmar_extraccion
+    # por no tener columna propia (ver ALIAS_CAMPOS en views.py para como se
+    # unifican esas 3 llaves en este solo campo). Mismo criterio de
+    # unificacion fisica/moral que fecha_nac_const/pais_nac_const arriba.
+    nombre_completo = models.CharField(max_length=250, blank=True, null=True)
     fecha_nac_const = models.DateField(blank=True, null=True)
     pais_nac_const = models.CharField(max_length=100, blank=True, null=True)
     folio_mercantil = models.CharField(max_length=250, blank=True, null=True)

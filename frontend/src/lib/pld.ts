@@ -13,6 +13,7 @@ export interface PldContraparteDoc {
   detalles_adicionales: string | null;
   status: PldDocStatus | null;
   link_documento: string | null;
+  drive_file_id: string | null;
   fecha_solicitud: string | null;
   fecha_limite: string | null;
   fecha_entrega: string | null;
@@ -28,6 +29,7 @@ export interface PldContraparteDoc {
 export interface PldContraparteKyc {
   id_kyc: string;
   id_contraparte: string;
+  nombre_completo: string | null;
   curp: string | null;
   nacionalidad: string | null;
   estado_cuenta: "ACTIVA" | "SOSPECHOSA" | "CONGELADA";
@@ -103,8 +105,16 @@ export async function createKyc(params: {
 // Whitelist en espejo de PldContraparteKycViewSet.CAMPOS_CONFIRMABLES
 // (views.py) - solo informativo aqui, el backend es quien realmente filtra;
 // se usa para no ni intentar mandar llaves de extracted_data que el
-// expediente no tiene columna para guardar (ej. "nombre_completo").
+// expediente no tiene columna para guardar. "nombre_completo" (18/Ago/2026)
+// tambien recibe "razon_social"/"razon_social_o_nombre" de la extraccion -
+// ver ALIAS_CAMPOS en pld/views.py, el backend hace la traduccion real.
 export const PLD_CAMPOS_CONFIRMABLES = [
+  "nombre_completo",
+  // Alias que el backend traduce a "nombre_completo" antes de guardar (ver
+  // ALIAS_CAMPOS en pld/views.py) - deben seguir en esta lista para que el
+  // filtro de MotorDocumentalDialog.tsx no los descarte antes de mandarlos.
+  "razon_social",
+  "razon_social_o_nombre",
   "fecha_nac_const",
   "pais_nac_const",
   "folio_mercantil",
@@ -163,6 +173,23 @@ export async function confirmarExtraccionKyc(
   return response.json();
 }
 
+// Revisa contra Drive real si cada documento del expediente sigue
+// existiendo (18/Ago/2026, boton "Verificar en Drive" - hallazgo real: si
+// alguien borra un archivo directo en drive.google.com, la app se quedaba
+// mostrandolo como si siguiera ahi) y BORRA los que ya no estan. Ver
+// services/pld-service/pld/views.py::verificar_documentos.
+export async function verificarDocumentosKyc(
+  idKyc: string
+): Promise<PldContraparteKyc & { documentos_eliminados: DocumentoEliminadoResumen[] }> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/verificar_documentos/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
 // Apaga estado_llenado_manual y recalcula de inmediato segun los
 // documentos actuales del expediente. Ver
 // services/pld-service/pld/views.py::reactivar_auto_estado.
@@ -174,6 +201,19 @@ export async function reactivarAutoEstadoKyc(idKyc: string): Promise<PldContrapa
     throw await friendlyApiError("PLD", response);
   }
   return response.json();
+}
+
+// Borrado manual de un documento (18/Ago/2026, decision de Mariana: los
+// duplicados se borran a mano, no automatico - "Verificar en Drive" solo
+// borra lo que ya no existe en Drive). Requiere pld-compliance.editar - ver
+// services/pld-service/pld/views.py::PldContraparteDocViewSet.get_permissions.
+export async function eliminarDocumentoKyc(idKycDoc: string): Promise<void> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
 }
 
 export async function aprobarKyc(idKyc: string, aprobadoPor: string): Promise<PldContraparteKyc> {
@@ -265,12 +305,31 @@ export async function createTicketCliente(params: {
   return response.json();
 }
 
+// Resumen de un documento que "validar" borro de la base de datos porque
+// ya no existe en Drive (18/Ago/2026, ver pld/views.py::
+// _limpiar_documentos_borrados_en_drive) - solo lo minimo para avisar en
+// pantalla que documento hay que volver a subir.
+export interface DocumentoEliminadoResumen {
+  id_kyc_doc: string;
+  denominacion: string | null;
+}
+
 // A diferencia de validateMagicLink (que regresa un jwt de alcance
 // externo), pld-service no tiene llave privada - regresa el ticket y,
 // si tiene expediente asociado, el KYC anidado directamente.
+//
+// Cada llamada tambien limpia contra Drive real los documentos del
+// expediente (ver docstring de validar() en pld/views.py) - "kyc.documentos"
+// ya viene sin los que se detectaron borrados; documentosEliminados trae el
+// resumen de lo que se quito, para poder avisarle al cliente que vuelva a
+// subirlos.
 export async function validarTicketCliente(
   token: string
-): Promise<{ ticket: PldTicketCliente; kyc?: PldContraparteKyc & PldDatosEditables }> {
+): Promise<{
+  ticket: PldTicketCliente;
+  kyc?: PldContraparteKyc & PldDatosEditables;
+  documentosEliminados: DocumentoEliminadoResumen[];
+}> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/validar/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -282,8 +341,8 @@ export async function validarTicketCliente(
     throw await friendlyApiError("PLD", response);
   }
   const data = await response.json();
-  const { kyc, ...ticket } = data;
-  return { ticket, kyc };
+  const { kyc, documentos_eliminados, ...ticket } = data;
+  return { ticket, kyc, documentosEliminados: documentos_eliminados ?? [] };
 }
 
 // Formulario publico de KYC externo (docs/architecture/pld-fase2-alcance.md

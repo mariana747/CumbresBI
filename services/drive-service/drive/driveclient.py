@@ -218,6 +218,39 @@ def iter_download(file_id: str, carpeta: str | None = None, chunk_size: int = 25
         raise DriveError(f"No se pudo descargar el archivo '{file_id}' de Drive: {exc}") from exc
 
 
+def file_exists(file_id: str, carpeta: str | None = None) -> bool:
+    """True si `file_id` sigue existiendo en Drive (y no esta en la papelera)
+    - usado para detectar documentos borrados directo en drive.google.com
+    sin pasar por la app (18/Ago/2026, hallazgo: la app nunca se enteraba,
+    seguia mostrando el documento como si siguiera ahi). No lanza DriveError
+    para un simple "no existe" (404/trashed) - eso es un resultado valido,
+    no una falla; DriveError sigue reservado para errores reales de
+    comunicacion con Drive (permisos, red, etc.)."""
+    if not _modo_real():
+        if not carpeta:
+            raise DriveError("Modo simulado: se requiere 'carpeta' para ubicar el archivo")
+        base = Path(ensure_folder_path(carpeta))
+        return len(list(base.glob(f"{file_id}__*"))) > 0
+
+    from googleapiclient.errors import HttpError
+
+    servicio = _servicio_real()
+    try:
+        metadata = (
+            servicio.files()
+            .get(fileId=file_id, fields="id, trashed", supportsAllDrives=True)
+            .execute()
+        )
+    except HttpError as exc:
+        if exc.resp.status == 404:
+            return False
+        raise DriveError(f"No se pudo verificar el archivo '{file_id}' en Drive: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise DriveError(f"No se pudo verificar el archivo '{file_id}' en Drive: {exc}") from exc
+
+    return not metadata.get("trashed", False)
+
+
 def list_files(carpeta: str) -> list[dict]:
     """Lista los archivos (no subcarpetas) dentro de `carpeta`."""
     if not _modo_real():
