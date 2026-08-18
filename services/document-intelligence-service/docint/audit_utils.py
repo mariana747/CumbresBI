@@ -27,10 +27,14 @@ def emitir_evento_auditoria(
     nivel especifica de cada servicio, igual criterio que las plantillas de
     correo duplicadas en pld-service/iam-service).
 
-    No propaga la excepcion si audit-service no responde - un fallo de
-    auditoria no debe tumbar el analisis de documentos en si."""
+    No propaga la excepcion ni el status de error - un fallo de auditoria
+    no debe tumbar el analisis de documentos en si. Se loguea en ambos
+    casos (red caida O audit-service rechazando el evento) para no perder
+    el hueco en silencio - antes solo se atrapaba RequestException, un
+    4xx/5xx de audit-service se perdia sin dejar rastro (18/Ago/2026, ver
+    pld-service/pld/audit_utils.py, mismo hallazgo)."""
     try:
-        requests.post(
+        response = requests.post(
             f"{settings.AUDIT_SERVICE_URL}/api/bitacora/registrar_evento/",
             json={
                 "servicio_origen": "document-intelligence-service",
@@ -46,3 +50,10 @@ def emitir_evento_auditoria(
         )
     except requests.RequestException:
         logger.warning("No se pudo registrar el evento de auditoria '%s' para %s", accion, entidad_id)
+        return
+
+    if not response.ok:
+        logger.warning(
+            "audit-service rechazo el evento de auditoria '%s' para %s (status %s): %s",
+            accion, entidad_id, response.status_code, response.text[:500],
+        )

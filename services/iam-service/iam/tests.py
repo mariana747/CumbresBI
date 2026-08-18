@@ -10,11 +10,15 @@ mismo que hace EffectiveScopeMiddleware en produccion, sin la parte de
 verificar la firma (eso ya esta cubierto en libs/cumbresbi-scope/tests).
 """
 
+from unittest.mock import Mock, patch
+
+import requests
 from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
+from .audit_utils import emitir_evento_auditoria
 from .auth_views import LoginRechazadoSinInvitacion, _upsert_identity
 from .models import GeneralSociedad, IamInvitation, IamRole, IamUser, IamUserRole
 from .views import GeneralSociedadViewSet, IamInvitationViewSet, IamUserRoleViewSet, IamUserViewSet
@@ -285,3 +289,29 @@ class IamInvitationViewSetTests(TestCase):
         self.assertEqual(response2.status_code, 200)
         invitacion.refresh_from_db()
         self.assertIsNotNone(invitacion.revoked_at)
+
+
+class EmitirEventoAuditoriaTests(TestCase):
+    """18/Ago/2026: antes solo se atrapaba RequestException (red caida) - un
+    4xx/5xx de audit-service rechazando el evento se perdia en silencio, sin
+    ningun log. Ver mismo hallazgo en pld-service/pld/audit_utils.py."""
+
+    def test_no_truena_si_audit_service_no_responde(self):
+        with patch("iam.audit_utils.requests.post", side_effect=requests.RequestException()):
+            with self.assertLogs("iam.audit_utils", level="WARNING") as logs:
+                emitir_evento_auditoria("iam_users.suspend", "iam_users", "usr00001")
+        self.assertIn("No se pudo registrar", logs.output[0])
+
+    def test_loguea_si_audit_service_rechaza_el_evento(self):
+        respuesta = Mock(status_code=400, ok=False, text="entidad_id invalido")
+        with patch("iam.audit_utils.requests.post", return_value=respuesta):
+            with self.assertLogs("iam.audit_utils", level="WARNING") as logs:
+                emitir_evento_auditoria("iam_users.suspend", "iam_users", "usr00001")
+        self.assertIn("rechazo el evento", logs.output[0])
+        self.assertIn("400", logs.output[0])
+
+    def test_no_loguea_nada_si_audit_service_acepta_el_evento(self):
+        respuesta = Mock(status_code=201, ok=True)
+        with patch("iam.audit_utils.requests.post", return_value=respuesta):
+            with self.assertNoLogs("iam.audit_utils", level="WARNING"):
+                emitir_evento_auditoria("iam_users.suspend", "iam_users", "usr00001")

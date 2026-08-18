@@ -25,10 +25,16 @@ def emitir_evento_auditoria(
 ):
     """Registra un evento en la bitacora central (audit-service).
 
-    No propaga la excepcion si audit-service no responde - un fallo de
-    auditoria no debe tumbar la operacion del expediente KYC en si."""
+    No propaga la excepcion ni el status de error - un fallo de auditoria
+    no debe tumbar la operacion del expediente KYC en si. Se loguea en
+    ambos casos (red caida O audit-service rechazando el evento, ej. un
+    actor_user_id mas largo que la columna) para no perder el hueco en
+    silencio - antes solo se atrapaba RequestException, un 4xx/5xx de
+    audit-service se perdia sin dejar rastro (18/Ago/2026, hallazgo real
+    durante pruebas: un actor_user_id de prueba mas largo de 8 caracteres
+    fallo en audit-service y aqui no quedo ningun log)."""
     try:
-        requests.post(
+        response = requests.post(
             f"{settings.AUDIT_SERVICE_URL}/api/bitacora/registrar_evento/",
             json={
                 "servicio_origen": "pld-service",
@@ -44,6 +50,13 @@ def emitir_evento_auditoria(
         )
     except requests.RequestException:
         logger.warning("No se pudo registrar el evento de auditoria '%s' para %s", accion, entidad_id)
+        return
+
+    if not response.ok:
+        logger.warning(
+            "audit-service rechazo el evento de auditoria '%s' para %s (status %s): %s",
+            accion, entidad_id, response.status_code, response.text[:500],
+        )
 
 
 def contexto_kyc(kyc) -> dict:
