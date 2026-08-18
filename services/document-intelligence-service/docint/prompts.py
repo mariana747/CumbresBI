@@ -31,12 +31,15 @@ PROMPTS = {
     ),
     "pld.ine": (
         "El documento es una identificacion oficial (INE/IFE) de una "
-        "persona fisica. Extrae en extracted_data: nombre_completo, curp, "
-        "fecha_nacimiento (YYYY-MM-DD), domicilio (calle, numero, colonia, "
-        "municipio_alcaldia, estado, cp), clave_elector, "
-        "numero_identificacion (el CIC/numero de identificacion del "
-        "ciudadano impreso junto a la fotografia, NO la clave de elector), "
-        "vigencia (YYYY-MM-DD), tipo_identificacion ('INE'). " + _REGLA_COMUN
+        "persona fisica. Extrae en extracted_data (campos PLANOS, nunca "
+        "un objeto anidado de domicilio - ver nombres exactos): "
+        "nombre_completo, curp, fecha_nac_const (YYYY-MM-DD, fecha de "
+        "nacimiento), dom_calle, dom_numero_ext, dom_numero_int (si "
+        "aparece), dom_colonia, dom_municipio_alcaldia, dom_estado, "
+        "dom_cp, clave_elector, numero_identificacion (el CIC/numero de "
+        "identificacion del ciudadano impreso junto a la fotografia, NO la "
+        "clave de elector), vigencia (YYYY-MM-DD), tipo_identificacion "
+        "('INE'). " + _REGLA_COMUN
     ),
     "pld.curp": (
         "El documento es una constancia de CURP (Clave Unica de Registro de "
@@ -49,15 +52,17 @@ PROMPTS = {
     ),
     "pld.acta_nacimiento": (
         "El documento es un acta de nacimiento. Extrae en extracted_data: "
-        "nombre_completo, fecha_nacimiento (YYYY-MM-DD), pais_nac_const, "
-        "entidad_nacimiento, municipio_nacimiento, nombre_padre, "
-        "nombre_madre, curp (si aparece), folio_acta. " + _REGLA_COMUN
+        "nombre_completo, fecha_nac_const (YYYY-MM-DD, fecha de "
+        "nacimiento), pais_nac_const, entidad_nacimiento, "
+        "municipio_nacimiento, nombre_padre, nombre_madre, curp (si "
+        "aparece), folio_acta. " + _REGLA_COMUN
     ),
     "pld.acta_constitutiva": (
         "El documento es un acta constitutiva de una persona moral. Extrae "
         "en extracted_data: razon_social, folio_mercantil, objeto_social, "
-        "fecha_constitucion (YYYY-MM-DD), rfc (si aparece), "
-        "domicilio_social, notario_publico, numero_notaria. " + _REGLA_COMUN
+        "fecha_nac_const (YYYY-MM-DD, fecha de constitucion), rfc (si "
+        "aparece), domicilio_social, notario_publico, numero_notaria. "
+        + _REGLA_COMUN
     ),
     "pld.comprobante_domicilio": (
         "El documento es un comprobante de domicilio (recibo de luz, agua, "
