@@ -53,6 +53,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         fields = [
             "id_kyc",
             "id_contraparte",
+            "nombre_completo",
             "fecha_nac_const",
             "pais_nac_const",
             "folio_mercantil",

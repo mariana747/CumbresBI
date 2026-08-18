@@ -189,6 +189,27 @@ class CumplimientoDePermisosEnEscrituraTests(TestCase):
         response = self._aprobar_kyc(EffectiveScope(is_global=True, perm_keys=("pld-compliance.aprobar",)))
         self.assertEqual(response.status_code, 200)
 
+    def test_borrar_documento_sin_permiso_da_403(self):
+        # Hallazgo real (18/Ago/2026): "destroy" no estaba en get_permissions
+        # de PldContraparteDocViewSet - caia al default global de DRF
+        # (AllowAny), cualquiera podia borrar documentos sin sesion.
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE duplicado")
+        request = self.factory.delete(f"/api/kyc-docs/{doc.id_kyc_doc}/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = PldContraparteDocViewSet.as_view({"delete": "destroy"})
+        response = view(request, pk=doc.id_kyc_doc)
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(PldContraparteDoc.objects.filter(pk=doc.id_kyc_doc).exists())
+
+    def test_borrar_documento_con_permiso_editar_si_funciona(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE duplicado")
+        request = self.factory.delete(f"/api/kyc-docs/{doc.id_kyc_doc}/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldContraparteDocViewSet.as_view({"delete": "destroy"})
+        response = view(request, pk=doc.id_kyc_doc)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(PldContraparteDoc.objects.filter(pk=doc.id_kyc_doc).exists())
+
 
 class PldTicketClienteTests(TestCase):
     """Frontend de PldTicketCliente (magic link de KYC externo, Fase 2
@@ -412,18 +433,60 @@ class ConfirmarExtraccionTests(TestCase):
         response = self._confirmar(
             {
                 "curp": "CURP000000HDFRRL01",
-                "nombre_completo": "Alguien Que No Tiene Columna Propia",
+                "clave_elector": "Alguien Que No Tiene Columna Propia",
             }
         )
         self.assertEqual(response.status_code, 200)
         self.kyc.refresh_from_db()
         self.assertEqual(self.kyc.curp, "CURP000000HDFRRL01")
-        # "nombre_completo" no es un campo del modelo - se ignora, no truena.
-        self.assertNotIn("nombre_completo", response.data)
+        # "clave_elector" no es un campo del modelo - se ignora, no truena.
+        self.assertNotIn("clave_elector", response.data)
 
     def test_rechaza_si_ningun_campo_es_confirmable(self):
-        response = self._confirmar({"nombre_completo": "Alguien"})
+        response = self._confirmar({"clave_elector": "Alguien"})
         self.assertEqual(response.status_code, 400)
+
+    def test_alias_razon_social_se_guarda_como_nombre_completo(self):
+        # ALIAS_CAMPOS (18/Ago/2026, ver views.py) - el Motor Documental
+        # extrae "razon_social" (acta constitutiva) o "razon_social_o_nombre"
+        # (constancia fiscal) segun el documento; ambos se traducen al mismo
+        # campo del modelo antes de guardarse.
+        response = self._confirmar({"razon_social": "Consultoria y Proyectos Cumbres SA de CV"})
+        self.assertEqual(response.status_code, 200)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.nombre_completo, "Consultoria y Proyectos Cumbres SA de CV")
+
+    def test_extraccion_ine_llena_domicilio_y_fecha_nacimiento(self):
+        # Regresion (18/Ago/2026, hallazgo real: el prompt de pld.ine pedia
+        # un objeto anidado "domicilio" y "fecha_nacimiento" en vez de los
+        # nombres planos que este endpoint acepta - el domicilio y la fecha
+        # de nacimiento se perdian en silencio aunque Gemini los extrajera
+        # bien. Ver docint/prompts.py, campos ya corregidos a plano/
+        # fecha_nac_const - esta prueba fija el contrato para que no se
+        # vuelva a romper la alineacion entre ambos servicios.
+        campos = {
+            "nombre_completo": "Juan Perez Lopez",
+            "curp": "PELJ900101HDFRRN01",
+            "fecha_nac_const": "1990-01-01",
+            "dom_calle": "Laurel",
+            "dom_numero_ext": "14",
+            "dom_colonia": "Centro",
+            "dom_municipio_alcaldia": "Cuauhtemoc",
+            "dom_estado": "CDMX",
+            "dom_cp": "06000",
+            "tipo_identificacion": "INE",
+            "numero_identificacion": "1234567890",
+        }
+        response = self._confirmar(campos)
+        self.assertEqual(response.status_code, 200)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.fecha_nac_const.isoformat(), "1990-01-01")
+        self.assertEqual(self.kyc.dom_calle, "Laurel")
+        self.assertEqual(self.kyc.dom_numero_ext, "14")
+        self.assertEqual(self.kyc.dom_colonia, "Centro")
+        self.assertEqual(self.kyc.dom_municipio_alcaldia, "Cuauhtemoc")
+        self.assertEqual(self.kyc.dom_estado, "CDMX")
+        self.assertEqual(self.kyc.dom_cp, "06000")
 
     def test_rechaza_body_vacio(self):
         response = self._confirmar({})

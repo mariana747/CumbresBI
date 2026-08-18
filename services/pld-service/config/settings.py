@@ -60,6 +60,17 @@ CORS_ALLOWED_ORIGINS = env.list(
     default=["http://localhost:3000", "http://127.0.0.1:3000"],
 )
 
+# Sube el default de Django (2.5MB) - PldTicketClienteViewSet.subir_documento
+# acepta hasta 5 archivos de 2MB c/u (ver pld/views.py, MAX_ARCHIVOS_POR_LOTE/
+# MAX_TAMANO_ARCHIVO_MB); el default rechazaba de golpe el multipart COMPLETO
+# (suma de todos los archivos, no por archivo) con "RequestDataTooBig" antes
+# de que la vista pudiera dar un mensaje explicito - hallazgo 18/Ago/2026, ver
+# memoria de sesion "el subir documentos solo acepta uno por uno". Margen
+# sobre 5*2MB=10MB para el overhead propio del multipart (boundaries, otros
+# campos del form).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
