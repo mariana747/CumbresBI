@@ -9,8 +9,14 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   Grid,
+  IconButton,
   Paper,
   Stack,
   Tab,
@@ -22,10 +28,13 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  Copy,
   FileText,
   Flag,
+  RefreshCw,
   ShieldQuestion,
   Snowflake,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -33,13 +42,16 @@ import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
+  PldContraparteDoc,
   PldContraparteKyc,
   PldDatosEditables,
   aprobarKyc,
   congelarKyc,
+  eliminarDocumentoKyc,
   getKyc,
   marcarSospechosoKyc,
   reactivarCuentaKyc,
+  verificarDocumentosKyc,
 } from "@/lib/pld";
 
 // Tipos que el Motor Documental ya reconoce (docint/classifier.py) - solo
@@ -83,6 +95,7 @@ const GRUPOS_CAMPOS_GENERAL: { titulo: string; campos: { campo: keyof PldDatosEd
   {
     titulo: "Identificación",
     campos: [
+      { campo: "nombre_completo", label: "Nombre completo / Razón social" },
       { campo: "curp", label: "CURP" },
       { campo: "nacionalidad", label: "Nacionalidad" },
       { campo: "pais_nac_const", label: "País de nacimiento / constitución" },
@@ -143,6 +156,11 @@ export default function PldExpedienteDetallePage() {
   const [aprobando, setAprobando] = useState(false);
   const [cambiandoEstadoCuenta, setCambiandoEstadoCuenta] = useState(false);
   const [motorAbierto, setMotorAbierto] = useState(false);
+  const [verificando, setVerificando] = useState(false);
+  const [verificarError, setVerificarError] = useState<string | null>(null);
+  const [verificarMensaje, setVerificarMensaje] = useState<string | null>(null);
+  const [confirmandoEliminarDoc, setConfirmandoEliminarDoc] = useState<PldContraparteDoc | null>(null);
+  const [eliminandoDoc, setEliminandoDoc] = useState(false);
 
   function cargar() {
     setLoading(true);
@@ -160,6 +178,22 @@ export default function PldExpedienteDetallePage() {
 
   const puedeAprobar = session?.perm_keys.includes("pld-compliance.aprobar") ?? false;
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("pld-compliance.editar") ?? false;
+
+  // Duplicados (18/Ago/2026, hallazgo real de Mariana): mismo nombre de
+  // archivo subido mas de una vez para este expediente - solo un aviso
+  // visual, no bloquea nada; el analista decide si borrar el sobrante.
+  // Comparacion case-insensitive porque el nombre lo pone el cliente/
+  // analista tal cual subio el archivo, sin normalizar.
+  const denominacionesDuplicadas = (() => {
+    const conteo = new Map<string, number>();
+    for (const doc of kyc?.documentos ?? []) {
+      if (!doc.denominacion) continue;
+      const clave = doc.denominacion.trim().toLowerCase();
+      conteo.set(clave, (conteo.get(clave) ?? 0) + 1);
+    }
+    return new Set([...conteo.entries()].filter(([, n]) => n > 1).map(([clave]) => clave));
+  })();
 
   async function handleAprobar() {
     if (!session?.user_id) return;
@@ -171,6 +205,43 @@ export default function PldExpedienteDetallePage() {
       setError(err instanceof Error ? err.message : "Error al aprobar el expediente");
     } finally {
       setAprobando(false);
+    }
+  }
+
+  async function handleVerificarDocumentos() {
+    setVerificando(true);
+    setVerificarError(null);
+    setVerificarMensaje(null);
+    try {
+      const resultado = await verificarDocumentosKyc(params.idKyc);
+      const eliminados = resultado.documentos_eliminados;
+      setVerificarMensaje(
+        eliminados.length === 0
+          ? "Todos los documentos siguen en Drive."
+          : `Se quitaron ${eliminados.length} documento(s) que ya no están en Drive: ${eliminados
+              .map((d) => d.denominacion || "sin nombre")
+              .join(", ")}.`
+      );
+      cargar();
+    } catch (err) {
+      setVerificarError(err instanceof Error ? err.message : "Error al verificar los documentos en Drive");
+    } finally {
+      setVerificando(false);
+    }
+  }
+
+  async function handleEliminarDocumento() {
+    if (!confirmandoEliminarDoc) return;
+    setEliminandoDoc(true);
+    try {
+      await eliminarDocumentoKyc(confirmandoEliminarDoc.id_kyc_doc);
+      setConfirmandoEliminarDoc(null);
+      cargar();
+    } catch (err) {
+      setVerificarError(err instanceof Error ? err.message : "Error al eliminar el documento");
+      setConfirmandoEliminarDoc(null);
+    } finally {
+      setEliminandoDoc(false);
     }
   }
 
@@ -217,7 +288,10 @@ export default function PldExpedienteDetallePage() {
                 {kyc.id_contraparte.slice(0, 2).toUpperCase()}
               </Avatar>
               <Typography variant="subtitle1" fontWeight={600}>
-                Contraparte {kyc.id_contraparte}
+                {kyc.nombre_completo || `Contraparte ${kyc.id_contraparte}`}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">
+                {kyc.nombre_completo ? `Contraparte ${kyc.id_contraparte}` : "Nombre sin capturar todavía"}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {kyc.curp ? `CURP: ${kyc.curp}` : "Sin CURP capturado todavía"}
@@ -366,35 +440,87 @@ export default function PldExpedienteDetallePage() {
                           <Chip key={label} label={label} size="small" variant="outlined" />
                         ))}
                       </Stack>
-                      {puedeCrear && (
-                        <Button
-                          size="small"
-                          variant="contained"
-                          startIcon={<UploadCloud size={16} strokeWidth={1.5} />}
-                          onClick={() => setMotorAbierto(true)}
-                          sx={{ whiteSpace: "nowrap" }}
-                        >
-                          Analizar con Motor Documental
-                        </Button>
-                      )}
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                        {puedeEditar && kyc.documentos.length > 0 && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={
+                              verificando ? (
+                                <CircularProgress size={16} />
+                              ) : (
+                                <RefreshCw size={16} strokeWidth={1.5} />
+                              )
+                            }
+                            disabled={verificando}
+                            onClick={handleVerificarDocumentos}
+                            sx={{ whiteSpace: "nowrap" }}
+                          >
+                            Verificar en Drive
+                          </Button>
+                        )}
+                        {puedeCrear && (
+                          <Button
+                            size="small"
+                            variant="contained"
+                            startIcon={<UploadCloud size={16} strokeWidth={1.5} />}
+                            onClick={() => setMotorAbierto(true)}
+                            sx={{ whiteSpace: "nowrap" }}
+                          >
+                            Analizar con Motor Documental
+                          </Button>
+                        )}
+                      </Stack>
                     </Stack>
+
+                    {verificarError && <Alert severity="error">{verificarError}</Alert>}
+                    {verificarMensaje && (
+                      <Alert severity="info" onClose={() => setVerificarMensaje(null)}>
+                        {verificarMensaje}
+                      </Alert>
+                    )}
 
                     {kyc.documentos.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
                         Sin documentos subidos todavía.
                       </Typography>
                     ) : (
-                      kyc.documentos.map((doc) => (
-                        <Paper key={doc.id_kyc_doc} variant="outlined" sx={{ p: 1.5 }}>
-                          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
-                            <Stack direction="row" spacing={1.5} alignItems="center">
-                              <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
-                              <Typography variant="body2">{doc.denominacion || "Documento sin nombre"}</Typography>
+                      kyc.documentos.map((doc) => {
+                        const esDuplicado = Boolean(
+                          doc.denominacion && denominacionesDuplicadas.has(doc.denominacion.trim().toLowerCase())
+                        );
+                        return (
+                          <Paper key={doc.id_kyc_doc} variant="outlined" sx={{ p: 1.5 }}>
+                            <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                              <Stack direction="row" spacing={1.5} alignItems="center">
+                                <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
+                                <Typography variant="body2">{doc.denominacion || "Documento sin nombre"}</Typography>
+                              </Stack>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                {esDuplicado && (
+                                  <Chip
+                                    size="small"
+                                    color="warning"
+                                    icon={<Copy size={14} strokeWidth={1.5} />}
+                                    label="Duplicado"
+                                  />
+                                )}
+                                <Chip size="small" label={doc.status ?? "Sin estado"} />
+                                {puedeEditar && (
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    aria-label="Eliminar documento"
+                                    onClick={() => setConfirmandoEliminarDoc(doc)}
+                                  >
+                                    <Trash2 size={16} strokeWidth={1.5} />
+                                  </IconButton>
+                                )}
+                              </Stack>
                             </Stack>
-                            <Chip size="small" label={doc.status ?? "Sin estado"} />
-                          </Stack>
-                        </Paper>
-                      ))
+                          </Paper>
+                        );
+                      })
                     )}
                   </Stack>
                 )}
@@ -511,6 +637,24 @@ export default function PldExpedienteDetallePage() {
           onDatosActualizados={cargar}
         />
       )}
+
+      <Dialog open={Boolean(confirmandoEliminarDoc)} onClose={() => setConfirmandoEliminarDoc(null)}>
+        <DialogTitle>¿Eliminar documento?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Vas a eliminar{" "}
+            <strong>{confirmandoEliminarDoc?.denominacion || "este documento"}</strong> del expediente.
+            Esto solo quita el registro de la plataforma - el archivo en Drive no se borra. Esta
+            acción no se puede deshacer desde aquí.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmandoEliminarDoc(null)}>Cancelar</Button>
+          <Button color="error" variant="contained" onClick={handleEliminarDocumento} disabled={eliminandoDoc}>
+            {eliminandoDoc ? <CircularProgress size={20} color="inherit" /> : "Eliminar documento"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AppShell>
   );
 }
