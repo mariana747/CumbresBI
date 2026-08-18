@@ -147,6 +147,10 @@ DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080"
 MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
 
+# audit-service (bitacora central, ver pld/audit_utils.py). Mismo patron que
+# document-intelligence-service/docint/audit_utils.py e iam-service/iam/audit_utils.py.
+AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
+
 # Secreto compartido servicio-a-servicio (docs/architecture/README.md sec.
 # 11: "secretos gestionados... secret key de reCAPTCHA"; este es distinto,
 # ver mas abajo) - PldTicketClienteViewSet.subir_documento es PUBLICO (sin

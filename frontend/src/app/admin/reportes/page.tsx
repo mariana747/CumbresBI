@@ -30,7 +30,6 @@ import AppShell from "@/components/AppShell";
 import { IamUser, IamUserRole, SCOPE_LABELS, listRoleHistory, listUsers, scopeChipColor } from "@/lib/iam";
 import {
   BitacoraEvento,
-  ENTITY_OPTIONS,
   SERVICE_OPTIONS,
   exportarBitacoraCsvADrive,
   friendlyActionName,
@@ -300,7 +299,6 @@ function BitacoraAuditoria() {
   const [eventos, setEventos] = useState<BitacoraEvento[]>([]);
   const [search, setSearch] = useState("");
   const [servicioOrigen, setServicioOrigen] = useState("");
-  const [entidad, setEntidad] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [loading, setLoading] = useState(true);
@@ -319,7 +317,6 @@ function BitacoraAuditoria() {
       const resultado = await exportarBitacoraCsvADrive({
         search: search || undefined,
         servicioOrigen: servicioOrigen || undefined,
-        entidad: entidad || undefined,
         desde: desde || undefined,
         hasta: hasta || undefined,
       });
@@ -355,7 +352,6 @@ function BitacoraAuditoria() {
       listBitacora({
         search: search || undefined,
         servicioOrigen: servicioOrigen || undefined,
-        entidad: entidad || undefined,
         desde: desde || undefined,
         hasta: hasta || undefined,
       })
@@ -364,7 +360,7 @@ function BitacoraAuditoria() {
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timeout);
-  }, [search, servicioOrigen, entidad, desde, hasta]);
+  }, [search, servicioOrigen, desde, hasta]);
 
   return (
     <>
@@ -379,10 +375,15 @@ function BitacoraAuditoria() {
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
         <TextField
           size="small"
-          placeholder="Buscar por acción/entidad..."
+          // Un solo buscador (18/Ago/2026: antes habia uno de texto libre y
+          // otro de "Cliente o expediente", redundantes) - el backend ya
+          // busca en accion/entidad/entidad_id Y en id_contraparte/
+          // nombre_completo del cliente con el mismo ?search=, ver
+          // audit-service/auditoria/views.py::get_queryset.
+          placeholder="Buscar por acción, cliente o expediente..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          sx={{ flex: 1, maxWidth: 300 }}
+          sx={{ flex: 1, maxWidth: 320 }}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -401,22 +402,6 @@ function BitacoraAuditoria() {
           >
             <MenuItem value="">Todos</MenuItem>
             {SERVICE_OPTIONS.map((o) => (
-              <MenuItem key={o.value} value={o.value}>
-                {o.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel id="entidad-filter-label">Entidad</InputLabel>
-          <Select
-            labelId="entidad-filter-label"
-            label="Entidad"
-            value={entidad}
-            onChange={(e) => setEntidad(e.target.value)}
-          >
-            <MenuItem value="">Todas</MenuItem>
-            {ENTITY_OPTIONS.map((o) => (
               <MenuItem key={o.value} value={o.value}>
                 {o.label}
               </MenuItem>

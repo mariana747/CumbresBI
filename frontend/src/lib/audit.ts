@@ -27,6 +27,11 @@ export async function listBitacora({
   desde,
   hasta,
 }: {
+  // Un solo buscador (18/Ago/2026, auditoria especifica del Motor
+  // Documental dentro de PLD): ademas de accion/entidad/entidad_id, tambien
+  // busca id_contraparte/nombre_completo del cliente dentro del JSON
+  // valores_nuevos/valores_previos - ver
+  // audit-service/auditoria/views.py::get_queryset.
   search?: string;
   servicioOrigen?: string;
   entidad?: string;
@@ -150,6 +155,19 @@ const ACTION_VERB_LABELS: Record<string, string> = {
   login: "Inició sesión",
   use: "Usó",
   resend: "Reenvió",
+  // Verbos del Motor Documental dentro de PLD (18/Ago/2026,
+  // pld-service/pld/views.py) - en español porque asi es la convencion de
+  // ese servicio (mismo criterio que "documento_analizado" de docint), a
+  // diferencia de los verbos en ingles de iam-service de arriba.
+  aprobar: "Aprobó",
+  marcar_sospechoso: "Marcó como sospechoso",
+  congelar: "Congeló",
+  reactivar_cuenta: "Reactivó",
+  subir: "Subió",
+  eliminar: "Eliminó",
+  eliminar_por_sincronia_drive: "Eliminó (ya no existía en Drive)",
+  confirmar_extraccion: "Confirmó datos extraídos",
+  actualizar_datos: "Actualizó sus datos",
 };
 
 // Acciones que ya son una frase completa por si solas - no se les concatena
