@@ -5,9 +5,9 @@ import logging
 import requests
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import action
-from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
@@ -26,15 +26,21 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
 
     Filtros: ?servicio_origen=, ?actor_user_id=, ?entidad=, ?desde=
     (ocurrido_en >=, ISO 8601), ?hasta= (ocurrido_en <=, ISO 8601).
-    Busqueda de texto libre (?search=) sobre accion/entidad/entidad_id.
     Exportable a CSV via /api/bitacora/export_csv/ (mismos filtros que la
     lista) - exportacion a PDF sigue pendiente.
+
+    ?search= (18/Ago/2026, auditoria especifica del Motor Documental dentro
+    de PLD: un solo buscador, no dos) - busca tanto accion/entidad/
+    entidad_id como id_contraparte/nombre_completo del cliente dentro del
+    JSON valores_nuevos/valores_previos (ver
+    pld-service/pld/audit_utils.py::contexto_kyc). Es un OR manual en vez
+    del SearchFilter generico de DRF porque SearchFilter no llega a claves
+    de un JSONField - "entidad" (el filtro de tipo) sigue aparte porque
+    filtra por *tipo* de cosa, no por *cliente*.
     """
 
     queryset = BitacoraAuditoria.objects.all()
     serializer_class = BitacoraAuditoriaSerializer
-    filter_backends = [SearchFilter]
-    search_fields = ["accion", "entidad", "entidad_id"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -55,6 +61,17 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
         entidad = self.request.query_params.get("entidad")
         if entidad:
             queryset = queryset.filter(entidad=entidad)
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(accion__icontains=search)
+                | Q(entidad__icontains=search)
+                | Q(entidad_id__icontains=search)
+                | Q(valores_nuevos__id_contraparte__icontains=search)
+                | Q(valores_nuevos__nombre_completo__icontains=search)
+                | Q(valores_previos__id_contraparte__icontains=search)
+                | Q(valores_previos__nombre_completo__icontains=search)
+            )
         desde = self.request.query_params.get("desde")
         if desde:
             queryset = queryset.filter(ocurrido_en__gte=desde)
