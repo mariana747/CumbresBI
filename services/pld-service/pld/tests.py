@@ -9,6 +9,7 @@ datos del otro").
 import datetime
 from unittest.mock import Mock, patch
 
+import requests
 from cumbresbi_scope.scope import EffectiveScope
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -16,6 +17,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
+from .audit_utils import emitir_evento_auditoria
 from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
 from .ticket_utils import hash_token
 from .views import PldContraparteDocViewSet, PldContraparteKycViewSet, PldTicketClienteViewSet
@@ -768,3 +770,30 @@ class AuditoriaMotorDocumentalTests(TestCase):
         self.assertEqual(payload["entidad_id"], str(doc.id_kyc_doc))
         self.assertEqual(payload["valores_previos"]["denominacion"], "INE duplicado")
         self.assertEqual(payload["valores_previos"]["drive_file_id"], "abc999")
+
+
+class EmitirEventoAuditoriaTests(TestCase):
+    """18/Ago/2026: antes solo se atrapaba RequestException (red caida) - un
+    4xx/5xx de audit-service rechazando el evento (ej. actor_user_id mas
+    largo que la columna, hallazgo real de un smoke test en vivo) se perdia
+    en silencio, sin ningun log."""
+
+    def test_no_truena_si_audit_service_no_responde(self):
+        with patch("pld.audit_utils.requests.post", side_effect=requests.RequestException()):
+            with self.assertLogs("pld.audit_utils", level="WARNING") as logs:
+                emitir_evento_auditoria("pld_contrapartes_kyc.aprobar", "pld_contrapartes_kyc", "ba9fa64b")
+        self.assertIn("No se pudo registrar", logs.output[0])
+
+    def test_loguea_si_audit_service_rechaza_el_evento(self):
+        respuesta = Mock(status_code=400, ok=False, text="actor_user_id demasiado largo")
+        with patch("pld.audit_utils.requests.post", return_value=respuesta):
+            with self.assertLogs("pld.audit_utils", level="WARNING") as logs:
+                emitir_evento_auditoria("pld_contrapartes_kyc.aprobar", "pld_contrapartes_kyc", "ba9fa64b")
+        self.assertIn("rechazo el evento", logs.output[0])
+        self.assertIn("400", logs.output[0])
+
+    def test_no_loguea_nada_si_audit_service_acepta_el_evento(self):
+        respuesta = Mock(status_code=201, ok=True)
+        with patch("pld.audit_utils.requests.post", return_value=respuesta):
+            with self.assertNoLogs("pld.audit_utils", level="WARNING"):
+                emitir_evento_auditoria("pld_contrapartes_kyc.aprobar", "pld_contrapartes_kyc", "ba9fa64b")
