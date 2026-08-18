@@ -10,6 +10,7 @@ import datetime
 from unittest.mock import Mock, patch
 
 from cumbresbi_scope.scope import EffectiveScope
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
@@ -592,3 +593,108 @@ class SubirDocumentoPublicoTests(TestCase):
         self.assertEqual(doc.drive_file_id, "abc123")
         self.assertEqual(doc.status, PldContraparteDoc.STATUS_ENTREGADO)
         self.assertEqual(doc.created_by, "externo")
+
+
+class AuditoriaMotorDocumentalTests(TestCase):
+    """Auditoria especifica del Motor Documental dentro de PLD (18/Ago/2026):
+    hasta ahora la unica bitacora relacionada era la generica de docint
+    (analisis IA, sin contexto de expediente/cliente) - estas pruebas
+    verifican que las decisiones humanas de negocio (aprobar, subir/eliminar
+    documento, cambiar estado_cuenta) tambien emiten un evento hacia
+    audit-service, con id_contraparte/nombre_completo en valores_nuevos para
+    que el frontend de Auditoria los pueda mostrar sin parsear JSON crudo."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(
+            is_global=True,
+            perm_keys=("pld-compliance.aprobar", "pld-compliance.editar", "pld-compliance.crear"),
+        )
+        self.kyc = _kyc("cp000200", RFC_TIZARA)
+
+    def test_aprobar_emite_evento_de_auditoria(self):
+        request = _with_scope(
+            self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/aprobar/", {"aprobado_por": "usr00001"}),
+            self.scope,
+        )
+        view = PldContraparteKycViewSet.as_view({"post": "aprobar"})
+        with patch("pld.audit_utils.requests.post") as mock_post:
+            response = view(request, pk=self.kyc.id_kyc)
+        self.assertEqual(response.status_code, 200)
+        mock_post.assert_called_once()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["servicio_origen"], "pld-service")
+        self.assertEqual(payload["accion"], "pld_contrapartes_kyc.aprobar")
+        self.assertEqual(payload["entidad"], "pld_contrapartes_kyc")
+        self.assertEqual(payload["entidad_id"], str(self.kyc.id_kyc))
+        self.assertEqual(payload["actor_user_id"], "usr00001")
+        self.assertEqual(payload["valores_nuevos"]["id_contraparte"], "cp000200")
+
+    def test_congelar_emite_evento_con_estado_anterior_y_nuevo(self):
+        request = _with_scope(
+            self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/congelar/", {"actor_user_id": "usr00002"}),
+            self.scope,
+        )
+        view = PldContraparteKycViewSet.as_view({"post": "congelar"})
+        with patch("pld.audit_utils.requests.post") as mock_post:
+            response = view(request, pk=self.kyc.id_kyc)
+        self.assertEqual(response.status_code, 200)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_kyc.congelar")
+        self.assertEqual(payload["valores_previos"]["estado_cuenta"], PldContraparteKyc.CUENTA_ACTIVA)
+        self.assertEqual(payload["valores_nuevos"]["estado_cuenta"], PldContraparteKyc.CUENTA_CONGELADA)
+
+    def test_subir_documento_emite_evento_de_auditoria(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE")
+        archivo = SimpleUploadedFile("ine.pdf", b"contenido", content_type="application/pdf")
+        request = _with_scope(
+            self.factory.post(
+                f"/api/kyc-docs/{doc.id_kyc_doc}/subir/",
+                {"file": archivo, "actor_user_id": "usr00003"},
+            ),
+            self.scope,
+        )
+        view = PldContraparteDocViewSet.as_view({"post": "subir"})
+        # pld.views.requests y pld.audit_utils.requests son el mismo modulo
+        # "requests" (singleton de Python) - patchear "post" en ambos por
+        # separado pisa el mismo atributo dos veces, no dos mocks distintos.
+        # Un solo mock con side_effect que distingue por URL.
+        with patch("requests.post") as mock_post:
+            def _side_effect(url, *args, **kwargs):
+                if url == f"{settings.AUDIT_SERVICE_URL}/api/bitacora/registrar_evento/":
+                    return Mock(status_code=200)
+                return Mock(
+                    status_code=201,
+                    content=b"{}",
+                    json=lambda: {
+                        "file_id": "abc123",
+                        "web_view_link": "https://drive/abc123",
+                        "mime_type": "application/pdf",
+                        "tamano_bytes": 9,
+                    },
+                )
+
+            mock_post.side_effect = _side_effect
+            response = view(request, pk=doc.id_kyc_doc)
+        self.assertEqual(response.status_code, 200)
+        audit_calls = [c for c in mock_post.call_args_list if "bitacora" in c.args[0]]
+        self.assertEqual(len(audit_calls), 1)
+        payload = audit_calls[0].kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_docs.subir")
+        self.assertEqual(payload["entidad"], "pld_contrapartes_docs")
+        self.assertEqual(payload["entidad_id"], str(doc.id_kyc_doc))
+        self.assertEqual(payload["valores_nuevos"]["nombre_completo"], self.kyc.nombre_completo)
+        self.assertEqual(payload["valores_nuevos"]["denominacion"], "INE")
+
+    def test_eliminar_documento_emite_evento_antes_de_borrarlo(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE duplicado", drive_file_id="abc999")
+        request = _with_scope(self.factory.delete(f"/api/kyc-docs/{doc.id_kyc_doc}/"), self.scope)
+        view = PldContraparteDocViewSet.as_view({"delete": "destroy"})
+        with patch("pld.audit_utils.requests.post") as mock_post:
+            response = view(request, pk=doc.id_kyc_doc)
+        self.assertEqual(response.status_code, 204)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_docs.eliminar")
+        self.assertEqual(payload["entidad_id"], str(doc.id_kyc_doc))
+        self.assertEqual(payload["valores_previos"]["denominacion"], "INE duplicado")
+        self.assertEqual(payload["valores_previos"]["drive_file_id"], "abc999")

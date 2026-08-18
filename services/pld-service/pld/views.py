@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet
 
+from .audit_utils import contexto_kyc, emitir_evento_auditoria
 from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
 from .serializers import (
     PldContraparteDocSerializer,
@@ -71,6 +72,20 @@ def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
 
         if not upstream.json().get("existe", True):
             eliminados.append({"id_kyc_doc": doc.id_kyc_doc, "denominacion": doc.denominacion})
+            # Auditoria ANTES del delete (18/Ago/2026) - un borrado silencioso
+            # de evidencia KYC, aunque sea por sincronia automatica con
+            # Drive, sigue siendo una decision sobre el expediente de un
+            # cliente y debe quedar en la bitacora con el mismo contexto que
+            # cualquier otra accion del Motor Documental (ver
+            # pld/audit_utils.py::contexto_kyc).
+            emitir_evento_auditoria(
+                "pld_contrapartes_docs.eliminar_por_sincronia_drive",
+                "pld_contrapartes_docs",
+                str(doc.id_kyc_doc),
+                actor_user_id="sistema-sincronia-drive",
+                valores_previos={"denominacion": doc.denominacion, "drive_file_id": doc.drive_file_id},
+                valores_nuevos={**contexto_kyc(kyc), "denominacion": doc.denominacion},
+            )
             doc.delete()
 
     return eliminados
@@ -275,6 +290,13 @@ class PldContraparteKycViewSet(ModelViewSet):
         kyc.aprobado_por = aprobado_por
         kyc.aprobado_en = timezone.now()
         kyc.save(update_fields=["aprobado_por", "aprobado_en"])
+        emitir_evento_auditoria(
+            "pld_contrapartes_kyc.aprobar",
+            "pld_contrapartes_kyc",
+            str(kyc.id_kyc),
+            actor_user_id=aprobado_por,
+            valores_nuevos=contexto_kyc(kyc),
+        )
         return Response(self.get_serializer(kyc).data)
 
     # Tres acciones del "semaforo" de estado_cuenta (17/Ago/2026, vista de
@@ -283,24 +305,33 @@ class PldContraparteKycViewSet(ModelViewSet):
     # estado_llenado/aprobado_en: una cuenta puede estar "Aprobada" (KYC
     # completo) y a la vez "Congelada" (decision operativa posterior, ej.
     # actividad sospechosa detectada despues de aprobar).
-    def _set_estado_cuenta(self, request, nuevo_estado):
+    def _set_estado_cuenta(self, request, nuevo_estado, accion):
         kyc = self.get_object()
+        estado_anterior = kyc.estado_cuenta
         kyc.estado_cuenta = nuevo_estado
         kyc.save(update_fields=["estado_cuenta"])
+        emitir_evento_auditoria(
+            accion,
+            "pld_contrapartes_kyc",
+            str(kyc.id_kyc),
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_previos={"estado_cuenta": estado_anterior},
+            valores_nuevos={**contexto_kyc(kyc), "estado_cuenta": nuevo_estado},
+        )
         return Response(self.get_serializer(kyc).data)
 
     @action(detail=True, methods=["post"])
     def marcar_sospechoso(self, request, pk=None):
-        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_SOSPECHOSA)
+        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_SOSPECHOSA, "pld_contrapartes_kyc.marcar_sospechoso")
 
     @action(detail=True, methods=["post"])
     def congelar(self, request, pk=None):
-        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_CONGELADA)
+        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_CONGELADA, "pld_contrapartes_kyc.congelar")
 
     @action(detail=True, methods=["post"])
     def reactivar_cuenta(self, request, pk=None):
         """Deshace marcar_sospechoso/congelar - vuelve la cuenta a ACTIVA."""
-        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_ACTIVA)
+        return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_ACTIVA, "pld_contrapartes_kyc.reactivar_cuenta")
 
 
 class PldContraparteDocViewSet(ModelViewSet):
@@ -385,7 +416,33 @@ class PldContraparteDocViewSet(ModelViewSet):
         doc.subido_en = timezone.now()
         doc.save(update_fields=["drive_file_id", "link_documento", "mime_type", "tamano_bytes", "subido_en"])
 
+        emitir_evento_auditoria(
+            "pld_contrapartes_docs.subir",
+            "pld_contrapartes_docs",
+            str(doc.id_kyc_doc),
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={**contexto_kyc(doc.kyc), "denominacion": doc.denominacion, "nombre_archivo": archivo.name},
+        )
         return Response(self.get_serializer(doc).data)
+
+    def destroy(self, request, *args, **kwargs):
+        """Override del destroy generico de DRF (18/Ago/2026) - eliminar un
+        documento del expediente (ej. un duplicado, ver comentario en
+        get_permissions arriba) es una decision sobre evidencia KYC de un
+        cliente real y debe quedar auditada igual que subir/aprobar, no solo
+        gateada por permiso."""
+        doc = self.get_object()
+        contexto = {**contexto_kyc(doc.kyc), "denominacion": doc.denominacion, "drive_file_id": doc.drive_file_id}
+        doc_id = str(doc.id_kyc_doc)
+        response = super().destroy(request, *args, **kwargs)
+        emitir_evento_auditoria(
+            "pld_contrapartes_docs.eliminar",
+            "pld_contrapartes_docs",
+            doc_id,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_previos=contexto,
+        )
+        return response
 
 
 class PldTicketClienteViewSet(ModelViewSet):
