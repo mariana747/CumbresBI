@@ -413,6 +413,13 @@ class ConfirmarExtraccionTests(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.kyc = _kyc("cp000060", RFC_TIZARA)
+        # confirmar_extraccion ahora emite auditoria (18/Ago/2026, ver
+        # pld/audit_utils.py) - se mockea aqui para todas las pruebas de la
+        # clase, no solo la que la verifica explicitamente, para no pegarle
+        # a audit-service real desde pruebas que no la necesitan.
+        patcher = patch("requests.post", return_value=Mock(status_code=200))
+        self.mock_audit_post = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _confirmar(self, campos, scope=None):
         request = self.factory.post(
@@ -492,6 +499,14 @@ class ConfirmarExtraccionTests(TestCase):
     def test_rechaza_body_vacio(self):
         response = self._confirmar({})
         self.assertEqual(response.status_code, 400)
+
+    def test_confirmar_extraccion_emite_evento_de_auditoria(self):
+        response = self._confirmar({"curp": "CURP000000HDFRRL01"})
+        self.assertEqual(response.status_code, 200)
+        payload = self.mock_audit_post.call_args.kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_kyc.confirmar_extraccion")
+        self.assertEqual(payload["entidad_id"], str(self.kyc.id_kyc))
+        self.assertEqual(payload["valores_nuevos"]["campos"], {"curp": "CURP000000HDFRRL01"})
 
 
 class SubirDocumentoPublicoTests(TestCase):
@@ -593,6 +608,61 @@ class SubirDocumentoPublicoTests(TestCase):
         self.assertEqual(doc.drive_file_id, "abc123")
         self.assertEqual(doc.status, PldContraparteDoc.STATUS_ENTREGADO)
         self.assertEqual(doc.created_by, "externo")
+
+    def test_subir_publico_emite_evento_de_auditoria_con_actor_externo(self):
+        with patch("pld.views.recaptcha.verificar", return_value=True), patch("requests.post") as mock_post:
+            mock_post.return_value = Mock(
+                status_code=201,
+                content=b"{}",
+                json=lambda: {
+                    "file_id": "abc123",
+                    "web_view_link": "https://drive/abc123",
+                    "mime_type": "application/pdf",
+                    "tamano_bytes": 14,
+                },
+            )
+            self._subir()
+        audit_calls = [c for c in mock_post.call_args_list if "bitacora" in c.args[0]]
+        self.assertEqual(len(audit_calls), 1)
+        payload = audit_calls[0].kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_docs.subir")
+        self.assertEqual(payload["actor_user_id"], "externo")
+        self.assertEqual(payload["valores_nuevos"]["id_contraparte"], "cp000070")
+
+
+class ActualizarDatosPublicoTests(TestCase):
+    """actualizar_datos (17/Ago/2026): el cliente externo edita sus propios
+    datos de KYC sin sesion, canjeando el mismo token del link publico -
+    debe auditarse con el mismo criterio que subir_documento (actor
+    "externo", ver pld/views.py::PldTicketClienteViewSet.actualizar_datos)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000080", RFC_TIZARA)
+        self.ticket = PldTicketCliente.objects.create(
+            kyc=self.kyc,
+            email="cliente@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-datos"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=5,
+        )
+        self.view = PldTicketClienteViewSet.as_view({"post": "actualizar_datos"})
+
+    def test_actualizar_datos_emite_evento_de_auditoria(self):
+        request = self.factory.post(
+            "/api/ticket-cliente/actualizar_datos/",
+            {"token": "token-datos", "campos": {"telefono_sms": "5511112222"}},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch("requests.post", return_value=Mock(status_code=200)) as mock_post:
+            response = self.view(request)
+        self.assertEqual(response.status_code, 200)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_kyc.actualizar_datos")
+        self.assertEqual(payload["actor_user_id"], "externo")
+        self.assertEqual(payload["valores_nuevos"]["campos"], {"telefono_sms": "5511112222"})
 
 
 class AuditoriaMotorDocumentalTests(TestCase):

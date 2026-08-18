@@ -237,6 +237,13 @@ class PldContraparteKycViewSet(ModelViewSet):
         serializer = self.get_serializer(kyc, data=datos_validos, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        emitir_evento_auditoria(
+            "pld_contrapartes_kyc.confirmar_extraccion",
+            "pld_contrapartes_kyc",
+            str(kyc.id_kyc),
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={**contexto_kyc(kyc), "campos": datos_validos},
+        )
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
@@ -681,6 +688,18 @@ class PldTicketClienteViewSet(ModelViewSet):
                 updated_by="externo",
             )
             resultados.append({"nombre_archivo": archivo.name, "ok": True, **PldContraparteDocSerializer(doc).data})
+            # actor_user_id="externo" (no hay sesion/JWT de usuario en este
+            # flujo publico, mismo criterio que created_by/updated_by arriba
+            # y que iam_magic_links.use en iam-service/audit_utils) - lo que
+            # importa para PLD es que quede claro que fue el cliente quien
+            # subio el documento, no un analista.
+            emitir_evento_auditoria(
+                "pld_contrapartes_docs.subir",
+                "pld_contrapartes_docs",
+                str(doc.id_kyc_doc),
+                actor_user_id="externo",
+                valores_nuevos={**contexto_kyc(ticket.kyc), "denominacion": doc.denominacion, "nombre_archivo": archivo.name},
+            )
 
         todos_ok = all(r["ok"] for r in resultados)
         return Response({"resultados": resultados}, status=201 if todos_ok else 207)
@@ -721,6 +740,13 @@ class PldTicketClienteViewSet(ModelViewSet):
         serializer = PldContraparteKycSerializer(ticket.kyc, data=datos_validos, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save(updated_by="externo")
+        emitir_evento_auditoria(
+            "pld_contrapartes_kyc.actualizar_datos",
+            "pld_contrapartes_kyc",
+            str(ticket.kyc_id),
+            actor_user_id="externo",
+            valores_nuevos={**contexto_kyc(ticket.kyc), "campos": datos_validos},
+        )
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
