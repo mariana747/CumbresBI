@@ -45,6 +45,7 @@ jobs:
             audit-service,
             pld-service,
             vivienda-service,
+            materiales-service,
             compras-tesoreria-service,
             rrhh-service,
             tesoreria-service,
@@ -76,6 +77,7 @@ jobs:
       AUDIT_DB_HOST: 127.0.0.1
       PLD_DB_HOST: 127.0.0.1
       VIVIENDA_DB_HOST: 127.0.0.1
+      MATERIALES_DB_HOST: 127.0.0.1
       COMPRAS_TESORERIA_DB_HOST: 127.0.0.1
       RRHH_DB_HOST: 127.0.0.1
       TESORERIA_DB_HOST: 127.0.0.1
@@ -85,6 +87,7 @@ jobs:
       AUDIT_DB_USER: root
       PLD_DB_USER: root
       VIVIENDA_DB_USER: root
+      MATERIALES_DB_USER: root
       COMPRAS_TESORERIA_DB_USER: root
       RRHH_DB_USER: root
       TESORERIA_DB_USER: root
@@ -224,6 +227,7 @@ jobs:
             audit-service,
             pld-service,
             vivienda-service,
+            materiales-service,
             compras-tesoreria-service,
             rrhh-service,
             tesoreria-service,
