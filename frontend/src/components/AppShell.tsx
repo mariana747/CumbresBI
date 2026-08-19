@@ -29,11 +29,13 @@ import {
   ShieldCheck,
   KeyRound,
   FileSearch,
+  FileText,
   ClipboardList,
   Link2,
   Building2,
   Landmark,
   Users,
+  Wallet,
   UserRound,
   UserPlus,
   ScrollText,
@@ -213,21 +215,34 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // de la barra en vez de dejarlo en gris sin motivo (decision 11/Ago/2026
   // - antes se mostraban los 3 a cualquiera con sesion, y despues se
   // dejaron deshabilitados; version actual permite entrar, ver mas abajo).
-  // Contrapartes: permiso ya asignado en la matriz (varios roles PLD lo
-  // traen, ej. PLD_APROBADOR/PLD_ANALISTA) pero el "contrapartes-service"
-  // (dueno real de id_contraparte, ver comentario en pld/models.py) todavia
-  // no existe. Decision de producto 11/Ago/2026: en vez de dejarlo
-  // deshabilitado, se deja entrar - la pantalla misma dice "en desarrollo"
-  // (mismo criterio que Ventas/Compras/RRHH de aqui abajo y que MiCumbres
-  // desde Fase 0) - ver docs/CumbresBI_estado.md Fase 2.
-  if (tieneAlgunPermiso(session, ["contrapartes"])) {
-    items.push({ label: "Contrapartes", href: "/contrapartes", icon: Users, enabled: true });
-  }
   if (tieneAlgunPermiso(session, ["ventas-vivienda", "materiales"])) {
     items.push({ label: "Ventas / Vivienda", href: "/ventas-vivienda", icon: Building2, enabled: true });
   }
-  if (tieneAlgunPermiso(session, ["tesoreria", "compras", "facturacion-cfdi"])) {
-    items.push({ label: "Compras / Tesorería", href: "/compras-tesoreria", icon: Landmark, enabled: true });
+  // Tesoreria (18/Ago/2026, arranque formal de Fase 4) ya tiene pantalla
+  // real de Contrapartes - reemplaza el placeholder "en desarrollo" que
+  // tenia su propio apartado suelto en el sidebar (docs/architecture/
+  // README.md sec. 11.2 #7: "fusion definitiva", Contrapartes vive dentro
+  // de tesoreria-service, no un microservicio propio - asi que un solo
+  // apartado, no dos "Contrapartes" distintos). Se incluye el permiso
+  // "contrapartes" en el gate (no solo tesoreria/facturacion-cfdi) porque
+  // varios roles de PLD solo tienen contrapartes.leer (ej. PLD_ANALISTA)
+  // y deben poder VER el catalogo real aunque no puedan crear/editar ahi -
+  // el propio boton "Nueva contraparte" ya se oculta sin tesoreria.crear.
+  if (tieneAlgunPermiso(session, ["contrapartes", "tesoreria", "facturacion-cfdi"])) {
+    items.push({
+      label: "Tesorería",
+      href: "/tesoreria/contrapartes",
+      icon: Landmark,
+      enabled: true,
+      children: [
+        { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
+        { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
+        { label: "Contratos", href: "/tesoreria/contratos", icon: FileText },
+      ],
+    });
+  }
+  if (tieneAlgunPermiso(session, ["compras"])) {
+    items.push({ label: "Compras", href: "/compras-tesoreria", icon: Landmark, enabled: true });
   }
   if (tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });

@@ -114,9 +114,9 @@ describe("buildNavItems - PLD", () => {
 
 describe("buildNavItems - placeholders 'en desarrollo' (clickeables, no deshabilitados)", () => {
   const CASOS: { prefijos: string[]; href: string }[] = [
-    { prefijos: ["contrapartes"], href: "/contrapartes" },
     { prefijos: ["ventas-vivienda", "materiales"], href: "/ventas-vivienda" },
-    { prefijos: ["tesoreria", "compras", "facturacion-cfdi"], href: "/compras-tesoreria" },
+    { prefijos: ["contrapartes", "tesoreria", "facturacion-cfdi"], href: "/tesoreria/contrapartes" },
+    { prefijos: ["compras"], href: "/compras-tesoreria" },
     { prefijos: ["rrhh"], href: "/rrhh" },
   ];
 
@@ -156,11 +156,11 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
   const DUEÑO_CONOCIDO: Record<string, string> = {
     iam: "/admin/usuarios (o Auditar)",
     "pld-compliance": "/pld",
-    contrapartes: "/contrapartes",
+    contrapartes: "/tesoreria/contrapartes",
     "ventas-vivienda": "/ventas-vivienda",
     materiales: "/ventas-vivienda",
-    tesoreria: "/compras-tesoreria",
-    "facturacion-cfdi": "/compras-tesoreria",
+    tesoreria: "/tesoreria/contrapartes",
+    "facturacion-cfdi": "/tesoreria/contrapartes",
     compras: "/compras-tesoreria",
     rrhh: "/rrhh",
     tickets: "/tickets",
@@ -240,7 +240,7 @@ describe("Suma de permisos - varios roles activos en la misma sesion", () => {
     const items = buildNavItems(sesion);
     expect(buscar(items, "/pld"), "debe conservar PLD de PLD_ANALISTA").toBeDefined();
     expect(buscar(items, "/ventas-vivienda"), "debe sumar Ventas de VENTAS_ASESOR").toBeDefined();
-    expect(buscar(items, "/contrapartes")).toBeDefined();
+    expect(buscar(items, "/tesoreria/contrapartes")).toBeDefined();
 
     // Ninguno de los dos roles trae iam.crear/editar por si solo - la
     // union tampoco debe inventarlo.
