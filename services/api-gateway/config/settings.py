@@ -71,6 +71,7 @@ SERVICE_ROUTES = {
     "audit": env("GATEWAY_ROUTE_AUDIT", default="http://audit-service:8080"),
     "docint": env("GATEWAY_ROUTE_DOCINT", default="http://document-intelligence-service:8080"),
     "vivienda": env("GATEWAY_ROUTE_VIVIENDA", default="http://vivienda-service:8080"),
+    "materiales": env("GATEWAY_ROUTE_MATERIALES", default="http://materiales-service:8080"),
     "compras-tesoreria": env("GATEWAY_ROUTE_COMPRAS_TESORERIA", default="http://compras-tesoreria-service:8080"),
     "rrhh": env("GATEWAY_ROUTE_RRHH", default="http://rrhh-service:8080"),
     "tesoreria": env("GATEWAY_ROUTE_TESORERIA", default="http://tesoreria-service:8080"),

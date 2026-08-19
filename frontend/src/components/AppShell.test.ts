@@ -112,11 +112,64 @@ describe("buildNavItems - PLD", () => {
   });
 });
 
+// Primer modulo de negocio con pantallas reales ademas de Admin(IAM)/PLD
+// (Fase 3, arranque de exposicion CRUD, 19/Ago/2026) - mismo estandar de
+// apartados con children (URL propio por pantalla), no un placeholder "en
+// desarrollo" mas. Sale del bloque de placeholders de abajo, igual que
+// nunca estuvo ahi Admin(IAM)/PLD.
+describe("buildNavItems - Ventas / Vivienda", () => {
+  it("algun perm de ventas-vivienda/materiales muestra el apartado con sus 6 pantallas", () => {
+    for (const roleKey of Object.keys(ROLES)) {
+      const tieneAlguno = ROLES[roleKey].some(
+        (p) => p.startsWith("ventas-vivienda.") || p.startsWith("materiales.")
+      );
+      if (!tieneAlguno) continue;
+      const items = buildNavItems(sesionDe(roleKey));
+      const ventas = buscar(items, "/ventas-vivienda/proyectos");
+      expect(ventas, `${roleKey} deberia ver Ventas / Vivienda`).toBeDefined();
+      expect(ventas?.enabled).toBe(true);
+      const labels = hijos(ventas).map((c) => c.label);
+      expect(labels).toEqual(["Proyectos", "Viviendas", "Asesores", "Expedientes", "Materiales", "Presupuestos"]);
+    }
+  });
+
+  it("sin ventas-vivienda.*/materiales.* no aparece el apartado", () => {
+    const items = buildNavItems(sesionDe("RRHH_ADMIN"));
+    expect(buscar(items, "/ventas-vivienda/proyectos")).toBeUndefined();
+  });
+});
+
+// Tesoreria (18/Ago/2026, arranque formal de Fase 4) ya tiene pantalla real
+// de Contrapartes/Cuentas/Contratos - mismo estandar de apartado con
+// children que Ventas/Vivienda de arriba, ya no es un placeholder "en
+// desarrollo". El permiso "contrapartes" tambien lo activa (varios roles de
+// PLD solo tienen contrapartes.leer, ver AppShell.tsx).
+describe("buildNavItems - Tesorería", () => {
+  it("algun perm de contrapartes/tesoreria/facturacion-cfdi muestra el apartado con sus 3 pantallas", () => {
+    for (const roleKey of Object.keys(ROLES)) {
+      const tieneAlguno = ROLES[roleKey].some(
+        (p) =>
+          p.startsWith("contrapartes.") || p.startsWith("tesoreria.") || p.startsWith("facturacion-cfdi.")
+      );
+      if (!tieneAlguno) continue;
+      const items = buildNavItems(sesionDe(roleKey));
+      const tesoreria = buscar(items, "/tesoreria/contrapartes");
+      expect(tesoreria, `${roleKey} deberia ver Tesorería`).toBeDefined();
+      expect(tesoreria?.enabled).toBe(true);
+      const labels = hijos(tesoreria).map((c) => c.label);
+      expect(labels).toEqual(["Contrapartes", "Cuentas bancarias", "Contratos"]);
+    }
+  });
+
+  it("sin contrapartes.*/tesoreria.*/facturacion-cfdi.* no aparece el apartado", () => {
+    const items = buildNavItems(sesionDe("RRHH_ADMIN"));
+    expect(buscar(items, "/tesoreria/contrapartes")).toBeUndefined();
+  });
+});
+
 describe("buildNavItems - placeholders 'en desarrollo' (clickeables, no deshabilitados)", () => {
   const CASOS: { prefijos: string[]; href: string }[] = [
-    { prefijos: ["contrapartes"], href: "/contrapartes" },
-    { prefijos: ["ventas-vivienda", "materiales"], href: "/ventas-vivienda" },
-    { prefijos: ["tesoreria", "compras", "facturacion-cfdi"], href: "/compras-tesoreria" },
+    { prefijos: ["compras"], href: "/compras-tesoreria" },
     { prefijos: ["rrhh"], href: "/rrhh" },
   ];
 
@@ -156,11 +209,11 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
   const DUEÑO_CONOCIDO: Record<string, string> = {
     iam: "/admin/usuarios (o Auditar)",
     "pld-compliance": "/pld",
-    contrapartes: "/contrapartes",
-    "ventas-vivienda": "/ventas-vivienda",
-    materiales: "/ventas-vivienda",
-    tesoreria: "/compras-tesoreria",
-    "facturacion-cfdi": "/compras-tesoreria",
+    contrapartes: "/tesoreria/contrapartes",
+    "ventas-vivienda": "/ventas-vivienda/proyectos",
+    materiales: "/ventas-vivienda/proyectos",
+    tesoreria: "/tesoreria/contrapartes",
+    "facturacion-cfdi": "/tesoreria/contrapartes",
     compras: "/compras-tesoreria",
     rrhh: "/rrhh",
     tickets: "/tickets",
@@ -239,8 +292,8 @@ describe("Suma de permisos - varios roles activos en la misma sesion", () => {
 
     const items = buildNavItems(sesion);
     expect(buscar(items, "/pld"), "debe conservar PLD de PLD_ANALISTA").toBeDefined();
-    expect(buscar(items, "/ventas-vivienda"), "debe sumar Ventas de VENTAS_ASESOR").toBeDefined();
-    expect(buscar(items, "/contrapartes")).toBeDefined();
+    expect(buscar(items, "/ventas-vivienda/proyectos"), "debe sumar Ventas de VENTAS_ASESOR").toBeDefined();
+    expect(buscar(items, "/tesoreria/contrapartes")).toBeDefined();
 
     // Ninguno de los dos roles trae iam.crear/editar por si solo - la
     // union tampoco debe inventarlo.
@@ -258,6 +311,6 @@ describe("Suma de permisos - varios roles activos en la misma sesion", () => {
     const items = buildNavItems(sesion);
     const admin = buscar(items, "/admin/usuarios");
     expect(hijos(admin).map((c) => c.label)).toContain("Auditoría");
-    expect(buscar(items, "/ventas-vivienda"), "no debe perder Ventas por tener IAM_ADMIN tambien").toBeDefined();
+    expect(buscar(items, "/ventas-vivienda/proyectos"), "no debe perder Ventas por tener IAM_ADMIN tambien").toBeDefined();
   });
 });

@@ -19,13 +19,11 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "corsheaders",
-    "tesoreria",
+    "materiales",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -51,15 +49,6 @@ fwIDAQAB
 -----END PUBLIC KEY-----""",
 )
 
-# CORS solo para origenes de desarrollo local - en produccion el frontend
-# llama via API Gateway (mismo origen), no directo al servicio (mismo
-# criterio que pld-service/audit-service, ver sus config/settings.py).
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = env.list(
-    "TESORERIA_CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:3000", "http://127.0.0.1:3000"],
-)
-
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
@@ -80,31 +69,31 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# TESORERIA_DB_SOCKET_DIR: cuando corre en Cloud Run, la conexion a Cloud SQL NO es
+# MATERIALES_DB_SOCKET_DIR: cuando corre en Cloud Run, la conexion a Cloud SQL NO es
 # por IP publica/TCP (Cloud Run no tiene IP fija que autorizar en Cloud SQL,
 # la conexion por IP publica se cuelga hasta que Cloud Run corta la request
 # con 503 "Service Unavailable"). En su lugar, Cloud Run monta un socket Unix
 # en /cloudsql/<INSTANCE_CONNECTION_NAME> cuando adjuntas la conexion Cloud
 # SQL al servicio (Cloud Run -> Editar e implementar nueva revision ->
-# Conexiones -> Conexiones de Cloud SQL). Configura TESORERIA_DB_SOCKET_DIR con
+# Conexiones -> Conexiones de Cloud SQL). Configura MATERIALES_DB_SOCKET_DIR con
 # esa ruta completa; en local (Docker Compose) se deja vacio y se usa TCP
-# normal via TESORERIA_DB_HOST/TESORERIA_DB_PORT como hasta ahora (mismo patron
+# normal via MATERIALES_DB_HOST/MATERIALES_DB_PORT como hasta ahora (mismo patron
 # que iam-service, ver su config/settings.py).
-TESORERIA_DB_SOCKET_DIR = env("TESORERIA_DB_SOCKET_DIR", default=None)
+MATERIALES_DB_SOCKET_DIR = env("MATERIALES_DB_SOCKET_DIR", default=None)
 
-if TESORERIA_DB_SOCKET_DIR:
-    _db_host = TESORERIA_DB_SOCKET_DIR
+if MATERIALES_DB_SOCKET_DIR:
+    _db_host = MATERIALES_DB_SOCKET_DIR
     _db_port = ""
 else:
-    _db_host = env("TESORERIA_DB_HOST", default="tesoreria-service-db")
-    _db_port = env("TESORERIA_DB_PORT", default="3306")
+    _db_host = env("MATERIALES_DB_HOST", default="materiales-service-db")
+    _db_port = env("MATERIALES_DB_PORT", default="3306")
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": env("TESORERIA_DB_NAME", default="tesoreria_service"),
-        "USER": env("TESORERIA_DB_USER", default="tesoreria_app"),
-        "PASSWORD": env("TESORERIA_DB_PASSWORD", default=""),
+        "NAME": env("MATERIALES_DB_NAME", default="materiales_service"),
+        "USER": env("MATERIALES_DB_USER", default="materiales_app"),
+        "PASSWORD": env("MATERIALES_DB_PASSWORD", default=""),
         "HOST": _db_host,
         "PORT": _db_port,
         "OPTIONS": {"charset": "utf8mb4"},
