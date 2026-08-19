@@ -38,9 +38,16 @@ export interface TesoreriaContraparte {
   updated_by: string | null;
 }
 
-export async function listContrapartes(search?: string): Promise<TesoreriaContraparte[]> {
+// tipoFiltro (19/Ago/2026): ?cliente=1 / ?proveedor=1 en tesoreria-service -
+// deja mostrar solo uno u otro segun el contexto (ej. ContraparteSelector
+// en el "Nuevo expediente" de PLD, preguntando si es cliente o proveedor).
+export async function listContrapartes(
+  search?: string,
+  tipoFiltro?: "cliente" | "proveedor"
+): Promise<TesoreriaContraparte[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (tipoFiltro) params.set(tipoFiltro, "1");
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrapartes/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

@@ -66,6 +66,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // Ver docs/architecture/README.md sec. 11.2 #7, "contraparte maestra
   // unica".
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
+  const [tipoContraparte, setTipoContraparte] = useState<"cliente" | "proveedor">("cliente");
   const [contraparte, setContraparte] = useState<TesoreriaContraparte | null>(null);
   const [sociedadRfc, setSociedadRfc] = useState("");
   const [creando, setCreando] = useState(false);
@@ -130,7 +131,11 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
             size="small"
             variant="contained"
             startIcon={<FilePlus2 size={16} strokeWidth={1.5} />}
-            onClick={() => setDialogoAbierto(true)}
+            onClick={() => {
+              setTipoContraparte("cliente");
+              setContraparte(null);
+              setDialogoAbierto(true);
+            }}
           >
             Nuevo expediente
           </Button>
@@ -150,12 +155,32 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         <Stack component="form" onSubmit={handleCrearExpediente}>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Busca el cliente o proveedor en el catálogo de Tesorería — si no existe, créalo aquí mismo
-              con solo el nombre. El resto de sus datos los llena él después, desde el link público que
-              le mandes (Tickets de cliente).
+              Indica si es cliente o proveedor y búscalo en el catálogo de Tesorería — si no existe,
+              créalo aquí mismo con solo el nombre. El resto de sus datos los llena él después, desde el
+              link público que le mandes (Tickets de cliente).
             </Typography>
             <Stack spacing={2}>
-              <ContraparteSelector value={contraparte} onChange={setContraparte} label="Cliente / proveedor" />
+              <FormControl size="small" fullWidth>
+                <InputLabel id="tipo-contraparte-label">Es un...</InputLabel>
+                <Select
+                  labelId="tipo-contraparte-label"
+                  label="Es un..."
+                  value={tipoContraparte}
+                  onChange={(e) => {
+                    setTipoContraparte(e.target.value as "cliente" | "proveedor");
+                    setContraparte(null);
+                  }}
+                >
+                  <MenuItem value="cliente">Cliente</MenuItem>
+                  <MenuItem value="proveedor">Proveedor</MenuItem>
+                </Select>
+              </FormControl>
+              <ContraparteSelector
+                value={contraparte}
+                onChange={setContraparte}
+                label={tipoContraparte === "cliente" ? "Cliente" : "Proveedor"}
+                tipo={tipoContraparte}
+              />
               <TextField
                 size="small"
                 fullWidth
