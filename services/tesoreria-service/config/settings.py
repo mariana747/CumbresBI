@@ -19,11 +19,13 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "corsheaders",
     "tesoreria",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -47,6 +49,15 @@ Gg06Cc6r+DO24tf7yc0ZiavjWAWvzdzEdtpc1Yr9f7zQdVB+2Ze0wJFaMLedK0Ar
 Pzzk6e7rDpCf91ZLB3wY5DMYtLmnfkrV7vovWjKRMOR0aAcbI4MbiG+Cot/YNptN
 fwIDAQAB
 -----END PUBLIC KEY-----""",
+)
+
+# CORS solo para origenes de desarrollo local - en produccion el frontend
+# llama via API Gateway (mismo origen), no directo al servicio (mismo
+# criterio que pld-service/audit-service, ver sus config/settings.py).
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = env.list(
+    "TESORERIA_CORS_ALLOWED_ORIGINS",
+    default=["http://localhost:3000", "http://127.0.0.1:3000"],
 )
 
 ROOT_URLCONF = "config.urls"

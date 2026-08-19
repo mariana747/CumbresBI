@@ -1,0 +1,214 @@
+"""Primera suite del servicio (18/Ago/2026, arranque formal de Fase 4:
+docs/architecture/README.md sec. 11.2 #7/#9 - Contrapartes y Facturacion
+CFDI fusionadas de forma definitiva dentro de tesoreria-service, no
+microservicios propios). CRUD real de Contrapartes/Bancos/Cuentas - los
+tres catalogos sin dependencia de Contrato/Flujo/Factura, primer corte
+del modulo (Contratos/Flujos/Facturas quedan para despues).
+
+Sin ScopedManager a proposito - ninguno de estos 3 modelos tiene columna
+de sociedad en el ERD real (son catalogos compartidos entre sociedades,
+mismo criterio que GeneralSociedad en iam-service); el filtro real es por
+permiso (tesoreria.crear/.editar), no por alcance de fila."""
+
+from cumbresbi_scope.scope import EffectiveScope
+from django.test import TestCase
+from rest_framework.test import APIRequestFactory
+
+from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta
+from .views import (
+    TesoreriaBancoViewSet,
+    TesoreriaContraparteViewSet,
+    TesoreriaContratoViewSet,
+    TesoreriaCuentaViewSet,
+)
+
+RFC_TIZARA = "#####1"
+RFC_CAPITAL = "#####2"
+
+
+class TesoreriaContraparteCrudTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Contraparte de prueba",
+            rfc="CPR900101ABC",
+            tipo_persona=TesoreriaContraparte.TIPO_MORAL,
+            email="contacto@prueba.com",
+        )
+
+    def test_crear_sin_permiso_da_403(self):
+        request = self.factory.post(
+            "/api/contrapartes/",
+            {"razon_social": "Nueva", "tipo_persona": "fisica", "email": "nueva@prueba.com"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = TesoreriaContraparteViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_permiso_tesoreria_crear(self):
+        request = self.factory.post(
+            "/api/contrapartes/",
+            {"razon_social": "Nueva", "tipo_persona": "fisica", "email": "nueva@prueba.com"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaContraparteViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(TesoreriaContraparte.objects.filter(razon_social="Nueva").exists())
+
+    def test_editar_requiere_tesoreria_editar(self):
+        request = self.factory.patch(
+            f"/api/contrapartes/{self.contraparte.id_contraparte}/", {"razon_social": "Editada"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaContraparteViewSet.as_view({"patch": "partial_update"})
+        response = view(request, pk=self.contraparte.id_contraparte)
+        self.assertEqual(response.status_code, 403)
+
+        request2 = self.factory.patch(
+            f"/api/contrapartes/{self.contraparte.id_contraparte}/", {"razon_social": "Editada"}, format="json"
+        )
+        request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+        response2 = view(request2, pk=self.contraparte.id_contraparte)
+        self.assertEqual(response2.status_code, 200)
+        self.assertEqual(response2.data["razon_social"], "Editada")
+
+    def test_lectura_sigue_sin_permiso_especial(self):
+        """Ver el catalogo sigue abierto (igual que GeneralSociedad en
+        iam-service) - el gate es solo sobre escritura."""
+        request = self.factory.get("/api/contrapartes/")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaContraparteViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+    def test_busqueda_por_razon_social_o_rfc(self):
+        TesoreriaContraparte.objects.create(
+            razon_social="Otra empresa", rfc="OTR900101XYZ", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="a@a.com"
+        )
+        request = self.factory.get("/api/contrapartes/", {"search": "CPR900101ABC"})
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaContraparteViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["razon_social"], "Contraparte de prueba")
+
+
+class TesoreriaBancoCuentaCrudTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex", alias="BMX")
+
+    def test_crear_banco_requiere_permiso(self):
+        request = self.factory.post("/api/bancos/", {"id_banxico": "00012", "banco": "Banorte"}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = TesoreriaBancoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+        request2 = self.factory.post("/api/bancos/", {"id_banxico": "00012", "banco": "Banorte"}, format="json")
+        request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        response2 = view(request2)
+        self.assertEqual(response2.status_code, 201)
+
+    def test_crear_cuenta_referencia_banco_existente(self):
+        request = self.factory.post(
+            "/api/cuentas/",
+            {"banco": self.banco.id_banxico, "clabe": "002180000000000001", "alias": "Cuenta operativa", "apertura": "2026-01-01"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaCuentaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["banco_nombre"], "Banamex")
+
+    def test_listar_cuentas_sin_permiso_especial(self):
+        TesoreriaCuenta.objects.create(banco=self.banco, clabe="002180000000000001", alias="Cuenta A", apertura="2026-01-01")
+        request = self.factory.get("/api/cuentas/")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaCuentaViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+
+class TesoreriaContratoTests(TestCase):
+    """Contrato (18/Ago/2026, tercer corte) - primer recurso de
+    tesoreria-service con alcance real por sociedad (ScopedManager). A
+    diferencia de Contraparte/Banco/Cuenta (catalogos compartidos, lectura
+    abierta), aqui SI hay filtro fino por sociedad - demuestra que un
+    usuario de una sociedad NO ve los contratos de otra (mismo criterio que
+    PldContraparteKycScopeTests en pld-service)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Contraparte de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+
+    def _crear_contrato(self, sociedad, scope=None):
+        request = self.factory.post(
+            "/api/contratos/",
+            {"sociedad": sociedad, "contraparte": self.contraparte.id_contraparte, "tipo": "INTERNO"},
+            format="json",
+        )
+        request.effective_scope = scope or self.scope_crear
+        view = TesoreriaContratoViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_crear_sin_permiso_da_403(self):
+        response = self._crear_contrato(RFC_TIZARA, scope=EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_id_contrato_se_genera_con_formato_sociedad_contraparte_consecutivo(self):
+        response = self._crear_contrato(RFC_TIZARA)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id_contrato"], f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-001")
+
+        # Segundo contrato para la misma sociedad+contraparte -> consecutivo 002.
+        response2 = self._crear_contrato(RFC_TIZARA)
+        self.assertEqual(response2.data["id_contrato"], f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-002")
+
+    def test_consecutivo_es_independiente_por_sociedad(self):
+        self._crear_contrato(RFC_TIZARA)
+        response = self._crear_contrato(RFC_CAPITAL)
+        self.assertEqual(response.data["id_contrato"], f"{RFC_CAPITAL}-{self.contraparte.id_contraparte}-001")
+
+    def test_usuario_de_una_sociedad_no_ve_contratos_de_otra(self):
+        self._crear_contrato(RFC_TIZARA)
+        self._crear_contrato(RFC_CAPITAL)
+
+        request = self.factory.get("/api/contratos/")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        view = TesoreriaContratoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
+
+    def test_global_ve_ambos_contratos(self):
+        self._crear_contrato(RFC_TIZARA)
+        self._crear_contrato(RFC_CAPITAL)
+
+        request = self.factory.get("/api/contratos/")
+        request.effective_scope = EffectiveScope(is_global=True)
+        view = TesoreriaContratoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 2)
+
+    def test_anonimo_no_ve_nada(self):
+        self._crear_contrato(RFC_TIZARA)
+        request = self.factory.get("/api/contratos/")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaContratoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 0)
+
+    def test_incluye_nombre_de_la_contraparte(self):
+        response = self._crear_contrato(RFC_TIZARA)
+        self.assertEqual(response.data["contraparte_nombre"], "Contraparte de prueba")

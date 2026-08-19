@@ -1,5 +1,6 @@
 import uuid
 
+from cumbresbi_scope.managers import ScopedManager
 from django.db import models
 
 
@@ -212,6 +213,16 @@ class TesoreriaContrato(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
     autorizacion = models.BooleanField(blank=True, null=True)
+
+    # Primer modelo real de tesoreria-service con columna de sociedad (18/Ago/2026,
+    # arranque formal de Fase 4) - "sociedad" es un CharField plano que
+    # referencia general_sociedades.rfc (iam-service, fuera de este esquema,
+    # ver docstring de la clase), mismo criterio de referencia laxa que
+    # pld_contrapartes_kyc.sociedad_rfc. Contraparte/Banco/Cuenta se quedan
+    # sin ScopedManager (catalogos compartidos, ver serializers.py) - un
+    # Contrato SI pertenece a una sociedad especifica.
+    SCOPE_FIELD_SOCIEDAD = "sociedad"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "tesoreria_contratos"
