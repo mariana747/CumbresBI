@@ -17,7 +17,6 @@ from rest_framework.test import APIRequestFactory
 from .models import (
     ViviendaListado,
     ViviendaProyecto,
-    ViviendaRelExpedienteCliente,
     ViviendaVentasAsesor,
     ViviendaVentasExpediente,
     ViviendaVentasExpedienteItem,
