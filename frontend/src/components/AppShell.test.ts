@@ -139,10 +139,37 @@ describe("buildNavItems - Ventas / Vivienda", () => {
   });
 });
 
+// Tesoreria (18/Ago/2026, arranque formal de Fase 4) ya tiene pantalla real
+// de Contrapartes/Cuentas/Contratos - mismo estandar de apartado con
+// children que Ventas/Vivienda de arriba, ya no es un placeholder "en
+// desarrollo". El permiso "contrapartes" tambien lo activa (varios roles de
+// PLD solo tienen contrapartes.leer, ver AppShell.tsx).
+describe("buildNavItems - Tesorería", () => {
+  it("algun perm de contrapartes/tesoreria/facturacion-cfdi muestra el apartado con sus 3 pantallas", () => {
+    for (const roleKey of Object.keys(ROLES)) {
+      const tieneAlguno = ROLES[roleKey].some(
+        (p) =>
+          p.startsWith("contrapartes.") || p.startsWith("tesoreria.") || p.startsWith("facturacion-cfdi.")
+      );
+      if (!tieneAlguno) continue;
+      const items = buildNavItems(sesionDe(roleKey));
+      const tesoreria = buscar(items, "/tesoreria/contrapartes");
+      expect(tesoreria, `${roleKey} deberia ver Tesorería`).toBeDefined();
+      expect(tesoreria?.enabled).toBe(true);
+      const labels = hijos(tesoreria).map((c) => c.label);
+      expect(labels).toEqual(["Contrapartes", "Cuentas bancarias", "Contratos"]);
+    }
+  });
+
+  it("sin contrapartes.*/tesoreria.*/facturacion-cfdi.* no aparece el apartado", () => {
+    const items = buildNavItems(sesionDe("RRHH_ADMIN"));
+    expect(buscar(items, "/tesoreria/contrapartes")).toBeUndefined();
+  });
+});
+
 describe("buildNavItems - placeholders 'en desarrollo' (clickeables, no deshabilitados)", () => {
   const CASOS: { prefijos: string[]; href: string }[] = [
-    { prefijos: ["contrapartes"], href: "/contrapartes" },
-    { prefijos: ["tesoreria", "compras", "facturacion-cfdi"], href: "/compras-tesoreria" },
+    { prefijos: ["compras"], href: "/compras-tesoreria" },
     { prefijos: ["rrhh"], href: "/rrhh" },
   ];
 
@@ -182,11 +209,11 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
   const DUEÑO_CONOCIDO: Record<string, string> = {
     iam: "/admin/usuarios (o Auditar)",
     "pld-compliance": "/pld",
-    contrapartes: "/contrapartes",
+    contrapartes: "/tesoreria/contrapartes",
     "ventas-vivienda": "/ventas-vivienda/proyectos",
     materiales: "/ventas-vivienda/proyectos",
-    tesoreria: "/compras-tesoreria",
-    "facturacion-cfdi": "/compras-tesoreria",
+    tesoreria: "/tesoreria/contrapartes",
+    "facturacion-cfdi": "/tesoreria/contrapartes",
     compras: "/compras-tesoreria",
     rrhh: "/rrhh",
     tickets: "/tickets",
@@ -266,7 +293,7 @@ describe("Suma de permisos - varios roles activos en la misma sesion", () => {
     const items = buildNavItems(sesion);
     expect(buscar(items, "/pld"), "debe conservar PLD de PLD_ANALISTA").toBeDefined();
     expect(buscar(items, "/ventas-vivienda/proyectos"), "debe sumar Ventas de VENTAS_ASESOR").toBeDefined();
-    expect(buscar(items, "/contrapartes")).toBeDefined();
+    expect(buscar(items, "/tesoreria/contrapartes")).toBeDefined();
 
     // Ninguno de los dos roles trae iam.crear/editar por si solo - la
     // union tampoco debe inventarlo.
