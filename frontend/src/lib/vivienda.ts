@@ -464,3 +464,67 @@ export async function deleteExpediente(idExpediente: string): Promise<void> {
     throw await friendlyApiError("VIVIENDA", response);
   }
 }
+
+export type ViviendaClienteTipo = "ACREDITADO" | "COACREDITADO";
+
+// Cliente/acreditado de un expediente (19/Ago/2026, conectado al catalogo
+// real de contrapartes - ver docs/architecture/README.md sec. 11.2 #7,
+// "contraparte maestra unica"). `id_contraparte` ya NO se captura a mano -
+// se busca/crea contra tesoreria-service (ver ContraparteSelector.tsx),
+// mismo criterio que ya se conecto en PLD.
+export interface ViviendaClienteExpediente {
+  id_rel_viv_exp_cliente: string;
+  expediente: string;
+  id_contraparte: string;
+  tipo: ViviendaClienteTipo;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listClientesExpediente(expedienteId: string): Promise<ViviendaClienteExpediente[]> {
+  const params = new URLSearchParams({ expediente: expedienteId });
+  const response = await apiFetch(
+    "VIVIENDA",
+    `${VIVIENDA_API_BASE_URL}/api/expedientes-clientes/?${params.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+  return response.json();
+}
+
+export async function createClienteExpediente(params: {
+  expediente: string;
+  idContraparte: string;
+  tipo: ViviendaClienteTipo;
+  actorId: string;
+}): Promise<ViviendaClienteExpediente> {
+  const response = await apiFetch("VIVIENDA", `${VIVIENDA_API_BASE_URL}/api/expedientes-clientes/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expediente: params.expediente,
+      id_contraparte: params.idContraparte,
+      tipo: params.tipo,
+      created_by: params.actorId,
+      updated_by: params.actorId,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+  return response.json();
+}
+
+export async function deleteClienteExpediente(idRelViviendaExpCliente: string): Promise<void> {
+  const response = await apiFetch(
+    "VIVIENDA",
+    `${VIVIENDA_API_BASE_URL}/api/expedientes-clientes/${idRelViviendaExpCliente}/`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+}

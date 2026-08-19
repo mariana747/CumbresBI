@@ -51,7 +51,10 @@ const TIPO_PERSONA_LABELS: Record<TesoreriaTipoPersona, string> = {
 const FORM_VACIO = {
   razonSocial: "",
   rfc: "",
-  tipoPersona: "moral" as TesoreriaTipoPersona,
+  // "" cabe aqui (union con TesoreriaTipoPersona) porque una contraparte
+  // pudo haberse dado de alta minima desde otro modulo (ej. PLD, ver
+  // docs/architecture, "contraparte maestra unica") sin este campo todavia.
+  tipoPersona: "moral" as TesoreriaTipoPersona | "",
   email: "",
   contacto: "",
   telefonoSms: "",
@@ -110,8 +113,8 @@ export default function TesoreriaContrapartesPage() {
     setForm({
       razonSocial: c.razon_social,
       rfc: c.rfc || "",
-      tipoPersona: c.tipo_persona,
-      email: c.email,
+      tipoPersona: c.tipo_persona || "",
+      email: c.email || "",
       contacto: c.contacto || "",
       telefonoSms: c.telefono_sms || "",
       cliente: c.cliente,
@@ -133,8 +136,8 @@ export default function TesoreriaContrapartesPage() {
       const params = {
         razonSocial: form.razonSocial,
         rfc: form.rfc || null,
-        tipoPersona: form.tipoPersona,
-        email: form.email,
+        tipoPersona: form.tipoPersona || null,
+        email: form.email || null,
         contacto: form.contacto || null,
         telefonoSms: form.telefonoSms || null,
         cliente: form.cliente,
@@ -244,7 +247,7 @@ export default function TesoreriaContrapartesPage() {
                   <TableRow key={c.id_contraparte} hover>
                     <TableCell>{c.razon_social}</TableCell>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.rfc || "—"}</TableCell>
-                    <TableCell>{TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona}</TableCell>
+                    <TableCell>{c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}</TableCell>
                     <TableCell>{c.contacto || c.email || "—"}</TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.5}>
@@ -303,7 +306,7 @@ export default function TesoreriaContrapartesPage() {
                 labelId="tipo-persona-label"
                 label="Tipo de persona"
                 value={form.tipoPersona}
-                onChange={(e) => setForm({ ...form, tipoPersona: e.target.value as TesoreriaTipoPersona })}
+                onChange={(e) => setForm({ ...form, tipoPersona: e.target.value as TesoreriaTipoPersona | "" })}
               >
                 {Object.entries(TIPO_PERSONA_LABELS).map(([value, label]) => (
                   <MenuItem key={value} value={value}>
