@@ -91,6 +91,67 @@ def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
     return eliminados
 
 
+def _detectar_documentos_nuevos_en_drive(kyc, headers, cookies, actor_user_id):
+    """Contraparte de _limpiar_documentos_borrados_en_drive (18/Ago/2026):
+    el analista puede subir un archivo directo en drive.google.com (decision
+    de producto - PLD no tiene Picker ni upload interno propio, ver memoria
+    de sesion "google-picker-para-contratos-no-pld") sin pasar nunca por
+    esta app. Sin esto, ese archivo quedaba invisible para la plataforma
+    aunque existiera en Drive de verdad.
+
+    Lista la carpeta del cliente en Drive y crea un PldContraparteDoc por
+    cada archivo que todavia no tenga un documento con ese drive_file_id -
+    denominacion = nombre real del archivo (el analista lo puede renombrar
+    despues como cualquier otro documento). Regresa la lista de documentos
+    creados (para avisar en pantalla) - no lanza si drive-service no
+    responde, igual que su contraparte de limpieza."""
+    carpeta = f"PLD/Nuevos Clientes/{kyc.id_contraparte}"
+    ya_vinculados = set(kyc.documentos.exclude(drive_file_id__isnull=True).exclude(drive_file_id="").values_list(
+        "drive_file_id", flat=True
+    ))
+
+    try:
+        upstream = requests.get(
+            f"{settings.DRIVE_SERVICE_URL}/api/list/",
+            params={"perm": "pld-compliance.leer", "carpeta": carpeta},
+            headers=headers,
+            cookies=cookies,
+            timeout=15,
+        )
+    except requests.RequestException:
+        logger.warning("drive-service no respondio al listar la carpeta de %s", kyc.id_contraparte, exc_info=True)
+        return []
+
+    if upstream.status_code != 200:
+        return []
+
+    agregados = []
+    for archivo in upstream.json().get("archivos", []):
+        if archivo["file_id"] in ya_vinculados:
+            continue
+        doc = PldContraparteDoc.objects.create(
+            kyc=kyc,
+            denominacion=archivo["nombre"],
+            status=PldContraparteDoc.STATUS_ENTREGADO,
+            drive_file_id=archivo["file_id"],
+            link_documento=archivo.get("web_view_link"),
+            mime_type=archivo.get("mime_type"),
+            subido_en=timezone.now(),
+            created_by=actor_user_id or "sistema-sincronia-drive",
+            updated_by=actor_user_id or "sistema-sincronia-drive",
+        )
+        agregados.append({"id_kyc_doc": doc.id_kyc_doc, "denominacion": doc.denominacion})
+        emitir_evento_auditoria(
+            "pld_contrapartes_docs.detectar_en_drive",
+            "pld_contrapartes_docs",
+            str(doc.id_kyc_doc),
+            actor_user_id=actor_user_id or "sistema-sincronia-drive",
+            valores_nuevos={**contexto_kyc(kyc), "denominacion": doc.denominacion},
+        )
+
+    return agregados
+
+
 # Limites del lote publico de documentos (18/Ago/2026, ver
 # PldTicketClienteViewSet.subir_documento) - antes solo dependian del
 # default de Django (DATA_UPLOAD_MAX_MEMORY_SIZE=2.5MB para el cuerpo
@@ -297,23 +358,35 @@ class PldContraparteKycViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def verificar_documentos(self, request, pk=None):
-        """Botón interno "Verificar en Drive" - revisa contra Drive real
-        cada documento del expediente y BORRA los que ya no existen (ver
-        _limpiar_documentos_borrados_en_drive). Manual en vez de polling
-        automático - Drive no tiene webhooks configurados todavía y cada
-        documento implica una llamada aparte a drive-service, no algo para
-        correr en cada carga de pantalla.
+        """Botón interno "Verificar en Drive" - sincroniza en ambos
+        sentidos contra Drive real (18/Ago/2026: antes solo borraba lo que
+        desaparecía; el analista tambien puede subir un archivo directo en
+        drive.google.com sin pasar por la app - ver memoria de sesion
+        "google-picker-para-contratos-no-pld", PLD no tiene upload interno
+        propio, es Drive-first a proposito):
+        1. BORRA los documentos cuyo archivo ya no existe (ver
+           _limpiar_documentos_borrados_en_drive).
+        2. CREA un PldContraparteDoc por cada archivo nuevo que aparezca en
+           la carpeta del cliente y todavia no tenga registro (ver
+           _detectar_documentos_nuevos_en_drive).
+        Manual en vez de polling automático - Drive no tiene webhooks
+        configurados todavía y cada documento implica una llamada aparte a
+        drive-service, no algo para correr en cada carga de pantalla.
 
-        Regresa el expediente actualizado (ya sin los documentos borrados)
-        más "documentos_eliminados" con lo que se quitó, para que el
-        frontend pueda avisarle al analista qué desapareció."""
+        Regresa el expediente actualizado más "documentos_eliminados" y
+        "documentos_agregados", para que el frontend pueda avisarle al
+        analista qué cambió."""
         kyc = self.get_object()
         headers, cookies = forward_auth_headers(request)
         eliminados = _limpiar_documentos_borrados_en_drive(kyc, headers, cookies)
+        agregados = _detectar_documentos_nuevos_en_drive(
+            kyc, headers, cookies, request.data.get("actor_user_id")
+        )
 
         kyc.refresh_from_db()
         data = self.get_serializer(kyc).data
         data["documentos_eliminados"] = eliminados
+        data["documentos_agregados"] = agregados
         return Response(data)
 
     @action(detail=True, methods=["post"])

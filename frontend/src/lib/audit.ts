@@ -168,11 +168,19 @@ const ACTION_VERB_LABELS: Record<string, string> = {
   eliminar_por_sincronia_drive: "Eliminó (ya no existía en Drive)",
   confirmar_extraccion: "Confirmó datos extraídos",
   actualizar_datos: "Actualizó sus datos",
+  editar: "Editó",
 };
 
 // Acciones que ya son una frase completa por si solas - no se les concatena
 // el nombre de la entidad (ver friendlyActionName).
-const FULL_ACTION_LABELS: Record<string, string> = {};
+const FULL_ACTION_LABELS: Record<string, string> = {
+  // "Verificar en Drive" (18/Ago/2026) detecta archivos subidos directo en
+  // drive.google.com, sin pasar por la app (PLD es Drive-first a
+  // proposito) - ver pld/views.py::_detectar_documentos_nuevos_en_drive.
+  // Frase completa en vez de "Detectó en Drive Documento KYC" (verbo +
+  // entidad concatenados se leia forzado).
+  "pld_contrapartes_docs.detectar_en_drive": "Detectó un documento nuevo en Drive",
+};
 
 export function friendlyServiceName(servicioOrigen: string): string {
   return SERVICE_LABELS[servicioOrigen] ?? servicioOrigen;

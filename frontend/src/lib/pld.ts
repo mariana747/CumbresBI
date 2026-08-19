@@ -197,16 +197,27 @@ export async function editarKyc(
   return response.json();
 }
 
-// Revisa contra Drive real si cada documento del expediente sigue
-// existiendo (18/Ago/2026, boton "Verificar en Drive" - hallazgo real: si
-// alguien borra un archivo directo en drive.google.com, la app se quedaba
-// mostrandolo como si siguiera ahi) y BORRA los que ya no estan. Ver
+// Sincroniza en ambos sentidos contra Drive real (18/Ago/2026, boton
+// "Verificar en Drive"): BORRA los documentos cuyo archivo ya no existe
+// (hallazgo real: si alguien borra un archivo directo en drive.google.com,
+// la app se quedaba mostrandolo como si siguiera ahi) y AGREGA un
+// documento por cada archivo nuevo que el analista haya subido directo en
+// Drive sin pasar por la app (PLD es Drive-first a proposito, no tiene
+// upload interno propio). Ver
 // services/pld-service/pld/views.py::verificar_documentos.
 export async function verificarDocumentosKyc(
-  idKyc: string
-): Promise<PldContraparteKyc & { documentos_eliminados: DocumentoEliminadoResumen[] }> {
+  idKyc: string,
+  actorUserId?: string | null
+): Promise<
+  PldContraparteKyc & {
+    documentos_eliminados: DocumentoEliminadoResumen[];
+    documentos_agregados: DocumentoEliminadoResumen[];
+  }
+> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/verificar_documentos/`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_user_id: actorUserId }),
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

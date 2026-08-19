@@ -853,3 +853,69 @@ class EmitirEventoAuditoriaTests(TestCase):
         with patch("pld.audit_utils.requests.post", return_value=respuesta):
             with self.assertNoLogs("pld.audit_utils", level="WARNING"):
                 emitir_evento_auditoria("pld_contrapartes_kyc.aprobar", "pld_contrapartes_kyc", "ba9fa64b")
+
+
+class SincronizarDocumentosDriveTests(TestCase):
+    """verificar_documentos (18/Ago/2026): PLD es Drive-first a proposito
+    (no hay upload interno propio, ver memoria de sesion
+    "google-picker-para-contratos-no-pld") - el analista puede subir un
+    archivo directo en drive.google.com, asi que "Verificar en Drive" debe
+    sincronizar en ambos sentidos: borrar lo que ya no existe (ya probado
+    en otras clases via _limpiar_documentos_borrados_en_drive) Y detectar
+    archivos nuevos que todavia no tienen PldContraparteDoc."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        self.kyc = _kyc("cp000400", RFC_TIZARA)
+
+    def _verificar(self, respuesta_list_files):
+        request = self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/verificar_documentos/", {"actor_user_id": "usr00007"})
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"post": "verificar_documentos"})
+        with patch("pld.views.requests.get", return_value=Mock(status_code=200, json=lambda: respuesta_list_files)), \
+             patch("pld.audit_utils.requests.post") as mock_audit:
+            response = view(request, pk=self.kyc.id_kyc)
+        return response, mock_audit
+
+    def test_crea_un_documento_por_cada_archivo_nuevo_en_drive(self):
+        respuesta = {
+            "archivos": [
+                {"file_id": "drive-abc", "nombre": "INE.pdf", "mime_type": "application/pdf", "web_view_link": "https://drive/abc"},
+            ]
+        }
+        response, mock_audit = self._verificar(respuesta)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["documentos_agregados"]), 1)
+        doc = PldContraparteDoc.objects.get(kyc=self.kyc, drive_file_id="drive-abc")
+        self.assertEqual(doc.denominacion, "INE.pdf")
+        self.assertEqual(doc.status, PldContraparteDoc.STATUS_ENTREGADO)
+        self.assertEqual(doc.created_by, "usr00007")
+
+        payload = mock_audit.call_args.kwargs["json"]
+        self.assertEqual(payload["accion"], "pld_contrapartes_docs.detectar_en_drive")
+        self.assertEqual(payload["actor_user_id"], "usr00007")
+
+    def test_no_duplica_un_archivo_ya_vinculado(self):
+        PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE.pdf", drive_file_id="drive-abc")
+        respuesta = {"archivos": [{"file_id": "drive-abc", "nombre": "INE.pdf"}]}
+        response, mock_audit = self._verificar(respuesta)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["documentos_agregados"], [])
+        mock_audit.assert_not_called()
+        self.assertEqual(PldContraparteDoc.objects.filter(kyc=self.kyc, drive_file_id="drive-abc").count(), 1)
+
+    def test_sin_archivos_nuevos_no_crea_nada(self):
+        response, mock_audit = self._verificar({"archivos": []})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["documentos_agregados"], [])
+        mock_audit.assert_not_called()
+
+    def test_drive_service_caido_no_truena_y_no_agrega_nada(self):
+        request = self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/verificar_documentos/", {})
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"post": "verificar_documentos"})
+        with patch("pld.views.requests.get", side_effect=requests.RequestException()):
+            response = view(request, pk=self.kyc.id_kyc)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["documentos_agregados"], [])
