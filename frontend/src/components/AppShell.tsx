@@ -272,17 +272,12 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   if (tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });
   }
-  // Hallazgo de AppShell.test.ts (11/Ago/2026, ver docs/CumbresBI_estado.md):
-  // estos dos prefijos no tenian apartado dueno todavia - se agregan aqui
-  // con el mismo patron "en desarrollo" (TICKETS_RESPONSABLE/
-  // TICKETS_PARTICIPANTE/EMPLEADO_SELF para tickets; FINANZAS_MANAGER/
-  // CONTRALOR para rentas).
-  if (tieneAlgunPermiso(session, ["tickets"])) {
-    items.push({ label: "Tickets", href: "/tickets", icon: Link2, enabled: true });
-  }
-  if (tieneAlgunPermiso(session, ["rentas"])) {
-    items.push({ label: "Rentas", href: "/rentas", icon: Landmark, enabled: true });
-  }
+  // Tickets/Rentas quitados del sidebar (19/Ago/2026, pedido de Mariana) -
+  // ninguno de los dos tiene backend real todavia, quedaban como
+  // placeholders "en desarrollo" sin nada detras. Si se retoman esos
+  // modulos, revivir este bloque (ver git blame) en vez de reinventarlo -
+  // el hallazgo original que lo agrego sigue documentado en
+  // docs/CumbresBI_estado.md.
   items.push({ label: "MiCumbres (portal empleado)", href: "/micumbres", icon: UserRound, enabled: true });
   return items;
 }
