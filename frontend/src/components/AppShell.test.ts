@@ -112,10 +112,36 @@ describe("buildNavItems - PLD", () => {
   });
 });
 
+// Primer modulo de negocio con pantallas reales ademas de Admin(IAM)/PLD
+// (Fase 3, arranque de exposicion CRUD, 19/Ago/2026) - mismo estandar de
+// apartados con children (URL propio por pantalla), no un placeholder "en
+// desarrollo" mas. Sale del bloque de placeholders de abajo, igual que
+// nunca estuvo ahi Admin(IAM)/PLD.
+describe("buildNavItems - Ventas / Vivienda", () => {
+  it("algun perm de ventas-vivienda/materiales muestra el apartado con sus 6 pantallas", () => {
+    for (const roleKey of Object.keys(ROLES)) {
+      const tieneAlguno = ROLES[roleKey].some(
+        (p) => p.startsWith("ventas-vivienda.") || p.startsWith("materiales.")
+      );
+      if (!tieneAlguno) continue;
+      const items = buildNavItems(sesionDe(roleKey));
+      const ventas = buscar(items, "/ventas-vivienda/proyectos");
+      expect(ventas, `${roleKey} deberia ver Ventas / Vivienda`).toBeDefined();
+      expect(ventas?.enabled).toBe(true);
+      const labels = hijos(ventas).map((c) => c.label);
+      expect(labels).toEqual(["Proyectos", "Viviendas", "Asesores", "Expedientes", "Materiales", "Presupuestos"]);
+    }
+  });
+
+  it("sin ventas-vivienda.*/materiales.* no aparece el apartado", () => {
+    const items = buildNavItems(sesionDe("RRHH_ADMIN"));
+    expect(buscar(items, "/ventas-vivienda/proyectos")).toBeUndefined();
+  });
+});
+
 describe("buildNavItems - placeholders 'en desarrollo' (clickeables, no deshabilitados)", () => {
   const CASOS: { prefijos: string[]; href: string }[] = [
     { prefijos: ["contrapartes"], href: "/contrapartes" },
-    { prefijos: ["ventas-vivienda", "materiales"], href: "/ventas-vivienda" },
     { prefijos: ["tesoreria", "compras", "facturacion-cfdi"], href: "/compras-tesoreria" },
     { prefijos: ["rrhh"], href: "/rrhh" },
   ];
@@ -157,8 +183,8 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
     iam: "/admin/usuarios (o Auditar)",
     "pld-compliance": "/pld",
     contrapartes: "/contrapartes",
-    "ventas-vivienda": "/ventas-vivienda",
-    materiales: "/ventas-vivienda",
+    "ventas-vivienda": "/ventas-vivienda/proyectos",
+    materiales: "/ventas-vivienda/proyectos",
     tesoreria: "/compras-tesoreria",
     "facturacion-cfdi": "/compras-tesoreria",
     compras: "/compras-tesoreria",
@@ -239,7 +265,7 @@ describe("Suma de permisos - varios roles activos en la misma sesion", () => {
 
     const items = buildNavItems(sesion);
     expect(buscar(items, "/pld"), "debe conservar PLD de PLD_ANALISTA").toBeDefined();
-    expect(buscar(items, "/ventas-vivienda"), "debe sumar Ventas de VENTAS_ASESOR").toBeDefined();
+    expect(buscar(items, "/ventas-vivienda/proyectos"), "debe sumar Ventas de VENTAS_ASESOR").toBeDefined();
     expect(buscar(items, "/contrapartes")).toBeDefined();
 
     // Ninguno de los dos roles trae iam.crear/editar por si solo - la
@@ -258,6 +284,6 @@ describe("Suma de permisos - varios roles activos en la misma sesion", () => {
     const items = buildNavItems(sesion);
     const admin = buscar(items, "/admin/usuarios");
     expect(hijos(admin).map((c) => c.label)).toContain("Auditoría");
-    expect(buscar(items, "/ventas-vivienda"), "no debe perder Ventas por tener IAM_ADMIN tambien").toBeDefined();
+    expect(buscar(items, "/ventas-vivienda/proyectos"), "no debe perder Ventas por tener IAM_ADMIN tambien").toBeDefined();
   });
 });
