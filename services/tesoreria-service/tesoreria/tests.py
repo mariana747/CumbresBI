@@ -14,7 +14,7 @@ from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta
+from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaCuenta
 from .views import (
     TesoreriaBancoViewSet,
     TesoreriaContraparteViewSet,
