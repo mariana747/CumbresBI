@@ -33,6 +33,9 @@ import {
   ClipboardList,
   Link2,
   Building2,
+  Home,
+  Package,
+  Calculator,
   Landmark,
   Users,
   Wallet,
@@ -216,7 +219,29 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // - antes se mostraban los 3 a cualquiera con sesion, y despues se
   // dejaron deshabilitados; version actual permite entrar, ver mas abajo).
   if (tieneAlgunPermiso(session, ["ventas-vivienda", "materiales"])) {
-    items.push({ label: "Ventas / Vivienda", href: "/ventas-vivienda", icon: Building2, enabled: true });
+    // Fase 3, arranque de exposicion CRUD (19/Ago/2026) - primer modulo de
+    // negocio con pantallas reales ademas de Admin(IAM)/PLD, mismo
+    // estandar de apartados con URL propio (ver children de arriba), no
+    // pestanas dentro de un solo /ventas-vivienda.
+    items.push({
+      label: "Ventas / Vivienda",
+      href: "/ventas-vivienda/proyectos",
+      icon: Building2,
+      enabled: true,
+      children: [
+        { label: "Proyectos", href: "/ventas-vivienda/proyectos", icon: Building2 },
+        { label: "Viviendas", href: "/ventas-vivienda/viviendas", icon: Home },
+        { label: "Asesores", href: "/ventas-vivienda/asesores", icon: Users },
+        { label: "Expedientes", href: "/ventas-vivienda/expedientes", icon: ClipboardList },
+        // Esqueleto de materiales-service (19/Ago/2026, servicio nuevo,
+        // ver docs/architecture/README.md sec. 1.1.2) - modelos y
+        // migracion ya existen, sin serializers/views/tests todavia; las
+        // 2 pantallas de abajo son "en desarrollo" (EnDesarrolloPage),
+        // mismo criterio que Compras/Tesoreria/RRHH antes de tener CRUD.
+        { label: "Materiales", href: "/ventas-vivienda/materiales", icon: Package },
+        { label: "Presupuestos", href: "/ventas-vivienda/presupuestos", icon: Calculator },
+      ],
+    });
   }
   // Tesoreria (18/Ago/2026, arranque formal de Fase 4) ya tiene pantalla
   // real de Contrapartes - reemplaza el placeholder "en desarrollo" que
