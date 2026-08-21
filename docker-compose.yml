@@ -398,6 +398,41 @@ services:
       rentas-service-db:
         condition: service_healthy
 
+  obra-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${OBRA_DB_NAME:-obra_service}
+      MYSQL_USER: ${OBRA_DB_USER:-obra_app}
+      MYSQL_PASSWORD: ${OBRA_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${OBRA_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33071:3306"
+    volumes:
+      - obra_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${OBRA_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  obra-service:
+    build:
+      context: .
+      dockerfile: services/obra-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      OBRA_DB_HOST: obra-service-db
+    volumes:
+      - ./services/obra-service:/app
+    ports:
+      - "8012:8080"
+    depends_on:
+      obra-service-db:
+        condition: service_healthy
+
   drive-service:
     build:
       context: .
@@ -446,3 +481,4 @@ volumes:
   docint_db_data:
   tesoreria_db_data:
   rentas_db_data:
+  obra_db_data:
