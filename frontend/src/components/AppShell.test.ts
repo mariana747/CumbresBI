@@ -118,24 +118,51 @@ describe("buildNavItems - PLD", () => {
 // desarrollo" mas. Sale del bloque de placeholders de abajo, igual que
 // nunca estuvo ahi Admin(IAM)/PLD.
 describe("buildNavItems - Ventas / Vivienda", () => {
-  it("algun perm de ventas-vivienda/materiales muestra el apartado con sus 6 pantallas", () => {
+  it("algun perm de ventas-vivienda muestra el apartado con sus 5 pantallas", () => {
     for (const roleKey of Object.keys(ROLES)) {
-      const tieneAlguno = ROLES[roleKey].some(
-        (p) => p.startsWith("ventas-vivienda.") || p.startsWith("materiales.")
-      );
+      const tieneAlguno = ROLES[roleKey].some((p) => p.startsWith("ventas-vivienda."));
       if (!tieneAlguno) continue;
       const items = buildNavItems(sesionDe(roleKey));
       const ventas = buscar(items, "/ventas-vivienda/proyectos");
       expect(ventas, `${roleKey} deberia ver Ventas / Vivienda`).toBeDefined();
       expect(ventas?.enabled).toBe(true);
       const labels = hijos(ventas).map((c) => c.label);
-      expect(labels).toEqual(["Proyectos", "Viviendas", "Asesores", "Expedientes", "Materiales", "Presupuestos"]);
+      expect(labels).toEqual(["Proyectos", "Viviendas", "Asesores", "Expedientes", "Presupuestos"]);
     }
   });
 
-  it("sin ventas-vivienda.*/materiales.* no aparece el apartado", () => {
+  it("sin ventas-vivienda.* no aparece el apartado", () => {
     const items = buildNavItems(sesionDe("RRHH_ADMIN"));
     expect(buscar(items, "/ventas-vivienda/proyectos")).toBeUndefined();
+  });
+});
+
+// Materiales vive en Obra desde 21/Ago/2026 (pedido de Mariana: "materiales
+// debe estar en obra") - antes colgaba de Ventas/Vivienda; ver AppShell.tsx.
+describe("buildNavItems - Obra (incluye Materiales)", () => {
+  it("algun perm de obra/materiales muestra el apartado con Materiales", () => {
+    for (const roleKey of Object.keys(ROLES)) {
+      const tieneAlguno = ROLES[roleKey].some(
+        (p) => p.startsWith("obra.") || p.startsWith("materiales.")
+      );
+      if (!tieneAlguno) continue;
+      const items = buildNavItems(sesionDe(roleKey));
+      const obra = buscar(items, "/obra/avance");
+      expect(obra, `${roleKey} deberia ver Obra`).toBeDefined();
+      expect(obra?.enabled).toBe(true);
+      const labels = hijos(obra).map((c) => c.label);
+      expect(labels).toContain("Materiales");
+      expect(labels).toContain("Requisiciones");
+      const materiales = hijos(obra).find((c) => c.label === "Materiales");
+      expect(materiales?.href).toBe("/obra/materiales");
+      const requisiciones = hijos(obra).find((c) => c.label === "Requisiciones");
+      expect(requisiciones?.href).toBe("/obra/requisiciones");
+    }
+  });
+
+  it("sin obra.*/materiales.* no aparece el apartado", () => {
+    const items = buildNavItems(sesionDe("RRHH_ADMIN"));
+    expect(buscar(items, "/obra/avance")).toBeUndefined();
   });
 });
 

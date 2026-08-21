@@ -29,6 +29,31 @@ export const SCOPE_PALETTE = {
   contrato: "#146C6C",
 } as const;
 
+// Leyenda de colores del avance de obra - el color de la celda de %/TOTAL
+// depende del estado real, no es decorativo.
+export const OBRA_AVANCE_PALETTE = {
+  falta: "#90caf9",
+  sobreestimado: "#e53935",
+  sinInformacion: "#ffb300",
+  completo: "#66bb6a",
+} as const;
+
+// Colores por etapa (pestañas de /obra/avance, una por etapa - misma
+// dinamica que las hojas del Excel legado). Ciclico, no un enum fijo como
+// el resto de las paletas de este archivo, asi que se queda como arreglo
+// plano en vez de registrarse en `palette` (no hay un color "obraEtapa1"
+// de primera clase, es "el color de la etapa N modulo el largo del
+// arreglo").
+export const OBRA_ETAPA_COLORS = [
+  "#1976d2", "#2e7d32", "#ef6c00", "#6a1b9a", "#c62828", "#00838f",
+  "#5d4037", "#455a64", "#8e24aa", "#00695c", "#ad1457", "#37474f",
+] as const;
+
+// Barra de pestañas de /obra/avance, estilo hojas de Excel - mas oscura
+// que BRAND.charcoal a proposito, para que se lea como la barra de hojas
+// de una hoja de calculo, no como el sidebar de la app.
+export const OBRA_TAB_BAR_BG = "#1c1c1c";
+
 export const theme = createTheme({
   palette: {
     mode: "light",
@@ -40,6 +65,10 @@ export const theme = createTheme({
     scopeProyecto: { main: SCOPE_PALETTE.proyecto, contrastText: "#FFFFFF" },
     scopeCentro: { main: SCOPE_PALETTE.centro, contrastText: "#FFFFFF" },
     scopeContrato: { main: SCOPE_PALETTE.contrato, contrastText: "#FFFFFF" },
+    obraFalta: { main: OBRA_AVANCE_PALETTE.falta, contrastText: "#000000" },
+    obraSobreestimado: { main: OBRA_AVANCE_PALETTE.sobreestimado, contrastText: "#FFFFFF" },
+    obraSinInformacion: { main: OBRA_AVANCE_PALETTE.sinInformacion, contrastText: "#000000" },
+    obraCompleto: { main: OBRA_AVANCE_PALETTE.completo, contrastText: "#000000" },
   },
   typography: {
     fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -69,6 +98,10 @@ declare module "@mui/material/styles" {
     scopeProyecto: Palette["primary"];
     scopeCentro: Palette["primary"];
     scopeContrato: Palette["primary"];
+    obraFalta: Palette["primary"];
+    obraSobreestimado: Palette["primary"];
+    obraSinInformacion: Palette["primary"];
+    obraCompleto: Palette["primary"];
   }
   interface PaletteOptions {
     scopeGlobal?: PaletteOptions["primary"];
@@ -76,6 +109,10 @@ declare module "@mui/material/styles" {
     scopeProyecto?: PaletteOptions["primary"];
     scopeCentro?: PaletteOptions["primary"];
     scopeContrato?: PaletteOptions["primary"];
+    obraFalta?: PaletteOptions["primary"];
+    obraSobreestimado?: PaletteOptions["primary"];
+    obraSinInformacion?: PaletteOptions["primary"];
+    obraCompleto?: PaletteOptions["primary"];
   }
 }
 
@@ -86,5 +123,9 @@ declare module "@mui/material/Chip" {
     scopeProyecto: true;
     scopeCentro: true;
     scopeContrato: true;
+    obraFalta: true;
+    obraSobreestimado: true;
+    obraSinInformacion: true;
+    obraCompleto: true;
   }
 }
