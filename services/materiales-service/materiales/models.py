@@ -191,18 +191,24 @@ class SolicitudMaterial(models.Model):
     """Solicitud de material conta <-> almacen (Plan de Trabajo Fase 3
     Semana 13: "Registro de recepcion de material y proceso de solicitud
     de material; descuento automatico de material disponible contra lo
-    presupuestado"). Esqueleto: el descuento automatico contra
-    MaterialCatalogo.cantidad_disponible al aprobar/entregar es logica de
-    negocio pendiente (senal o vista dedicada), NO implementada en este
-    primer corte - este modelo solo registra la solicitud."""
+    presupuestado"). Es SOLO para pedir contra lo que ya hay en almacen,
+    NO una requisicion de compra (decision de Mariana 21/Ago/2026) - por
+    eso el serializer valida que cantidad_solicitada no exceda
+    MaterialCatalogo.cantidad_disponible al crear, y
+    SolicitudMaterialViewSet.entregar hace el descuento real (con
+    select_for_update).
+
+    Flujo de 3 estados (decision de Mariana 21/Ago/2026: "tendremos
+    Entregado, Solicitado, Rechazado" - sin paso intermedio de Aprobado):
+    SOLICITADO -> ENTREGADO o SOLICITADO -> RECHAZADO. `entregar` exige
+    ademas al menos una EvidenciaRecepcion con foto (ver
+    SolicitudMaterialViewSet.entregar)."""
 
     ESTADO_SOLICITADO = "SOLICITADO"
-    ESTADO_APROBADO = "APROBADO"
     ESTADO_ENTREGADO = "ENTREGADO"
     ESTADO_RECHAZADO = "RECHAZADO"
     ESTADO_CHOICES = [
         (ESTADO_SOLICITADO, "Solicitado"),
-        (ESTADO_APROBADO, "Aprobado"),
         (ESTADO_ENTREGADO, "Entregado"),
         (ESTADO_RECHAZADO, "Rechazado"),
     ]
@@ -227,4 +233,139 @@ class SolicitudMaterial(models.Model):
         db_table = "materiales_solicitudes"
 
     def __str__(self):
-        return self.id_solicitud
+        return f"{self.id_solicitud} ({self.estado})"
+
+
+class EvidenciaRecepcion(models.Model):
+    """Bitacora de recepcion de material contra una SolicitudMaterial: foto +
+    fecha/hora de cuando llego el material (pedido de Mariana 21/Ago/2026,
+    "falta evidencia de recepcion... debe poder mandar foto, anotar fecha,
+    hora... es una bitacora" - puede haber varias entradas por solicitud,
+    ej. entregas parciales).
+
+    Mismo patron que ObraEvidencia en obra-service: `link_drive` se captura
+    a mano (URL pegada desde el frontend) mientras no exista la Unidad
+    compartida de Drive para esto - cuando exista, conectar la subida real
+    via drive-service en este mismo campo, sin cambiar el modelo."""
+
+    id_evidencia = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    solicitud = models.ForeignKey(
+        SolicitudMaterial, db_column="id_solicitud", on_delete=models.PROTECT, related_name="evidencias"
+    )
+    link_drive = models.CharField(max_length=2083, blank=True, null=True)
+    fecha = models.DateField()
+    hora = models.TimeField()
+    registrado_por = models.CharField(max_length=8)
+    comentarios = models.CharField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8)
+
+    class Meta:
+        db_table = "materiales_evidencias_recepcion"
+        ordering = ["-fecha", "-hora"]
+
+    def __str__(self):
+        return f"{self.solicitud_id}-{self.fecha}-{self.hora}"
+
+
+class Requisicion(models.Model):
+    """Requisicion de materiales: documento formal por proyecto+etapa que
+    jala los ConceptoPresupuesto ya presupuestados y ES la que dispara la
+    COMPRA - distinta de SolicitudMaterial ("Salida de almacen", esa es
+    para pedir contra lo que YA hay en almacen, ver su docstring).
+    Decision de Mariana 21/Ago/2026: "en requisicion es donde se va a
+    pedir material". Diseno del documento (folio, presupuesto asignado,
+    viviendas que comprende, etapa constructiva con sus conceptos,
+    3 firmas) aprobado 17/Ago/2026 sobre el mockup original de Ruben.
+
+    V1 (21/Ago/2026): las lineas (RequisicionLinea) son un SNAPSHOT tomado
+    de ConceptoPresupuesto al crear la requisicion - `cantidad` de
+    ConceptoPresupuesto se interpreta aqui como cantidad POR VIVIENDA,
+    multiplicada por `num_viviendas` para la cantidad total. Pendiente:
+    generar el archivo .xlsx real con el formato de Ruben (hoy solo se
+    expone la data via API) y conectar `autorizo_compra_por`/`valido_por`
+    a informacion real de quien firma (hoy son ids de usuario simples, sin
+    firma electronica - mismo criterio que PresupuestoFirma)."""
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_AUTORIZADA = "AUTORIZADA"
+    ESTADO_RECHAZADA = "RECHAZADA"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente de autorización"),
+        (ESTADO_AUTORIZADA, "Autorizada"),
+        (ESTADO_RECHAZADA, "Rechazada"),
+    ]
+
+    id_requisicion = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    folio = models.CharField(max_length=40, unique=True, editable=False)
+    proyecto = models.CharField(max_length=8)
+    presupuesto = models.ForeignKey(
+        Presupuesto, db_column="id_presupuesto", on_delete=models.PROTECT, related_name="requisiciones"
+    )
+    etapa_constructiva = models.CharField(max_length=150)
+    empresa = models.CharField(max_length=200, blank=True, null=True)
+    responsable = models.CharField(max_length=150, blank=True, null=True)
+    num_viviendas = models.PositiveIntegerField(default=1)
+    presupuesto_asignado = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    solicito_por = models.CharField(max_length=8, blank=True, null=True)
+    valido_por = models.CharField(max_length=8, blank=True, null=True)
+    autorizo_compra_por = models.CharField(max_length=8, blank=True, null=True)
+    comentarios = models.CharField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8)
+
+    class Meta:
+        db_table = "materiales_requisiciones"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.folio
+
+
+class RequisicionLinea(models.Model):
+    """Una fila de la requisicion - snapshot de un ConceptoPresupuesto al
+    momento de generar el documento (precio/cantidad pueden variar despues
+    en el presupuesto sin afectar una requisicion ya generada)."""
+
+    id_linea = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    requisicion = models.ForeignKey(
+        Requisicion, db_column="id_requisicion", on_delete=models.CASCADE, related_name="lineas"
+    )
+    concepto = models.ForeignKey(
+        ConceptoPresupuesto,
+        db_column="id_concepto",
+        on_delete=models.SET_NULL,
+        related_name="lineas_requisicion",
+        blank=True,
+        null=True,
+    )
+    concepto_nombre = models.CharField(max_length=250)
+    material = models.ForeignKey(
+        MaterialCatalogo,
+        db_column="id_material",
+        on_delete=models.PROTECT,
+        related_name="lineas_requisicion",
+        blank=True,
+        null=True,
+    )
+    cantidad_por_vivienda = models.DecimalField(max_digits=14, decimal_places=4)
+    cantidad_total = models.DecimalField(max_digits=14, decimal_places=2)
+    precio_unitario = models.DecimalField(max_digits=14, decimal_places=2)
+    importe = models.DecimalField(max_digits=16, decimal_places=2)
+    proveedor_cotizacion = models.CharField(max_length=200, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8)
+
+    class Meta:
+        db_table = "materiales_requisicion_lineas"
+        ordering = ["concepto_nombre"]
+
+    def __str__(self):
+        return f"{self.requisicion_id}-{self.concepto_nombre}"
