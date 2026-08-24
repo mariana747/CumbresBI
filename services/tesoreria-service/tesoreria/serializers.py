@@ -244,9 +244,15 @@ class FacturaConceptoSerializer(serializers.ModelSerializer):
 class TesoreriaFacturaSerializer(serializers.ModelSerializer):
     """Factura CFDI recibida de un proveedor (Fase 4, Sem 20 del
     cronograma) - primer corte de encabezado, alta manual via API/
-    formulario. El "motor" que la llena automaticamente desde el Motor
-    Documental (lectura de PDF/XML) es una integracion aparte, todavia sin
-    construir - por ahora cualquier campo de aqui se puede escribir a mano.
+    formulario, mas el Motor Documental (24/Ago/2026, ver
+    TesoreriaFacturaViewSet.confirmar_extraccion) para prellenar/actualizar
+    esos mismos campos desde un PDF/XML ya analizado.
+
+    `estado` es de solo lectura aqui a proposito - el ciclo de vida
+    (PENDIENTE -> EN_PROCESO -> ACEPTADA/RECHAZADA, ver
+    TesoreriaFactura.ESTADO_CHOICES) solo cambia via la accion
+    marcar_estado(), que exige link_pdf+link_xml antes de aceptar. Sin este
+    read_only, un PATCH normal podria saltarse esa validacion.
 
     conceptos expone las lineas reales (FacturaConcepto) filtradas por el
     mismo timbre_uuid - de solo lectura aqui, se administran via
@@ -266,6 +272,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "comprobante_metodo_pago",
             "comprobante_moneda",
             "comprobante_total",
+            "comprobante_tipo_de_comprobante",
             "tipo_relacion",
             "uuid_relacionado",
             "emisor_rfc",
@@ -277,6 +284,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "timbre_fecha_timbrado",
             "tipo_factura",
             "link_pdf",
+            "link_xml",
             "estado",
             "conceptos",
             "created_at",
@@ -284,7 +292,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "estado", "created_at", "updated_at"]
 
     def get_conceptos(self, obj):
         conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)

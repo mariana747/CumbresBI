@@ -342,6 +342,24 @@ class TesoreriaComplementoPago(models.Model):
 
 
 class TesoreriaFactura(models.Model):
+    # Estado del proceso de revision (24/Ago/2026, pedido explicito de
+    # Mariana) - distinto del estado fiscal del CFDI ante el SAT
+    # (vigente/cancelada, que hoy tambien vive en este mismo campo como
+    # texto libre para las facturas ya capturadas antes de este cambio).
+    # Pasar a ACEPTADA exige tener cargados los dos archivos esenciales
+    # (link_pdf + link_xml, ver TesoreriaFacturaViewSet.marcar_estado) -
+    # sin eso no hay forma de comprobar despues que el CFDI es el correcto.
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_EN_PROCESO = "EN_PROCESO"
+    ESTADO_ACEPTADA = "ACEPTADA"
+    ESTADO_RECHAZADA = "RECHAZADA"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_EN_PROCESO, "En proceso"),
+        (ESTADO_ACEPTADA, "Aceptada"),
+        (ESTADO_RECHAZADA, "Rechazada"),
+    ]
+
     id = models.AutoField(primary_key=True)
     comprobante_version = models.CharField(
         db_column="Comprobante_Version", max_length=10, blank=True, null=True
@@ -412,11 +430,18 @@ class TesoreriaFactura(models.Model):
     )
     tipo_factura = models.CharField(max_length=50, blank=True, null=True)
     link_pdf = models.TextField(blank=True, null=True)
+    # Vista previa (PDF) y comprobante fiscal digital (XML) son los dos
+    # archivos esenciales que se piden para poder aceptar la factura (ver
+    # ESTADO_CHOICES arriba) - se pegan a mano igual que link_pdf mientras
+    # no exista una integracion real de subida de archivo para este flujo.
+    link_xml = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
-    estado = models.CharField(max_length=50, blank=True, null=True)
+    estado = models.CharField(
+        max_length=50, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, blank=True, null=True
+    )
 
     class Meta:
         db_table = "tesoreria_facturas"

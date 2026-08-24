@@ -327,14 +327,102 @@ class _PermisosFacturacionCfdiMixin:
 class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     """Factura CFDI recibida de un proveedor (Fase 4, Sem 20 del
     cronograma) - primer corte de encabezado, alta manual via API/
-    formulario mientras no exista la integracion con el Motor Documental
-    (ver docstring del serializer). Busqueda de texto libre (?search=)
-    sobre folio/UUID/nombres de emisor-receptor."""
+    formulario. confirmar_extraccion() abajo es el enlace real con el
+    Motor Documental (24/Ago/2026, heredado del mismo patron que
+    PldContraparteKycViewSet.confirmar_extraccion en pld-service). Busqueda
+    de texto libre (?search=) sobre folio/UUID/nombres de emisor-receptor."""
 
     queryset = TesoreriaFactura.objects.all().order_by("-created_at")
     serializer_class = TesoreriaFacturaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre"]
+
+    # Whitelist de columnas que confirmar_extraccion puede escribir - mismo
+    # criterio que PldContraparteKycViewSet.CAMPOS_CONFIRMABLES (ver
+    # pld/views.py): la IA propone, un humano ya reviso/corrigio en pantalla
+    # antes de este POST. timbre_uuid queda FUERA a proposito (es la
+    # identidad del registro, ya se captura a mano al crear la factura y el
+    # frontend la deja fija/no editable despues - no se debe poder pisar
+    # por una extraccion que leyo mal un documento).
+    CAMPOS_CONFIRMABLES = {
+        "comprobante_serie",
+        "comprobante_folio",
+        "comprobante_fecha",
+        "comprobante_moneda",
+        "comprobante_forma_pago",
+        "comprobante_metodo_pago",
+        "comprobante_total",
+        "comprobante_tipo_de_comprobante",
+        "tipo_relacion",
+        "uuid_relacionado",
+        "emisor_rfc",
+        "emisor_nombre",
+        "receptor_rfc",
+        "receptor_nombre",
+        "receptor_uso_cfdi",
+        "timbre_fecha_timbrado",
+    }
+
+    def get_permissions(self):
+        if self.action in ("confirmar_extraccion", "marcar_estado"):
+            return [require_permission("facturacion-cfdi.editar")()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["post"])
+    def marcar_estado(self, request, pk=None):
+        """Cambia el estado del proceso de revision de la factura
+        (PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA, ver
+        TesoreriaFactura.ESTADO_CHOICES) - pedido explicito de Mariana
+        (24/Ago/2026). Pasar a ACEPTADA exige que ya esten cargados los dos
+        archivos esenciales (link_pdf = vista previa en PDF, link_xml =
+        comprobante fiscal digital) - sin eso no queda forma de comprobar
+        despues que el CFDI aceptado es el correcto. Mismo permiso que
+        editar la factura (facturacion-cfdi.editar) - a diferencia de
+        TesoreriaFlujo, aqui no se segrega captura de aprobacion."""
+        nuevo_estado = request.data.get("estado")
+        if nuevo_estado not in dict(TesoreriaFactura.ESTADO_CHOICES):
+            return Response({"estado": "Estado inválido."}, status=400)
+
+        factura = self.get_object()
+        if nuevo_estado == TesoreriaFactura.ESTADO_ACEPTADA and not (factura.link_pdf and factura.link_xml):
+            return Response(
+                {"detail": "Para aceptar la factura hace falta cargar el PDF y el XML."}, status=400
+            )
+
+        factura.estado = nuevo_estado
+        factura.save(update_fields=["estado"])
+        return Response(self.get_serializer(factura).data)
+
+    @action(detail=True, methods=["post"])
+    def confirmar_extraccion(self, request, pk=None):
+        """Guarda en la factura los datos que salieron del Motor Documental
+        (docint AnalyzeView, prompt "tesoreria.cfdi_factura") DESPUES de que
+        el analista los reviso en pantalla - la IA propone, un humano
+        confirma antes de que el dato quede como verdad de negocio (mismo
+        criterio que pld-service, ver docstring de la clase).
+
+        Body: {"campos": {<nombre_de_campo>: <valor>, ...}} - solo se
+        aceptan campos en CAMPOS_CONFIRMABLES, cualquier otra llave
+        (incluido timbre_uuid) se ignora silenciosamente. NOTA: a diferencia
+        de pld-service, todavia no emite evento de auditoria -
+        tesoreria-service no tiene audit_utils.py (ver docs/CumbresBI_estado.md,
+        hallazgo 24/Ago/2026, pendiente aparte)."""
+        campos = request.data.get("campos")
+        if not isinstance(campos, dict) or not campos:
+            return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
+
+        datos_validos = {k: v for k, v in campos.items() if k in self.CAMPOS_CONFIRMABLES}
+        if not datos_validos:
+            return Response(
+                {"detail": "Ninguno de los campos enviados es confirmable en esta factura."},
+                status=400,
+            )
+
+        factura = self.get_object()
+        serializer = self.get_serializer(factura, data=datos_validos, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
