@@ -43,6 +43,9 @@ import {
   UserPlus,
   ScrollText,
   ArrowLeftRight,
+  Receipt,
+  FileMinus,
+  Wallet2,
   Bell,
   HardHat,
   CalendarCheck,
@@ -267,6 +270,10 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FileText },
         { label: "Flujos", href: "/tesoreria/flujos", icon: ArrowLeftRight },
+        { label: "Facturas CFDI", href: "/tesoreria/facturas", icon: FileText },
+        { label: "Complementos de pago", href: "/tesoreria/complementos-pago", icon: Receipt },
+        { label: "Notas de crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
+        { label: "Recibos de nómina", href: "/tesoreria/rec-nominas", icon: Wallet2 },
       ],
     });
   }

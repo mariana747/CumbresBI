@@ -534,3 +534,479 @@ export async function updateContrato(
   }
   return response.json();
 }
+
+// Facturacion CFDI (Sem 20 del cronograma, CRUD real agregado 24/Ago/2026 -
+// ver tesoreria/views.py::_PermisosFacturacionCfdiMixin). Permiso propio
+// "facturacion-cfdi.crear/.editar", distinto de "tesoreria.*" - por eso
+// estas 4 pantallas usan su propio gate en vez de puedeCrear/puedeEditar
+// de Contrapartes/Cuentas/Contratos/Flujos.
+export interface FacturaConcepto {
+  id: number;
+  uuid: string | null;
+  clave_prod_serv: string | null;
+  no_identificacion: string | null;
+  cantidad: string | null;
+  clave_unidad: string | null;
+  unidad: string | null;
+  descripcion: string | null;
+  valor_unitario: string | null;
+  importe: string | null;
+  descuento: string | null;
+  objeto_imp: string | null;
+  rfc_propietario: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface TesoreriaFactura {
+  id: number;
+  comprobante_serie: string | null;
+  comprobante_folio: string | null;
+  comprobante_fecha: string | null;
+  comprobante_forma_pago: string | null;
+  comprobante_metodo_pago: string | null;
+  comprobante_moneda: string | null;
+  comprobante_total: string | null;
+  tipo_relacion: string | null;
+  uuid_relacionado: string | null;
+  emisor_rfc: string | null;
+  emisor_nombre: string | null;
+  receptor_rfc: string | null;
+  receptor_nombre: string | null;
+  receptor_uso_cfdi: string | null;
+  timbre_uuid: string;
+  timbre_fecha_timbrado: string | null;
+  tipo_factura: string | null;
+  link_pdf: string | null;
+  estado: string | null;
+  conceptos: FacturaConcepto[];
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listFacturas(search?: string): Promise<TesoreriaFactura[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface FacturaInput {
+  comprobanteSerie?: string;
+  comprobanteFolio?: string;
+  comprobanteFecha?: string;
+  comprobanteFormaPago?: string;
+  comprobanteMetodoPago?: string;
+  comprobanteMoneda?: string;
+  comprobanteTotal?: string;
+  tipoRelacion?: string;
+  uuidRelacionado?: string;
+  emisorRfc?: string;
+  emisorNombre?: string;
+  receptorRfc?: string;
+  receptorNombre?: string;
+  receptorUsoCfdi?: string;
+  timbreUuid?: string;
+  timbreFechaTimbrado?: string;
+  tipoFactura?: string;
+  linkPdf?: string;
+  estado?: string;
+}
+
+// Los campos de monto de Facturacion CFDI son DecimalField en el backend
+// (ver tesoreria/models.py) - si el usuario captura "84,360.00" con separador
+// de miles, Django los rechaza tal cual con "Se requiere un numero valido."
+// (TESORERIA-400). Se le quitan comas/espacios antes de mandarlo, igual que
+// ya hace cualquier <input type="number"> nativo por su cuenta.
+function normalizaDecimal(valor?: string): string | null {
+  if (!valor) return null;
+  const limpio = valor.replace(/[,\s]/g, "");
+  return limpio || null;
+}
+
+function facturaBody(params: FacturaInput) {
+  return {
+    comprobante_serie: params.comprobanteSerie || null,
+    comprobante_folio: params.comprobanteFolio || null,
+    comprobante_fecha: params.comprobanteFecha || null,
+    comprobante_forma_pago: params.comprobanteFormaPago || null,
+    comprobante_metodo_pago: params.comprobanteMetodoPago || null,
+    comprobante_moneda: params.comprobanteMoneda || null,
+    comprobante_total: normalizaDecimal(params.comprobanteTotal),
+    tipo_relacion: params.tipoRelacion || null,
+    uuid_relacionado: params.uuidRelacionado || null,
+    emisor_rfc: params.emisorRfc || null,
+    emisor_nombre: params.emisorNombre || null,
+    receptor_rfc: params.receptorRfc || null,
+    receptor_nombre: params.receptorNombre || null,
+    receptor_uso_cfdi: params.receptorUsoCfdi || null,
+    timbre_uuid: params.timbreUuid || undefined,
+    timbre_fecha_timbrado: params.timbreFechaTimbrado || null,
+    tipo_factura: params.tipoFactura || null,
+    link_pdf: params.linkPdf || null,
+    estado: params.estado || null,
+  };
+}
+
+export async function createFactura(params: FacturaInput): Promise<TesoreriaFactura> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(facturaBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateFactura(id: number, params: FacturaInput): Promise<TesoreriaFactura> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(facturaBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteFactura(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/`, { method: "DELETE" });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+export interface TesoreriaComplementoPago {
+  id: number;
+  timbre_uuid: string;
+  serie: string | null;
+  folio: string | null;
+  fecha: string | null;
+  moneda: string | null;
+  sub_total: string | null;
+  total: string | null;
+  emisor_rfc: string | null;
+  emisor_nombre: string | null;
+  receptor_rfc: string | null;
+  receptor_nombre: string | null;
+  fecha_de_pago: string | null;
+  monto_pagado: string | null;
+  uuid_relacion: string | null;
+  tipo_factura: string | null;
+  link_pdf: string | null;
+  estado: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listComplementosPago(search?: string): Promise<TesoreriaComplementoPago[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/complementos-pago/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface ComplementoPagoInput {
+  timbreUuid?: string;
+  serie?: string;
+  folio?: string;
+  fecha?: string;
+  moneda?: string;
+  subTotal?: string;
+  total?: string;
+  emisorRfc?: string;
+  emisorNombre?: string;
+  receptorRfc?: string;
+  receptorNombre?: string;
+  fechaDePago?: string;
+  montoPagado?: string;
+  uuidRelacion?: string;
+  tipoFactura?: string;
+  linkPdf?: string;
+  estado?: string;
+}
+
+function complementoPagoBody(params: ComplementoPagoInput) {
+  return {
+    timbre_uuid: params.timbreUuid || undefined,
+    serie: params.serie || null,
+    folio: params.folio || null,
+    fecha: params.fecha || null,
+    moneda: params.moneda || null,
+    sub_total: normalizaDecimal(params.subTotal),
+    total: normalizaDecimal(params.total),
+    emisor_rfc: params.emisorRfc || null,
+    emisor_nombre: params.emisorNombre || null,
+    receptor_rfc: params.receptorRfc || null,
+    receptor_nombre: params.receptorNombre || null,
+    fecha_de_pago: params.fechaDePago || null,
+    monto_pagado: normalizaDecimal(params.montoPagado),
+    uuid_relacion: params.uuidRelacion || null,
+    tipo_factura: params.tipoFactura || null,
+    link_pdf: params.linkPdf || null,
+    estado: params.estado || null,
+  };
+}
+
+export async function createComplementoPago(params: ComplementoPagoInput): Promise<TesoreriaComplementoPago> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/complementos-pago/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(complementoPagoBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateComplementoPago(id: number, params: ComplementoPagoInput): Promise<TesoreriaComplementoPago> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/complementos-pago/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(complementoPagoBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteComplementoPago(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/complementos-pago/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+export interface TesoreriaNotaCredito {
+  id: number;
+  comprobante_serie: string | null;
+  comprobante_folio: string | null;
+  comprobante_fecha: string | null;
+  comprobante_total: string | null;
+  uuid_relacionado: string | null;
+  factura_folio: string | null;
+  emisor_rfc: string | null;
+  emisor_nombre: string | null;
+  receptor_rfc: string | null;
+  receptor_nombre: string | null;
+  timbre_uuid: string;
+  timbre_fecha_timbrado: string | null;
+  tipo_factura: string | null;
+  link_pdf: string | null;
+  estado: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listNotasCredito(search?: string): Promise<TesoreriaNotaCredito[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/notas-credito/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface NotaCreditoInput {
+  comprobanteSerie?: string;
+  comprobanteFolio?: string;
+  comprobanteFecha?: string;
+  comprobanteTotal?: string;
+  uuidRelacionado?: string;
+  emisorRfc?: string;
+  emisorNombre?: string;
+  receptorRfc?: string;
+  receptorNombre?: string;
+  timbreUuid?: string;
+  timbreFechaTimbrado?: string;
+  tipoFactura?: string;
+  linkPdf?: string;
+  estado?: string;
+}
+
+function notaCreditoBody(params: NotaCreditoInput) {
+  return {
+    comprobante_serie: params.comprobanteSerie || null,
+    comprobante_folio: params.comprobanteFolio || null,
+    comprobante_fecha: params.comprobanteFecha || null,
+    comprobante_total: normalizaDecimal(params.comprobanteTotal),
+    uuid_relacionado: params.uuidRelacionado || null,
+    emisor_rfc: params.emisorRfc || null,
+    emisor_nombre: params.emisorNombre || null,
+    receptor_rfc: params.receptorRfc || null,
+    receptor_nombre: params.receptorNombre || null,
+    timbre_uuid: params.timbreUuid || undefined,
+    timbre_fecha_timbrado: params.timbreFechaTimbrado || null,
+    tipo_factura: params.tipoFactura || null,
+    link_pdf: params.linkPdf || null,
+    estado: params.estado || null,
+  };
+}
+
+export async function createNotaCredito(params: NotaCreditoInput): Promise<TesoreriaNotaCredito> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/notas-credito/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(notaCreditoBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateNotaCredito(id: number, params: NotaCreditoInput): Promise<TesoreriaNotaCredito> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/notas-credito/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(notaCreditoBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteNotaCredito(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/notas-credito/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+export interface TesoreriaRecNomina {
+  id: number;
+  fecha: string | null;
+  moneda: string | null;
+  folio: string | null;
+  sub_total: string | null;
+  total: string | null;
+  emisor_rfc: string | null;
+  emisor_nombre: string | null;
+  receptor_rfc: string | null;
+  receptor_nombre: string | null;
+  nom_receptor_num_empleado: string | null;
+  nomina_fecha_pago: string | null;
+  nomina_fecha_inicial_pago: string | null;
+  nomina_fecha_final_pago: string | null;
+  timbre_uuid: string | null;
+  timbre_fecha_timbrado: string | null;
+  tipo_factura: string | null;
+  link_pdf: string | null;
+  estado: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listRecNominas(search?: string): Promise<TesoreriaRecNomina[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/rec-nominas/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface RecNominaInput {
+  fecha?: string;
+  moneda?: string;
+  folio?: string;
+  subTotal?: string;
+  total?: string;
+  emisorRfc?: string;
+  emisorNombre?: string;
+  receptorRfc?: string;
+  receptorNombre?: string;
+  nomReceptorNumEmpleado?: string;
+  nominaFechaPago?: string;
+  nominaFechaInicialPago?: string;
+  nominaFechaFinalPago?: string;
+  timbreUuid?: string;
+  timbreFechaTimbrado?: string;
+  tipoFactura?: string;
+  linkPdf?: string;
+  estado?: string;
+}
+
+function recNominaBody(params: RecNominaInput) {
+  return {
+    fecha: params.fecha || null,
+    moneda: params.moneda || null,
+    folio: params.folio || null,
+    sub_total: normalizaDecimal(params.subTotal),
+    total: normalizaDecimal(params.total),
+    emisor_rfc: params.emisorRfc || null,
+    emisor_nombre: params.emisorNombre || null,
+    receptor_rfc: params.receptorRfc || null,
+    receptor_nombre: params.receptorNombre || null,
+    nom_receptor_num_empleado: params.nomReceptorNumEmpleado || null,
+    nomina_fecha_pago: params.nominaFechaPago || null,
+    nomina_fecha_inicial_pago: params.nominaFechaInicialPago || null,
+    nomina_fecha_final_pago: params.nominaFechaFinalPago || null,
+    timbre_uuid: params.timbreUuid || null,
+    timbre_fecha_timbrado: params.timbreFechaTimbrado || null,
+    tipo_factura: params.tipoFactura || null,
+    link_pdf: params.linkPdf || null,
+    estado: params.estado || null,
+  };
+}
+
+export async function createRecNomina(params: RecNominaInput): Promise<TesoreriaRecNomina> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/rec-nominas/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(recNominaBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateRecNomina(id: number, params: RecNominaInput): Promise<TesoreriaRecNomina> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/rec-nominas/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(recNominaBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteRecNomina(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/rec-nominas/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
