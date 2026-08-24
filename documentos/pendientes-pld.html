@@ -1,0 +1,212 @@
+<title>Pendientes de PLD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #f4f2f7;
+    --surface: #ffffff;
+    --surface-2: #eae6f2;
+    --ink: #1c1826;
+    --ink-soft: #5c5468;
+    --ink-faint: #8a8296;
+    --line: #ded8e8;
+    --line-strong: #b9aecf;
+
+    --accent: #6b5b95;
+    --accent-strong: #4f4270;
+    --accent-soft: #eae6f4;
+
+    --ok: #2f7a4f;
+    --ok-soft: #dceee1;
+    --warn: #a6720b;
+    --warn-soft: #f6ecd4;
+    --missing: #a6485a;
+    --missing-soft: #f6e4e7;
+
+    --font-display: "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Courier New", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16131c; --surface: #1d1926; --surface-2: #241f30;
+      --ink: #ede9f2; --ink-soft: #b3aac2; --ink-faint: #837a94;
+      --line: #322b3f; --line-strong: #453a56;
+      --accent: #b3a1e0; --accent-strong: #cabdea; --accent-soft: #2a2338;
+      --ok: #6bc98f; --ok-soft: #17301f;
+      --warn: #e0b84a; --warn-soft: #3a2f10;
+      --missing: #e0919f; --missing-soft: #331f24;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16131c; --surface: #1d1926; --surface-2: #241f30;
+    --ink: #ede9f2; --ink-soft: #b3aac2; --ink-faint: #837a94;
+    --line: #322b3f; --line-strong: #453a56;
+    --accent: #b3a1e0; --accent-strong: #cabdea; --accent-soft: #2a2338;
+    --ok: #6bc98f; --ok-soft: #17301f;
+    --warn: #e0b84a; --warn-soft: #3a2f10;
+    --missing: #e0919f; --missing-soft: #331f24;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 900px; margin: 0 auto; padding: 56px 28px 90px; display: flex; flex-direction: column; gap: 40px; }
+
+  header { display: flex; flex-direction: column; gap: 14px; border-bottom: 1px solid var(--line); padding-bottom: 32px; }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent-strong); display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--accent); display: inline-block; }
+  h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(2rem, 3.6vw, 2.6rem); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+  .lede { max-width: 68ch; color: var(--ink-soft); font-size: 1.02rem; }
+  .lede code { font-family: var(--font-mono); font-size: 0.9em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.4em; color: var(--ink); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; }
+  .stat .n { font-family: var(--font-mono); font-weight: 600; font-size: 1.9rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat .label { font-size: 0.8rem; color: var(--ink-soft); }
+  .stat.total { border-color: var(--accent); background: var(--accent-soft); }
+  .stat.blocked .n { color: var(--missing); }
+  .stat.waiting .n { color: var(--warn); }
+
+  .item {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 22px 26px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .item-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .item h2 { font-family: var(--font-display); font-size: 1.15rem; font-weight: 700; margin: 0; }
+  .pill { font-size: 0.72rem; font-weight: 600; padding: 3px 11px; border-radius: 999px; white-space: nowrap; font-family: var(--font-mono); letter-spacing: 0.02em; }
+  .pill.blocked { background: var(--missing-soft); color: var(--missing); }
+  .pill.waiting { background: var(--warn-soft); color: var(--warn); }
+  .pill.open { background: var(--accent-soft); color: var(--accent-strong); }
+  .item p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; }
+  .item .porque { font-size: 0.88rem; color: var(--ink-faint); border-left: 2px solid var(--line-strong); padding-left: 12px; margin-top: 2px; }
+  .item .porque strong { color: var(--ink-soft); font-weight: 600; }
+  .item code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.35em; color: var(--ink); }
+
+  .hecho {
+    background: var(--ok-soft); border: 1px solid var(--ok); border-radius: 12px;
+    padding: 16px 20px; font-size: 0.92rem; color: var(--ink);
+  }
+  .hecho strong { color: var(--ok); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 20px; font-size: 0.82rem; color: var(--ink-faint); font-family: var(--font-mono); }
+
+  @media (max-width: 640px) { .page { padding: 36px 16px 70px; } }
+</style>
+
+<div class="page">
+
+  <header>
+    <div class="eyebrow">CumbresBI · PLD / Cumplimiento</div>
+    <h1>Lo que le falta a PLD</h1>
+    <p class="lede">
+      El módulo está ~80% construido — expediente KYC, Motor Documental, Drive real, portal público del
+      cliente y auditoría de punta a punta ya funcionan. Esto es lo que queda: 3 cosas bloqueadas por un
+      tercero, una esperando respuesta de negocio, y un PR sin abrir.
+    </p>
+  </header>
+
+  <section class="stats">
+    <div class="stat total"><span class="n">6</span><span class="label">Pendientes reales</span></div>
+    <div class="stat blocked"><span class="n">3</span><span class="label">Bloqueados por proveedor externo</span></div>
+    <div class="stat waiting"><span class="n">2</span><span class="label">Esperando decisión de negocio</span></div>
+  </section>
+
+  <div class="hecho">
+    <strong>Ya construido y en uso:</strong> expediente KYC con alta mínima (Opción B), Drive real con
+    grupos por rol, Motor Documental con confirmar_extraccion, portal público del cliente
+    (<code>/pld-ticket/[token]</code>) con reCAPTCHA real, semáforo de estado de cuenta, y bitácora de
+    auditoría de punta a punta (<code>pld/audit_utils.py</code>, 54/54 pruebas).
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <h2>Validación contra fuentes externas (INE, PEP/OFAC, RFC, liveness)</h2>
+      <span class="pill blocked">Bloqueado</span>
+    </div>
+    <p>
+      Hoy nadie valida un expediente contra una fuente autoritativa real — solo la revisión visual del
+      analista. Se decidió contratar un proveedor externo de KYC/AML (Incode/Metamap/Truora/Didit) en vez
+      de integrar cada fuente por separado.
+    </p>
+    <div class="porque"><strong>Por qué sigue detenido:</strong> todavía no hay proveedor elegido. Ver
+      <code>docs/architecture/pld-fase2-alcance.md</code> sec. 7.</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <h2>Nivel de riesgo / estatus PEP en el detalle del expediente</h2>
+      <span class="pill blocked">Bloqueado</span>
+    </div>
+    <p>
+      La pestaña "Análisis de riesgo" de <code>/pld/[idKyc]</code> ya existe en la UI, pero muestra
+      "No disponible" a propósito — es la misma pieza de arriba, mostrada donde el analista la necesita ver.
+    </p>
+    <div class="porque"><strong>Por qué sigue detenido:</strong> depende del mismo proveedor externo de KYC/AML — no hay nada nuevo que construir aquí una vez que se elija.</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <h2>Reportes de cumplimiento PLD/AML</h2>
+      <span class="pill blocked">Bloqueado</span>
+    </div>
+    <p>
+      Los reportes formales que se le entregan a un regulador o a un oficial de cumplimiento no existen
+      todavía — hoy solo hay la tabla de expedientes y la bitácora de auditoría.
+    </p>
+    <div class="porque"><strong>Por qué sigue detenido:</strong> el contenido real de un reporte de cumplimiento depende de los datos que traiga el proveedor externo (scoring EBR, PEP) — construirlo antes sería adivinar el formato.</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <h2>Checklist de documentos requeridos por tipo de persona</h2>
+      <span class="pill waiting">Esperando respuesta</span>
+    </div>
+    <p>
+      Falta cerrar: la lista completa de documentos que se piden según persona física/moral y sus
+      vigencias, qué campos del expediente son obligatorios vs. opcionales de verdad, y si la carpeta de
+      Drive necesita subcarpetas por tipo de documento (hoy todo cae en una sola carpeta plana
+      <code>PLD/Nuevos Clientes/{id_contraparte}</code>).
+    </p>
+    <div class="porque"><strong>Por qué sigue detenido:</strong> petición enviada el 18/Ago/2026 a quien tiene el criterio de cumplimiento — todavía sin respuesta.</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <h2>Contraparte maestra compartida con PLD</h2>
+      <span class="pill waiting">Pendiente real</span>
+    </div>
+    <p>
+      <code>pld_contrapartes_kyc.id_contraparte</code> todavía genera su propio ID en vez de referenciar
+      de verdad a <code>TesoreriaContraparte</code> — la reconciliación entre los dos catálogos (la misma
+      persona/empresa vista desde PLD y desde Tesorería) sigue sin implementarse del lado de PLD.
+    </p>
+    <div class="porque"><strong>Por qué sigue detenido:</strong> el <code>ContraparteSelector</code> ya existe y ya lo usan Ventas/Vivienda — falta conectarlo también en el alta de expediente KYC de PLD.</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <h2>PR de sincronización bidireccional con Drive sin abrir</h2>
+      <span class="pill open">Solo falta el PR</span>
+    </div>
+    <p>
+      <code>verificar_documentos</code> ya detecta archivos nuevos que el analista sube directo en
+      <code>drive.google.com</code> (no solo los que desaparecen) y los audita — código completo, probado
+      (54/54 pruebas + smoke test en vivo), ya reconciliado contra <code>develop</code>.
+    </p>
+    <div class="porque"><strong>Por qué sigue detenido:</strong> nada técnico — es trabajo administrativo, solo falta abrir el Pull Request en GitHub.</div>
+  </div>
+
+  <footer>
+    Fuente: docs/CumbresBI_estado.md, Fase 2 — revisado 24/Ago/2026.
+  </footer>
+
+</div>

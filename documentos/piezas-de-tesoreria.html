@@ -1,0 +1,572 @@
+<title>Piezas de Tesorería</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #f2f5f0;
+    --surface: #ffffff;
+    --surface-2: #e9ede5;
+    --ink: #182019;
+    --ink-soft: #52605a;
+    --ink-faint: #7c8880;
+    --line: #d3d9cd;
+    --line-strong: #aab3a2;
+
+    --accent: #0e6f5c;
+    --accent-strong: #0a5548;
+    --accent-soft: #dcefe9;
+
+    --iam: #3b6fa0; --iam-soft: #e2ecf5;
+    --pld: #6b5b95; --pld-soft: #eae6f4;
+    --rrhh: #a6485a; --rrhh-soft: #f6e4e7;
+    --vivienda: #a9762c; --vivienda-soft: #f4ead9;
+    --rentas: #55606b; --rentas-soft: #e7e9eb;
+    --docint: #2f8f7a; --docint-soft: #d9efe9;
+
+    --letter-l: #55606b; --letter-l-soft: #e7e9eb;
+    --letter-c: #2f7a5e; --letter-c-soft: #dcefe6;
+    --letter-e: #3b6fa0; --letter-e-soft: #e2ecf5;
+    --letter-a: #a6720b; --letter-a-soft: #f6ecd4;
+
+    --font-display: "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Courier New", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10140e; --surface: #171d15; --surface-2: #1d241a;
+      --ink: #e9efe4; --ink-soft: #a9b5a2; --ink-faint: #7c8878;
+      --line: #2b3327; --line-strong: #3c4636;
+      --accent: #3fcbab; --accent-strong: #6fe0c4; --accent-soft: #163830;
+      --iam: #7fb0e0; --iam-soft: #1c2c3a;
+      --pld: #b3a1e0; --pld-soft: #262038;
+      --rrhh: #e0919f; --rrhh-soft: #331f24;
+      --vivienda: #d9a256; --vivienda-soft: #332711;
+      --rentas: #9aa6ad; --rentas-soft: #232a2e;
+      --docint: #5fd0b6; --docint-soft: #163830;
+      --letter-l: #9aa6ad; --letter-l-soft: #232a2e;
+      --letter-c: #5fd0b6; --letter-c-soft: #163830;
+      --letter-e: #7fb0e0; --letter-e-soft: #1c2c3a;
+      --letter-a: #e0b84a; --letter-a-soft: #3a2f10;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10140e; --surface: #171d15; --surface-2: #1d241a;
+    --ink: #e9efe4; --ink-soft: #a9b5a2; --ink-faint: #7c8878;
+    --line: #2b3327; --line-strong: #3c4636;
+    --accent: #3fcbab; --accent-strong: #6fe0c4; --accent-soft: #163830;
+    --iam: #7fb0e0; --iam-soft: #1c2c3a;
+    --pld: #b3a1e0; --pld-soft: #262038;
+    --rrhh: #e0919f; --rrhh-soft: #331f24;
+    --vivienda: #d9a256; --vivienda-soft: #332711;
+    --rentas: #9aa6ad; --rentas-soft: #232a2e;
+    --docint: #5fd0b6; --docint-soft: #163830;
+    --letter-l: #9aa6ad; --letter-l-soft: #232a2e;
+    --letter-c: #5fd0b6; --letter-c-soft: #163830;
+    --letter-e: #7fb0e0; --letter-e-soft: #1c2c3a;
+    --letter-a: #e0b84a; --letter-a-soft: #3a2f10;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1180px; margin: 0 auto; padding: 56px 28px 90px;
+    display: flex; flex-direction: column; gap: 52px;
+  }
+
+  header {
+    display: flex; flex-direction: column; gap: 14px;
+    border-bottom: 1px solid var(--line); padding-bottom: 32px;
+  }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent-strong);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--accent); display: inline-block; }
+  h1 {
+    font-family: var(--font-display); font-weight: 800; font-size: clamp(2.1rem, 4vw, 2.9rem);
+    letter-spacing: -0.02em; margin: 0; text-wrap: balance;
+  }
+  .lede { max-width: 72ch; color: var(--ink-soft); font-size: 1.05rem; }
+  .lede code {
+    font-family: var(--font-mono); font-size: 0.92em; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.4em; color: var(--ink);
+  }
+
+  /* leyenda de niveles de permiso */
+  .perm-legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 0.84rem; color: var(--ink-soft); }
+  .perm-legend .item { display: flex; align-items: center; gap: 7px; }
+  .letter {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 5px;
+    font-family: var(--font-mono); font-weight: 700; font-size: 0.72rem;
+  }
+  .letter.L { background: var(--letter-l-soft); color: var(--letter-l); }
+  .letter.C { background: var(--letter-c-soft); color: var(--letter-c); }
+  .letter.E { background: var(--letter-e-soft); color: var(--letter-e); }
+  .letter.A { background: var(--letter-a-soft); color: var(--letter-a); }
+
+  /* ---------- bloques ---------- */
+  .block { display: flex; flex-direction: column; gap: 22px; }
+  .block-head { display: flex; flex-direction: column; gap: 6px; }
+  .block-eyebrow {
+    font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-faint); font-weight: 600;
+  }
+  .block-head h2 {
+    font-family: var(--font-display); font-size: 1.55rem; font-weight: 700;
+    letter-spacing: -0.01em; margin: 0;
+  }
+  .block-head p { margin: 0; color: var(--ink-soft); font-size: 0.96rem; max-width: 74ch; }
+
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 18px;
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .card-head { display: flex; flex-direction: column; gap: 3px; }
+  .card-table { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-strong); letter-spacing: 0.02em; }
+  .card-title { font-family: var(--font-display); font-size: 1.08rem; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  .card-desc { color: var(--ink-soft); font-size: 0.9rem; }
+
+  .example {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; display: flex; flex-direction: column; gap: 5px;
+  }
+  .example .ex-label {
+    font-family: var(--font-mono); font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink-faint); margin-bottom: 3px;
+  }
+  .ex-row { display: flex; gap: 8px; font-family: var(--font-mono); font-size: 0.82rem; }
+  .ex-key { color: var(--ink-faint); min-width: 128px; flex-shrink: 0; }
+  .ex-val { color: var(--ink); font-weight: 500; }
+
+  .connects { display: flex; flex-direction: column; gap: 8px; }
+  .connects .cx-label {
+    font-family: var(--font-mono); font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink-faint);
+  }
+  .cx-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cx-pill {
+    font-family: var(--font-mono); font-size: 0.74rem; padding: 3px 9px; border-radius: 999px; font-weight: 600;
+  }
+  .cx-pill.iam { background: var(--iam-soft); color: var(--iam); }
+  .cx-pill.pld { background: var(--pld-soft); color: var(--pld); }
+  .cx-pill.rrhh { background: var(--rrhh-soft); color: var(--rrhh); }
+  .cx-pill.vivienda { background: var(--vivienda-soft); color: var(--vivienda); }
+  .cx-pill.rentas { background: var(--rentas-soft); color: var(--rentas); }
+  .cx-pill.docint { background: var(--docint-soft); color: var(--docint); }
+  .cx-pill.self { background: var(--surface-2); color: var(--ink-faint); border: 1px dashed var(--line-strong); }
+
+  .roles { display: flex; flex-direction: column; gap: 8px; }
+  .roles .rl-label {
+    font-family: var(--font-mono); font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink-faint);
+  }
+  .role-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .role-name { font-size: 0.86rem; color: var(--ink); }
+  .role-letters { display: flex; gap: 3px; }
+
+  footer {
+    border-top: 1px solid var(--line); padding-top: 20px; font-size: 0.82rem;
+    color: var(--ink-faint); font-family: var(--font-mono);
+  }
+
+  @media (max-width: 620px) {
+    .page { padding: 36px 16px 70px; }
+    .card-grid { grid-template-columns: 1fr; }
+    .ex-row { flex-direction: column; gap: 2px; }
+    .ex-key { min-width: 0; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <div class="eyebrow">CumbresBI · Tesorería, tabla por tabla</div>
+    <h1>Piezas de Tesorería</h1>
+    <p class="lede">
+      Las 16 tablas de <code>tesoreria_*</code> agrupadas en 5 bloques. Cada una con un ejemplo
+      concreto, con qué otro módulo se comunica y qué rol de <code>iam-service</code> la usa —
+      y con qué nivel (leer/crear/editar/aprobar).
+    </p>
+    <div class="perm-legend">
+      <div class="item"><span class="letter L">L</span> Leer</div>
+      <div class="item"><span class="letter C">C</span> Crear</div>
+      <div class="item"><span class="letter E">E</span> Editar</div>
+      <div class="item"><span class="letter A">A</span> Aprobar / autorizar</div>
+    </div>
+  </header>
+
+  <!-- ============ BLOQUE 1 ============ -->
+  <div class="block">
+    <div class="block-head">
+      <div class="block-eyebrow">Bloque 1 · construido</div>
+      <h2>Catálogos maestros</h2>
+      <p>Quién es la contraparte, en qué banco, bajo qué contrato — la base de la que cuelga todo lo demás.</p>
+    </div>
+    <div class="card-grid">
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_contrapartes</span>
+          <h3 class="card-title">Contraparte</h3>
+          <p class="card-desc">El catálogo maestro de clientes y proveedores de todo CumbresBI.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">razon_social</span><span class="ex-val">Constructora Rincón del Valle SA de CV</span></div>
+          <div class="ex-row"><span class="ex-key">proveedor / cliente</span><span class="ex-val">true / true</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills">
+            <span class="cx-pill pld">PLD — id_contraparte del KYC</span>
+            <span class="cx-pill vivienda">Vivienda — comprador/acreditado</span>
+            <span class="cx-pill rentas">Rentas — arrendatario/fiador</span>
+          </div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">VENTAS_GERENTE, COMPRAS_ANALISTA, CONTRALOR, AUDITOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_bancos</span>
+          <h3 class="card-title">Banco</h3>
+          <p class="card-desc">Catálogo fijo de claves Banxico — casi no cambia.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">id_banxico</span><span class="ex-val">40012</span></div>
+          <div class="ex-row"><span class="ex-key">banco / alias</span><span class="ex-val">BBVA MEXICO / BBVA</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills"><span class="cx-pill self">Solo internamente — usado por Cuentas</span></div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_cuentas</span>
+          <h3 class="card-title">Cuenta bancaria</h3>
+          <p class="card-desc">Una cuenta real de una sociedad, ligada a un banco del catálogo.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">alias</span><span class="ex-val">BBVA operativa CPC</span></div>
+          <div class="ex-row"><span class="ex-key">clabe</span><span class="ex-val">····4821</span></div>
+          <div class="ex-row"><span class="ex-key">activa</span><span class="ex-val">true</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills"><span class="cx-pill self">tesoreria_flujos, tesoreria_cortes_edc (dentro del mismo servicio)</span></div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">CONTRALOR, AUDITOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_contratos</span>
+          <h3 class="card-title">Contrato</h3>
+          <p class="card-desc">El acuerdo real entre una sociedad de Cumbres y una contraparte.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">id_contrato</span><span class="ex-val">TES-CPC-2026-014</span></div>
+          <div class="ex-row"><span class="ex-key">monto_total_iva_mxp</span><span class="ex-val">$850,000.00</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills">
+            <span class="cx-pill iam">IAM — acceso otorgado por contrato</span>
+            <span class="cx-pill vivienda">Vivienda — expediente de venta</span>
+            <span class="cx-pill rentas">Rentas — contrato de arrendamiento</span>
+          </div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">VENTAS_GERENTE, COMPRAS_ANALISTA, CONTRALOR, AUDITOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_contrapartes_relacion</span>
+          <h3 class="card-title">Relación de contraparte</h3>
+          <p class="card-desc">Representante legal / beneficiario controlador — dato que pide PLD/AML.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">tipo_relacion</span><span class="ex-val">REP LEGAL</span></div>
+          <div class="ex-row"><span class="ex-key">contraparte_relacion</span><span class="ex-val">Juan Pérez (persona física)</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills"><span class="cx-pill pld">PLD — identificación de beneficiario controlador</span></div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">PLD_ANALISTA (vía contrapartes.leer) / TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER, PLD_APROBADOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ BLOQUE 2 ============ -->
+  <div class="block">
+    <div class="block-head">
+      <div class="block-eyebrow">Bloque 2 · construido (24/Ago/2026)</div>
+      <h2>Flujo de caja</h2>
+      <p>El dinero que de verdad entra y sale — la tabla bisagra, con ciclo real de aprobar/registrar pago.</p>
+    </div>
+    <div class="card-grid">
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_flujos</span>
+          <h3 class="card-title">Flujo (ingreso/egreso)</h3>
+          <p class="card-desc">Un movimiento real de dinero: pago a proveedor, reembolso, nómina.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">id_contrato</span><span class="ex-val">TES-CPC-2026-014</span></div>
+          <div class="ex-row"><span class="ex-key">total_mxp</span><span class="ex-val">$85,000.00</span></div>
+          <div class="ex-row"><span class="ex-key">validacion_estado</span><span class="ex-val">APROBADA</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills">
+            <span class="cx-pill self">tesoreria_contratos, tesoreria_cuentas, tesoreria_facturas, tesoreria_complementos_pago</span>
+            <span class="cx-pill rrhh">RRHH — id_empleado / reembolso</span>
+          </div>
+        </div>
+        <p class="card-desc" style="margin-top:10px">
+          <strong>Vínculo con CFDI construido (24/Ago/2026):</strong> acción <code>vincular_factura</code>
+          (factura_uuid/complemento_uuid, solo lectura en el PATCH normal) + botón 🔗 y columna
+          "CFDI vinculado" en <code>/tesoreria/flujos</code>. <code>nomina_uuid</code> sigue de solo
+          lectura — todavía no hay acción para vincular un recibo de nómina.
+        </p>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">CONTRALOR, AUDITOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ BLOQUE 3 ============ -->
+  <div class="block">
+    <div class="block-head">
+      <div class="block-eyebrow">Bloque 3 · construido (backend 24/Ago/2026, frontend 24/Ago/2026)</div>
+      <h2>Facturación CFDI</h2>
+      <p>Comprobantes fiscales completos — CRUD real de alta manual, con pantalla propia por tabla de encabezado (<code>/tesoreria/facturas</code>, <code>/complementos-pago</code>, <code>/notas-credito</code>, <code>/rec-nominas</code>); llenado automático vía Motor Documental sigue pendiente.</p>
+    </div>
+    <div class="card-grid">
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_facturas + factura_conceptos / traslados / doctos_relacionados</span>
+          <h3 class="card-title">Factura (CFDI)</h3>
+          <p class="card-desc">El comprobante fiscal recibido del proveedor, con sus líneas e impuestos.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">Emisor_Nombre</span><span class="ex-val">Constructora Rincón del Valle</span></div>
+          <div class="ex-row"><span class="ex-key">Comprobante_Total</span><span class="ex-val">$98,600.00</span></div>
+          <div class="ex-row"><span class="ex-key">factura_conceptos</span><span class="ex-val">"Avance de obra, mes 3"</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills">
+            <span class="cx-pill self">tesoreria_flujos.factura_uuid</span>
+            <span class="cx-pill docint">Motor Documental — extracción automática (futuro)</span>
+          </div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span></span></div>
+          <div class="role-row"><span class="role-name">CONTRALOR, AUDITOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_complementos_pago</span>
+          <h3 class="card-title">Complemento de pago (REP)</h3>
+          <p class="card-desc">Confirma fiscalmente que una factura a crédito ya se pagó.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">uuid_relacion</span><span class="ex-val">UUID de tesoreria_facturas</span></div>
+          <div class="ex-row"><span class="ex-key">monto_pagado</span><span class="ex-val">$98,600.00</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills"><span class="cx-pill self">tesoreria_flujos.complemento_uuid, tesoreria_facturas</span></div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER, CONTRALOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_notas_credito + factura_notas_credito</span>
+          <h3 class="card-title">Nota de crédito</h3>
+          <p class="card-desc">Ajuste fiscal — ej. una devolución de material sobre una factura ya emitida.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">UUID_Relacionado</span><span class="ex-val">UUID de tesoreria_facturas</span></div>
+          <div class="ex-row"><span class="ex-key">Comprobante_Total</span><span class="ex-val">-$4,300.00</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills"><span class="cx-pill self">tesoreria_facturas.Timbre_UUID</span></div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">CONTRALOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ BLOQUE 4 ============ -->
+  <div class="block">
+    <div class="block-head">
+      <div class="block-eyebrow">Bloque 4 · CRUD construido, bloqueado en la práctica por RRHH</div>
+      <h2>Nómina</h2>
+      <p>No se puede probar con datos reales hasta que exista al menos el esqueleto de RRHH.</p>
+    </div>
+    <div class="card-grid">
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_rec_nominas</span>
+          <h3 class="card-title">Recibo de nómina (CFDI)</h3>
+          <p class="card-desc">El comprobante fiscal de sueldo de un empleado real de Cumbres.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">Receptor_Nombre</span><span class="ex-val">Laura Gonzalez</span></div>
+          <div class="ex-row"><span class="ex-key">NomReceptor_NumEmpleado</span><span class="ex-val">EMP-00231</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills">
+            <span class="cx-pill rrhh">RRHH — rrhh_empleados.id_empleado</span>
+            <span class="cx-pill self">tesoreria_flujos.nomina_uuid</span>
+          </div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">RRHH_ADMIN</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span><span class="letter E">E</span><span class="letter A">A</span></span></div>
+          <div class="role-row"><span class="role-name">EMPLEADO_SELF — solo su propio recibo, vía MiCumbres</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ BLOQUE 5 ============ -->
+  <div class="block">
+    <div class="block-head">
+      <div class="block-eyebrow">Bloque 5 · construido (24/Ago/2026), casi sin lógica de negocio</div>
+      <h2>Saldos y cortes</h2>
+      <p>Solo lectura para el día a día — se llenan por proceso o por carga de archivo, no a mano dato por dato.</p>
+    </div>
+    <div class="card-grid">
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_saldos</span>
+          <h3 class="card-title">Saldo por cuenta</h3>
+          <p class="card-desc">Foto del saldo de una cuenta en una fecha — el reporte que pidió Mariana en la reunión.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">cuenta</span><span class="ex-val">BBVA operativa CPC</span></div>
+          <div class="ex-row"><span class="ex-key">saldo</span><span class="ex-val">$1,240,500.00</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills"><span class="cx-pill self">tesoreria_cuentas</span></div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER, CONTRALOR, AUDITOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA — referencia antes de autorizar pagos</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-table">tesoreria_cortes_edc</span>
+          <h3 class="card-title">Corte / estado de cuenta</h3>
+          <p class="card-desc">El PDF del banco, subido para conciliar contra los flujos capturados.</p>
+        </div>
+        <div class="example">
+          <div class="ex-label">Ejemplo</div>
+          <div class="ex-row"><span class="ex-key">tipo / formato</span><span class="ex-val">estado_cuenta / pdf</span></div>
+          <div class="ex-row"><span class="ex-key">fecha_final</span><span class="ex-val">31/ago/2026</span></div>
+        </div>
+        <div class="connects">
+          <div class="cx-label">Se comunica con</div>
+          <div class="cx-pills"><span class="cx-pill self">tesoreria_cuentas</span></div>
+        </div>
+        <div class="roles">
+          <div class="rl-label">Lo usan</div>
+          <div class="role-row"><span class="role-name">TESORERIA_ANALISTA</span><span class="role-letters"><span class="letter L">L</span><span class="letter C">C</span></span></div>
+          <div class="role-row"><span class="role-name">FINANZAS_MANAGER, CONTRALOR, AUDITOR</span><span class="role-letters"><span class="letter L">L</span></span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>
+    Roles según services/iam-service/iam/permission_matrix.py — tablas según 20260727_Cumbres_ERD.sql. Ejemplos ilustrativos.
+  </footer>
+
+</div>
