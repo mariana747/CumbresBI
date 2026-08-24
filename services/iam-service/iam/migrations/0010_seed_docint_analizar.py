@@ -43,7 +43,14 @@ def seed(apps, schema_editor):
         permisos_por_key[perm_key] = permiso
 
     for role_key, accesos in ROLE_ACCESS.items():
-        role = IamRole.objects.get(role_key=role_key)
+        # Mismo guard que 0004_seed_permisos_matriz.py (24/Ago/2026, ver ese
+        # archivo para el porque) - ROLE_ACCESS es "vivo", en una base nueva
+        # esta migracion corre antes que las que crean roles todavia mas
+        # nuevos (ej. 0012_seed_obra_permisos.py, SUPERVISOR_OBRA).
+        try:
+            role = IamRole.objects.get(role_key=role_key)
+        except IamRole.DoesNotExist:
+            continue
         for servicio, letras in accesos.items():
             for letra in letras:
                 perm_key = f"{servicio}.{ACCION_POR_LETRA[letra]}"

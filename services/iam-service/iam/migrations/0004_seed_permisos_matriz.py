@@ -40,7 +40,21 @@ def seed(apps, schema_editor):
         permisos_por_key[perm_key] = permiso
 
     for role_key, accesos in ROLE_ACCESS.items():
-        role = IamRole.objects.get(role_key=role_key)
+        # get_or_create/skip en vez de .get() a secas (24/Ago/2026, hallazgo
+        # real en CI): ROLE_ACCESS se importa "vivo" desde permission_matrix.py
+        # (ver comentario de arriba), asi que en una base nueva (CI, clon
+        # limpio) esta migracion corre ANTES que las migraciones posteriores
+        # que agregan roles nuevos al modulo (ej. 0012_seed_obra_permisos.py,
+        # SUPERVISOR_OBRA) - sin este guard, .get() truena con
+        # IamRole.DoesNotExist para cualquier rol que el modulo ya conoce pero
+        # que su propia migracion de alta todavia no corrio. Se omite aqui sin
+        # riesgo: la migracion que da de alta ese rol (0012 y las que sigan)
+        # ya re-siembra el ROLE_ACCESS completo con el mismo seed() idempotente,
+        # asi que esos permisos se asignan de todos modos, solo mas adelante.
+        try:
+            role = IamRole.objects.get(role_key=role_key)
+        except IamRole.DoesNotExist:
+            continue
         for servicio, letras in accesos.items():
             for letra in letras:
                 perm_key = f"{servicio}.{ACCION_POR_LETRA[letra]}"
