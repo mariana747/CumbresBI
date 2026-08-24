@@ -10,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   IconButton,
   InputAdornment,
   Paper,
@@ -23,10 +24,19 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Receipt, Pencil, Plus, Search, X as CloseIcon } from "lucide-react";
+import { Receipt, Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
-import { TesoreriaComplementoPago, createComplementoPago, listComplementosPago, updateComplementoPago } from "@/lib/tesoreria";
+import {
+  FacturaDoctoRelacionado,
+  TesoreriaComplementoPago,
+  createComplementoPago,
+  createFacturaDoctoRelacionado,
+  deleteFacturaDoctoRelacionado,
+  listComplementosPago,
+  listFacturaDoctosRelacionados,
+  updateComplementoPago,
+} from "@/lib/tesoreria";
 
 const FORM_VACIO = {
   timbreUuid: "",
@@ -46,6 +56,181 @@ const FORM_VACIO = {
   linkPdf: "",
   estado: "",
 };
+
+// "Facturas PPD a liquidar" (24/Ago/2026, pedido explicito de Mariana,
+// alineado al estandar del SAT) - el nodo "DoctoRelacionado" del XML de un
+// Complemento de Pago (REP) describe QUE facturas PPD esta liquidando este
+// pago y con que parcialidad, distinto del nodo "CfdiRelacionados" de una
+// Factura normal (sustitucion/nota de credito, ese vive en
+// TesoreriaFactura.tipo_relacion/uuid_relacionado). Por eso este panel vive
+// aqui y no en /tesoreria/facturas - reusa la misma tabla/endpoint
+// (factura_doctos_relacionados, FacturaDoctoRelacionadoViewSet) via
+// timbre_uuid del propio complemento, sin FK real en el ERD (ver docstring
+// del modelo).
+function PanelFacturasPpdALiquidar({ timbreUuid, puedeEditar }: { timbreUuid: string; puedeEditar: boolean }) {
+  const [items, setItems] = useState<FacturaDoctoRelacionado[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [nuevo, setNuevo] = useState({ idDocumento: "", numParcialidad: "", impSaldoAnt: "", impPagado: "", impSaldoInsoluto: "" });
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function refresh() {
+    setLoading(true);
+    listFacturaDoctosRelacionados(timbreUuid)
+      .then(setItems)
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(refresh, [timbreUuid]);
+
+  async function handleAgregar() {
+    if (!nuevo.idDocumento) {
+      setError("El UUID (folio fiscal) de la factura previa es obligatorio.");
+      return;
+    }
+    setGuardando(true);
+    setError(null);
+    try {
+      await createFacturaDoctoRelacionado(timbreUuid, nuevo);
+      setNuevo({ idDocumento: "", numParcialidad: "", impSaldoAnt: "", impPagado: "", impSaldoInsoluto: "" });
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function handleEliminar(id: number) {
+    setGuardando(true);
+    try {
+      await deleteFacturaDoctoRelacionado(id);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2">Facturas PPD a liquidar</Typography>
+      <Typography variant="caption" color="text.secondary">
+        Cada renglón es una factura PPD que este pago liquida (total o parcialmente).
+      </Typography>
+      {error && (
+        <Alert severity="error" onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>UUID (folio fiscal) de la factura previa</TableCell>
+              <TableCell>Parcialidad</TableCell>
+              <TableCell align="right">Saldo anterior</TableCell>
+              <TableCell align="right">Pago aplicado</TableCell>
+              <TableCell align="right">Saldo insoluto</TableCell>
+              {puedeEditar && <TableCell align="right" />}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={6} align="center">
+                  <CircularProgress size={16} />
+                </TableCell>
+              </TableRow>
+            ) : items.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} align="center">
+                  <Typography variant="caption" color="text.secondary">
+                    Sin facturas ligadas a este pago.
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : (
+              items.map((d) => (
+                <TableRow key={d.id}>
+                  <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{d.id_documento || "—"}</TableCell>
+                  <TableCell>{d.num_parcialidad ?? "—"}</TableCell>
+                  <TableCell align="right">{d.imp_saldo_ant || "—"}</TableCell>
+                  <TableCell align="right">{d.imp_pagado || "—"}</TableCell>
+                  <TableCell align="right">{d.imp_saldo_insoluto || "—"}</TableCell>
+                  {puedeEditar && (
+                    <TableCell align="right">
+                      <IconButton size="small" aria-label="Eliminar" onClick={() => handleEliminar(d.id)} disabled={guardando}>
+                        <Trash2 size={13} strokeWidth={1.5} />
+                      </IconButton>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))
+            )}
+            {puedeEditar && (
+              <TableRow>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    placeholder="UUID de la factura"
+                    value={nuevo.idDocumento}
+                    onChange={(e) => setNuevo({ ...nuevo, idDocumento: e.target.value })}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.numParcialidad}
+                    onChange={(e) => setNuevo({ ...nuevo, numParcialidad: e.target.value })}
+                    sx={{ width: 60 }}
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.impSaldoAnt}
+                    onChange={(e) => setNuevo({ ...nuevo, impSaldoAnt: e.target.value })}
+                    sx={{ width: 90 }}
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.impPagado}
+                    onChange={(e) => setNuevo({ ...nuevo, impPagado: e.target.value })}
+                    sx={{ width: 90 }}
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.impSaldoInsoluto}
+                    onChange={(e) => setNuevo({ ...nuevo, impSaldoInsoluto: e.target.value })}
+                    sx={{ width: 90 }}
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <IconButton size="small" aria-label="Agregar factura a liquidar" onClick={handleAgregar} disabled={guardando}>
+                    <Plus size={14} strokeWidth={2} />
+                  </IconButton>
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
+  );
+}
 
 // Complementos de pago CFDI (REP) - confirman fiscalmente que una factura a
 // credito ya se pago (ver docstring de TesoreriaComplementoPagoSerializer).
@@ -233,7 +418,7 @@ export default function TesoreriaComplementosPagoPage() {
         </TableContainer>
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editing ? `Editar complemento ${editing.folio || editing.timbre_uuid}` : "Nuevo complemento"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -376,6 +561,12 @@ export default function TesoreriaComplementosPagoPage() {
               onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
               fullWidth
             />
+            {editing && (
+              <>
+                <Divider sx={{ pt: 1 }} />
+                <PanelFacturasPpdALiquidar timbreUuid={editing.timbre_uuid} puedeEditar={puedeEditar} />
+              </>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>

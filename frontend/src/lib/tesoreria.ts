@@ -901,15 +901,30 @@ export async function deleteNotaCreditoConcepto(id: number): Promise<void> {
   }
 }
 
+// Ciclo de vida propio de la factura (24/Ago/2026, pedido explicito de
+// Mariana) - distinto del ciclo de un TesoreriaFlujo, no se segrega
+// captura/aprobacion aqui (mismo permiso facturacion-cfdi.editar para
+// cualquier transicion, ver marcarEstadoFactura). Pasar a ACEPTADA exige
+// link_pdf + link_xml ya cargados (el backend lo valida, ver
+// TesoreriaFacturaViewSet.marcar_estado).
+export type TesoreriaFacturaEstado = "PENDIENTE" | "EN_PROCESO" | "ACEPTADA" | "RECHAZADA";
+
+// Catalogo c_TipoDeComprobante del SAT - en esta pantalla solo se ofrece
+// "I" (Ingreso): Egreso/Pago/Nomina ya tienen su propia tabla y pantalla
+// (tesoreria_notas_credito, tesoreria_complementos_pago,
+// tesoreria_rec_nominas), no se dan de alta desde Facturas.
+export type TesoreriaFacturaMetodoPago = "PUE" | "PPD";
+
 export interface TesoreriaFactura {
   id: number;
   comprobante_serie: string | null;
   comprobante_folio: string | null;
   comprobante_fecha: string | null;
   comprobante_forma_pago: string | null;
-  comprobante_metodo_pago: string | null;
+  comprobante_metodo_pago: TesoreriaFacturaMetodoPago | null;
   comprobante_moneda: string | null;
   comprobante_total: string | null;
+  comprobante_tipo_de_comprobante: string | null;
   tipo_relacion: string | null;
   uuid_relacionado: string | null;
   emisor_rfc: string | null;
@@ -921,7 +936,10 @@ export interface TesoreriaFactura {
   timbre_fecha_timbrado: string | null;
   tipo_factura: string | null;
   link_pdf: string | null;
-  estado: string | null;
+  link_xml: string | null;
+  // De solo lectura en el backend (ver TesoreriaFacturaSerializer.read_only_fields)
+  // - solo cambia via marcarEstadoFactura(), no via update/createFactura.
+  estado: TesoreriaFacturaEstado | null;
   conceptos: FacturaConcepto[];
   created_at: string;
   created_by: string | null;
@@ -944,9 +962,10 @@ export interface FacturaInput {
   comprobanteFolio?: string;
   comprobanteFecha?: string;
   comprobanteFormaPago?: string;
-  comprobanteMetodoPago?: string;
+  comprobanteMetodoPago?: TesoreriaFacturaMetodoPago | "";
   comprobanteMoneda?: string;
   comprobanteTotal?: string;
+  comprobanteTipoDeComprobante?: string;
   tipoRelacion?: string;
   uuidRelacionado?: string;
   emisorRfc?: string;
@@ -958,7 +977,11 @@ export interface FacturaInput {
   timbreFechaTimbrado?: string;
   tipoFactura?: string;
   linkPdf?: string;
-  estado?: string;
+  linkXml?: string;
+  // NO incluye "estado" - es de solo lectura en el backend (ver
+  // TesoreriaFacturaSerializer), se cambia unicamente via
+  // marcarEstadoFactura(). Mandarlo aqui no truena, el backend lo ignora
+  // en silencio, pero se omite del tipo para no sugerir que funciona.
 }
 
 // Los campos de monto de Facturacion CFDI son DecimalField en el backend
@@ -981,6 +1004,7 @@ function facturaBody(params: FacturaInput) {
     comprobante_metodo_pago: params.comprobanteMetodoPago || null,
     comprobante_moneda: params.comprobanteMoneda || null,
     comprobante_total: normalizaDecimal(params.comprobanteTotal),
+    comprobante_tipo_de_comprobante: params.comprobanteTipoDeComprobante || null,
     tipo_relacion: params.tipoRelacion || null,
     uuid_relacionado: params.uuidRelacionado || null,
     emisor_rfc: params.emisorRfc || null,
@@ -992,7 +1016,7 @@ function facturaBody(params: FacturaInput) {
     timbre_fecha_timbrado: params.timbreFechaTimbrado || null,
     tipo_factura: params.tipoFactura || null,
     link_pdf: params.linkPdf || null,
-    estado: params.estado || null,
+    link_xml: params.linkXml || null,
   };
 }
 
@@ -1025,6 +1049,70 @@ export async function deleteFactura(id: number): Promise<void> {
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
+}
+
+// Cambia el estado del proceso de revision de la factura (PENDIENTE/
+// EN_PROCESO/ACEPTADA/RECHAZADA). Ver
+// services/tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet.marcar_estado -
+// el backend rechaza con 400 si se intenta ACEPTADA sin link_pdf/link_xml.
+export async function marcarEstadoFactura(id: number, estado: TesoreriaFacturaEstado): Promise<TesoreriaFactura> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/marcar_estado/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ estado }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Motor Documental para Facturacion CFDI (24/Ago/2026) - espejo en cliente
+// de TesoreriaFacturaViewSet.CAMPOS_CONFIRMABLES (views.py). Solo
+// informativo aqui (MotorDocumentalDialog filtra con esto antes de mandar),
+// el backend es quien realmente valida. timbre_uuid queda fuera a
+// proposito - es la identidad de la factura, no se pisa desde una
+// extraccion (mismo criterio documentado en el backend).
+export const TESORERIA_CAMPOS_CONFIRMABLES = [
+  "comprobante_serie",
+  "comprobante_folio",
+  "comprobante_fecha",
+  "comprobante_moneda",
+  "comprobante_forma_pago",
+  "comprobante_metodo_pago",
+  "comprobante_total",
+  "emisor_rfc",
+  "emisor_nombre",
+  "receptor_rfc",
+  "receptor_nombre",
+  "receptor_uso_cfdi",
+  "timbre_fecha_timbrado",
+] as const;
+
+// Version usada al CREAR una factura desde el Motor Documental (24/Ago/2026,
+// caso de uso real: alguien sube el escaneo de la factura a Drive antes de
+// que exista el registro en Tesoreria - a futuro desde MiCumbres, hoy el
+// analista lo sube directo) - aqui SI incluye timbre_uuid porque todavia no
+// hay ningun registro cuya identidad proteger (a diferencia de
+// TESORERIA_CAMPOS_CONFIRMABLES, que es para una factura ya guardada).
+export const TESORERIA_CAMPOS_CONFIRMABLES_NUEVA = [...TESORERIA_CAMPOS_CONFIRMABLES, "timbre_uuid"] as const;
+
+// Guarda en la factura los datos ya revisados por el analista (Motor
+// Documental -> docint/analyze -> correccion en pantalla -> este endpoint).
+// Ver services/tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet.confirmar_extraccion.
+export async function confirmarExtraccionFactura(
+  id: number,
+  campos: Record<string, unknown>
+): Promise<TesoreriaFactura> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/confirmar_extraccion/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ campos }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 export interface TesoreriaComplementoPago {

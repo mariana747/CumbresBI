@@ -11,9 +11,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   IconButton,
   InputAdornment,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -24,25 +28,38 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileText, Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
+import {
+  CheckCircle2,
+  ExternalLink,
+  FileSearch,
+  FileText,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X as CloseIcon,
+  XCircle,
+} from "lucide-react";
 import AppShell from "@/components/AppShell";
+import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   FacturaConcepto,
-  FacturaDoctoRelacionado,
   FacturaTraslado,
+  TESORERIA_CAMPOS_CONFIRMABLES,
+  TESORERIA_CAMPOS_CONFIRMABLES_NUEVA,
   TesoreriaFactura,
+  TesoreriaFacturaEstado,
+  confirmarExtraccionFactura,
   createFactura,
   createFacturaConcepto,
-  createFacturaDoctoRelacionado,
   createFacturaTraslado,
   deleteFacturaConcepto,
-  deleteFacturaDoctoRelacionado,
   deleteFacturaTraslado,
   listFacturaConceptos,
-  listFacturaDoctosRelacionados,
   listFacturaTraslados,
   listFacturas,
+  marcarEstadoFactura,
   updateFactura,
 } from "@/lib/tesoreria";
 
@@ -53,14 +70,53 @@ const FORM_VACIO = {
   comprobanteFecha: "",
   comprobanteMoneda: "",
   comprobanteTotal: "",
+  // Catalogo real del SAT (c_TipoDeComprobante) - en esta pantalla siempre
+  // "I" (Ingreso): Egreso/Pago/Nomina ya tienen su propia tabla y pantalla
+  // (Notas de credito, Complementos de pago, Rec-nominas), ver
+  // TesoreriaFacturaMetodoPago en tesoreria.ts.
+  comprobanteTipoDeComprobante: "I",
+  comprobanteMetodoPago: "" as "" | "PUE" | "PPD",
+  tipoRelacion: "",
+  uuidRelacionado: "",
   emisorRfc: "",
   emisorNombre: "",
   receptorRfc: "",
   receptorNombre: "",
-  tipoFactura: "",
   linkPdf: "",
-  estado: "",
+  linkXml: "",
 };
+
+// c_TipoRelacion del SAT - solo aplica si esta factura sustituye o se
+// relaciona con otro CFDI ya timbrado (nodo CfdiRelacionados). Subconjunto
+// mas comun, no el catalogo completo.
+const TIPO_RELACION_OPCIONES: { value: string; label: string }[] = [
+  { value: "01", label: "01 — Nota de crédito de los documentos relacionados" },
+  { value: "03", label: "03 — Devolución de mercancía sobre facturas previas" },
+  { value: "04", label: "04 — Sustitución de los CFDI previos" },
+  { value: "07", label: "07 — CFDI por aplicación de anticipo" },
+];
+
+const ESTADO_LABEL: Record<TesoreriaFacturaEstado, string> = {
+  PENDIENTE: "Pendiente",
+  EN_PROCESO: "En proceso",
+  ACEPTADA: "Aceptada",
+  RECHAZADA: "Rechazada",
+};
+
+const ESTADO_COLOR: Record<TesoreriaFacturaEstado, "default" | "info" | "success" | "error"> = {
+  PENDIENTE: "default",
+  EN_PROCESO: "info",
+  ACEPTADA: "success",
+  RECHAZADA: "error",
+};
+
+// snake_case (nombres de columna, tal como los pide el prompt
+// "tesoreria.cfdi_factura" en docint/prompts.py) -> camelCase (llaves de
+// `form` arriba) - convertir aqui en vez de duplicar el prompt con nombres
+// de campo distintos a los reales del modelo.
+function aCamelCase(snake: string): string {
+  return snake.replace(/_([a-z])/g, (_, letra) => letra.toUpperCase());
+}
 
 // Conceptos de una factura ya guardada (Sem 20, CRUD real agregado
 // 24/Ago/2026 - antes solo se veian de solo lectura aqui, ver
@@ -393,183 +449,6 @@ function PanelTraslados({ uuidFactura, puedeEditar }: { uuidFactura: string; pue
   );
 }
 
-// Documentos relacionados (parcialidades de pago) - mismo criterio de
-// enlace logico, aqui por timbre_uuid (ver FacturaDoctoRelacionadoViewSet).
-function PanelDoctosRelacionados({ timbreUuid, puedeEditar }: { timbreUuid: string; puedeEditar: boolean }) {
-  const [items, setItems] = useState<FacturaDoctoRelacionado[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [nuevo, setNuevo] = useState({ serie: "", folio: "", numParcialidad: "", impSaldoAnt: "", impPagado: "", impSaldoInsoluto: "" });
-  const [guardando, setGuardando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function refresh() {
-    setLoading(true);
-    listFacturaDoctosRelacionados(timbreUuid)
-      .then(setItems)
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(refresh, [timbreUuid]);
-
-  async function handleAgregar() {
-    if (!nuevo.folio) {
-      setError("El folio es obligatorio.");
-      return;
-    }
-    setGuardando(true);
-    setError(null);
-    try {
-      await createFacturaDoctoRelacionado(timbreUuid, nuevo);
-      setNuevo({ serie: "", folio: "", numParcialidad: "", impSaldoAnt: "", impPagado: "", impSaldoInsoluto: "" });
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error desconocido");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  async function handleEliminar(id: number) {
-    setGuardando(true);
-    try {
-      await deleteFacturaDoctoRelacionado(id);
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error desconocido");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  return (
-    <Stack spacing={1}>
-      <Typography variant="subtitle2">Documentos relacionados (parcialidades)</Typography>
-      {error && (
-        <Alert severity="error" onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Serie/Folio</TableCell>
-              <TableCell>No. parcialidad</TableCell>
-              <TableCell align="right">Saldo anterior</TableCell>
-              <TableCell align="right">Pagado</TableCell>
-              <TableCell align="right">Saldo insoluto</TableCell>
-              {puedeEditar && <TableCell align="right" />}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={6} align="center">
-                  <CircularProgress size={16} />
-                </TableCell>
-              </TableRow>
-            ) : items.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} align="center">
-                  <Typography variant="caption" color="text.secondary">
-                    Sin documentos relacionados.
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            ) : (
-              items.map((d) => (
-                <TableRow key={d.id}>
-                  <TableCell>
-                    {d.serie || ""}
-                    {d.folio || "—"}
-                  </TableCell>
-                  <TableCell>{d.num_parcialidad ?? "—"}</TableCell>
-                  <TableCell align="right">{d.imp_saldo_ant || "—"}</TableCell>
-                  <TableCell align="right">{d.imp_pagado || "—"}</TableCell>
-                  <TableCell align="right">{d.imp_saldo_insoluto || "—"}</TableCell>
-                  {puedeEditar && (
-                    <TableCell align="right">
-                      <IconButton size="small" aria-label="Eliminar" onClick={() => handleEliminar(d.id)} disabled={guardando}>
-                        <Trash2 size={13} strokeWidth={1.5} />
-                      </IconButton>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))
-            )}
-            {puedeEditar && (
-              <TableRow>
-                <TableCell>
-                  <Stack direction="row" spacing={0.5}>
-                    <TextField
-                      size="small"
-                      variant="standard"
-                      placeholder="Serie"
-                      value={nuevo.serie}
-                      onChange={(e) => setNuevo({ ...nuevo, serie: e.target.value })}
-                      sx={{ width: 50 }}
-                    />
-                    <TextField
-                      size="small"
-                      variant="standard"
-                      placeholder="Folio"
-                      value={nuevo.folio}
-                      onChange={(e) => setNuevo({ ...nuevo, folio: e.target.value })}
-                      sx={{ width: 70 }}
-                    />
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <TextField
-                    size="small"
-                    variant="standard"
-                    value={nuevo.numParcialidad}
-                    onChange={(e) => setNuevo({ ...nuevo, numParcialidad: e.target.value })}
-                    sx={{ width: 60 }}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <TextField
-                    size="small"
-                    variant="standard"
-                    value={nuevo.impSaldoAnt}
-                    onChange={(e) => setNuevo({ ...nuevo, impSaldoAnt: e.target.value })}
-                    sx={{ width: 90 }}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <TextField
-                    size="small"
-                    variant="standard"
-                    value={nuevo.impPagado}
-                    onChange={(e) => setNuevo({ ...nuevo, impPagado: e.target.value })}
-                    sx={{ width: 90 }}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <TextField
-                    size="small"
-                    variant="standard"
-                    value={nuevo.impSaldoInsoluto}
-                    onChange={(e) => setNuevo({ ...nuevo, impSaldoInsoluto: e.target.value })}
-                    sx={{ width: 90 }}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" aria-label="Agregar documento relacionado" onClick={handleAgregar} disabled={guardando}>
-                    <Plus size={14} strokeWidth={2} />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Stack>
-  );
-}
-
 // Facturacion CFDI (Sem 20 del cronograma, CRUD real agregado 24/Ago/2026 -
 // ver tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet). Alta
 // manual mientras no exista el motor que la llene desde el Motor Documental
@@ -586,6 +465,9 @@ export default function TesoreriaFacturasPage() {
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [motorAbierto, setMotorAbierto] = useState(false);
+  const [cambiandoEstado, setCambiandoEstado] = useState(false);
+  const [estadoError, setEstadoError] = useState<string | null>(null);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -615,25 +497,88 @@ export default function TesoreriaFacturasPage() {
     setDialogOpen(true);
   }
 
-  function abrirEdicion(f: TesoreriaFactura) {
-    setEditing(f);
-    setForm({
+  // Extraido de abrirEdicion (24/Ago/2026) para reusarlo tambien despues de
+  // confirmar una extraccion del Motor Documental - mismo mapeo, sin
+  // duplicarlo entre los dos flujos que necesitan refrescar `form` desde
+  // una TesoreriaFactura ya guardada.
+  function formDesdeFactura(f: TesoreriaFactura): typeof FORM_VACIO {
+    return {
       timbreUuid: f.timbre_uuid || "",
       comprobanteSerie: f.comprobante_serie || "",
       comprobanteFolio: f.comprobante_folio || "",
       comprobanteFecha: f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "",
       comprobanteMoneda: f.comprobante_moneda || "",
       comprobanteTotal: f.comprobante_total || "",
+      comprobanteTipoDeComprobante: f.comprobante_tipo_de_comprobante || "I",
+      comprobanteMetodoPago: f.comprobante_metodo_pago || "",
+      tipoRelacion: f.tipo_relacion || "",
+      uuidRelacionado: f.uuid_relacionado || "",
       emisorRfc: f.emisor_rfc || "",
       emisorNombre: f.emisor_nombre || "",
       receptorRfc: f.receptor_rfc || "",
       receptorNombre: f.receptor_nombre || "",
-      tipoFactura: f.tipo_factura || "",
       linkPdf: f.link_pdf || "",
-      estado: f.estado || "",
-    });
+      linkXml: f.link_xml || "",
+    };
+  }
+
+  function abrirEdicion(f: TesoreriaFactura) {
+    setEditing(f);
+    setForm(formDesdeFactura(f));
     setFormError(null);
     setDialogOpen(true);
+  }
+
+  // Ciclo de vida de la factura (24/Ago/2026, pedido explicito de Mariana) -
+  // ACEPTADA la rechaza el backend con 400 si faltan link_pdf/link_xml
+  // (ver TesoreriaFacturaViewSet.marcar_estado), ese mensaje real se
+  // muestra tal cual via friendlyApiError.
+  async function handleCambiarEstado(nuevoEstado: TesoreriaFacturaEstado) {
+    if (!editing) return;
+    setCambiandoEstado(true);
+    setEstadoError(null);
+    try {
+      const actualizada = await marcarEstadoFactura(editing.id, nuevoEstado);
+      setEditing(actualizada);
+      refresh();
+    } catch (err) {
+      setEstadoError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setCambiandoEstado(false);
+    }
+  }
+
+  // Motor Documental (24/Ago/2026) - unico camino que puede escribir en una
+  // factura ya guardada sin pasar por el formulario a mano (ver
+  // TesoreriaFacturaViewSet.confirmar_extraccion). Actualiza `editing`/`form`
+  // con la respuesta real del backend en vez de solo confiar en los datos
+  // que el analista vio en pantalla (ej. si el backend ignoro algun campo).
+  async function handleConfirmarExtraccionFactura(campos: Record<string, unknown>) {
+    if (!editing) return;
+    const actualizada = await confirmarExtraccionFactura(editing.id, campos);
+    setEditing(actualizada);
+    setForm(formDesdeFactura(actualizada));
+    refresh();
+  }
+
+  // Caso de uso real (24/Ago/2026): alguien sube el escaneo/foto de la
+  // factura a Drive ANTES de que exista el registro (a futuro desde
+  // MiCumbres) - aqui todavia no hay id que mandar a confirmar_extraccion,
+  // asi que solo se prellena `form` con lo que salio del analisis; el
+  // analista revisa/corrige y da "Guardar" como si lo hubiera tecleado el
+  // mismo. Sin llamada al backend - createFactura() ya se encarga de
+  // validar/guardar cuando el usuario confirme el formulario.
+  async function handleAutorellenarNuevaFactura(campos: Record<string, unknown>) {
+    setForm((prev) => {
+      const siguiente = { ...prev };
+      for (const [key, value] of Object.entries(campos)) {
+        const llaveForm = aCamelCase(key) as keyof typeof FORM_VACIO;
+        if (llaveForm in FORM_VACIO && typeof value === "string") {
+          (siguiente as Record<string, string>)[llaveForm] = value;
+        }
+      }
+      return siguiente;
+    });
   }
 
   async function handleGuardar() {
@@ -742,11 +687,29 @@ export default function TesoreriaFacturasPage() {
                     <TableCell>{f.receptor_nombre || f.receptor_rfc || "—"}</TableCell>
                     <TableCell>{f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "—"}</TableCell>
                     <TableCell align="right">{f.comprobante_total || "—"}</TableCell>
-                    <TableCell>{f.estado && <Chip size="small" label={f.estado} variant="outlined" />}</TableCell>
+                    <TableCell>
+                      {f.estado && (
+                        <Chip size="small" label={ESTADO_LABEL[f.estado]} color={ESTADO_COLOR[f.estado]} variant="outlined" />
+                      )}
+                    </TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
+                      <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                        {f.link_pdf && (
+                          <IconButton
+                            size="small"
+                            aria-label="Ver PDF"
+                            component="a"
+                            href={f.link_pdf}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ExternalLink size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        )}
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </Stack>
                     </TableCell>
                   </TableRow>
                 ))
@@ -770,6 +733,17 @@ export default function TesoreriaFacturasPage() {
             </Alert>
           )}
           <Stack spacing={2}>
+            {(editing ? puedeEditar : puedeCrear) && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<FileSearch size={16} strokeWidth={1.5} />}
+                onClick={() => setMotorAbierto(true)}
+                sx={{ alignSelf: "flex-start" }}
+              >
+                Motor Documental
+              </Button>
+            )}
             <TextField
               size="small"
               label="UUID de timbrado"
@@ -812,6 +786,34 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
+            <Stack direction="row" spacing={2}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="tipo-comprobante-label">Tipo de comprobante</InputLabel>
+                <Select
+                  labelId="tipo-comprobante-label"
+                  label="Tipo de comprobante"
+                  value={form.comprobanteTipoDeComprobante}
+                  onChange={(e) => setForm({ ...form, comprobanteTipoDeComprobante: e.target.value })}
+                >
+                  <MenuItem value="I">Ingreso (I)</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="metodo-pago-label">Método de pago</InputLabel>
+                <Select
+                  labelId="metodo-pago-label"
+                  label="Método de pago"
+                  value={form.comprobanteMetodoPago}
+                  onChange={(e) => setForm({ ...form, comprobanteMetodoPago: e.target.value as "" | "PUE" | "PPD" })}
+                >
+                  <MenuItem value="">
+                    <em>Sin especificar</em>
+                  </MenuItem>
+                  <MenuItem value="PUE">PUE — Pago en una sola exhibición</MenuItem>
+                  <MenuItem value="PPD">PPD — Pago en parcialidades o diferido</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
             <TextField
               size="small"
               label="Total"
@@ -852,34 +854,136 @@ export default function TesoreriaFacturasPage() {
               />
             </Stack>
             <Stack direction="row" spacing={2}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="tipo-relacion-label">Tipo de relación (opcional)</InputLabel>
+                <Select
+                  labelId="tipo-relacion-label"
+                  label="Tipo de relación (opcional)"
+                  value={form.tipoRelacion}
+                  onChange={(e) => setForm({ ...form, tipoRelacion: e.target.value })}
+                >
+                  <MenuItem value="">
+                    <em>No relaciona ningún otro CFDI</em>
+                  </MenuItem>
+                  {TIPO_RELACION_OPCIONES.map((op) => (
+                    <MenuItem key={op.value} value={op.value}>
+                      {op.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {form.tipoRelacion && (
+                <TextField
+                  size="small"
+                  label="UUID del CFDI relacionado"
+                  value={form.uuidRelacionado}
+                  onChange={(e) => setForm({ ...form, uuidRelacionado: e.target.value })}
+                  fullWidth
+                />
+              )}
+            </Stack>
+            <Stack direction="row" spacing={2}>
               <TextField
                 size="small"
-                label="Tipo de factura"
-                value={form.tipoFactura}
-                onChange={(e) => setForm({ ...form, tipoFactura: e.target.value })}
+                label="Link al PDF (vista previa)"
+                value={form.linkPdf}
+                onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
                 fullWidth
+                InputProps={{
+                  endAdornment: form.linkPdf && (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        aria-label="Ver PDF"
+                        component="a"
+                        href={form.linkPdf}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
               />
               <TextField
                 size="small"
-                label="Estado"
-                value={form.estado}
-                onChange={(e) => setForm({ ...form, estado: e.target.value })}
+                label="Link al XML (comprobante fiscal)"
+                value={form.linkXml}
+                onChange={(e) => setForm({ ...form, linkXml: e.target.value })}
                 fullWidth
+                InputProps={{
+                  endAdornment: form.linkXml && (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        aria-label="Ver XML"
+                        component="a"
+                        href={form.linkXml}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
               />
             </Stack>
-            <TextField
-              size="small"
-              label="Link al PDF"
-              value={form.linkPdf}
-              onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
-              fullWidth
-            />
+            {editing && (
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Estado del proceso</Typography>
+                {estadoError && (
+                  <Alert severity="error" onClose={() => setEstadoError(null)}>
+                    {estadoError}
+                  </Alert>
+                )}
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                  <Chip
+                    size="small"
+                    label={editing.estado ? ESTADO_LABEL[editing.estado] : "—"}
+                    color={editing.estado ? ESTADO_COLOR[editing.estado] : "default"}
+                  />
+                  {puedeEditar && editing.estado !== "EN_PROCESO" && (
+                    <Button size="small" onClick={() => handleCambiarEstado("EN_PROCESO")} disabled={cambiandoEstado}>
+                      Marcar en proceso
+                    </Button>
+                  )}
+                  {puedeEditar && editing.estado !== "ACEPTADA" && (
+                    <Button
+                      size="small"
+                      color="success"
+                      startIcon={<CheckCircle2 size={14} strokeWidth={1.5} />}
+                      onClick={() => handleCambiarEstado("ACEPTADA")}
+                      disabled={cambiandoEstado}
+                    >
+                      Aceptar
+                    </Button>
+                  )}
+                  {puedeEditar && editing.estado !== "RECHAZADA" && (
+                    <Button
+                      size="small"
+                      color="error"
+                      startIcon={<XCircle size={14} strokeWidth={1.5} />}
+                      onClick={() => handleCambiarEstado("RECHAZADA")}
+                      disabled={cambiandoEstado}
+                    >
+                      Rechazar
+                    </Button>
+                  )}
+                </Stack>
+                {editing.estado !== "ACEPTADA" && (!editing.link_pdf || !editing.link_xml) && (
+                  <Typography variant="caption" color="text.secondary">
+                    Para aceptar hace falta cargar el link al PDF y al XML.
+                  </Typography>
+                )}
+              </Stack>
+            )}
             {editing && (
               <>
                 <Divider sx={{ pt: 1 }} />
                 <PanelConceptos uuidFactura={editing.timbre_uuid} puedeEditar={puedeEditar} />
                 <PanelTraslados uuidFactura={editing.timbre_uuid} puedeEditar={puedeEditar} />
-                <PanelDoctosRelacionados timbreUuid={editing.timbre_uuid} puedeEditar={puedeEditar} />
               </>
             )}
           </Stack>
@@ -891,6 +995,44 @@ export default function TesoreriaFacturasPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <MotorDocumentalDialog
+        open={motorAbierto}
+        onClose={() => setMotorAbierto(false)}
+        contexto={
+          editing
+            ? {
+                etiqueta: `factura ${editing.comprobante_folio || editing.timbre_uuid}`,
+                servicioSolicitante: "tesoreria-service",
+                // Convencion de carpeta propia de Facturacion CFDI (24/Ago/2026) -
+                // el analista sube el PDF/XML ahi mismo en drive.google.com antes
+                // de analizarlo, mismo criterio "Drive-first" que PLD.
+                carpeta: `Tesoreria/Facturas/${editing.timbre_uuid}`,
+                permKey: "facturacion-cfdi.crear",
+                expectedDocumentType: "tesoreria.cfdi_factura",
+                camposConfirmables: TESORERIA_CAMPOS_CONFIRMABLES,
+                onConfirmar: handleConfirmarExtraccionFactura,
+              }
+            : {
+                // Caso de uso real (24/Ago/2026): la factura todavia no
+                // existe - hoy el analista sube el escaneo directo a esta
+                // carpeta "bandeja" antes de darla de alta; a futuro,
+                // MiCumbres subira ahi mismo lo que capture un empleado
+                // (ver memoria de sesion "rrhh-mi-cumbres-y-modulo-
+                // pendiente" - ese portal todavia no existe). No hay id de
+                // factura que mandar a confirmar_extraccion, por eso
+                // onConfirmar solo prellena `form` en vez de llamar al
+                // backend.
+                etiqueta: "una factura nueva",
+                servicioSolicitante: "tesoreria-service",
+                carpeta: "Tesoreria/Facturas/Bandeja de entrada",
+                permKey: "facturacion-cfdi.crear",
+                expectedDocumentType: "tesoreria.cfdi_factura",
+                camposConfirmables: TESORERIA_CAMPOS_CONFIRMABLES_NUEVA,
+                onConfirmar: handleAutorellenarNuevaFactura,
+              }
+        }
+      />
     </AppShell>
   );
 }
