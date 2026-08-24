@@ -44,6 +44,9 @@ import {
   ScrollText,
   ArrowLeftRight,
   Bell,
+  HardHat,
+  CalendarCheck,
+  ListTree,
   ChevronDown,
   ChevronRight,
   Menu as MenuIcon,
@@ -113,6 +116,7 @@ const ROLE_LABELS: Record<string, string> = {
   VENTAS_ASESOR: "Asesor de Ventas",
   VENTAS_GERENTE: "Gerente de Ventas/Proyecto",
   OBRA_COORDINADOR: "Coordinador de Obra",
+  SUPERVISOR_OBRA: "Supervisor de Obra",
   FINANZAS_MANAGER: "Finance Manager",
   TESORERIA_ANALISTA: "Analista de Tesorería",
   COMPRAS_ANALISTA: "Comprador / Analista de Compras",
@@ -219,7 +223,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // de la barra en vez de dejarlo en gris sin motivo (decision 11/Ago/2026
   // - antes se mostraban los 3 a cualquiera con sesion, y despues se
   // dejaron deshabilitados; version actual permite entrar, ver mas abajo).
-  if (tieneAlgunPermiso(session, ["ventas-vivienda", "materiales"])) {
+  if (tieneAlgunPermiso(session, ["ventas-vivienda"])) {
     // Fase 3, arranque de exposicion CRUD (19/Ago/2026) - primer modulo de
     // negocio con pantallas reales ademas de Admin(IAM)/PLD, mismo
     // estandar de apartados con URL propio (ver children de arriba), no
@@ -234,12 +238,10 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Viviendas", href: "/ventas-vivienda/viviendas", icon: Home },
         { label: "Asesores", href: "/ventas-vivienda/asesores", icon: Users },
         { label: "Expedientes", href: "/ventas-vivienda/expedientes", icon: ClipboardList },
-        // Esqueleto de materiales-service (19/Ago/2026, servicio nuevo,
-        // ver docs/architecture/README.md sec. 1.1.2) - modelos y
-        // migracion ya existen, sin serializers/views/tests todavia; las
-        // 2 pantallas de abajo son "en desarrollo" (EnDesarrolloPage),
-        // mismo criterio que Compras/Tesoreria/RRHH antes de tener CRUD.
-        { label: "Materiales", href: "/ventas-vivienda/materiales", icon: Package },
+        // Materiales se movio a Obra (21/Ago/2026, pedido de Mariana:
+        // "materiales debe estar en obra") - ver children de Obra abajo.
+        // Presupuestos sigue en desarrollo (EnDesarrolloPage) - el motor
+        // etapa->concepto no esta construido todavia.
         { label: "Presupuestos", href: "/ventas-vivienda/presupuestos", icon: Calculator },
       ],
     });
@@ -265,6 +267,32 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FileText },
         { label: "Flujos", href: "/tesoreria/flujos", icon: ArrowLeftRight },
+      ],
+    });
+  }
+  // Obra (obra-service, 21/Ago/2026) - avance semanal, reusa la vista/
+  // nomenclatura del Excel legado. Mismo criterio que Tesoreria: children
+  // con URL propio por pantalla, no pestañas dentro de un solo /obra.
+  if (tieneAlgunPermiso(session, ["obra", "materiales"])) {
+    items.push({
+      label: "Obra",
+      href: "/obra/avance",
+      icon: HardHat,
+      enabled: true,
+      children: [
+        { label: "Avance", href: "/obra/avance", icon: HardHat },
+        { label: "Cortes semanales", href: "/obra/cortes", icon: CalendarCheck },
+        { label: "Catálogo (etapas/conceptos)", href: "/obra/catalogo", icon: ListTree },
+        // Materiales vive aqui desde 21/Ago/2026 (pedido de Mariana:
+        // "materiales debe estar en obra") - antes colgaba de Ventas/
+        // Vivienda; el backend (materiales-service) no cambio, solo el
+        // menu y la ruta del frontend.
+        { label: "Materiales", href: "/obra/materiales", icon: Package },
+        // Requisiciones (21/Ago/2026, decision de Mariana: "en
+        // requisicion es donde se va a pedir material") - documento
+        // formal por proyecto+etapa que dispara la compra, distinto de
+        // "Materiales" (esa es solo el catalogo + salida de almacen).
+        { label: "Requisiciones", href: "/obra/requisiciones", icon: ClipboardList },
       ],
     });
   }

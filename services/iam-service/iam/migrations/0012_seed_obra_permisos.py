@@ -2,14 +2,16 @@ from django.db import migrations
 
 from iam.permission_matrix import ACCION_POR_LETRA, ROLE_ACCESS
 
-# Re-siembra el catalogo completo (mismo codigo que 0004_seed_permisos_matriz,
-# ver ese archivo para el porque de este patron) - 0004 ya se aplico en
-# cualquier entorno existente, asi que agregar "docint" a
-# iam/permission_matrix.py no le llega solo; esta migracion vuelve a correr
-# el seed con get_or_create, que no toca nada de lo que ya existia y solo
-# agrega lo nuevo (perm_keys docint.leer/docint.crear + su asignacion a
-# SUPER_ADMIN/AUDITOR/PLD_ANALISTA/PLD_APROBADOR). Fase 4 de la migracion a
-# analisis asincrono con Cloud Tasks (13/Ago/2026, ver docint/views.py).
+# Obra (obra-service, 21/Ago/2026) - agrega el servicio "obra" y el rol
+# SUPERVISOR_OBRA al catalogo (ver permission_matrix.py, PENDIENTE
+# confirmar nombres con el cliente igual que el resto de esa matriz).
+# Reutiliza el mismo seed() de 0004_seed_permisos_matriz.py sobre el
+# ROLE_ACCESS actual completo - idempotente via get_or_create, no duplica
+# ni toca los permisos de los demas servicios/roles ya sembrados.
+
+ROLES_NUEVOS = [
+    ("SUPERVISOR_OBRA", "Supervisor de Obra", "Captura y valida/cierra el corte semanal de avance de obra."),
+]
 
 
 def _perm_keys():
@@ -29,6 +31,17 @@ def seed(apps, schema_editor):
 
     system_user = IamUser.objects.get(user_id="system01")
 
+    for role_key, role_name, description in ROLES_NUEVOS:
+        IamRole.objects.get_or_create(
+            role_key=role_key,
+            defaults={
+                "role_name": role_name,
+                "description": description,
+                "created_by": system_user,
+                "updated_by": system_user,
+            },
+        )
+
     permisos_por_key = {}
     for servicio, accion in _perm_keys():
         perm_key = f"{servicio}.{accion}"
@@ -43,10 +56,10 @@ def seed(apps, schema_editor):
         permisos_por_key[perm_key] = permiso
 
     for role_key, accesos in ROLE_ACCESS.items():
-        # Mismo guard que 0004_seed_permisos_matriz.py (24/Ago/2026, ver ese
-        # archivo para el porque) - ROLE_ACCESS es "vivo", en una base nueva
-        # esta migracion corre antes que las que crean roles todavia mas
-        # nuevos (ej. 0012_seed_obra_permisos.py, SUPERVISOR_OBRA).
+        # Mismo guard que 0004_seed_permisos_matriz.py (24/Ago/2026) - por
+        # consistencia/a prueba de futuro: si algun dia se agrega otro rol a
+        # permission_matrix.py sin sembrarlo todavia en una migracion previa
+        # a esta, no debe tronar la base completa.
         try:
             role = IamRole.objects.get(role_key=role_key)
         except IamRole.DoesNotExist:
@@ -64,15 +77,18 @@ def seed(apps, schema_editor):
 def unseed(apps, schema_editor):
     IamRolePermission = apps.get_model("iam", "IamRolePermission")
     IamPermission = apps.get_model("iam", "IamPermission")
+    IamRole = apps.get_model("iam", "IamRole")
 
-    perm_keys = ["docint.leer", "docint.crear"]
+    perm_keys = [f"obra.{accion}" for accion in ACCION_POR_LETRA.values()]
     IamRolePermission.objects.filter(permission__perm_key__in=perm_keys).delete()
     IamPermission.objects.filter(perm_key__in=perm_keys).delete()
+    IamRole.objects.filter(role_key__in=[rk for rk, _, _ in ROLES_NUEVOS]).delete()
 
 
 class Migration(migrations.Migration):
+
     dependencies = [
-        ("iam", "0009_agrega_iam_invitation"),
+        ("iam", "0011_merge_iamexternalcollaborator_y_seed_docint"),
     ]
 
     operations = [
