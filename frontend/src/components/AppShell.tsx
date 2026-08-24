@@ -42,6 +42,7 @@ import {
   UserRound,
   UserPlus,
   ScrollText,
+  ArrowLeftRight,
   Bell,
   ChevronDown,
   ChevronRight,
@@ -263,12 +264,15 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FileText },
+        { label: "Flujos", href: "/tesoreria/flujos", icon: ArrowLeftRight },
       ],
     });
   }
-  if (tieneAlgunPermiso(session, ["compras"])) {
-    items.push({ label: "Compras", href: "/compras-tesoreria", icon: Landmark, enabled: true });
-  }
+  // "Compras" (compras-tesoreria-service) se quito del sidebar (24/Ago/2026,
+  // pedido de Mariana) - es el mismo dominio que Tesoreria (arriba), que ya
+  // tiene pantallas reales; compras-tesoreria-service en si sigue sin
+  // tablas de negocio propias (ver services/compras-tesoreria-service/
+  // config/models.py), la pagina era solo el placeholder EnDesarrolloPage.
   if (tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });
   }

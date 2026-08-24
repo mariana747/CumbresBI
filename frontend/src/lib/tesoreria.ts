@@ -347,6 +347,157 @@ export async function createContrato(params: {
   return response.json();
 }
 
+export type TesoreriaValidacionEstado = "PENDIENTE" | "APROBADA" | "RECHAZADA";
+
+// Flujo de caja (24/Ago/2026, Sem 21 del cronograma) - segundo recurso con
+// alcance real por sociedad (via contrato.sociedad, ver
+// tesoreria/models.py::TesoreriaFlujo.SCOPE_FIELD_SOCIEDAD). factura/
+// complemento/nomina se quedan de solo lectura aqui (Facturacion CFDI es
+// Sem 20, sin CRUD propio todavia) - no se exponen en este cliente.
+export interface TesoreriaFlujo {
+  id_flujo: string;
+  contrato: string | null;
+  contrato_sociedad: string | null;
+  id_empleado: string | null;
+  id_requisicion: string | null;
+  fecha_efectiva: string | null;
+  concepto: string | null;
+  reembolso: boolean | null;
+  id_empleado_reembolso: string | null;
+  cuenta: string;
+  cuenta_alias: string | null;
+  total_mxp: string | null;
+  autorizacion: boolean | null;
+  autorizado_por: string | null;
+  fecha_autorizacion: string | null;
+  link_referencia: string | null;
+  pagado: boolean | null;
+  fecha_pago: string | null;
+  descripcion_pago: string | null;
+  link_comprobante_banco: string | null;
+  validacion_estado: TesoreriaValidacionEstado | null;
+  comentarios: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listFlujos(params?: { search?: string; contrato?: string }): Promise<TesoreriaFlujo[]> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.contrato) query.set("contrato", params.contrato);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function createFlujo(params: {
+  contrato?: string;
+  cuenta: string;
+  totalMxp?: string;
+  fechaEfectiva?: string;
+  concepto?: string;
+  reembolso?: boolean;
+  idEmpleadoReembolso?: string;
+  linkReferencia?: string;
+  comentarios?: string;
+}): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contrato: params.contrato || null,
+      cuenta: params.cuenta,
+      total_mxp: params.totalMxp || null,
+      fecha_efectiva: params.fechaEfectiva || null,
+      concepto: params.concepto || null,
+      reembolso: params.reembolso ?? false,
+      id_empleado_reembolso: params.idEmpleadoReembolso || null,
+      link_referencia: params.linkReferencia || null,
+      comentarios: params.comentarios || null,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateFlujo(
+  idFlujo: string,
+  params: Partial<{
+    concepto: string;
+    fechaEfectiva: string;
+    totalMxp: string;
+    linkReferencia: string;
+    comentarios: string;
+  }>
+): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      concepto: params.concepto,
+      fecha_efectiva: params.fechaEfectiva,
+      total_mxp: params.totalMxp,
+      link_referencia: params.linkReferencia,
+      comentarios: params.comentarios,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Ciclo de vida propio del flujo (segregacion de funciones: aprobar/
+// rechazar requieren tesoreria.aprobar, distinto de crear/editar - ver
+// docstring de TesoreriaFlujoViewSet). autorizadoPor viaja en el body
+// porque el backend todavia no resuelve el actor desde el JWT en este
+// punto del proyecto (mismo criterio que PldContraparteKycViewSet.aprobar).
+export async function aprobarFlujo(idFlujo: string, autorizadoPor: string): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/aprobar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ autorizado_por: autorizadoPor }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function rechazarFlujo(idFlujo: string): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/rechazar/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function registrarPagoFlujo(
+  idFlujo: string,
+  params?: { descripcionPago?: string; linkComprobanteBanco?: string }
+): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/registrar_pago/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      descripcion_pago: params?.descripcionPago || null,
+      link_comprobante_banco: params?.linkComprobanteBanco || null,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function updateContrato(
   idContrato: string,
   params: Partial<{
