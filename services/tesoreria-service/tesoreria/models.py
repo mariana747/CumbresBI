@@ -801,6 +801,16 @@ class TesoreriaFlujo(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
 
+    # Alcance por sociedad (24/Ago/2026, Sem 21 del cronograma) via el
+    # contrato relacionado - TesoreriaFlujo no tiene su propia columna de
+    # sociedad (viene heredado de AppSheet asi), pero ScopedQuerySet.for_scope
+    # soporta lookups con doble guion bajo (ver libs/cumbresbi-scope). Limitacion
+    # conocida: `contrato` es nullable (un flujo sin contrato, ej. un
+    # reembolso suelto a un empleado) queda fuera de cualquier alcance por
+    # sociedad y solo lo ve GLOBAL - documentado, no un descuido.
+    SCOPE_FIELD_SOCIEDAD = "contrato__sociedad"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "tesoreria_flujos"
 
