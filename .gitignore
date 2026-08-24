@@ -76,8 +76,15 @@ services/document-intelligence-service/Maria/
 *.md
 *.pdf
 *.docx
+*.xlsx
 !docs/architecture/*.md
 !docs/architecture/**/*.md
+
+# HTML sueltos en la raiz del repo (24/Ago/2026) - diagramas/documentacion
+# exploratoria generados durante una sesion (ej. mapas de tablas, ejemplos
+# guiados), no codigo. Solo en la raiz (/*.html), no afecta ningun .html
+# real dentro de frontend/ ni de otro servicio.
+/*.html
 # Excepcion a la excepcion: este no debe subirse nunca (instruccion de
 # Mariana, 12/Ago/2026), aunque viva dentro de docs/architecture/.
 docs/architecture/CumbresBI_Onboarding_Desarrollador.md
