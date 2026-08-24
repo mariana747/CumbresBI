@@ -424,7 +424,7 @@ class TesoreriaFlujoVincularFacturaTests(TestCase):
         self.assertEqual(response.data["factura"], "uuid-real")
 
     def test_vincular_complemento_real(self):
-        complemento = TesoreriaComplementoPago.objects.create(timbre_uuid="uuid-comp", folio="C-1")
+        TesoreriaComplementoPago.objects.create(timbre_uuid="uuid-comp", folio="C-1")
         request = self.factory.post(
             f"/api/flujos/{self.flujo.id_flujo}/vincular_factura/", {"complemento": "uuid-comp"}, format="json"
         )
