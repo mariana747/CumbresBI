@@ -5,6 +5,7 @@ from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
 from django.utils import timezone
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.parsers import MultiPartParser
@@ -152,6 +153,43 @@ def _detectar_documentos_nuevos_en_drive(kyc, headers, cookies, actor_user_id):
     return agregados
 
 
+def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
+    """Verifica contra el catalogo maestro real (tesoreria-service) que
+    `id_contraparte` exista (24/Ago/2026, cierre de la reconciliacion
+    contraparte maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md
+    Semana 19). ContraparteSelector en el frontend siempre manda un id real,
+    pero nada impedia hasta ahora que llegara uno inventado (o el default
+    autogenerado del modelo, si el selector no se uso). Si tesoreria-service
+    no responde, se deja pasar (fail-open, mismo criterio que
+    _limpiar_documentos_borrados_en_drive) - un problema de red entre
+    servicios no debe bloquear el alta de un expediente KYC real."""
+    try:
+        upstream = requests.get(
+            f"{settings.TESORERIA_SERVICE_URL}/api/contrapartes/{id_contraparte}/",
+            headers=headers,
+            cookies=cookies,
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning(
+            "tesoreria-service no respondio al validar id_contraparte %s", id_contraparte, exc_info=True
+        )
+        return True
+
+    if upstream.status_code == 404:
+        return False
+    if upstream.status_code != 200:
+        # Error real del lado de tesoreria-service (500, 403 por permisos
+        # desalineados, etc.) - mismo criterio fail-open que timeout/red.
+        logger.warning(
+            "tesoreria-service respondio %s al validar id_contraparte %s",
+            upstream.status_code,
+            id_contraparte,
+        )
+        return True
+    return True
+
+
 # Limites del lote publico de documentos (18/Ago/2026, ver
 # PldTicketClienteViewSet.subir_documento) - antes solo dependian del
 # default de Django (DATA_UPLOAD_MAX_MEMORY_SIZE=2.5MB para el cuerpo
@@ -209,6 +247,22 @@ class PldContraparteKycViewSet(ModelViewSet):
         if estado_llenado:
             queryset = queryset.filter(estado_llenado=estado_llenado.upper())
         return queryset
+
+    def create(self, request, *args, **kwargs):
+        """Valida contra el catalogo real de tesoreria-service antes de
+        crear (24/Ago/2026, ver _existe_contraparte_en_tesoreria) - el
+        unique=True del modelo ya evita duplicados, pero no evita un
+        id_contraparte que simplemente no existe en Tesoreria (ej. si
+        alguien llama a la API directo, sin pasar por ContraparteSelector)."""
+        id_contraparte = request.data.get("id_contraparte")
+        if id_contraparte:
+            headers, cookies = forward_auth_headers(request)
+            if not _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
+                return Response(
+                    {"id_contraparte": "No existe esa contraparte en el catálogo de Tesorería."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
         """Override del update/partial_update generico de DRF (18/Ago/2026)

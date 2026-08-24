@@ -100,6 +100,14 @@ DATABASES = {
     }
 }
 
+# tesoreria-service (24/Ago/2026, cierre de la reconciliacion contraparte
+# maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Semana 19,
+# mismo cambio ya hecho en pld-service/config/settings.py).
+# ViviendaRelExpedienteClienteViewSet.create la usa para validar que el
+# id_contraparte que manda el frontend (via ContraparteSelector) exista de
+# verdad en el catalogo maestro, antes de guardar la relacion cliente.
+TESORERIA_SERVICE_URL = env("TESORERIA_SERVICE_URL", default="http://tesoreria-service:8080")
+
 AUTH_PASSWORD_VALIDATORS = []
 
 LANGUAGE_CODE = "es-mx"

@@ -172,7 +172,7 @@ describe("buildNavItems - Obra (incluye Materiales)", () => {
 // desarrollo". El permiso "contrapartes" tambien lo activa (varios roles de
 // PLD solo tienen contrapartes.leer, ver AppShell.tsx).
 describe("buildNavItems - Tesorería", () => {
-  it("algun perm de contrapartes/tesoreria/facturacion-cfdi muestra el apartado con sus 3 pantallas", () => {
+  it("algun perm de contrapartes/tesoreria/facturacion-cfdi muestra el apartado con sus 4 pantallas", () => {
     for (const roleKey of Object.keys(ROLES)) {
       const tieneAlguno = ROLES[roleKey].some(
         (p) =>
@@ -184,7 +184,9 @@ describe("buildNavItems - Tesorería", () => {
       expect(tesoreria, `${roleKey} deberia ver Tesorería`).toBeDefined();
       expect(tesoreria?.enabled).toBe(true);
       const labels = hijos(tesoreria).map((c) => c.label);
-      expect(labels).toEqual(["Contrapartes", "Cuentas bancarias", "Contratos"]);
+      // "Flujos" (24/Ago/2026) se agrego junto con el CRUD real de
+      // tesoreria_flujos - ver AppShell.tsx.
+      expect(labels).toEqual(["Contrapartes", "Cuentas bancarias", "Contratos", "Flujos"]);
     }
   });
 
@@ -195,10 +197,11 @@ describe("buildNavItems - Tesorería", () => {
 });
 
 describe("buildNavItems - placeholders 'en desarrollo' (clickeables, no deshabilitados)", () => {
-  const CASOS: { prefijos: string[]; href: string }[] = [
-    { prefijos: ["compras"], href: "/compras-tesoreria" },
-    { prefijos: ["rrhh"], href: "/rrhh" },
-  ];
+  // "compras" se quito de esta lista (24/Ago/2026, pedido de Mariana) -
+  // /compras-tesoreria ya no existe como item del sidebar en absoluto (no
+  // es que siga deshabilitado, se elimino por completo: mismo dominio que
+  // Tesoreria, que ya tiene pantallas reales - ver DUEÑO_CONOCIDO abajo).
+  const CASOS: { prefijos: string[]; href: string }[] = [{ prefijos: ["rrhh"], href: "/rrhh" }];
 
   for (const { prefijos, href } of CASOS) {
     it(`algun perm de [${prefijos.join(", ")}] muestra ${href} habilitado`, () => {
@@ -224,14 +227,18 @@ describe("buildNavItems - siempre presentes", () => {
   });
 });
 
-// Hallazgo de esta ronda (11/Ago/2026, ver docs/CumbresBI_estado.md): hay
+// Hallazgo de esta ronda (11/Ago/2026, ver docs/CumbresBI_estado.md): hubo
 // dos servicios de la matriz sin ningun apartado dueno en el sidebar -
 // "tickets" (TICKETS_RESPONSABLE, TICKETS_PARTICIPANTE, EMPLEADO_SELF) y
-// "rentas" (FINANZAS_MANAGER, CONTRALOR) - ya resuelto (11/Ago/2026,
-// pantallas "en desarrollo" agregadas, ver /tickets y /rentas). Este test
-// se queda como red de seguridad: si algun dia se agrega un servicio
-// nuevo a la matriz sin apartado dueno, vuelve a quedar en rojo (no se
-// oculta con .skip, el rojo es el aviso).
+// "rentas" (FINANZAS_MANAGER, CONTRALOR). Se agregaron placeholders "en
+// desarrollo" ese dia, pero se QUITARON otra vez el 19/Ago/2026 (pedido de
+// Mariana - ningun backend real detras, quedaban como ruido en el sidebar).
+// SIN_DUEÑO_A_PROPOSITO documenta ese hueco como deliberado (no un
+// descuido) para no confundirlo con un servicio nuevo que de verdad se le
+// olvido a alguien agregarle apartado - ver DUEÑO_CONOCIDO abajo para esos.
+// Este test se queda como red de seguridad: si algun dia se agrega un
+// servicio nuevo a la matriz sin apartado dueno NI en esta lista, vuelve a
+// quedar en rojo (no se oculta con .skip, el rojo es el aviso).
 describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a proposito)", () => {
   const DUEÑO_CONOCIDO: Record<string, string> = {
     iam: "/admin/usuarios (o Auditar)",
@@ -241,17 +248,20 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
     materiales: "/ventas-vivienda/proyectos",
     tesoreria: "/tesoreria/contrapartes",
     "facturacion-cfdi": "/tesoreria/contrapartes",
-    compras: "/compras-tesoreria",
+    // "compras" ya no tiene pantalla propia (24/Ago/2026, se quito
+    // /compras-tesoreria del sidebar) - mismo dominio que Tesoreria, que
+    // ya cubre catalogos/contratos/flujos reales.
+    compras: "/tesoreria/contrapartes",
     rrhh: "/rrhh",
-    tickets: "/tickets",
-    rentas: "/rentas",
     audit: "Bitácora (dentro de Admin(IAM)/Auditar, no un item propio)",
   };
 
-  it("todo servicio de la matriz tiene un apartado dueno en el sidebar", () => {
+  const SIN_DUEÑO_A_PROPOSITO = new Set(["tickets", "rentas"]);
+
+  it("todo servicio de la matriz tiene un apartado dueno en el sidebar (o esta en SIN_DUEÑO_A_PROPOSITO)", () => {
     const sinDueno: string[] = [];
     for (const servicio of matrizFixture.servicios) {
-      if (DUEÑO_CONOCIDO[servicio]) continue;
+      if (DUEÑO_CONOCIDO[servicio] || SIN_DUEÑO_A_PROPOSITO.has(servicio)) continue;
 
       // Sesion sintetica con SOLO el permiso de este servicio (no un rol
       // real completo) - a proposito, para aislar el hallazgo: un rol

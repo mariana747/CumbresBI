@@ -42,6 +42,7 @@ import {
   UserRound,
   UserPlus,
   ScrollText,
+  ArrowLeftRight,
   Bell,
   HardHat,
   CalendarCheck,
@@ -265,6 +266,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FileText },
+        { label: "Flujos", href: "/tesoreria/flujos", icon: ArrowLeftRight },
       ],
     });
   }
@@ -294,23 +296,20 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       ],
     });
   }
-  if (tieneAlgunPermiso(session, ["compras"])) {
-    items.push({ label: "Compras", href: "/compras-tesoreria", icon: Landmark, enabled: true });
-  }
+  // "Compras" (compras-tesoreria-service) se quito del sidebar (24/Ago/2026,
+  // pedido de Mariana) - es el mismo dominio que Tesoreria (arriba), que ya
+  // tiene pantallas reales; compras-tesoreria-service en si sigue sin
+  // tablas de negocio propias (ver services/compras-tesoreria-service/
+  // config/models.py), la pagina era solo el placeholder EnDesarrolloPage.
   if (tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });
   }
-  // Hallazgo de AppShell.test.ts (11/Ago/2026, ver docs/CumbresBI_estado.md):
-  // estos dos prefijos no tenian apartado dueno todavia - se agregan aqui
-  // con el mismo patron "en desarrollo" (TICKETS_RESPONSABLE/
-  // TICKETS_PARTICIPANTE/EMPLEADO_SELF para tickets; FINANZAS_MANAGER/
-  // CONTRALOR para rentas).
-  if (tieneAlgunPermiso(session, ["tickets"])) {
-    items.push({ label: "Tickets", href: "/tickets", icon: Link2, enabled: true });
-  }
-  if (tieneAlgunPermiso(session, ["rentas"])) {
-    items.push({ label: "Rentas", href: "/rentas", icon: Landmark, enabled: true });
-  }
+  // Tickets/Rentas quitados del sidebar (19/Ago/2026, pedido de Mariana) -
+  // ninguno de los dos tiene backend real todavia, quedaban como
+  // placeholders "en desarrollo" sin nada detras. Si se retoman esos
+  // modulos, revivir este bloque (ver git blame) en vez de reinventarlo -
+  // el hallazgo original que lo agrego sigue documentado en
+  // docs/CumbresBI_estado.md.
   items.push({ label: "MiCumbres (portal empleado)", href: "/micumbres", icon: UserRound, enabled: true });
   return items;
 }

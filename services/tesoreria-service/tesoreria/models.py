@@ -63,7 +63,15 @@ class TesoreriaContraparte(models.Model):
     razon_social = models.CharField(max_length=100)
     contacto = models.CharField(max_length=100, blank=True, null=True)
     telefono_sms = models.CharField(max_length=10, blank=True, null=True)
-    email = models.CharField(max_length=100)
+    # blank/null=True (19/Ago/2026, "contraparte maestra unica") - antes
+    # eran obligatorios, lo que impedia dar de alta un cliente/proveedor
+    # solo con el nombre. Ahora este es el UNICO lugar de alta real de
+    # contrapartes de toda la empresa (PLD/Ventas/Compras ya no generan la
+    # suya propia, ver docs/architecture/README.md sec. 11.2 #7) - el resto
+    # de los datos se completa despues, mismo criterio "alta minima" que ya
+    # usaba PLD por su cuenta (Opcion B, 17/Ago/2026) antes de que esta
+    # pantalla existiera.
+    email = models.CharField(max_length=100, blank=True, null=True)
     comentarios = models.TextField(blank=True, null=True)
     permiso = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -73,7 +81,9 @@ class TesoreriaContraparte(models.Model):
     autorizado_por = models.CharField(max_length=100, blank=True, null=True)
     apellido_paterno = models.CharField(max_length=100, blank=True, null=True)
     apellido_materno = models.CharField(max_length=100, blank=True, null=True)
-    tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES)
+    # blank/null=True (19/Ago/2026) - ver docstring de "email" arriba, mismo
+    # criterio.
+    tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES, blank=True, null=True)
     genero = models.CharField(max_length=20, choices=GENERO_CHOICES, blank=True, null=True)
     cliente = models.BooleanField(default=False)
     proveedor = models.BooleanField(default=False)
@@ -790,6 +800,16 @@ class TesoreriaFlujo(models.Model):
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
+
+    # Alcance por sociedad (24/Ago/2026, Sem 21 del cronograma) via el
+    # contrato relacionado - TesoreriaFlujo no tiene su propia columna de
+    # sociedad (viene heredado de AppSheet asi), pero ScopedQuerySet.for_scope
+    # soporta lookups con doble guion bajo (ver libs/cumbresbi-scope). Limitacion
+    # conocida: `contrato` es nullable (un flujo sin contrato, ej. un
+    # reembolso suelto a un empleado) queda fuera de cualquier alcance por
+    # sociedad y solo lo ve GLOBAL - documentado, no un descuido.
+    SCOPE_FIELD_SOCIEDAD = "contrato__sociedad"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "tesoreria_flujos"

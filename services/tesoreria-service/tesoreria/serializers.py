@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta
+from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta, TesoreriaFlujo
 
 
 class TesoreriaContraparteSerializer(serializers.ModelSerializer):
@@ -126,3 +126,69 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         read_only_fields = ["id_contrato", "created_at", "updated_at"]
+
+
+class TesoreriaFlujoSerializer(serializers.ModelSerializer):
+    """Flujo de caja (Fase 4, Sem 21 del cronograma) - un movimiento real de
+    dinero (ingreso o egreso: pago a proveedor, reembolso, nomina) ligado a
+    un TesoreriaContrato. Primer corte: catalogos de facturas/complementos/
+    nomina (CFDI) todavia no tienen CRUD propio (Sem 20, sin construir),
+    asi que `factura`/`complemento`/`nomina` se exponen de solo lectura por
+    ahora - se llenaran cuando exista esa pantalla, no a mano desde aqui.
+
+    `autorizacion`/`autorizado_por`/`fecha_autorizacion` y `pagado`/
+    `fecha_pago` los llenan las acciones `aprobar`/`registrar_pago` del
+    ViewSet, no un PATCH directo - ver views.py. Mismo criterio que
+    PldContraparteKycViewSet: "quien captura no aprueba"
+    (docs/architecture/roles-y-permisos.md sec. 2)."""
+
+    contrato_sociedad = serializers.CharField(source="contrato.sociedad", read_only=True, default=None)
+    cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
+
+    class Meta:
+        model = TesoreriaFlujo
+        fields = [
+            "id_flujo",
+            "contrato",
+            "contrato_sociedad",
+            "id_empleado",
+            "id_requisicion",
+            "fecha_efectiva",
+            "concepto",
+            "reembolso",
+            "id_empleado_reembolso",
+            "cuenta",
+            "cuenta_alias",
+            "total_mxp",
+            "autorizacion",
+            "autorizado_por",
+            "fecha_autorizacion",
+            "link_referencia",
+            "pagado",
+            "fecha_pago",
+            "descripcion_pago",
+            "link_comprobante_banco",
+            "factura",
+            "complemento",
+            "nomina",
+            "validacion_estado",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = [
+            "id_flujo",
+            "autorizacion",
+            "autorizado_por",
+            "fecha_autorizacion",
+            "pagado",
+            "fecha_pago",
+            "factura",
+            "complemento",
+            "nomina",
+            "validacion_estado",
+            "created_at",
+            "updated_at",
+        ]

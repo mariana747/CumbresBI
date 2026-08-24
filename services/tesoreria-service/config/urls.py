@@ -7,6 +7,7 @@ from tesoreria.views import (
     TesoreriaContraparteViewSet,
     TesoreriaContratoViewSet,
     TesoreriaCuentaViewSet,
+    TesoreriaFlujoViewSet,
 )
 
 router = DefaultRouter()
@@ -14,6 +15,7 @@ router.register("contrapartes", TesoreriaContraparteViewSet, basename="tesoreria
 router.register("bancos", TesoreriaBancoViewSet, basename="tesoreriabanco")
 router.register("cuentas", TesoreriaCuentaViewSet, basename="tesoreriacuenta")
 router.register("contratos", TesoreriaContratoViewSet, basename="tesoreriacontrato")
+router.register("flujos", TesoreriaFlujoViewSet, basename="tesoreriaflujo")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

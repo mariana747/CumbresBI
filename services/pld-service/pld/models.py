@@ -58,6 +58,13 @@ class PldContraparteKyc(models.Model):
     # que se reconciliara con la contraparte maestra compartida hasta la
     # Fase 4. default=_short_id (17/Ago/2026) para que el analista no tenga
     # que inventar un identificador a mano al crear un expediente nuevo.
+    # Sin unique=True (24/Ago/2026, decision explicita de Mariana: seguir
+    # el ERD real - 20260727_Cumbres_ERD.sql linea 195 solo declara
+    # `id_contraparte varchar(8) NOT NULL`, sin restriccion de unicidad -
+    # una misma contraparte puede tener mas de un expediente KYC (ej.
+    # historico/renovacion), no es un duplicado invalido por definicion.
+    # La existencia real contra tesoreria-service SI se valida en
+    # PldContraparteKycViewSet.create (ver views.py).
     id_contraparte = models.CharField(max_length=8, default=_short_id)
     # FK real a general_sociedades.rfc (iam-service) - referencia laxa, ver
     # nota de clase arriba. Columna real de alcance (punto 2 del plan de
