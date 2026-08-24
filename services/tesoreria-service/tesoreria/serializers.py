@@ -1,6 +1,23 @@
 from rest_framework import serializers
 
-from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta, TesoreriaFlujo
+from .models import (
+    FacturaConcepto,
+    FacturaDoctoRelacionado,
+    FacturaNotaCredito,
+    FacturaTraslado,
+    TesoreriaBanco,
+    TesoreriaComplementoPago,
+    TesoreriaContraparte,
+    TesoreriaContraparteRelacion,
+    TesoreriaContrato,
+    TesoreriaCorteEdc,
+    TesoreriaCuenta,
+    TesoreriaFactura,
+    TesoreriaFlujo,
+    TesoreriaNotaCredito,
+    TesoreriaRecNomina,
+    TesoreriaSaldo,
+)
 
 
 class TesoreriaContraparteSerializer(serializers.ModelSerializer):
@@ -192,3 +209,349 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class FacturaConceptoSerializer(serializers.ModelSerializer):
+    """Linea de una factura (Fase 4, Sem 20 del cronograma) - sin FK real
+    hacia TesoreriaFactura en el ERD (uuid/rfc_propietario son referencias
+    logicas de origen ETL, ver docstring del modelo); el filtro por
+    ?uuid=<timbre_uuid> en el ViewSet es el unico enlace real."""
+
+    class Meta:
+        model = FacturaConcepto
+        fields = [
+            "id",
+            "uuid",
+            "clave_prod_serv",
+            "no_identificacion",
+            "cantidad",
+            "clave_unidad",
+            "unidad",
+            "descripcion",
+            "valor_unitario",
+            "importe",
+            "descuento",
+            "objeto_imp",
+            "rfc_propietario",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TesoreriaFacturaSerializer(serializers.ModelSerializer):
+    """Factura CFDI recibida de un proveedor (Fase 4, Sem 20 del
+    cronograma) - primer corte de encabezado, alta manual via API/
+    formulario. El "motor" que la llena automaticamente desde el Motor
+    Documental (lectura de PDF/XML) es una integracion aparte, todavia sin
+    construir - por ahora cualquier campo de aqui se puede escribir a mano.
+
+    conceptos expone las lineas reales (FacturaConcepto) filtradas por el
+    mismo timbre_uuid - de solo lectura aqui, se administran via
+    FacturaConceptoViewSet (?uuid=<timbre_uuid>), igual criterio que
+    documentos/PldContraparteDocViewSet en pld-service."""
+
+    conceptos = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TesoreriaFactura
+        fields = [
+            "id",
+            "comprobante_serie",
+            "comprobante_folio",
+            "comprobante_fecha",
+            "comprobante_forma_pago",
+            "comprobante_metodo_pago",
+            "comprobante_moneda",
+            "comprobante_total",
+            "tipo_relacion",
+            "uuid_relacionado",
+            "emisor_rfc",
+            "emisor_nombre",
+            "receptor_rfc",
+            "receptor_nombre",
+            "receptor_uso_cfdi",
+            "timbre_uuid",
+            "timbre_fecha_timbrado",
+            "tipo_factura",
+            "link_pdf",
+            "estado",
+            "conceptos",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_conceptos(self, obj):
+        conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)
+        return FacturaConceptoSerializer(conceptos, many=True).data
+
+
+class TesoreriaComplementoPagoSerializer(serializers.ModelSerializer):
+    """CFDI complemento de pago - confirma fiscalmente que una factura a
+    credito ya se pago. Mismo criterio de alta manual que TesoreriaFactura
+    en este primer corte."""
+
+    class Meta:
+        model = TesoreriaComplementoPago
+        fields = [
+            "id",
+            "timbre_uuid",
+            "serie",
+            "folio",
+            "fecha",
+            "moneda",
+            "sub_total",
+            "total",
+            "emisor_rfc",
+            "emisor_nombre",
+            "receptor_rfc",
+            "receptor_nombre",
+            "fecha_de_pago",
+            "monto_pagado",
+            "uuid_relacion",
+            "tipo_factura",
+            "link_pdf",
+            "estado",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TesoreriaNotaCreditoSerializer(serializers.ModelSerializer):
+    """Nota de credito - ajuste fiscal sobre una factura ya emitida
+    (uuid_relacionado es FK real a TesoreriaFactura.timbre_uuid, a
+    diferencia de ComplementoPago que solo trae el UUID en texto plano -
+    asi esta declarado en el ERD/models.py)."""
+
+    factura_folio = serializers.CharField(source="uuid_relacionado.comprobante_folio", read_only=True, default=None)
+
+    class Meta:
+        model = TesoreriaNotaCredito
+        fields = [
+            "id",
+            "comprobante_serie",
+            "comprobante_folio",
+            "comprobante_fecha",
+            "comprobante_total",
+            "uuid_relacionado",
+            "factura_folio",
+            "emisor_rfc",
+            "emisor_nombre",
+            "receptor_rfc",
+            "receptor_nombre",
+            "timbre_uuid",
+            "timbre_fecha_timbrado",
+            "tipo_factura",
+            "link_pdf",
+            "estado",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TesoreriaContraparteRelacionSerializer(serializers.ModelSerializer):
+    """Representante legal / beneficiario controlador de una contraparte -
+    dato que pide PLD/AML (ver piezas-de-tesoreria.html, bloque 1).
+    contraparte_relacion es OTRA fila de TesoreriaContraparte (una persona
+    fisica dada de alta en el mismo catalogo maestro), no un campo de texto
+    libre - por eso ambos extremos son FK reales al mismo modelo."""
+
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
+    contraparte_relacion_nombre = serializers.CharField(source="contraparte_relacion.razon_social", read_only=True)
+
+    class Meta:
+        model = TesoreriaContraparteRelacion
+        fields = [
+            "id_relacion",
+            "contraparte",
+            "contraparte_nombre",
+            "contraparte_relacion",
+            "contraparte_relacion_nombre",
+            "tipo_relacion",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id_relacion", "created_at", "updated_at"]
+
+
+class TesoreriaCorteEdcSerializer(serializers.ModelSerializer):
+    """Corte / estado de cuenta - el PDF del banco subido para conciliar
+    contra los flujos capturados (ver piezas-de-tesoreria.html, bloque 5).
+    `link` se captura a mano (URL pegada) - mismo criterio que
+    ObraEvidencia.link_drive/EvidenciaRecepcion.link_drive mientras no
+    exista una integracion real de subida de archivo para este flujo."""
+
+    cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
+
+    class Meta:
+        model = TesoreriaCorteEdc
+        fields = [
+            "id",
+            "cuenta",
+            "cuenta_alias",
+            "fecha_final",
+            "tipo",
+            "formato",
+            "link",
+            "disponible",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TesoreriaSaldoSerializer(serializers.ModelSerializer):
+    """Foto del saldo de una cuenta en una fecha - reporte de solo lectura
+    para el dia a dia (ver piezas-de-tesoreria.html, bloque 5). `id` no es
+    autogenerado (el modelo heredado no le puso default, ver models.py) -
+    se llena por proceso/carga de archivo, no dato por dato a mano; se
+    manda explicito al crear."""
+
+    class Meta:
+        model = TesoreriaSaldo
+        fields = [
+            "id",
+            "fecha",
+            "cuenta",
+            "saldo",
+            "cambio_dinero",
+            "cambio_porcentual",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class FacturaTrasladoSerializer(serializers.ModelSerializer):
+    """Linea de impuesto trasladado de una factura - mismo criterio que
+    FacturaConcepto (sin FK real, enlace logico por `uuid`)."""
+
+    class Meta:
+        model = FacturaTraslado
+        fields = [
+            "id",
+            "uuid",
+            "base",
+            "impuesto",
+            "tipo_factor",
+            "tasa_o_cuota",
+            "importe",
+            "rfc_propietario",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class FacturaDoctoRelacionadoSerializer(serializers.ModelSerializer):
+    """Documento relacionado de una factura (parcialidades de pago) - mismo
+    criterio que FacturaConcepto (sin FK real, enlace logico por
+    `timbre_uuid`)."""
+
+    class Meta:
+        model = FacturaDoctoRelacionado
+        fields = [
+            "id",
+            "timbre_uuid",
+            "id_documento",
+            "serie",
+            "folio",
+            "moneda_dr",
+            "num_parcialidad",
+            "imp_saldo_ant",
+            "imp_pagado",
+            "imp_saldo_insoluto",
+            "rfc_propietario",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class FacturaNotaCreditoSerializer(serializers.ModelSerializer):
+    """Linea de una nota de credito (distinta de TesoreriaNotaCredito, que
+    es el encabezado) - mismo criterio que FacturaConcepto, enlace logico
+    por `uuid`."""
+
+    class Meta:
+        model = FacturaNotaCredito
+        fields = [
+            "id",
+            "uuid",
+            "uuid_relacionado",
+            "clave_prod_serv",
+            "no_identificacion",
+            "cantidad",
+            "clave_unidad",
+            "unidad",
+            "descripcion",
+            "valor_unitario",
+            "importe",
+            "objeto_imp",
+            "rfc_propietario",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TesoreriaRecNominaSerializer(serializers.ModelSerializer):
+    """CFDI de nomina - primer corte de encabezado/resumen (ver docstring
+    de TesoreriaFacturaSerializer, mismo criterio: alta manual mientras no
+    exista la integracion con RRHH/Motor Documental que de verdad la
+    llene). No expone los ~50 campos granulares de Percepcion_*/Deduccion_*/
+    OtroPago_* del modelo heredado - eso vive en el propio detalle del
+    recibo (PDF/XML real), no hace falta capturarlo campo por campo aqui
+    para el primer corte de Tesoreria."""
+
+    class Meta:
+        model = TesoreriaRecNomina
+        fields = [
+            "id",
+            "fecha",
+            "moneda",
+            "folio",
+            "sub_total",
+            "total",
+            "emisor_rfc",
+            "emisor_nombre",
+            "receptor_rfc",
+            "receptor_nombre",
+            "nom_receptor_num_empleado",
+            "nomina_fecha_pago",
+            "nomina_fecha_inicial_pago",
+            "nomina_fecha_final_pago",
+            "timbre_uuid",
+            "timbre_fecha_timbrado",
+            "tipo_factura",
+            "link_pdf",
+            "estado",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]

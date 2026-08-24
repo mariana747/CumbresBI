@@ -5,13 +5,41 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta, TesoreriaFlujo
+from .models import (
+    FacturaConcepto,
+    FacturaDoctoRelacionado,
+    FacturaNotaCredito,
+    FacturaTraslado,
+    TesoreriaBanco,
+    TesoreriaComplementoPago,
+    TesoreriaContraparte,
+    TesoreriaContraparteRelacion,
+    TesoreriaContrato,
+    TesoreriaCorteEdc,
+    TesoreriaCuenta,
+    TesoreriaFactura,
+    TesoreriaFlujo,
+    TesoreriaNotaCredito,
+    TesoreriaRecNomina,
+    TesoreriaSaldo,
+)
 from .serializers import (
+    FacturaConceptoSerializer,
+    FacturaDoctoRelacionadoSerializer,
+    FacturaNotaCreditoSerializer,
+    FacturaTrasladoSerializer,
     TesoreriaBancoSerializer,
+    TesoreriaComplementoPagoSerializer,
+    TesoreriaContraparteRelacionSerializer,
     TesoreriaContraparteSerializer,
     TesoreriaContratoSerializer,
+    TesoreriaCorteEdcSerializer,
     TesoreriaCuentaSerializer,
+    TesoreriaFacturaSerializer,
     TesoreriaFlujoSerializer,
+    TesoreriaNotaCreditoSerializer,
+    TesoreriaRecNominaSerializer,
+    TesoreriaSaldoSerializer,
 )
 
 
@@ -144,7 +172,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [require_permission("tesoreria.crear")()]
-        if self.action in ("update", "partial_update", "destroy", "registrar_pago"):
+        if self.action in ("update", "partial_update", "destroy", "registrar_pago", "vincular_factura"):
             return [require_permission("tesoreria.editar")()]
         if self.action in ("aprobar", "rechazar"):
             return [require_permission("tesoreria.aprobar")()]
@@ -224,3 +252,221 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             update_fields=["pagado", "fecha_pago", "descripcion_pago", "link_comprobante_banco"]
         )
         return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["post"])
+    def vincular_factura(self, request, pk=None):
+        """Liga el flujo a una factura/complemento ya emitidos (Fase 4,
+        Sem 20 del cronograma) - `factura`/`complemento` son de solo
+        lectura en el serializer (ver TesoreriaFlujoSerializer) porque no
+        tiene sentido escribirlos a mano en un POST/PATCH normal: la
+        factura debe existir de antemano en tesoreria-service, esta accion
+        solo valida eso y hace el enlace. Recibe timbre_uuid (PK real de
+        ambos modelos), no el id numerico interno."""
+        flujo = self.get_object()
+        timbre_uuid_factura = request.data.get("factura")
+        timbre_uuid_complemento = request.data.get("complemento")
+        update_fields = []
+
+        if timbre_uuid_factura:
+            try:
+                flujo.factura = TesoreriaFactura.objects.get(timbre_uuid=timbre_uuid_factura)
+            except TesoreriaFactura.DoesNotExist:
+                return Response({"factura": "No existe una factura con ese UUID."}, status=400)
+            update_fields.append("factura")
+
+        if timbre_uuid_complemento:
+            try:
+                flujo.complemento = TesoreriaComplementoPago.objects.get(timbre_uuid=timbre_uuid_complemento)
+            except TesoreriaComplementoPago.DoesNotExist:
+                return Response({"complemento": "No existe un complemento de pago con ese UUID."}, status=400)
+            update_fields.append("complemento")
+
+        if not update_fields:
+            return Response({"detail": "Manda factura y/o complemento (timbre_uuid)."}, status=400)
+
+        flujo.save(update_fields=update_fields)
+        return Response(self.get_serializer(flujo).data)
+
+
+class FacturaConceptoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Lineas de una factura CFDI (Fase 4, Sem 20) - sin FK real hacia
+    TesoreriaFactura en el ERD (ver docstring del modelo), el filtro
+    ?uuid=<timbre_uuid> es el enlace real desde la pantalla de detalle de
+    una factura. Mismo gate de permisos que los demas recursos de este
+    servicio (tesoreria.crear/.editar) - de hecho reusa
+    facturacion-cfdi.crear/.editar seria mas preciso, pero se decide en
+    TesoreriaFacturaViewSet/ComplementoPago/NotaCredito (las cabeceras),
+    no aqui (linea de detalle sin cabecera FK real que gatear)."""
+
+    serializer_class = FacturaConceptoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["descripcion", "no_identificacion"]
+
+    def get_queryset(self):
+        queryset = FacturaConcepto.objects.all().order_by("id")
+        uuid_factura = self.request.query_params.get("uuid")
+        if uuid_factura:
+            queryset = queryset.filter(uuid=uuid_factura)
+        return queryset
+
+
+class _PermisosFacturacionCfdiMixin:
+    """Gate de permisos de las 3 cabeceras CFDI (Factura/ComplementoPago/
+    NotaCredito) - usa el servicio `facturacion-cfdi` de permission_matrix.py
+    (distinto de `tesoreria`), ya asignado a TESORERIA_ANALISTA (LC) y
+    FINANZAS_MANAGER (LCE) desde antes de este corte."""
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("facturacion-cfdi.crear")()]
+        if self.action in ("update", "partial_update", "destroy"):
+            return [require_permission("facturacion-cfdi.editar")()]
+        return super().get_permissions()
+
+
+class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
+    """Factura CFDI recibida de un proveedor (Fase 4, Sem 20 del
+    cronograma) - primer corte de encabezado, alta manual via API/
+    formulario mientras no exista la integracion con el Motor Documental
+    (ver docstring del serializer). Busqueda de texto libre (?search=)
+    sobre folio/UUID/nombres de emisor-receptor."""
+
+    queryset = TesoreriaFactura.objects.all().order_by("-created_at")
+    serializer_class = TesoreriaFacturaSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre"]
+
+
+class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
+    """Complemento de pago (REP) - confirma fiscalmente que una factura a
+    credito ya se pago. Mismo criterio de alta manual que Factura."""
+
+    queryset = TesoreriaComplementoPago.objects.all().order_by("-created_at")
+    serializer_class = TesoreriaComplementoPagoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre"]
+
+
+class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
+    """Nota de credito - ajuste fiscal sobre una factura ya emitida
+    (uuid_relacionado es FK real, ver docstring del serializer)."""
+
+    queryset = TesoreriaNotaCredito.objects.select_related("uuid_relacionado").order_by("-created_at")
+    serializer_class = TesoreriaNotaCreditoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre"]
+
+
+class TesoreriaContraparteRelacionViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Representante legal / beneficiario controlador de una contraparte -
+    dato que pide PLD/AML (bloque 1 del catalogo maestro, mismo gate de
+    permisos que Contraparte/Banco/Cuenta). Filtro ?contraparte=<id> desde
+    la vista de detalle de una contraparte."""
+
+    serializer_class = TesoreriaContraparteRelacionSerializer
+    filter_backends = [SearchFilter]
+
+    def get_queryset(self):
+        queryset = (
+            TesoreriaContraparteRelacion.objects.select_related("contraparte", "contraparte_relacion")
+            .order_by("-created_at")
+        )
+        contraparte_id = self.request.query_params.get("contraparte")
+        if contraparte_id:
+            queryset = queryset.filter(contraparte_id=contraparte_id)
+        return queryset
+
+
+class TesoreriaCorteEdcViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Corte / estado de cuenta bancario - PDF subido para conciliar contra
+    los flujos capturados (bloque 5, reportes). Filtro ?cuenta=<id> desde
+    la vista de detalle de una cuenta."""
+
+    serializer_class = TesoreriaCorteEdcSerializer
+    filter_backends = [SearchFilter]
+
+    def get_queryset(self):
+        queryset = TesoreriaCorteEdc.objects.select_related("cuenta").order_by("-fecha_final")
+        cuenta_id = self.request.query_params.get("cuenta")
+        if cuenta_id:
+            queryset = queryset.filter(cuenta_id=cuenta_id)
+        return queryset
+
+
+class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Foto del saldo de una cuenta en una fecha (bloque 5, reportes) - se
+    llena por proceso/carga de archivo, no dato por dato a mano (ver
+    docstring del serializer); el CRUD existe para eso, no para captura
+    manual del dia a dia. Filtro ?cuenta=<alias/id> tal cual viene en el
+    campo (CharField plano, sin FK real - ver models.py)."""
+
+    serializer_class = TesoreriaSaldoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["cuenta"]
+
+    def get_queryset(self):
+        queryset = TesoreriaSaldo.objects.all().order_by("-fecha")
+        cuenta = self.request.query_params.get("cuenta")
+        if cuenta:
+            queryset = queryset.filter(cuenta=cuenta)
+        return queryset
+
+
+class FacturaTrasladoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
+    """Linea de impuesto trasladado de una factura - filtro ?uuid=<timbre_uuid>
+    desde la vista de detalle de la factura, mismo criterio que
+    FacturaConceptoViewSet."""
+
+    serializer_class = FacturaTrasladoSerializer
+    filter_backends = [SearchFilter]
+
+    def get_queryset(self):
+        queryset = FacturaTraslado.objects.all().order_by("id")
+        uuid_factura = self.request.query_params.get("uuid")
+        if uuid_factura:
+            queryset = queryset.filter(uuid=uuid_factura)
+        return queryset
+
+
+class FacturaDoctoRelacionadoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
+    """Documento relacionado de una factura (parcialidades de pago) -
+    filtro ?timbre_uuid=<uuid> desde la vista de detalle de la factura."""
+
+    serializer_class = FacturaDoctoRelacionadoSerializer
+    filter_backends = [SearchFilter]
+
+    def get_queryset(self):
+        queryset = FacturaDoctoRelacionado.objects.all().order_by("id")
+        timbre_uuid = self.request.query_params.get("timbre_uuid")
+        if timbre_uuid:
+            queryset = queryset.filter(timbre_uuid=timbre_uuid)
+        return queryset
+
+
+class FacturaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
+    """Linea de una nota de credito (distinta de TesoreriaNotaCreditoViewSet,
+    que es el encabezado) - filtro ?uuid=<timbre_uuid> de la nota de
+    credito duena."""
+
+    serializer_class = FacturaNotaCreditoSerializer
+    filter_backends = [SearchFilter]
+
+    def get_queryset(self):
+        queryset = FacturaNotaCredito.objects.all().order_by("id")
+        uuid_nota = self.request.query_params.get("uuid")
+        if uuid_nota:
+            queryset = queryset.filter(uuid=uuid_nota)
+        return queryset
+
+
+class TesoreriaRecNominaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
+    """CFDI de nomina - encabezado/resumen (ver docstring del serializer).
+    Bloqueado en la practica hasta que exista RRHH (sin catalogo real de
+    empleados contra el que validar `nom_receptor_num_empleado`), pero el
+    CRUD en si no depende de eso - mismo criterio que TesoreriaFlujo con
+    id_empleado_reembolso."""
+
+    queryset = TesoreriaRecNomina.objects.all().order_by("-created_at")
+    serializer_class = TesoreriaRecNominaSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "nom_receptor_num_empleado"]

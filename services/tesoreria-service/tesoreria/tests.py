@@ -14,13 +14,24 @@ from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta, TesoreriaFlujo
+from .models import (
+    TesoreriaBanco,
+    TesoreriaComplementoPago,
+    TesoreriaContraparte,
+    TesoreriaContrato,
+    TesoreriaCuenta,
+    TesoreriaFactura,
+    TesoreriaFlujo,
+)
 from .views import (
     TesoreriaBancoViewSet,
+    TesoreriaContraparteRelacionViewSet,
     TesoreriaContraparteViewSet,
     TesoreriaContratoViewSet,
     TesoreriaCuentaViewSet,
+    TesoreriaFacturaViewSet,
     TesoreriaFlujoViewSet,
+    TesoreriaSaldoViewSet,
 )
 
 RFC_TIZARA = "#####1"
@@ -323,3 +334,176 @@ class TesoreriaFlujoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["pagado"])
         self.assertEqual(response.data["descripcion_pago"], "SPEI BBVA")
+
+
+class TesoreriaFacturaTests(TestCase):
+    """Facturacion CFDI (24/Ago/2026, Sem 20 del cronograma) - encabezado,
+    permiso distinto (facturacion-cfdi.*) al resto del servicio (tesoreria.*)
+    - mismo criterio que ya usaban TESORERIA_ANALISTA/FINANZAS_MANAGER en
+    permission_matrix.py, ahora si con CRUD real detras."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_crear = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.crear",))
+
+    def test_crear_sin_permiso_da_403(self):
+        request = self.factory.post(
+            "/api/facturas/", {"timbre_uuid": "uuid-001", "comprobante_folio": "F-1"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_permiso_facturacion_cfdi_crear(self):
+        request = self.factory.post(
+            "/api/facturas/",
+            {"timbre_uuid": "uuid-001", "comprobante_folio": "F-1", "comprobante_total": "98600.00"},
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["conceptos"], [])
+
+    def test_timbre_uuid_es_unico(self):
+        TesoreriaFactura.objects.create(timbre_uuid="uuid-dup", comprobante_folio="F-1")
+        request = self.factory.post(
+            "/api/facturas/", {"timbre_uuid": "uuid-dup", "comprobante_folio": "F-2"}, format="json"
+        )
+        request.effective_scope = self.scope_crear
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+
+class TesoreriaFlujoVincularFacturaTests(TestCase):
+    """vincular_factura() liga un flujo ya capturado a una factura/
+    complemento reales - factura/complemento son de solo lectura en el
+    serializer normal, esta es la unica via para llenarlos."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Constructora de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex", alias="BMX")
+        cuenta = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000000001", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        self.flujo = TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000900", contrato=self.contrato, cuenta=cuenta, total_mxp="98600.00"
+        )
+        self.factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-real", comprobante_folio="F-1")
+        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+
+    def test_vincular_factura_inexistente_da_400(self):
+        request = self.factory.post(
+            f"/api/flujos/{self.flujo.id_flujo}/vincular_factura/", {"factura": "no-existe"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "vincular_factura"})
+        response = view(request, pk=self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 400)
+
+    def test_vincular_factura_real(self):
+        request = self.factory.post(
+            f"/api/flujos/{self.flujo.id_flujo}/vincular_factura/", {"factura": "uuid-real"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "vincular_factura"})
+        response = view(request, pk=self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["factura"], "uuid-real")
+
+    def test_vincular_complemento_real(self):
+        TesoreriaComplementoPago.objects.create(timbre_uuid="uuid-comp", folio="C-1")
+        request = self.factory.post(
+            f"/api/flujos/{self.flujo.id_flujo}/vincular_factura/", {"complemento": "uuid-comp"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "vincular_factura"})
+        response = view(request, pk=self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["complemento"], "uuid-comp")
+
+
+class TesoreriaContraparteRelacionTests(TestCase):
+    """Representante legal/beneficiario controlador - ambos extremos son
+    FK reales a TesoreriaContraparte (misma tabla), dato que pide PLD/AML."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.empresa = TesoreriaContraparte.objects.create(
+            razon_social="Constructora SA", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.representante = TesoreriaContraparte.objects.create(
+            razon_social="Juan Perez", tipo_persona=TesoreriaContraparte.TIPO_FISICA, email="j@j.com"
+        )
+
+    def test_crear_relacion_requiere_tesoreria_crear(self):
+        request = self.factory.post(
+            "/api/contrapartes-relacion/",
+            {
+                "contraparte": self.empresa.id_contraparte,
+                "contraparte_relacion": self.representante.id_contraparte,
+                "tipo_relacion": "REP LEGAL",
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = TesoreriaContraparteRelacionViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+        request2 = self.factory.post(
+            "/api/contrapartes-relacion/",
+            {
+                "contraparte": self.empresa.id_contraparte,
+                "contraparte_relacion": self.representante.id_contraparte,
+                "tipo_relacion": "REP LEGAL",
+            },
+            format="json",
+        )
+        request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        response2 = view(request2)
+        self.assertEqual(response2.status_code, 201)
+        self.assertEqual(response2.data["contraparte_relacion_nombre"], "Juan Perez")
+
+    def test_filtro_por_contraparte(self):
+        from .models import TesoreriaContraparteRelacion
+
+        TesoreriaContraparteRelacion.objects.create(
+            contraparte=self.empresa, contraparte_relacion=self.representante, tipo_relacion="REP LEGAL"
+        )
+        request = self.factory.get("/api/contrapartes-relacion/", {"contraparte": self.empresa.id_contraparte})
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaContraparteRelacionViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+
+
+class TesoreriaSaldoTests(TestCase):
+    """`id` no es autogenerado en el modelo heredado (ver models.py) - el
+    cliente debe mandarlo explicito al crear, distinto del resto de los
+    catalogos de este servicio."""
+
+    def test_crear_saldo_requiere_id_explicito(self):
+        factory = APIRequestFactory()
+        request = factory.post(
+            "/api/saldos/",
+            {"id": "saldo-2026-08-24-cta1", "fecha": "2026-08-24", "cuenta": "BBVA operativa", "saldo": "1240500.00"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaSaldoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id"], "saldo-2026-08-24-cta1")
