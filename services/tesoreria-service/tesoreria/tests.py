@@ -14,12 +14,13 @@ from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaCuenta
+from .models import TesoreriaBanco, TesoreriaContraparte, TesoreriaContrato, TesoreriaCuenta, TesoreriaFlujo
 from .views import (
     TesoreriaBancoViewSet,
     TesoreriaContraparteViewSet,
     TesoreriaContratoViewSet,
     TesoreriaCuentaViewSet,
+    TesoreriaFlujoViewSet,
 )
 
 RFC_TIZARA = "#####1"
@@ -212,3 +213,113 @@ class TesoreriaContratoTests(TestCase):
     def test_incluye_nombre_de_la_contraparte(self):
         response = self._crear_contrato(RFC_TIZARA)
         self.assertEqual(response.data["contraparte_nombre"], "Contraparte de prueba")
+
+
+class TesoreriaFlujoTests(TestCase):
+    """Flujo de caja (24/Ago/2026, Sem 21 del cronograma) - primer recurso
+    de este servicio que ademas de CRUD tiene un ciclo de vida propio
+    (aprobar/rechazar/registrar_pago), mismo criterio de segregacion de
+    funciones que PldContraparteKycViewSet.aprobar en pld-service."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Constructora de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex", alias="BMX")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000001", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+        self.scope_aprobar = EffectiveScope(is_global=True, perm_keys=("tesoreria.aprobar",))
+
+    def _crear_flujo(self, scope=None):
+        request = self.factory.post(
+            "/api/flujos/",
+            {"contrato": self.contrato.id_contrato, "cuenta": self.cuenta.id_cuenta_bancaria, "total_mxp": "85000.00"},
+            format="json",
+        )
+        request.effective_scope = scope or self.scope_crear
+        view = TesoreriaFlujoViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_crear_sin_permiso_da_403(self):
+        response = self._crear_flujo(scope=EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_id_flujo_se_genera_con_consecutivo(self):
+        response = self._crear_flujo()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id_flujo"], "FLJ-000001")
+
+        response2 = self._crear_flujo()
+        self.assertEqual(response2.data["id_flujo"], "FLJ-000002")
+
+    def test_usuario_de_una_sociedad_no_ve_flujos_de_otra(self):
+        self._crear_flujo()
+
+        request = self.factory.get("/api/flujos/")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_CAPITAL,))
+        view = TesoreriaFlujoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 0)
+
+        request2 = self.factory.get("/api/flujos/")
+        request2.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        response2 = view(request2)
+        self.assertEqual(len(response2.data), 1)
+
+    def test_no_se_puede_pagar_sin_autorizar_primero(self):
+        creado = self._crear_flujo()
+        flujo_id = creado.data["id_flujo"]
+
+        request = self.factory.post(f"/api/flujos/{flujo_id}/registrar_pago/", {}, format="json")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "registrar_pago"})
+        response = view(request, pk=flujo_id)
+        self.assertEqual(response.status_code, 400)
+
+    def test_aprobar_requiere_permiso_distinto_a_editar(self):
+        creado = self._crear_flujo()
+        flujo_id = creado.data["id_flujo"]
+
+        request = self.factory.post(f"/api/flujos/{flujo_id}/aprobar/", {"autorizado_por": "u001"}, format="json")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "aprobar"})
+        response = view(request, pk=flujo_id)
+        self.assertEqual(response.status_code, 403)
+
+        request2 = self.factory.post(f"/api/flujos/{flujo_id}/aprobar/", {"autorizado_por": "u001"}, format="json")
+        request2.effective_scope = self.scope_aprobar
+        response2 = view(request2, pk=flujo_id)
+        self.assertEqual(response2.status_code, 200)
+        self.assertTrue(response2.data["autorizacion"])
+        self.assertEqual(response2.data["validacion_estado"], TesoreriaFlujo.VALIDACION_APROBADA)
+
+    def test_ciclo_completo_aprobar_y_registrar_pago(self):
+        creado = self._crear_flujo()
+        flujo_id = creado.data["id_flujo"]
+
+        aprobar_request = self.factory.post(
+            f"/api/flujos/{flujo_id}/aprobar/", {"autorizado_por": "u001"}, format="json"
+        )
+        aprobar_request.effective_scope = self.scope_aprobar
+        aprobar_view = TesoreriaFlujoViewSet.as_view({"post": "aprobar"})
+        aprobar_view(aprobar_request, pk=flujo_id)
+
+        pago_request = self.factory.post(
+            f"/api/flujos/{flujo_id}/registrar_pago/", {"descripcion_pago": "SPEI BBVA"}, format="json"
+        )
+        pago_request.effective_scope = self.scope_editar
+        pago_view = TesoreriaFlujoViewSet.as_view({"post": "registrar_pago"})
+        response = pago_view(pago_request, pk=flujo_id)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["pagado"])
+        self.assertEqual(response.data["descripcion_pago"], "SPEI BBVA")
