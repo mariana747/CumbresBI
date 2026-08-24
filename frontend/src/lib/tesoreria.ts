@@ -18,11 +18,15 @@ export interface TesoreriaContraparte {
   razon_social: string;
   apellido_paterno: string | null;
   apellido_materno: string | null;
-  tipo_persona: TesoreriaTipoPersona;
+  // opcional desde 19/Ago/2026 (migracion 0002) - la contraparte maestra
+  // unica se puede dar de alta con solo razon_social, el resto se llena
+  // despues (mismo criterio que ya usaba PLD por su cuenta, ver
+  // docs/architecture/README.md sec. 11.2 #7).
+  tipo_persona: TesoreriaTipoPersona | null;
   genero: "MUJER" | "HOMBRE" | null;
   contacto: string | null;
   telefono_sms: string | null;
-  email: string;
+  email: string | null;
   cliente: boolean;
   proveedor: boolean;
   comentarios: string | null;
@@ -34,10 +38,29 @@ export interface TesoreriaContraparte {
   updated_by: string | null;
 }
 
-export async function listContrapartes(search?: string): Promise<TesoreriaContraparte[]> {
+// tipoFiltro (19/Ago/2026): ?cliente=1 / ?proveedor=1 en tesoreria-service -
+// deja mostrar solo uno u otro segun el contexto (ej. ContraparteSelector
+// en el "Nuevo expediente" de PLD, preguntando si es cliente o proveedor).
+export async function listContrapartes(
+  search?: string,
+  tipoFiltro?: "cliente" | "proveedor"
+): Promise<TesoreriaContraparte[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (tipoFiltro) params.set(tipoFiltro, "1");
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrapartes/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Para mostrar el nombre de una contraparte ya guardada en otro modulo
+// (ej. ViviendaRelExpedienteCliente.id_contraparte, un CharField plano sin
+// nombre denormalizado) - no hay forma de buscar por ID via ?search=, asi
+// que esto pega directo al retrieve por PK.
+export async function getContraparte(idContraparte: string): Promise<TesoreriaContraparte> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrapartes/${idContraparte}/`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
@@ -47,8 +70,10 @@ export async function listContrapartes(search?: string): Promise<TesoreriaContra
 export async function createContraparte(params: {
   razonSocial: string;
   rfc?: string | null;
-  tipoPersona: TesoreriaTipoPersona;
-  email: string;
+  // Opcionales desde 19/Ago/2026 - ver docstring de TesoreriaContraparte
+  // arriba. Alta minima real: solo razonSocial es obligatorio.
+  tipoPersona?: TesoreriaTipoPersona | null;
+  email?: string | null;
   contacto?: string | null;
   telefonoSms?: string | null;
   cliente?: boolean;
@@ -61,8 +86,8 @@ export async function createContraparte(params: {
     body: JSON.stringify({
       razon_social: params.razonSocial,
       rfc: params.rfc || null,
-      tipo_persona: params.tipoPersona,
-      email: params.email,
+      tipo_persona: params.tipoPersona || null,
+      email: params.email || null,
       contacto: params.contacto || null,
       telefono_sms: params.telefonoSms || null,
       cliente: params.cliente ?? false,
@@ -81,8 +106,8 @@ export async function updateContraparte(
   params: Partial<{
     razonSocial: string;
     rfc: string | null;
-    tipoPersona: TesoreriaTipoPersona;
-    email: string;
+    tipoPersona: TesoreriaTipoPersona | null;
+    email: string | null;
     contacto: string | null;
     telefonoSms: string | null;
     cliente: boolean;

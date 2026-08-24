@@ -151,6 +151,13 @@ FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
 # document-intelligence-service/docint/audit_utils.py e iam-service/iam/audit_utils.py.
 AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
 
+# tesoreria-service (24/Ago/2026, cierre de la reconciliacion contraparte
+# maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Semana 19).
+# PldContraparteKycViewSet.create la usa para validar que el id_contraparte
+# que manda el frontend (via ContraparteSelector) exista de verdad en el
+# catalogo maestro, antes de guardar el expediente KYC.
+TESORERIA_SERVICE_URL = env("TESORERIA_SERVICE_URL", default="http://tesoreria-service:8080")
+
 # Secreto compartido servicio-a-servicio (docs/architecture/README.md sec.
 # 11: "secretos gestionados... secret key de reCAPTCHA"; este es distinto,
 # ver mas abajo) - PldTicketClienteViewSet.subir_documento es PUBLICO (sin

@@ -26,18 +26,196 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, X as CloseIcon } from "lucide-react";
+import { Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import ContraparteSelector from "@/components/ContraparteSelector";
+import { TesoreriaContraparte, getContraparte } from "@/lib/tesoreria";
 import {
   ViviendaAsesor,
+  ViviendaClienteExpediente,
+  ViviendaClienteTipo,
   ViviendaExpediente,
   ViviendaExpedienteEstado,
   ViviendaUnidad,
+  createClienteExpediente,
   createExpediente,
+  deleteClienteExpediente,
   listAsesores,
+  listClientesExpediente,
   listExpedientes,
   listViviendas,
   updateExpediente,
 } from "@/lib/vivienda";
+
+const TIPO_CLIENTE_LABELS: Record<ViviendaClienteTipo, string> = {
+  ACREDITADO: "Acreditado",
+  COACREDITADO: "Coacreditado",
+};
+
+// Dialogo de clientes de un expediente (19/Ago/2026, conectado al catalogo
+// real de contrapartes - ver ContraparteSelector.tsx y docs/architecture/
+// README.md sec. 11.2 #7). Aparte del dialogo de arriba porque un
+// expediente puede tener 0+ clientes (acreditado/coacreditado), no es un
+// campo mas del formulario del expediente.
+function ClientesExpedienteDialog({
+  expediente,
+  onClose,
+  puedeCrear,
+  puedeEditar,
+  actorId,
+}: {
+  expediente: ViviendaExpediente;
+  onClose: () => void;
+  puedeCrear: boolean;
+  puedeEditar: boolean;
+  actorId: string;
+}) {
+  const [clientes, setClientes] = useState<(ViviendaClienteExpediente & { contraparteNombre?: string })[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nuevaContraparte, setNuevaContraparte] = useState<TesoreriaContraparte | null>(null);
+  const [nuevoTipo, setNuevoTipo] = useState<ViviendaClienteTipo>("ACREDITADO");
+  const [agregando, setAgregando] = useState(false);
+
+  function refresh() {
+    setLoading(true);
+    listClientesExpediente(expediente.id_expediente)
+      .then(async (lista) => {
+        const conNombre = await Promise.all(
+          lista.map(async (c) => {
+            try {
+              const contraparte = await getContraparte(c.id_contraparte);
+              return { ...c, contraparteNombre: contraparte.razon_social };
+            } catch {
+              return c;
+            }
+          })
+        );
+        setClientes(conNombre);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(refresh, [expediente.id_expediente]);
+
+  async function handleAgregar() {
+    if (!nuevaContraparte) return;
+    setAgregando(true);
+    setError(null);
+    try {
+      await createClienteExpediente({
+        expediente: expediente.id_expediente,
+        idContraparte: nuevaContraparte.id_contraparte,
+        tipo: nuevoTipo,
+        actorId,
+      });
+      setNuevaContraparte(null);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setAgregando(false);
+    }
+  }
+
+  async function handleQuitar(cliente: ViviendaClienteExpediente) {
+    if (!window.confirm("¿Quitar este cliente del expediente?")) return;
+    try {
+      await deleteClienteExpediente(cliente.id_rel_viv_exp_cliente);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
+  return (
+    <Dialog open onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        Clientes del expediente {expediente.id_expediente}
+        <IconButton onClick={onClose} size="small" aria-label="Cerrar">
+          <CloseIcon size={18} strokeWidth={1.5} />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+        {loading ? (
+          <Stack alignItems="center" sx={{ py: 2 }}>
+            <CircularProgress size={20} />
+          </Stack>
+        ) : clientes.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Sin clientes registrados en este expediente.
+          </Typography>
+        ) : (
+          <Table size="small" sx={{ mb: 2 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell>Contraparte</TableCell>
+                <TableCell>Tipo</TableCell>
+                <TableCell align="right">Acciones</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {clientes.map((c) => (
+                <TableRow key={c.id_rel_viv_exp_cliente}>
+                  <TableCell>{c.contraparteNombre || c.id_contraparte}</TableCell>
+                  <TableCell>{TIPO_CLIENTE_LABELS[c.tipo]}</TableCell>
+                  <TableCell align="right">
+                    <IconButton
+                      size="small"
+                      aria-label="Quitar"
+                      onClick={() => handleQuitar(c)}
+                      disabled={!puedeEditar}
+                    >
+                      <Trash2 size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        {puedeCrear && (
+          <Stack spacing={2} sx={{ pt: 1, borderTop: "1px solid", borderColor: "divider" }}>
+            <Typography variant="subtitle2" sx={{ pt: 2 }}>
+              Agregar cliente
+            </Typography>
+            <ContraparteSelector value={nuevaContraparte} onChange={setNuevaContraparte} label="Cliente" />
+            <FormControl size="small" fullWidth>
+              <InputLabel id="tipo-cliente-label">Tipo</InputLabel>
+              <Select
+                labelId="tipo-cliente-label"
+                label="Tipo"
+                value={nuevoTipo}
+                onChange={(e) => setNuevoTipo(e.target.value as ViviendaClienteTipo)}
+              >
+                {Object.entries(TIPO_CLIENTE_LABELS).map(([value, label]) => (
+                  <MenuItem key={value} value={value}>
+                    {label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<Plus size={14} strokeWidth={2} />}
+              onClick={handleAgregar}
+              disabled={!nuevaContraparte || agregando}
+              sx={{ alignSelf: "flex-start" }}
+            >
+              {agregando ? <CircularProgress size={14} /> : "Agregar"}
+            </Button>
+          </Stack>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const ESTADO_LABELS: Record<ViviendaExpedienteEstado, string> = {
   PENDIENTE: "Pendiente",
@@ -80,6 +258,7 @@ export default function ExpedientesTab({
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [clientesDe, setClientesDe] = useState<ViviendaExpediente | null>(null);
 
   useEffect(() => {
     listViviendas().then(setViviendas).catch(() => undefined);
@@ -210,6 +389,9 @@ export default function ExpedientesTab({
                       <Chip size="small" label={ESTADO_LABELS[e.estado]} color={ESTADO_COLORS[e.estado]} variant="outlined" />
                     </TableCell>
                     <TableCell align="right">
+                      <IconButton size="small" aria-label="Clientes" onClick={() => setClientesDe(e)}>
+                        <Users size={14} strokeWidth={1.5} />
+                      </IconButton>
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(e)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
                       </IconButton>
@@ -311,6 +493,16 @@ export default function ExpedientesTab({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {clientesDe && (
+        <ClientesExpedienteDialog
+          expediente={clientesDe}
+          onClose={() => setClientesDe(null)}
+          puedeCrear={puedeCrear}
+          puedeEditar={puedeEditar}
+          actorId={actorId}
+        />
+      )}
     </>
   );
 }

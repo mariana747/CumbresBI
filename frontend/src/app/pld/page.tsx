@@ -28,9 +28,11 @@ import {
 } from "@mui/material";
 import { FilePlus2, FolderOpen, Search } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import ContraparteSelector from "@/components/ContraparteSelector";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession } from "@/lib/auth";
 import { PldContraparteKyc, createKyc, listKyc } from "@/lib/pld";
+import { TesoreriaContraparte } from "@/lib/tesoreria";
 
 const ESTADO_OPTIONS = [
   { value: "PENDIENTE", label: "Pendiente" },
@@ -56,10 +58,16 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Nuevo expediente (17/Ago/2026, Opcion B): dialogo minimo - solo
-  // sociedad opcional, el resto lo llena el cliente despues via el link
-  // publico. Ver memoria de sesion "pld-crear-expediente-opcion-b".
+  // Nuevo expediente (17/Ago/2026, Opcion B; 19/Ago/2026 - conectado al
+  // catalogo real de contrapartes): sociedad sigue opcional, pero la
+  // contraparte ya no se autogenera con un ID propio - el analista busca
+  // el cliente/proveedor real en Tesoreria (o lo crea ahi mismo con solo
+  // el nombre) y el expediente adopta ESE id_contraparte desde el dia 1.
+  // Ver docs/architecture/README.md sec. 11.2 #7, "contraparte maestra
+  // unica".
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
+  const [tipoContraparte, setTipoContraparte] = useState<"cliente" | "proveedor">("cliente");
+  const [contraparte, setContraparte] = useState<TesoreriaContraparte | null>(null);
   const [sociedadRfc, setSociedadRfc] = useState("");
   const [creando, setCreando] = useState(false);
   const [creandoError, setCreandoError] = useState<string | null>(null);
@@ -86,11 +94,20 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   async function handleCrearExpediente(e: React.FormEvent) {
     e.preventDefault();
     if (!session?.user_id) return;
+    if (!contraparte) {
+      setCreandoError("Busca o crea la contraparte antes de continuar.");
+      return;
+    }
     setCreando(true);
     setCreandoError(null);
     try {
-      await createKyc({ createdBy: session.user_id, sociedadRfc: sociedadRfc || undefined });
+      await createKyc({
+        createdBy: session.user_id,
+        sociedadRfc: sociedadRfc || undefined,
+        idContraparte: contraparte.id_contraparte,
+      });
       setDialogoAbierto(false);
+      setContraparte(null);
       setSociedadRfc("");
       cargar();
     } catch (err) {
@@ -114,28 +131,64 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
             size="small"
             variant="contained"
             startIcon={<FilePlus2 size={16} strokeWidth={1.5} />}
-            onClick={() => setDialogoAbierto(true)}
+            onClick={() => {
+              setTipoContraparte("cliente");
+              setContraparte(null);
+              setDialogoAbierto(true);
+            }}
           >
             Nuevo expediente
           </Button>
         )}
       </Stack>
 
-      <Dialog open={dialogoAbierto} onClose={() => setDialogoAbierto(false)} fullWidth maxWidth="xs">
+      <Dialog
+        open={dialogoAbierto}
+        onClose={() => {
+          setDialogoAbierto(false);
+          setContraparte(null);
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
         <DialogTitle>Nuevo expediente KYC</DialogTitle>
         <Stack component="form" onSubmit={handleCrearExpediente}>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Se crea un expediente vacío — el cliente llena sus propios datos después, desde el
-              link público que le mandes (Tickets de cliente). No hace falta capturar nada más aquí.
+              Indica si es cliente o proveedor y búscalo en el catálogo de Tesorería — si no existe,
+              créalo aquí mismo con solo el nombre. El resto de sus datos los llena él después, desde el
+              link público que le mandes (Tickets de cliente).
             </Typography>
-            <TextField
-              size="small"
-              fullWidth
-              label="Sociedad (RFC, opcional)"
-              value={sociedadRfc}
-              onChange={(e) => setSociedadRfc(e.target.value)}
-            />
+            <Stack spacing={2}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="tipo-contraparte-label">Es un...</InputLabel>
+                <Select
+                  labelId="tipo-contraparte-label"
+                  label="Es un..."
+                  value={tipoContraparte}
+                  onChange={(e) => {
+                    setTipoContraparte(e.target.value as "cliente" | "proveedor");
+                    setContraparte(null);
+                  }}
+                >
+                  <MenuItem value="cliente">Cliente</MenuItem>
+                  <MenuItem value="proveedor">Proveedor</MenuItem>
+                </Select>
+              </FormControl>
+              <ContraparteSelector
+                value={contraparte}
+                onChange={setContraparte}
+                label={tipoContraparte === "cliente" ? "Cliente" : "Proveedor"}
+                tipo={tipoContraparte}
+              />
+              <TextField
+                size="small"
+                fullWidth
+                label="Sociedad (RFC, opcional)"
+                value={sociedadRfc}
+                onChange={(e) => setSociedadRfc(e.target.value)}
+              />
+            </Stack>
             {creandoError && (
               <Alert severity="error" sx={{ mt: 2 }}>
                 {creandoError}
@@ -144,7 +197,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setDialogoAbierto(false)}>Cancelar</Button>
-            <Button type="submit" variant="contained" disabled={creando}>
+            <Button type="submit" variant="contained" disabled={creando || !contraparte}>
               {creando ? <CircularProgress size={20} color="inherit" /> : "Crear expediente"}
             </Button>
           </DialogActions>

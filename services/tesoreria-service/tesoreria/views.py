@@ -34,13 +34,25 @@ class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet)
     iam-service (unico otro catalogo generico real del ERD).
 
     Busqueda de texto libre (?search=) sobre razon_social/rfc/contacto.
+    Filtro adicional ?cliente=1 / ?proveedor=1 (19/Ago/2026) - para que el
+    ContraparteSelector del frontend pueda mostrar solo uno u otro segun el
+    contexto (ej. PLD preguntando si el expediente es de un cliente o un
+    proveedor). Sin filtro, regresa todas por igual - un registro puede ser
+    ambas cosas a la vez (cliente Y proveedor), no son excluyentes.
     DELETE es fisico (sin soft-delete en el ERD real) - usar con cuidado,
     igual advertencia que GeneralSociedadViewSet."""
 
-    queryset = TesoreriaContraparte.objects.all().order_by("razon_social")
     serializer_class = TesoreriaContraparteSerializer
     filter_backends = [SearchFilter]
     search_fields = ["razon_social", "rfc", "contacto"]
+
+    def get_queryset(self):
+        queryset = TesoreriaContraparte.objects.all().order_by("razon_social")
+        if self.request.query_params.get("cliente") in ("1", "true", "True"):
+            queryset = queryset.filter(cliente=True)
+        if self.request.query_params.get("proveedor") in ("1", "true", "True"):
+            queryset = queryset.filter(proveedor=True)
+        return queryset
 
 
 class TesoreriaBancoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):

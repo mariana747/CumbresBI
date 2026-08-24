@@ -197,14 +197,18 @@ describe("buildNavItems - siempre presentes", () => {
   });
 });
 
-// Hallazgo de esta ronda (11/Ago/2026, ver docs/CumbresBI_estado.md): hay
+// Hallazgo de esta ronda (11/Ago/2026, ver docs/CumbresBI_estado.md): hubo
 // dos servicios de la matriz sin ningun apartado dueno en el sidebar -
 // "tickets" (TICKETS_RESPONSABLE, TICKETS_PARTICIPANTE, EMPLEADO_SELF) y
-// "rentas" (FINANZAS_MANAGER, CONTRALOR) - ya resuelto (11/Ago/2026,
-// pantallas "en desarrollo" agregadas, ver /tickets y /rentas). Este test
-// se queda como red de seguridad: si algun dia se agrega un servicio
-// nuevo a la matriz sin apartado dueno, vuelve a quedar en rojo (no se
-// oculta con .skip, el rojo es el aviso).
+// "rentas" (FINANZAS_MANAGER, CONTRALOR). Se agregaron placeholders "en
+// desarrollo" ese dia, pero se QUITARON otra vez el 19/Ago/2026 (pedido de
+// Mariana - ningun backend real detras, quedaban como ruido en el sidebar).
+// SIN_DUEÑO_A_PROPOSITO documenta ese hueco como deliberado (no un
+// descuido) para no confundirlo con un servicio nuevo que de verdad se le
+// olvido a alguien agregarle apartado - ver DUEÑO_CONOCIDO abajo para esos.
+// Este test se queda como red de seguridad: si algun dia se agrega un
+// servicio nuevo a la matriz sin apartado dueno NI en esta lista, vuelve a
+// quedar en rojo (no se oculta con .skip, el rojo es el aviso).
 describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a proposito)", () => {
   const DUEÑO_CONOCIDO: Record<string, string> = {
     iam: "/admin/usuarios (o Auditar)",
@@ -216,15 +220,15 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
     "facturacion-cfdi": "/tesoreria/contrapartes",
     compras: "/compras-tesoreria",
     rrhh: "/rrhh",
-    tickets: "/tickets",
-    rentas: "/rentas",
     audit: "Bitácora (dentro de Admin(IAM)/Auditar, no un item propio)",
   };
 
-  it("todo servicio de la matriz tiene un apartado dueno en el sidebar", () => {
+  const SIN_DUEÑO_A_PROPOSITO = new Set(["tickets", "rentas"]);
+
+  it("todo servicio de la matriz tiene un apartado dueno en el sidebar (o esta en SIN_DUEÑO_A_PROPOSITO)", () => {
     const sinDueno: string[] = [];
     for (const servicio of matrizFixture.servicios) {
-      if (DUEÑO_CONOCIDO[servicio]) continue;
+      if (DUEÑO_CONOCIDO[servicio] || SIN_DUEÑO_A_PROPOSITO.has(servicio)) continue;
 
       // Sesion sintetica con SOLO el permiso de este servicio (no un rol
       // real completo) - a proposito, para aislar el hallazgo: un rol
