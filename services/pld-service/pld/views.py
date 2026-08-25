@@ -131,6 +131,38 @@ def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
     return True
 
 
+def _obtener_sociedad_en_iam(sociedad_rfc, headers, cookies):
+    """Verifica contra el catalogo real (iam-service, general_sociedades)
+    que `sociedad_rfc` exista y regresa su nombre (25/Ago/2026, requerimiento
+    real del cliente) - mismo criterio fail-open que
+    _existe_contraparte_en_tesoreria si iam-service no responde (un
+    problema de red entre servicios no debe bloquear el alta de un
+    expediente KYC real; se deja pasar sin nombre, no sin sociedad).
+
+    Regresa (existe: bool, nombre: str | None) - "existe" solo es False
+    cuando iam-service confirma con un 404 real que esa sociedad no esta en
+    su catalogo."""
+    try:
+        upstream = requests.get(
+            f"{settings.IAM_SERVICE_URL}/api/sociedades/{sociedad_rfc}/",
+            headers=headers,
+            cookies=cookies,
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning("iam-service no respondio al validar sociedad_rfc %s", sociedad_rfc, exc_info=True)
+        return True, None
+
+    if upstream.status_code == 404:
+        return False, None
+    if upstream.status_code != 200:
+        logger.warning(
+            "iam-service respondio %s al validar sociedad_rfc %s", upstream.status_code, sociedad_rfc
+        )
+        return True, None
+    return True, upstream.json().get("razon_social")
+
+
 # Limites del lote publico de documentos (18/Ago/2026, ver
 # PldTicketClienteViewSet.subir_documento) - antes solo dependian del
 # default de Django (DATA_UPLOAD_MAX_MEMORY_SIZE=2.5MB para el cuerpo
@@ -194,16 +226,45 @@ class PldContraparteKycViewSet(ModelViewSet):
         crear (24/Ago/2026, ver _existe_contraparte_en_tesoreria) - el
         unique=True del modelo ya evita duplicados, pero no evita un
         id_contraparte que simplemente no existe en Tesoreria (ej. si
-        alguien llama a la API directo, sin pasar por ContraparteSelector)."""
+        alguien llama a la API directo, sin pasar por ContraparteSelector).
+
+        25/Ago/2026 (requerimiento real del cliente: "hay que implementar
+        sociedad... se ponga en automatico el nombre") - sociedad_rfc pasa
+        de opcional/texto libre a obligatorio, elegido de un dropdown real
+        en el frontend contra el catalogo de iam-service (ver
+        lib/iam.ts::listSociedades). Se valida aqui igual que
+        id_contraparte, y se guarda tambien el nombre (sociedad_nombre,
+        snapshot de solo lectura) para poder mostrarselo al cliente en el
+        formulario publico sin que esa pagina, sin sesion, tenga que llamar
+        a iam-service (que si exige un permiso real)."""
         id_contraparte = request.data.get("id_contraparte")
+        headers, cookies = forward_auth_headers(request)
         if id_contraparte:
-            headers, cookies = forward_auth_headers(request)
             if not _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
                 return Response(
                     {"id_contraparte": "No existe esa contraparte en el catálogo de Tesorería."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        return super().create(request, *args, **kwargs)
+
+        sociedad_rfc = request.data.get("sociedad_rfc")
+        if not sociedad_rfc:
+            return Response({"sociedad_rfc": "Este campo es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+        existe, sociedad_nombre = _obtener_sociedad_en_iam(sociedad_rfc, headers, cookies)
+        if not existe:
+            return Response(
+                {"sociedad_rfc": "No existe esa sociedad en el catálogo."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # sociedad_nombre esta en read_only_fields (a proposito, el cliente
+        # no lo escribe a mano) - DRF lo descarta si viaja dentro de "data"
+        # normal, hay que pisarlo via save(**kwargs) (mismo patron que
+        # PldTicketClienteViewSet.actualizar_datos con politicas_aceptadas_en).
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        serializer.instance.sociedad_nombre = sociedad_nombre
+        serializer.instance.save(update_fields=["sociedad_nombre"])
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         """Override del update/partial_update generico de DRF (18/Ago/2026)

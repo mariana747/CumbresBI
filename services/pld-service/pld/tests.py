@@ -232,6 +232,57 @@ class CumplimientoDePermisosEnEscrituraTests(TestCase):
         self.assertFalse(PldContraparteDoc.objects.filter(pk=doc.id_kyc_doc).exists())
 
 
+class ValidacionSociedadAlCrearTests(TestCase):
+    """25/Ago/2026 (requerimiento real del cliente: sociedad obligatoria,
+    elegida de un dropdown real contra el catalogo de iam-service, no texto
+    libre) - PldContraparteKycViewSet.create."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",))
+
+    def _crear(self, sociedad_rfc):
+        # Sin id_contraparte a proposito - el modelo lo autogenera (ver
+        # _short_id); si se manda, dispara ADEMAS _existe_contraparte_en_
+        # tesoreria, que usa el mismo requests.get mockeado aqui y
+        # contaminaria estas pruebas (son solo de la validacion de sociedad).
+        body = {"created_by": "usr00001", "updated_by": "usr00001"}
+        if sociedad_rfc is not None:
+            body["sociedad_rfc"] = sociedad_rfc
+        request = self.factory.post("/api/kyc/", body, format="json")
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_sin_sociedad_rfc_da_400(self):
+        response = self._crear(None)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sociedad_rfc", response.data)
+
+    def test_sociedad_inexistente_da_400(self):
+        with patch("pld.views.requests.get", return_value=Mock(status_code=404)):
+            response = self._crear(RFC_TIZARA)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sociedad_rfc", response.data)
+
+    def test_sociedad_real_guarda_el_nombre(self):
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara SA de CV"}),
+        ):
+            response = self._crear(RFC_TIZARA)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["sociedad_nombre"], "Tizara SA de CV")
+
+    def test_iam_service_caido_deja_pasar_sin_nombre(self):
+        # Fail-open, mismo criterio que _existe_contraparte_en_tesoreria -
+        # un problema de red no debe bloquear el alta de un expediente real.
+        with patch("pld.views.requests.get", side_effect=requests.RequestException()):
+            response = self._crear(RFC_TIZARA)
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.data["sociedad_nombre"])
+
+
 class PldTicketClienteTests(TestCase):
     """Frontend de PldTicketCliente (magic link de KYC externo, Fase 2
     Semana 9): crear/revocar requieren permiso real, "validar" es publico

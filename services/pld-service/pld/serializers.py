@@ -103,6 +103,10 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             # de prueba tienen sociedad_rfc=NULL pese a que el analista si
             # lo lleno).
             "sociedad_rfc",
+            # sociedad_nombre (25/Ago/2026) - snapshot de solo lectura, ver
+            # comentario en models.py. Lo llena create() en views.py
+            # (validado contra iam-service), nunca el cliente a mano.
+            "sociedad_nombre",
             "nombre_completo",
             "fecha_nac_const",
             "pais_nac_const",
@@ -171,6 +175,9 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             # serializer.save(**kwargs) que si puede pisar read_only_fields.
             "politicas_aceptadas_en",
             "veracidad_declarada_en",
+            # sociedad_nombre (25/Ago/2026) - se llena en create() (ver
+            # views.py), nunca por PATCH directo.
+            "sociedad_nombre",
         ]
 
     def update(self, instance, validated_data):

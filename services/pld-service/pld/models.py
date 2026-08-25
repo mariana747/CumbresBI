@@ -80,7 +80,20 @@ class PldContraparteKyc(models.Model):
     # expediente KYC, para filtrar por SCOPE_FIELD_SOCIEDAD. blank/null
     # porque los expedientes creados antes de esta columna no tienen valor
     # todavia (backfill pendiente).
+    #
+    # 25/Ago/2026 (requerimiento real del cliente: "hay que implementar
+    # sociedad... se ponga en automatico el nombre de la sociedad") - se
+    # vuelve obligatorio para expedientes NUEVOS (ver
+    # PldContraparteKycViewSet.create), elegido de un dropdown real contra
+    # el catalogo de iam-service, no texto libre. Los 3 expedientes viejos
+    # con NULL se quedan asi (backfill aparte, fuera de este cambio).
     sociedad_rfc = models.CharField(max_length=13, blank=True, null=True)
+    # Snapshot del nombre de la sociedad al momento de crear el expediente
+    # (mismo criterio que PldSolicitudEliminacionDoc.denominacion_doc) - se
+    # usa para mostrarselo al cliente en el formulario publico
+    # (pld-ticket/[token]/page.tsx) sin que esa pagina publica, sin sesion,
+    # tenga que llamar a iam-service (que si requiere permiso real).
+    sociedad_nombre = models.CharField(max_length=250, blank=True, null=True)
     # A partir de aqui, los campos de "datos del cliente" son opcionales al
     # crear (decision 17/Ago/2026, Opcion B: expediente minimo autonomo -
     # ver memoria de sesion "pld-crear-expediente-opcion-b"): el analista
