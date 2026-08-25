@@ -51,6 +51,20 @@ export interface PldContraparteKyc {
 
 const PLD_API_BASE_URL = process.env.NEXT_PUBLIC_PLD_API_BASE_URL ?? `${GATEWAY_URL}/pld`;
 
+// URL del boton "Ver documento" (25/Ago/2026, hallazgo real: el link crudo
+// de Drive (doc.link_documento) requiere que el usuario tenga acceso
+// directo a la Unidad compartida de Google - un analista con permiso real
+// en CumbresBI pero sin membresia en ese grupo se topaba con "No tienes
+// acceso" de Google). Sirve el archivo a traves de pld-service
+// (PldContraparteDocViewSet.ver), que reenvia la sesion del usuario a
+// drive-service y este valida el mismo permiso contra su rol real de
+// CumbresBI - el acceso ya no depende de la cuenta personal de Google de
+// quien mira. No es un fetch (es una URL para <a href>/window.open) - la
+// cookie de sesion viaja sola en la navegacion normal del navegador.
+export function urlVerDocumento(idKycDoc: string): string {
+  return `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/ver/`;
+}
+
 export async function listKyc(params?: {
   estadoLlenado?: string;
   search?: string;
@@ -197,27 +211,71 @@ export async function editarKyc(
   return response.json();
 }
 
-// Sincroniza en ambos sentidos contra Drive real (18/Ago/2026, boton
-// "Verificar en Drive"): BORRA los documentos cuyo archivo ya no existe
-// (hallazgo real: si alguien borra un archivo directo en drive.google.com,
-// la app se quedaba mostrandolo como si siguiera ahi) y AGREGA un
-// documento por cada archivo nuevo que el analista haya subido directo en
-// Drive sin pasar por la app (PLD es Drive-first a proposito, no tiene
-// upload interno propio). Ver
-// services/pld-service/pld/views.py::verificar_documentos.
+// Solo BORRA los documentos cuyo archivo ya no existe en Drive
+// (hallazgo real, 18/Ago/2026: si alguien borra un archivo directo en
+// drive.google.com, la app se quedaba mostrandolo como si siguiera ahi).
+// 25/Ago/2026 (requerimiento real del cliente: "nadie modifica en Drive,
+// todo desde CumbresBI") - ya NO agrega documentos por archivos subidos
+// directo en Drive, eso legitimaba justo la edicion manual ahora
+// prohibida (revierte la decision "Drive-first a proposito" del 18/Ago).
+// Ver services/pld-service/pld/views.py::verificar_documentos.
 export async function verificarDocumentosKyc(
   idKyc: string,
   actorUserId?: string | null
-): Promise<
-  PldContraparteKyc & {
-    documentos_eliminados: DocumentoEliminadoResumen[];
-    documentos_agregados: DocumentoEliminadoResumen[];
-  }
-> {
+): Promise<PldContraparteKyc & { documentos_eliminados: DocumentoEliminadoResumen[] }> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/verificar_documentos/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ actor_user_id: actorUserId }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Uploader interno del analista (25/Ago/2026 - unico camino real para
+// agregar un archivo al expediente, junto con el link publico del
+// cliente). Dos pasos, mismo criterio que el backend: 1) crea el registro
+// de metadata (denominacion = nombre del archivo), 2) sube el archivo real
+// a Drive con subirArchivoDocumento. Requiere pld-documentos.crear - ver
+// services/pld-service/pld/views.py::PldContraparteDocViewSet.
+export async function crearDocumentoKyc(
+  idKyc: string,
+  denominacion: string,
+  createdBy?: string | null
+): Promise<PldContraparteDoc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kyc: idKyc,
+      denominacion,
+      created_by: createdBy,
+      updated_by: createdBy,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Sube el archivo real a Drive para un documento ya creado (ver
+// crearDocumentoKyc arriba). Ver
+// services/pld-service/pld/views.py::PldContraparteDocViewSet.subir.
+export async function subirArchivoDocumento(
+  idKycDoc: string,
+  archivo: File,
+  actorUserId?: string | null
+): Promise<PldContraparteDoc> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  if (actorUserId) formData.append("actor_user_id", actorUserId);
+
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/subir/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);
@@ -437,14 +495,27 @@ export async function subirDocumentosPublico(params: {
 // KYC sin sesion. Solo campos en PLD_CAMPOS_CONFIRMABLES - el backend
 // ignora silenciosamente cualquier otra llave (ver
 // pld/views.py::actualizar_datos).
+//
+// aceptaPoliticas/declaraVeracidad (25/Ago/2026, requerimiento real del
+// cliente) - obligatorios, el backend los rechaza con 400 si falta
+// cualquiera de los dos. Quedan guardados en el expediente
+// (politicas_aceptadas_en/veracidad_declarada_en) como evidencia real del
+// consentimiento, no solo validados en pantalla.
 export async function actualizarDatosPublico(params: {
   token: string;
   campos: PldDatosEditables;
+  aceptaPoliticas: boolean;
+  declaraVeracidad: boolean;
 }): Promise<PldContraparteKyc & PldDatosEditables> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/actualizar_datos/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: params.token, campos: params.campos }),
+    body: JSON.stringify({
+      token: params.token,
+      campos: params.campos,
+      acepta_politicas: params.aceptaPoliticas,
+      declara_veracidad: params.declaraVeracidad,
+    }),
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

@@ -37,7 +37,14 @@ import {
   guessDocumentTypeFromFilename,
   pollAnalysis,
 } from "@/lib/docint";
-import { PLD_CAMPOS_CONFIRMABLES, PldContraparteKyc, confirmarExtraccionKyc, listKyc } from "@/lib/pld";
+import {
+  getKyc,
+  listKyc,
+  PLD_CAMPOS_CONFIRMABLES,
+  PldContraparteKyc,
+  PldDatosEditables,
+  confirmarExtraccionKyc,
+} from "@/lib/pld";
 import { getSession } from "@/lib/auth";
 
 // Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
@@ -55,6 +62,65 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   "materiales.presupuesto": "Presupuesto",
   generic: "Genérico (sin tipo esperado)",
 };
+
+// Mismo alias que pld/views.py::PldContraparteKycViewSet.ALIAS_CAMPOS - la
+// extraccion trae "razon_social"/"razon_social_o_nombre" segun el tipo de
+// documento, ambos se guardan en la misma columna (nombre_completo). Se
+// duplica aqui (25/Ago/2026) solo para poder comparar correctamente contra
+// el valor ya guardado del expediente antes de confirmar - el backend
+// sigue siendo quien realmente traduce al guardar.
+const ALIAS_CAMPOS: Record<string, string> = {
+  razon_social: "nombre_completo",
+  razon_social_o_nombre: "nombre_completo",
+};
+
+// Etiquetas legibles de los campos confirmables (25/Ago/2026, para la
+// comparacion "documento vs. lo que ya puso el cliente") - espejo parcial
+// de las mismas etiquetas en app/pld/[idKyc]/page.tsx y
+// app/pld-ticket/[token]/page.tsx, solo los nombres, sin duplicar toda la
+// logica de grupos/requeridos de esas pantallas.
+const LABELS_CAMPOS: Record<string, string> = {
+  nombre_completo: "Nombre completo / Razón social",
+  fecha_nac_const: "Fecha de nacimiento / constitución",
+  pais_nac_const: "País de nacimiento / constitución",
+  folio_mercantil: "Folio mercantil",
+  objeto_social: "Objeto social",
+  curp: "CURP",
+  nacionalidad: "Nacionalidad",
+  ocupacion_act_economica: "Ocupación / actividad económica",
+  dom_calle: "Calle",
+  dom_numero_ext: "Número exterior",
+  dom_numero_int: "Número interior",
+  dom_colonia: "Colonia",
+  dom_municipio_alcaldia: "Municipio / alcaldía",
+  dom_estado: "Estado",
+  dom_cp: "Código postal",
+  dom_pais: "País",
+  tipo_identificacion: "Tipo de identificación",
+  autoridad_identificacion: "Autoridad que emitió la identificación",
+  numero_identificacion: "Número de identificación",
+  dom_corresp_dom_calle: "Calle (correspondencia)",
+  dom_corresp_dom_numero_ext: "Número exterior (correspondencia)",
+  dom_corresp_dom_numero_int: "Número interior (correspondencia)",
+  dom_corresp_dom_colonia: "Colonia (correspondencia)",
+  dom_corresp_dom_municipio_alcaldia: "Municipio / alcaldía (correspondencia)",
+  dom_corresp_dom_estado: "Estado (correspondencia)",
+  dom_corresp_dom_cp: "Código postal (correspondencia)",
+  dom_corresp_dom_pais: "País (correspondencia)",
+  telefono_fijo: "Teléfono fijo",
+  telefono_sms: "Celular",
+  estado_civil: "Estado civil",
+  ident_fideicomiso: "Identificación de fideicomiso",
+  comentarios: "Comentarios",
+};
+
+interface FilaComparacion {
+  campo: string;
+  label: string;
+  valorDocumento: string;
+  valorActual: string | null;
+  coincide: boolean;
+}
 
 // Microservicios consumidores actuales (services/*), identifican quien pide
 // el analisis para el log operacional (AnalysisRequestLog.servicio_solicitante)
@@ -138,6 +204,21 @@ export default function MotorDocumentalDialog({
   const [kycOptions, setKycOptions] = useState<PldContraparteKyc[]>([]);
   const [kycSeleccionado, setKycSeleccionado] = useState(kycPreseleccionado?.id_kyc ?? "");
 
+  // Expediente completo del kyc seleccionado (25/Ago/2026) - kycOptions/
+  // kycPreseleccionado no traen los valores de los campos (solo id/nombre),
+  // hace falta el registro completo para poder comparar "lo que dice el
+  // documento" contra "lo que el cliente ya puso" antes de confirmar.
+  const [kycActual, setKycActual] = useState<(PldContraparteKyc & PldDatosEditables) | null>(null);
+  useEffect(() => {
+    if (!kycSeleccionado) {
+      setKycActual(null);
+      return;
+    }
+    getKyc(kycSeleccionado)
+      .then(setKycActual)
+      .catch(() => setKycActual(null));
+  }, [kycSeleccionado]);
+
   // "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): mismo prefijo que
   // pld/views.py (subir/subir_documento) - subcarpeta fija dentro de la
   // Unidad compartida PLD_CumbresBI, no la raiz directa.
@@ -194,6 +275,33 @@ export default function MotorDocumentalDialog({
       else next.add(fileId);
       return next;
     });
+  }
+
+  // Compara los datos que salieron del documento contra lo que el cliente
+  // ya tiene guardado en el expediente (25/Ago/2026, requerimiento real:
+  // "vamos a comparar con la informacion que da el usuario") - solo aviso
+  // visual para el analista, no bloquea nada, el decide que valor se queda
+  // al confirmar. Sin kycActual cargado (todavia cargando o fallo el
+  // fetch) regresa vacio - no compara contra un expediente que no se pudo
+  // leer.
+  function compararConExpediente(extractedData: Record<string, unknown>): FilaComparacion[] {
+    if (!kycActual) return [];
+    return Object.entries(extractedData)
+      .map(([key, value]) => [ALIAS_CAMPOS[key] ?? key, value] as const)
+      .filter(
+        ([campo, value]) => value !== null && (PLD_CAMPOS_CONFIRMABLES as readonly string[]).includes(campo)
+      )
+      .map(([campo, value]) => {
+        const valorDocumento = String(value);
+        const valorActual = (kycActual[campo as keyof PldDatosEditables] as string | null | undefined) ?? null;
+        return {
+          campo,
+          label: LABELS_CAMPOS[campo] ?? campo,
+          valorDocumento,
+          valorActual,
+          coincide: !valorActual || valorActual.trim().toLowerCase() === valorDocumento.trim().toLowerCase(),
+        };
+      });
   }
 
   function handleBorrarTodo() {
@@ -520,6 +628,47 @@ export default function MotorDocumentalDialog({
                       )}
 
                       <Typography variant="subtitle2">Datos extraídos</Typography>
+                      {(() => {
+                        const comparacion = compararConExpediente(doc.result.extracted_data);
+                        const discrepancias = comparacion.filter((fila) => !fila.coincide);
+                        return (
+                          comparacion.length > 0 && (
+                            <Stack spacing={0.75}>
+                              {discrepancias.length > 0 && (
+                                <Alert severity="warning">
+                                  {discrepancias.length === 1
+                                    ? "1 dato no coincide con lo que el cliente ya había escrito:"
+                                    : `${discrepancias.length} datos no coinciden con lo que el cliente ya había escrito:`}
+                                </Alert>
+                              )}
+                              {comparacion.map((fila) => (
+                                <Box
+                                  key={fila.campo}
+                                  sx={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    gap: 1,
+                                    fontSize: 13,
+                                    py: 0.5,
+                                    px: 1,
+                                    borderRadius: 1,
+                                    bgcolor: fila.coincide ? "transparent" : "warning.main",
+                                    ...(!fila.coincide && { color: "warning.contrastText" }),
+                                  }}
+                                >
+                                  <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                                    {fila.label}
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ textAlign: "right" }}>
+                                    Documento: {fila.valorDocumento}
+                                    {!fila.coincide && ` · Cliente puso: ${fila.valorActual}`}
+                                  </Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          )
+                        );
+                      })()}
                       <Box
                         component="pre"
                         sx={{

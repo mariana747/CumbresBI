@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   Alert,
@@ -36,6 +36,7 @@ import {
   ChevronRight,
   CheckCircle2,
   Copy,
+  Eye,
   FileText,
   Flag,
   History,
@@ -58,11 +59,14 @@ import {
   PldDatosEditables,
   aprobarKyc,
   congelarKyc,
+  crearDocumentoKyc,
   editarKyc,
   eliminarDocumentoKyc,
   getKyc,
   marcarSospechosoKyc,
   reactivarCuentaKyc,
+  subirArchivoDocumento,
+  urlVerDocumento,
   verificarDocumentosKyc,
 } from "@/lib/pld";
 
@@ -152,7 +156,7 @@ const GRUPOS_CAMPOS_GENERAL: { titulo: string; campos: { campo: keyof PldDatosEd
     titulo: "Contacto",
     campos: [
       { campo: "telefono_fijo", label: "Teléfono fijo" },
-      { campo: "telefono_sms", label: "Teléfono / SMS" },
+      { campo: "telefono_sms", label: "Celular" },
     ],
   },
 ];
@@ -173,6 +177,7 @@ export default function PldExpedienteDetallePage() {
   const [verificarMensaje, setVerificarMensaje] = useState<string | null>(null);
   const [confirmandoEliminarDoc, setConfirmandoEliminarDoc] = useState<PldContraparteDoc | null>(null);
   const [eliminandoDoc, setEliminandoDoc] = useState(false);
+  const [subiendoDoc, setSubiendoDoc] = useState(false);
   const [historial, setHistorial] = useState<BitacoraEvento[] | null>(null);
   const [historialLoading, setHistorialLoading] = useState(false);
   const [historialError, setHistorialError] = useState<string | null>(null);
@@ -192,16 +197,50 @@ export default function PldExpedienteDetallePage() {
       .finally(() => setLoading(false));
   }
 
+  const autoVerificadoRef = useRef(false);
+
   useEffect(() => {
     cargar();
     getSession().then(setSession);
     setHistorial(null);
+    autoVerificadoRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.idKyc]);
 
   const puedeAprobar = session?.perm_keys.includes("pld-compliance.aprobar") ?? false;
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("pld-compliance.editar") ?? false;
+
+  // Verificacion automatica contra Drive al abrir el expediente (25/Ago/2026,
+  // hallazgo real: un documento puede desaparecer de Drive sin que nadie
+  // pase por aqui a darle clic manual a "Verificar en Drive" - la lista se
+  // quedaba mostrando registros huerfanos hasta que alguien se acordara).
+  // Silenciosa (sin los mensajes/spinner del boton manual) y solo una vez
+  // por expediente abierto - autoVerificadoRef evita que un re-render
+  // dispare otra verificacion de la nada. Mismo permiso que el boton
+  // manual (pld-compliance.editar, ver verificar_documentos en
+  // pld/views.py) - si el usuario no tiene permiso, no se intenta.
+  useEffect(() => {
+    if (!kyc || autoVerificadoRef.current || !puedeEditar || kyc.documentos.length === 0) return;
+    autoVerificadoRef.current = true;
+    verificarDocumentosKyc(params.idKyc, session?.user_id)
+      .then((resultado) => {
+        if (resultado.documentos_eliminados.length > 0) cargar();
+      })
+      .catch(() => {
+        // silencioso a proposito - si falla, el boton manual sigue
+        // disponible; no vale la pena molestar al analista con un error de
+        // una verificacion que el ni pidio.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kyc, puedeEditar]);
+  // 25/Ago/2026 (requerimiento real del cliente: "nadie modifica en Drive,
+  // todo desde CumbresBI") - agregar/eliminar un archivo es exclusivo de
+  // Admin (pld-documentos.crear/editar), separado de puedeEditar (datos
+  // escritos del expediente, que el analista conserva). Ver
+  // services/pld-service/pld/views.py::PldContraparteDocViewSet.get_permissions.
+  const puedeGestionarArchivos = session?.perm_keys.includes("pld-documentos.crear") ?? false;
+  const puedeEliminarArchivos = session?.perm_keys.includes("pld-documentos.editar") ?? false;
   const puedeVerHistorial = puedeVerBitacora(session);
 
   // Historial de auditoria (18/Ago/2026) - reusa el mismo buscador
@@ -223,11 +262,6 @@ export default function PldExpedienteDetallePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, kyc, puedeVerHistorial]);
 
-  // Duplicados (18/Ago/2026, hallazgo real de Mariana): mismo nombre de
-  // archivo subido mas de una vez para este expediente - solo un aviso
-  // visual, no bloquea nada; el analista decide si borrar el sobrante.
-  // Comparacion case-insensitive porque el nombre lo pone el cliente/
-  // analista tal cual subio el archivo, sin normalizar.
   const denominacionesDuplicadas = (() => {
     const conteo = new Map<string, number>();
     for (const doc of kyc?.documentos ?? []) {
@@ -293,27 +327,15 @@ export default function PldExpedienteDetallePage() {
     try {
       const resultado = await verificarDocumentosKyc(params.idKyc, session?.user_id);
       const eliminados = resultado.documentos_eliminados;
-      const agregados = resultado.documentos_agregados;
 
-      if (eliminados.length === 0 && agregados.length === 0) {
+      if (eliminados.length === 0) {
         setVerificarMensaje("Todo sigue igual - sin cambios en Drive.");
       } else {
-        const partes: string[] = [];
-        if (agregados.length > 0) {
-          partes.push(
-            `se encontraron ${agregados.length} documento(s) nuevo(s) subidos directo en Drive: ${agregados
-              .map((d) => d.denominacion || "sin nombre")
-              .join(", ")}`
-          );
-        }
-        if (eliminados.length > 0) {
-          partes.push(
-            `se quitaron ${eliminados.length} documento(s) que ya no están en Drive: ${eliminados
-              .map((d) => d.denominacion || "sin nombre")
-              .join(", ")}`
-          );
-        }
-        setVerificarMensaje(`${partes.join("; ")}.`);
+        setVerificarMensaje(
+          `Se quitaron ${eliminados.length} documento(s) que ya no están en Drive: ${eliminados
+            .map((d) => d.denominacion || "sin nombre")
+            .join(", ")}.`
+        );
       }
       cargar();
     } catch (err) {
@@ -335,6 +357,39 @@ export default function PldExpedienteDetallePage() {
       setConfirmandoEliminarDoc(null);
     } finally {
       setEliminandoDoc(false);
+    }
+  }
+
+  // Uploader interno (25/Ago/2026, requerimiento real del cliente: "nadie
+  // modifica en Drive, todo desde CumbresBI") - unico camino real para
+  // agregar un archivo desde ahora: crea el registro de metadata y sube el
+  // archivo real a Drive via drive-service (dos llamadas, mismo criterio
+  // que PldContraparteDocViewSet.subir en el backend). Gateado por
+  // puedeGestionarArchivos (pld-documentos.crear), no puedeCrear.
+  async function handleSubirDocumento(archivo: File) {
+    if (!kyc) return;
+    setSubiendoDoc(true);
+    setVerificarError(null);
+    let docCreado: PldContraparteDoc | null = null;
+    try {
+      docCreado = await crearDocumentoKyc(kyc.id_kyc, archivo.name, session?.user_id);
+      await subirArchivoDocumento(docCreado.id_kyc_doc, archivo, session?.user_id);
+      cargar();
+    } catch (err) {
+      // 25/Ago/2026 (hallazgo real: si el paso de crear metadata funciona
+      // pero subir el archivo falla, quedaba un registro huerfano sin
+      // drive_file_id - "Verificar en Drive" no lo limpia porque solo
+      // revisa documentos que SI tienen drive_file_id. Un reintento
+      // entonces creaba otro con el mismo nombre, pareciendo un duplicado
+      // aunque en Drive solo existiera un archivo real). Se borra el
+      // registro a medias en vez de dejarlo tirado.
+      if (docCreado) {
+        await eliminarDocumentoKyc(docCreado.id_kyc_doc, session?.user_id).catch(() => {});
+        cargar();
+      }
+      setVerificarError(err instanceof Error ? err.message : "Error al subir el documento");
+    } finally {
+      setSubiendoDoc(false);
     }
   }
 
@@ -524,7 +579,14 @@ export default function PldExpedienteDetallePage() {
           {/* Columna derecha: pestañas */}
           <Grid item xs={12} md={9}>
             <Paper variant="outlined">
-              <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: "1px solid", borderColor: "divider", px: 2 }}>
+              <Tabs
+                value={tab}
+                onChange={(_, v) => setTab(v)}
+                variant="scrollable"
+                scrollButtons="auto"
+                allowScrollButtonsMobile
+                sx={{ borderBottom: "1px solid", borderColor: "divider", px: 2 }}
+              >
                 <Tab label="Información general" />
                 <Tab label="Análisis de riesgo" />
                 <Tab label="Documentos KYC" />
@@ -589,6 +651,12 @@ export default function PldExpedienteDetallePage() {
                                   size="small"
                                   fullWidth
                                   label={label}
+                                  // Selector de calendario nativo para fechas
+                                  // (25/Ago/2026) - sin agregar una libreria
+                                  // nueva, <input type="date"> del navegador
+                                  // ya trae el picker.
+                                  type={campo === "fecha_nac_const" ? "date" : "text"}
+                                  InputLabelProps={campo === "fecha_nac_const" ? { shrink: true } : undefined}
                                   value={editandoCampos[campo] ?? ""}
                                   onChange={(e) =>
                                     setEditandoCampos((prev) => (prev ? { ...prev, [campo]: e.target.value } : prev))
@@ -683,7 +751,7 @@ export default function PldExpedienteDetallePage() {
                         ))}
                       </Stack>
                       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {puedeEditar && kyc.documentos.length > 0 && (
+                        {puedeGestionarArchivos && kyc.documentos.length > 0 && (
                           <Button
                             size="small"
                             variant="outlined"
@@ -699,6 +767,29 @@ export default function PldExpedienteDetallePage() {
                             sx={{ whiteSpace: "nowrap" }}
                           >
                             Verificar en Drive
+                          </Button>
+                        )}
+                        {puedeGestionarArchivos && (
+                          <Button
+                            component="label"
+                            size="small"
+                            variant="outlined"
+                            startIcon={
+                              subiendoDoc ? <CircularProgress size={16} /> : <UploadCloud size={16} strokeWidth={1.5} />
+                            }
+                            disabled={subiendoDoc}
+                            sx={{ whiteSpace: "nowrap" }}
+                          >
+                            Subir documento
+                            <input
+                              type="file"
+                              hidden
+                              onChange={(e) => {
+                                const archivo = e.target.files?.[0];
+                                e.target.value = "";
+                                if (archivo) handleSubirDocumento(archivo);
+                              }}
+                            />
                           </Button>
                         )}
                         {puedeCrear && (
@@ -739,6 +830,31 @@ export default function PldExpedienteDetallePage() {
                                 <Typography variant="body2">{doc.denominacion || "Documento sin nombre"}</Typography>
                               </Stack>
                               <Stack direction="row" spacing={1} alignItems="center">
+                                {/* 25/Ago/2026 (requerimiento real del cliente: "en
+                                    el expediente se debe poder ver los archivos aqui
+                                    mismo") - boton explicito, abre el archivo real
+                                    en pestaña nueva A TRAVES de pld-service
+                                    (urlVerDocumento), NO del link crudo de Drive
+                                    (doc.link_documento) - un analista con permiso
+                                    real en CumbresBI puede no tener acceso directo
+                                    a la Unidad compartida de Google, ver
+                                    PldContraparteDocViewSet.ver. Sin drive_file_id
+                                    (documento "solicitado" pendiente de que llegue
+                                    el archivo) no hay nada que ver todavía, se
+                                    deshabilita en vez de esconderse (el boton no
+                                    "salta" de lugar cuando el archivo si llega). */}
+                                <IconButton
+                                  size="small"
+                                  component={doc.drive_file_id ? "a" : "button"}
+                                  href={doc.drive_file_id ? urlVerDocumento(doc.id_kyc_doc) : undefined}
+                                  target={doc.drive_file_id ? "_blank" : undefined}
+                                  rel={doc.drive_file_id ? "noopener" : undefined}
+                                  disabled={!doc.drive_file_id}
+                                  aria-label="Ver documento"
+                                  title="Ver documento"
+                                >
+                                  <Eye size={16} strokeWidth={1.5} />
+                                </IconButton>
                                 {esDuplicado && (
                                   <Chip
                                     size="small"
@@ -748,7 +864,7 @@ export default function PldExpedienteDetallePage() {
                                   />
                                 )}
                                 <Chip size="small" label={doc.status ?? "Sin estado"} />
-                                {puedeEditar && (
+                                {puedeEliminarArchivos && (
                                   <IconButton
                                     size="small"
                                     color="error"

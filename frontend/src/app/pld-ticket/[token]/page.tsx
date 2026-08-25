@@ -12,6 +12,8 @@ import {
   Checkbox,
   CircularProgress,
   Divider,
+  Grid,
+  Link,
   List,
   ListItem,
   ListItemButton,
@@ -36,20 +38,55 @@ import {
 } from "@/lib/pld";
 import { PublicNavbar } from "@/components/PublicNavbar";
 import RecaptchaV2 from "@/components/RecaptchaV2";
+import { PAISES, TIPOS_IDENTIFICACION } from "@/lib/paises";
+
+const GENTILICIOS = [...new Set(PAISES.map((p) => p.gentilicio))].sort((a, b) => a.localeCompare(b, "es"));
+
+type OpcionSelect = string | { value: string; label: string };
+
+// Dropdowns fijos (25/Ago/2026, requerimiento real del cliente) para los
+// campos que antes eran texto libre - ver lib/paises.ts para el porque de
+// un catalogo estatico en vez de una API externa. Municipio/colonia se
+// quedan fuera a proposito (ningun dataset global llega a ese nivel).
+// Estado y pais (25/Ago/2026, ajuste posterior de Mariana): se revierten a
+// texto libre - solo nacionalidad y tipo de identificacion quedan como
+// dropdown.
+const OPCIONES_POR_CAMPO: Partial<Record<keyof PldDatosEditables, readonly OpcionSelect[]>> = {
+  nacionalidad: GENTILICIOS,
+  tipo_identificacion: TIPOS_IDENTIFICACION,
+};
+
+// Estado civil (25/Ago/2026) - 5 opciones estandar de la industria para
+// Mexico, espejo de PldContraparteKyc.ESTADO_CIVIL_CHOICES en el backend
+// (services/pld-service/pld/models.py).
+const ESTADO_CIVIL_OPCIONES: OpcionSelect[] = [
+  { value: "SOLTERO", label: "Soltero(a)" },
+  { value: "CASADO", label: "Casado(a)" },
+  { value: "DIVORCIADO", label: "Divorciado(a)" },
+  { value: "VIUDO", label: "Viudo(a)" },
+  { value: "UNION_LIBRE", label: "Unión libre / Concubinato" },
+];
 
 // Grupos del formulario de datos (17/Ago/2026) - mismo whitelist que
 // PLD_CAMPOS_CONFIRMABLES (lib/pld.ts), agrupados solo para presentacion.
-const GRUPOS_DATOS: { titulo: string; campos: { campo: keyof PldDatosEditables; label: string }[] }[] = [
+// "requerido" (25/Ago/2026) - minimo real de identificacion/domicilio para
+// poder aprobar un expediente KYC; el resto (fideicomiso, domicilio de
+// correspondencia, comentarios) se queda opcional porque no aplica a todos
+// los casos.
+const GRUPOS_DATOS: {
+  titulo: string;
+  campos: { campo: keyof PldDatosEditables; label: string; requerido?: boolean }[];
+}[] = [
   {
     titulo: "Identificación",
     campos: [
-      { campo: "nombre_completo", label: "Nombre completo / Razón social" },
+      { campo: "nombre_completo", label: "Nombre completo / Razón social", requerido: true },
       { campo: "curp", label: "CURP" },
-      { campo: "nacionalidad", label: "Nacionalidad" },
+      { campo: "nacionalidad", label: "Nacionalidad", requerido: true },
       { campo: "pais_nac_const", label: "País de nacimiento / constitución" },
-      { campo: "fecha_nac_const", label: "Fecha de nacimiento / constitución (AAAA-MM-DD)" },
-      { campo: "tipo_identificacion", label: "Tipo de identificación" },
-      { campo: "numero_identificacion", label: "Número de identificación" },
+      { campo: "fecha_nac_const", label: "Fecha de nacimiento / constitución" },
+      { campo: "tipo_identificacion", label: "Tipo de identificación", requerido: true },
+      { campo: "numero_identificacion", label: "Número de identificación", requerido: true },
       { campo: "autoridad_identificacion", label: "Autoridad que emitió la identificación" },
       { campo: "estado_civil", label: "Estado civil" },
       { campo: "ocupacion_act_economica", label: "Ocupación / actividad económica" },
@@ -61,14 +98,14 @@ const GRUPOS_DATOS: { titulo: string; campos: { campo: keyof PldDatosEditables; 
   {
     titulo: "Domicilio",
     campos: [
-      { campo: "dom_calle", label: "Calle" },
-      { campo: "dom_numero_ext", label: "Número exterior" },
+      { campo: "dom_calle", label: "Calle", requerido: true },
+      { campo: "dom_numero_ext", label: "Número exterior", requerido: true },
       { campo: "dom_numero_int", label: "Número interior" },
-      { campo: "dom_colonia", label: "Colonia" },
-      { campo: "dom_municipio_alcaldia", label: "Municipio / alcaldía" },
-      { campo: "dom_estado", label: "Estado" },
-      { campo: "dom_cp", label: "Código postal" },
-      { campo: "dom_pais", label: "País" },
+      { campo: "dom_colonia", label: "Colonia", requerido: true },
+      { campo: "dom_municipio_alcaldia", label: "Municipio / alcaldía", requerido: true },
+      { campo: "dom_estado", label: "Estado", requerido: true },
+      { campo: "dom_cp", label: "Código postal", requerido: true },
+      { campo: "dom_pais", label: "País", requerido: true },
     ],
   },
   {
@@ -88,7 +125,7 @@ const GRUPOS_DATOS: { titulo: string; campos: { campo: keyof PldDatosEditables; 
     titulo: "Contacto",
     campos: [
       { campo: "telefono_fijo", label: "Teléfono fijo" },
-      { campo: "telefono_sms", label: "Teléfono para SMS" },
+      { campo: "telefono_sms", label: "Celular", requerido: true },
     ],
   },
   {
@@ -96,6 +133,8 @@ const GRUPOS_DATOS: { titulo: string; campos: { campo: keyof PldDatosEditables; 
     campos: [{ campo: "comentarios", label: "Comentarios adicionales" }],
   },
 ];
+
+const CAMPOS_REQUERIDOS = GRUPOS_DATOS.flatMap((g) => g.campos.filter((c) => c.requerido).map((c) => c.campo));
 
 // Pagina publica (sin AppShell) - a donde llega el cliente externo real al
 // abrir el link recibido (hoy, en modo dev, mostrado directo en
@@ -139,6 +178,10 @@ export default function PldTicketPage() {
   const [subiendo, setSubiendo] = useState(false);
   const [subidaError, setSubidaError] = useState<string | null>(null);
   const [subidaOk, setSubidaOk] = useState<string | null>(null);
+  // 25/Ago/2026 (requerimiento real del cliente): al terminar de subir
+  // todo el lote sin fallos, se saca al cliente del formulario y se
+  // muestra una pantalla de agradecimiento en su lugar.
+  const [subidaCompleta, setSubidaCompleta] = useState(false);
 
   // Datos del formulario (17/Ago/2026) - se precargan con lo que ya haya en
   // el expediente (si el cliente vuelve a entrar con el mismo link, ve lo
@@ -147,6 +190,12 @@ export default function PldTicketPage() {
   const [guardando, setGuardando] = useState(false);
   const [guardadoError, setGuardadoError] = useState<string | null>(null);
   const [guardadoOk, setGuardadoOk] = useState(false);
+
+  // Aceptacion de politicas + declaracion de veracidad (25/Ago/2026,
+  // requerimiento real del cliente) - ambas obligatorias antes de poder
+  // guardar los datos, igual que cualquier formulario KYC real.
+  const [aceptaPoliticas, setAceptaPoliticas] = useState(false);
+  const [declaraVeracidad, setDeclaraVeracidad] = useState(false);
 
   // Documentos que el cliente ya subio antes con este mismo link (18/Ago/2026,
   // decision de Mariana: la verificacion contra Drive debe pasar justo aqui,
@@ -175,16 +224,32 @@ export default function PldTicketPage() {
       });
   }, [params.token]);
 
+  // Campos requeridos que siguen vacios (25/Ago/2026) - vuelve a calcularse
+  // en cada render, se usa tanto para bloquear el boton como para el
+  // mensaje de error si de todos modos se intenta enviar (ej. Enter en un
+  // campo).
+  const camposFaltantes = CAMPOS_REQUERIDOS.filter((campo) => !datos[campo]);
+
   async function handleGuardarDatos(e: React.FormEvent) {
     e.preventDefault();
-    setGuardando(true);
     setGuardadoError(null);
     setGuardadoOk(false);
+
+    if (camposFaltantes.length > 0) {
+      setGuardadoError("Faltan campos obligatorios por llenar (marcados con *).");
+      return;
+    }
+    if (!aceptaPoliticas || !declaraVeracidad) {
+      setGuardadoError("Debes aceptar el aviso de privacidad y la declaración de veracidad antes de guardar.");
+      return;
+    }
+
+    setGuardando(true);
     try {
       // No manda campos vacios - evita borrar en el expediente algo que el
       // analista ya tenia capturado si el cliente deja un campo en blanco.
       const campos = Object.fromEntries(Object.entries(datos).filter(([, v]) => v !== "" && v != null));
-      await actualizarDatosPublico({ token: params.token, campos });
+      await actualizarDatosPublico({ token: params.token, campos, aceptaPoliticas, declaraVeracidad });
       setGuardadoOk(true);
     } catch (err) {
       setGuardadoError(err instanceof Error ? err.message : "Error al guardar tus datos.");
@@ -224,6 +289,7 @@ export default function PldTicketPage() {
         );
         setArchivos([]);
         setSeleccionados(new Set());
+        setSubidaCompleta(true);
       } else {
         setSubidaError(
           `${fallidos.length} de ${resultados.length} archivo(s) no se pudieron subir: ${fallidos
@@ -258,7 +324,7 @@ export default function PldTicketPage() {
         sx={{
           flex: 1,
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-start",
           justifyContent: "center",
           p: 2,
         }}
@@ -268,7 +334,7 @@ export default function PldTicketPage() {
           sx={{
             p: { xs: 3, sm: 4 },
             width: "100%",
-            maxWidth: 920,
+            maxWidth: 1400,
             border: "1px solid",
             borderColor: "divider",
           }}
@@ -298,6 +364,13 @@ export default function PldTicketPage() {
 
               {!tieneExpediente ? (
                 <Alert severity="info">Este enlace no tiene un expediente asociado para subir documentos.</Alert>
+              ) : subidaCompleta ? (
+                <Stack spacing={2} alignItems="center" textAlign="center" sx={{ py: 4 }}>
+                  <CheckCircle2 size={40} strokeWidth={1.5} color={theme.palette.success.main} />
+                  <Typography variant="subtitle1" fontWeight={600}>
+                    ¡Gracias! Tus documentos fueron recibidos
+                  </Typography>
+                </Stack>
               ) : (
                 <Stack direction={{ xs: "column", md: "row" }} spacing={3} divider={<Divider orientation="vertical" flexItem sx={{ display: { xs: "none", md: "block" } }} />}>
                   <Stack component="form" spacing={2} onSubmit={handleGuardarDatos} sx={{ flex: 1, minWidth: 0 }}>
@@ -315,35 +388,93 @@ export default function PldTicketPage() {
                           </Typography>
                         </AccordionSummary>
                         <AccordionDetails>
-                          <Stack spacing={1.5}>
-                            {grupo.campos.map(({ campo, label }) =>
-                              campo === "estado_civil" ? (
-                                <TextField
-                                  key={campo}
-                                  select
-                                  size="small"
-                                  label={label}
-                                  value={datos[campo] ?? ""}
-                                  onChange={(e) => setDatos((prev) => ({ ...prev, [campo]: e.target.value }))}
-                                >
-                                  <MenuItem value="SOLTERO">Soltero</MenuItem>
-                                  <MenuItem value="CASADO">Casado</MenuItem>
-                                </TextField>
-                              ) : (
-                                <TextField
-                                  key={campo}
-                                  size="small"
-                                  label={label}
-                                  multiline={campo === "comentarios" || campo === "objeto_social"}
-                                  value={datos[campo] ?? ""}
-                                  onChange={(e) => setDatos((prev) => ({ ...prev, [campo]: e.target.value }))}
-                                />
-                              )
-                            )}
-                          </Stack>
+                          <Grid container spacing={1.5}>
+                            {grupo.campos.map(({ campo, label, requerido }) => {
+                              const opciones = campo === "estado_civil" ? ESTADO_CIVIL_OPCIONES : OPCIONES_POR_CAMPO[campo];
+                              return (
+                                <Grid item xs={12} sm={6} key={campo}>
+                                  {opciones ? (
+                                    <TextField
+                                      select
+                                      fullWidth
+                                      size="small"
+                                      label={requerido ? `${label} *` : label}
+                                      required={requerido}
+                                      error={requerido && !datos[campo]}
+                                      value={datos[campo] ?? ""}
+                                      onChange={(e) => setDatos((prev) => ({ ...prev, [campo]: e.target.value }))}
+                                    >
+                                      {opciones.map((opcion) =>
+                                        typeof opcion === "string" ? (
+                                          <MenuItem key={opcion} value={opcion}>
+                                            {opcion}
+                                          </MenuItem>
+                                        ) : (
+                                          <MenuItem key={opcion.value} value={opcion.value}>
+                                            {opcion.label}
+                                          </MenuItem>
+                                        )
+                                      )}
+                                    </TextField>
+                                  ) : (
+                                    <TextField
+                                      fullWidth
+                                      size="small"
+                                      label={requerido ? `${label} *` : label}
+                                      required={requerido}
+                                      error={requerido && !datos[campo]}
+                                      // Selector de calendario nativo para
+                                      // fechas (25/Ago/2026) - sin libreria
+                                      // nueva, <input type="date"> ya trae
+                                      // el picker del navegador.
+                                      type={campo === "fecha_nac_const" ? "date" : "text"}
+                                      InputLabelProps={campo === "fecha_nac_const" ? { shrink: true } : undefined}
+                                      multiline={campo === "comentarios" || campo === "objeto_social"}
+                                      value={datos[campo] ?? ""}
+                                      onChange={(e) => setDatos((prev) => ({ ...prev, [campo]: e.target.value }))}
+                                    />
+                                  )}
+                                </Grid>
+                              );
+                            })}
+                          </Grid>
                         </AccordionDetails>
                       </Accordion>
                     ))}
+
+                    <Stack spacing={0.5} sx={{ pt: 1 }}>
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <Checkbox
+                          size="small"
+                          checked={aceptaPoliticas}
+                          onChange={(e) => setAceptaPoliticas(e.target.checked)}
+                          sx={{ mt: -0.75 }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          He leído y acepto el{" "}
+                          <Link href="/legal/privacidad" target="_blank" rel="noopener">
+                            Aviso de Privacidad
+                          </Link>{" "}
+                          y los{" "}
+                          <Link href="/legal/terminos" target="_blank" rel="noopener">
+                            Términos y Condiciones
+                          </Link>{" "}
+                          de CumbresBI para el tratamiento de mis datos personales.
+                        </Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <Checkbox
+                          size="small"
+                          checked={declaraVeracidad}
+                          onChange={(e) => setDeclaraVeracidad(e.target.checked)}
+                          sx={{ mt: -0.75 }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          Declaro, bajo protesta de decir verdad, que la información que proporcioné en este
+                          formulario es verídica, correcta y completa.
+                        </Typography>
+                      </Stack>
+                    </Stack>
 
                     {guardadoError && <Alert severity="error">{guardadoError}</Alert>}
                     {guardadoOk && (
@@ -352,7 +483,11 @@ export default function PldTicketPage() {
                       </Alert>
                     )}
 
-                    <Button type="submit" variant="contained" disabled={guardando}>
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      disabled={guardando || camposFaltantes.length > 0 || !aceptaPoliticas || !declaraVeracidad}
+                    >
                       {guardando ? <CircularProgress size={20} color="inherit" /> : "Guardar mis datos"}
                     </Button>
                   </Stack>
@@ -391,7 +526,16 @@ export default function PldTicketPage() {
                       Máximo {MAX_ARCHIVOS_POR_LOTE} archivos por lote, {MAX_TAMANO_ARCHIVO_MB}MB cada uno.
                     </Typography>
 
-                    <Button component="label" variant="outlined" startIcon={<UploadCloud size={18} strokeWidth={1.5} />}>
+                    <Button
+                      component="label"
+                      variant="outlined"
+                      startIcon={<UploadCloud size={18} strokeWidth={1.5} />}
+                      // 25/Ago/2026 (requerimiento real del cliente) -
+                      // bloqueado mientras se estan subiendo los archivos
+                      // seleccionados, para no dejar agregar mas a un lote
+                      // que ya esta en vuelo.
+                      disabled={subiendo}
+                    >
                     {archivos.length > 0
                       ? `${archivos.length} archivo(s) seleccionado(s)`
                       : "Seleccionar archivos"}
@@ -399,6 +543,7 @@ export default function PldTicketPage() {
                       type="file"
                       hidden
                       multiple
+                      disabled={subiendo}
                       // Acumula en vez de reemplazar - el cliente puede abrir el
                       // selector varias veces (uno por uno, o varios de golpe
                       // cada vez) y todo se va agregando a la misma lista, en
@@ -470,7 +615,17 @@ export default function PldTicketPage() {
                     </List>
                   )}
 
-                  <RecaptchaV2 onChange={setRecaptchaToken} />
+                  <RecaptchaV2
+                    onChange={(token) => {
+                      setRecaptchaToken(token);
+                      // 25/Ago/2026 (hallazgo real): cuando el token caduca
+                      // (~2 min) el boton ya se deshabilita solo, pero un
+                      // error de un intento anterior se quedaba pegado en
+                      // pantalla junto al boton gris, confundiendo si el
+                      // problema seguia ahi o ya se resolvio.
+                      if (token) setSubidaError(null);
+                    }}
+                  />
 
                   {subidaError && <Alert severity="error">{subidaError}</Alert>}
                   {subidaOk && (
