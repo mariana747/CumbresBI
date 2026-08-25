@@ -48,7 +48,7 @@ import {
   UploadCloud,
   X as CloseIcon,
 } from "lucide-react";
-import AppShell from "@/components/AppShell";
+import AppShell, { notifySolicitudEliminacionChanged } from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession, puedeVerBitacora } from "@/lib/auth";
@@ -57,14 +57,19 @@ import {
   PldContraparteDoc,
   PldContraparteKyc,
   PldDatosEditables,
+  PldSolicitudEliminacionDoc,
   aprobarKyc,
+  aprobarSolicitudEliminacion,
   congelarKyc,
   crearDocumentoKyc,
+  crearSolicitudEliminacion,
   editarKyc,
   eliminarDocumentoKyc,
   getKyc,
+  listSolicitudesEliminacion,
   marcarSospechosoKyc,
   reactivarCuentaKyc,
+  rechazarSolicitudEliminacion,
   subirArchivoDocumento,
   urlVerDocumento,
   verificarDocumentosKyc,
@@ -178,6 +183,18 @@ export default function PldExpedienteDetallePage() {
   const [confirmandoEliminarDoc, setConfirmandoEliminarDoc] = useState<PldContraparteDoc | null>(null);
   const [eliminandoDoc, setEliminandoDoc] = useState(false);
   const [subiendoDoc, setSubiendoDoc] = useState(false);
+
+  // Solicitud de eliminacion (25/Ago/2026, requerimiento real del cliente):
+  // el analista (puedeEditar) ya no puede borrar un archivo directo, pide
+  // su eliminacion con una razon breve; solo Admin (puedeEliminarArchivos)
+  // aprueba/rechaza. solicitudesPendientes son las de este expediente
+  // (filtradas del lado del cliente contra kyc.documentos, el endpoint no
+  // tiene ?kyc= propio).
+  const [solicitandoEliminarDoc, setSolicitandoEliminarDoc] = useState<PldContraparteDoc | null>(null);
+  const [razonSolicitud, setRazonSolicitud] = useState("");
+  const [enviandoSolicitud, setEnviandoSolicitud] = useState(false);
+  const [solicitudesPendientes, setSolicitudesPendientes] = useState<PldSolicitudEliminacionDoc[]>([]);
+  const [resolviendoSolicitud, setResolviendoSolicitud] = useState<string | null>(null);
   const [historial, setHistorial] = useState<BitacoraEvento[] | null>(null);
   const [historialLoading, setHistorialLoading] = useState(false);
   const [historialError, setHistorialError] = useState<string | null>(null);
@@ -243,6 +260,22 @@ export default function PldExpedienteDetallePage() {
   const puedeEliminarArchivos = session?.perm_keys.includes("pld-documentos.editar") ?? false;
   const puedeVerHistorial = puedeVerBitacora(session);
 
+  // Solicitudes de eliminacion pendientes de este expediente (25/Ago/2026)
+  // - visibles tanto para quien solicita (el analista quiere ver que sigue
+  // pendiente) como para quien resuelve (Admin). Filtro del lado del
+  // cliente contra los documentos actuales del expediente - el endpoint no
+  // tiene ?kyc= propio (ver lib/pld.ts::listSolicitudesEliminacion).
+  function cargarSolicitudesPendientes(idsDocumentos: Set<string>) {
+    listSolicitudesEliminacion({ estado: "PENDIENTE" })
+      .then((todas) => setSolicitudesPendientes(todas.filter((s) => s.documento && idsDocumentos.has(s.documento))))
+      .catch(() => setSolicitudesPendientes([]));
+  }
+  useEffect(() => {
+    if (!kyc || (!puedeEditar && !puedeEliminarArchivos)) return;
+    cargarSolicitudesPendientes(new Set(kyc.documentos.map((d) => d.id_kyc_doc)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kyc, puedeEditar, puedeEliminarArchivos]);
+
   // Historial de auditoria (18/Ago/2026) - reusa el mismo buscador
   // unificado de audit-service (?search=), que ya encuentra tanto eventos
   // de pld-service (entidad_id = id_kyc) como de docint (entidad_id =
@@ -270,6 +303,27 @@ export default function PldExpedienteDetallePage() {
       conteo.set(clave, (conteo.get(clave) ?? 0) + 1);
     }
     return new Set([...conteo.entries()].filter(([, n]) => n > 1).map(([clave]) => clave));
+  })();
+
+  // "Se queda el ultimo que se subio" (25/Ago/2026, requerimiento real del
+  // cliente) - no se borra nada solo (asi se decidio: avisar y dejar que
+  // Admin resuelva), solo se marca cual es el vigente (el mas reciente) de
+  // cada grupo de duplicados por nombre - el resto son candidatos a pedir
+  // su eliminacion.
+  const idsDocumentoVigentePorDuplicado = (() => {
+    const porNombre = new Map<string, PldContraparteDoc[]>();
+    for (const doc of kyc?.documentos ?? []) {
+      if (!doc.denominacion) continue;
+      const clave = doc.denominacion.trim().toLowerCase();
+      porNombre.set(clave, [...(porNombre.get(clave) ?? []), doc]);
+    }
+    const vigentes = new Set<string>();
+    for (const docs of porNombre.values()) {
+      if (docs.length < 2) continue;
+      const masReciente = docs.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+      vigentes.add(masReciente.id_kyc_doc);
+    }
+    return vigentes;
   })();
 
   async function handleAprobar() {
@@ -357,6 +411,43 @@ export default function PldExpedienteDetallePage() {
       setConfirmandoEliminarDoc(null);
     } finally {
       setEliminandoDoc(false);
+    }
+  }
+
+  async function handleSolicitarEliminacion() {
+    if (!solicitandoEliminarDoc || !razonSolicitud.trim() || !session?.user_id || !kyc) return;
+    setEnviandoSolicitud(true);
+    try {
+      await crearSolicitudEliminacion({
+        idKycDoc: solicitandoEliminarDoc.id_kyc_doc,
+        razon: razonSolicitud.trim(),
+        solicitadoPor: session.user_id,
+      });
+      setSolicitandoEliminarDoc(null);
+      setRazonSolicitud("");
+      cargarSolicitudesPendientes(new Set(kyc.documentos.map((d) => d.id_kyc_doc)));
+      // Avisa a la campana de AppShell (25/Ago/2026, requerimiento real:
+      // "en la sesion de admin en la campana debe llegar la notificacion")
+      // - sin esto, Admin la veria hasta el proximo poll de 60s.
+      notifySolicitudEliminacionChanged();
+    } catch (err) {
+      setVerificarError(err instanceof Error ? err.message : "Error al enviar la solicitud");
+    } finally {
+      setEnviandoSolicitud(false);
+    }
+  }
+
+  async function handleResolverSolicitud(solicitud: PldSolicitudEliminacionDoc, aprobar: boolean) {
+    setResolviendoSolicitud(solicitud.id_solicitud);
+    try {
+      const resolver = aprobar ? aprobarSolicitudEliminacion : rechazarSolicitudEliminacion;
+      await resolver(solicitud.id_solicitud, session?.user_id);
+      cargar();
+      notifySolicitudEliminacionChanged();
+    } catch (err) {
+      setVerificarError(err instanceof Error ? err.message : "Error al resolver la solicitud");
+    } finally {
+      setResolviendoSolicitud(null);
     }
   }
 
@@ -813,6 +904,49 @@ export default function PldExpedienteDetallePage() {
                       </Alert>
                     )}
 
+                    {/* 25/Ago/2026 (requerimiento real del cliente) - solo
+                        Admin resuelve las solicitudes de eliminacion; el
+                        analista ya ve el estado "Eliminación solicitada"
+                        en el chip de cada documento, no necesita este
+                        panel. */}
+                    {puedeEliminarArchivos && solicitudesPendientes.length > 0 && (
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle2">
+                          Solicitudes de eliminación pendientes ({solicitudesPendientes.length})
+                        </Typography>
+                        {solicitudesPendientes.map((solicitud) => (
+                          <Paper key={solicitud.id_solicitud} variant="outlined" sx={{ p: 1.5, bgcolor: "warning.main" }}>
+                            <Stack spacing={0.5}>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {solicitud.denominacion_doc || "Documento sin nombre"}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {solicitud.solicitado_por}: "{solicitud.razon}"
+                              </Typography>
+                              <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  variant="contained"
+                                  disabled={resolviendoSolicitud === solicitud.id_solicitud}
+                                  onClick={() => handleResolverSolicitud(solicitud, true)}
+                                >
+                                  Aprobar (elimina)
+                                </Button>
+                                <Button
+                                  size="small"
+                                  disabled={resolviendoSolicitud === solicitud.id_solicitud}
+                                  onClick={() => handleResolverSolicitud(solicitud, false)}
+                                >
+                                  Rechazar
+                                </Button>
+                              </Stack>
+                            </Stack>
+                          </Paper>
+                        ))}
+                      </Stack>
+                    )}
+
                     {kyc.documentos.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
                         Sin documentos subidos todavía.
@@ -822,6 +956,12 @@ export default function PldExpedienteDetallePage() {
                         const esDuplicado = Boolean(
                           doc.denominacion && denominacionesDuplicadas.has(doc.denominacion.trim().toLowerCase())
                         );
+                        // "Se queda el ultimo que se subio" - el mas
+                        // reciente del grupo se marca vigente, el resto
+                        // como duplicado viejo (candidato a solicitar su
+                        // eliminacion, no se borra solo).
+                        const esDuplicadoViejo = esDuplicado && !idsDocumentoVigentePorDuplicado.has(doc.id_kyc_doc);
+                        const solicitudPendiente = solicitudesPendientes.find((s) => s.documento === doc.id_kyc_doc);
                         return (
                           <Paper key={doc.id_kyc_doc} variant="outlined" sx={{ p: 1.5 }}>
                             <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
@@ -860,11 +1000,14 @@ export default function PldExpedienteDetallePage() {
                                     size="small"
                                     color="warning"
                                     icon={<Copy size={14} strokeWidth={1.5} />}
-                                    label="Duplicado"
+                                    label={esDuplicadoViejo ? "Duplicado (no vigente)" : "Vigente"}
                                   />
                                 )}
                                 <Chip size="small" label={doc.status ?? "Sin estado"} />
-                                {puedeEliminarArchivos && (
+                                {solicitudPendiente && (
+                                  <Chip size="small" color="info" label="Eliminación solicitada" />
+                                )}
+                                {puedeEliminarArchivos ? (
                                   <IconButton
                                     size="small"
                                     color="error"
@@ -873,6 +1016,24 @@ export default function PldExpedienteDetallePage() {
                                   >
                                     <Trash2 size={16} strokeWidth={1.5} />
                                   </IconButton>
+                                ) : (
+                                  puedeEditar && (
+                                    // 25/Ago/2026 (requerimiento real del
+                                    // cliente) - el analista ya no puede
+                                    // borrar directo, pide la eliminacion
+                                    // con una razon; Admin la aprueba o
+                                    // rechaza.
+                                    <IconButton
+                                      size="small"
+                                      color="warning"
+                                      aria-label="Solicitar eliminación"
+                                      title="Solicitar eliminación"
+                                      disabled={Boolean(solicitudPendiente)}
+                                      onClick={() => setSolicitandoEliminarDoc(doc)}
+                                    >
+                                      <Flag size={16} strokeWidth={1.5} />
+                                    </IconButton>
+                                  )
                                 )}
                               </Stack>
                             </Stack>
@@ -962,6 +1123,55 @@ export default function PldExpedienteDetallePage() {
           <Button onClick={() => setConfirmandoEliminarDoc(null)}>Cancelar</Button>
           <Button color="error" variant="contained" onClick={handleEliminarDocumento} disabled={eliminandoDoc}>
             {eliminandoDoc ? <CircularProgress size={20} color="inherit" /> : "Eliminar documento"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 25/Ago/2026 (requerimiento real del cliente) - solicitar
+          eliminacion en vez de borrar directo (el analista no tiene
+          pld-documentos.editar). Solo Admin resuelve, ver panel de
+          solicitudes pendientes en la pestaña Documentos. */}
+      <Dialog
+        open={Boolean(solicitandoEliminarDoc)}
+        onClose={() => {
+          setSolicitandoEliminarDoc(null);
+          setRazonSolicitud("");
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Solicitar eliminación</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Vas a pedirle a un Admin que elimine{" "}
+            <strong>{solicitandoEliminarDoc?.denominacion || "este documento"}</strong>. Explica brevemente
+            por qué.
+          </DialogContentText>
+          <TextField
+            fullWidth
+            multiline
+            minRows={2}
+            size="small"
+            label="Razón"
+            value={razonSolicitud}
+            onChange={(e) => setRazonSolicitud(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setSolicitandoEliminarDoc(null);
+              setRazonSolicitud("");
+            }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSolicitarEliminacion}
+            disabled={enviandoSolicitud || !razonSolicitud.trim()}
+          >
+            {enviandoSolicitud ? <CircularProgress size={20} color="inherit" /> : "Enviar solicitud"}
           </Button>
         </DialogActions>
       </Dialog>

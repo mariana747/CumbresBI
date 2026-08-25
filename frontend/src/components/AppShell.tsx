@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { SessionUser, getSession, puedeAdministrarIam, tieneAccesoIam, tieneAccesoPld, tieneAlgunPermiso } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
+import { PldSolicitudEliminacionDoc, listSolicitudesEliminacion } from "@/lib/pld";
 import { Footer } from "@/components/Footer";
 import { BRAND } from "@/theme/theme";
 
@@ -336,6 +337,16 @@ export function notifySinRolChanged() {
   window.dispatchEvent(new Event(SIN_ROL_CHANGED_EVENT));
 }
 
+// Mismo patron que SIN_ROL_CHANGED_EVENT arriba, para que la campana se
+// refresque al instante cuando se crea/resuelve una solicitud de
+// eliminacion de documento PLD (25/Ago/2026) - sin esto habria que esperar
+// hasta 60s (el poll de refreshSolicitudes) para que Admin la vea.
+export const SOLICITUD_ELIMINACION_CHANGED_EVENT = "cumbresbi:solicitud-eliminacion-changed";
+
+export function notifySolicitudEliminacionChanged() {
+  window.dispatchEvent(new Event(SOLICITUD_ELIMINACION_CHANGED_EVENT));
+}
+
 // Un item con "children" empieza abierto si la ruta actual es uno de sus
 // sub-items (ej. entrar directo a /admin/permisos desde un link externo
 // debe abrir el submenu de Admin, no dejarlo colapsado con la seccion
@@ -454,17 +465,23 @@ function Header({
   isMobile,
   sinRolUsers,
   onVerTodos,
+  solicitudesEliminacion,
   session,
 }: {
   onMenuClick: () => void;
   isMobile: boolean;
   sinRolUsers: IamUser[];
   onVerTodos: () => void;
+  // 25/Ago/2026 (requerimiento real del cliente: "en la sesion de admin en
+  // la campana debe llegar la notificacion") - solicitudes de eliminacion
+  // de documentos PLD pendientes de aprobar/rechazar, solo se llenan si la
+  // sesion tiene pld-documentos.editar (Admin), ver AppShell abajo.
+  solicitudesEliminacion: PldSolicitudEliminacionDoc[];
   session: SessionUser | null;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [avatarAnchorEl, setAvatarAnchorEl] = useState<HTMLElement | null>(null);
-  const count = sinRolUsers.length;
+  const count = sinRolUsers.length + solicitudesEliminacion.length;
 
   return (
     <AppBar
@@ -500,34 +517,65 @@ function Header({
             <MenuItem disabled>Sin notificaciones</MenuItem>
           ) : (
             [
-              <MenuItem key="titulo" disabled sx={{ opacity: "1 !important" }}>
-                <Typography variant="caption" fontWeight={600} color="text.primary">
-                  {count} usuario(s) sin rol asignado
-                </Typography>
-              </MenuItem>,
-              // Clic directo en el usuario (17/Ago/2026, pedido de Mariana) -
-              // antes solo estaban listados (disabled) y habia que usar
-              // "Ver todos en el directorio" incluso para ver a uno solo.
-              ...sinRolUsers.slice(0, 5).map((user) => (
-                <MenuItem
-                  key={user.user_id}
-                  component="a"
-                  href={`/admin/usuarios?search=${encodeURIComponent(user.primary_email)}`}
-                  onClick={() => setAnchorEl(null)}
-                >
-                  {user.display_name || user.primary_email}
-                </MenuItem>
-              )),
-              <Divider key="divider" />,
-              <MenuItem
-                key="ver-todos"
-                onClick={() => {
-                  setAnchorEl(null);
-                  onVerTodos();
-                }}
-              >
-                Ver todos en el directorio
-              </MenuItem>,
+              ...(sinRolUsers.length > 0
+                ? [
+                    <MenuItem key="titulo-sin-rol" disabled sx={{ opacity: "1 !important" }}>
+                      <Typography variant="caption" fontWeight={600} color="text.primary">
+                        {sinRolUsers.length} usuario(s) sin rol asignado
+                      </Typography>
+                    </MenuItem>,
+                    // Clic directo en el usuario (17/Ago/2026, pedido de
+                    // Mariana) - antes solo estaban listados (disabled) y
+                    // habia que usar "Ver todos en el directorio" incluso
+                    // para ver a uno solo.
+                    ...sinRolUsers.slice(0, 5).map((user) => (
+                      <MenuItem
+                        key={user.user_id}
+                        component="a"
+                        href={`/admin/usuarios?search=${encodeURIComponent(user.primary_email)}`}
+                        onClick={() => setAnchorEl(null)}
+                      >
+                        {user.display_name || user.primary_email}
+                      </MenuItem>
+                    )),
+                    <Divider key="divider-sin-rol" />,
+                    <MenuItem
+                      key="ver-todos"
+                      onClick={() => {
+                        setAnchorEl(null);
+                        onVerTodos();
+                      }}
+                    >
+                      Ver todos en el directorio
+                    </MenuItem>,
+                  ]
+                : []),
+              // Solicitudes de eliminacion de documentos PLD (25/Ago/2026,
+              // requerimiento real del cliente) - solo Admin las ve aqui
+              // (solicitudesEliminacion ya viene vacio si la sesion no
+              // tiene pld-documentos.editar). Clic lleva directo al
+              // expediente, pestaña Documentos - ahi esta el panel real
+              // para aprobar/rechazar (ver app/pld/[idKyc]/page.tsx).
+              ...(solicitudesEliminacion.length > 0
+                ? [
+                    sinRolUsers.length > 0 && <Divider key="divider-solicitudes" />,
+                    <MenuItem key="titulo-solicitudes" disabled sx={{ opacity: "1 !important" }}>
+                      <Typography variant="caption" fontWeight={600} color="text.primary">
+                        {solicitudesEliminacion.length} solicitud(es) de eliminación de documento PLD
+                      </Typography>
+                    </MenuItem>,
+                    ...solicitudesEliminacion.slice(0, 5).map((solicitud) => (
+                      <MenuItem
+                        key={solicitud.id_solicitud}
+                        component="a"
+                        href={solicitud.documento_kyc ? `/pld/${solicitud.documento_kyc}` : "/pld"}
+                        onClick={() => setAnchorEl(null)}
+                      >
+                        {solicitud.denominacion_doc || "Documento sin nombre"} — {solicitud.solicitado_por}
+                      </MenuItem>
+                    )),
+                  ].filter(Boolean)
+                : []),
             ]
           )}
         </Menu>
@@ -594,6 +642,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [checked, setChecked] = useState(false);
   const [session, setSession] = useState<SessionUser | null>(null);
   const [sinRolUsers, setSinRolUsers] = useState<IamUser[]>([]);
+  const [solicitudesEliminacion, setSolicitudesEliminacion] = useState<PldSolicitudEliminacionDoc[]>([]);
 
   useEffect(() => {
     getSession().then((session) => {
@@ -622,6 +671,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(SIN_ROL_CHANGED_EVENT, refreshSinRolUsers);
   }, [checked]);
 
+  // Solicitudes de eliminacion de documentos PLD pendientes (25/Ago/2026,
+  // requerimiento real del cliente: "en la sesion de admin en la campana
+  // debe llegar la notificacion") - solo se consulta si la sesion tiene el
+  // permiso de Admin (pld-documentos.editar, el mismo que aprueba/rechaza,
+  // ver app/pld/[idKyc]/page.tsx); un analista sin ese permiso nunca hace
+  // esta llamada. Poll cada 60s (no hay push/websocket todavia) para que
+  // una solicitud nueva llegue sin recargar la pagina.
+  useEffect(() => {
+    if (!checked || !session?.perm_keys.includes("pld-documentos.editar")) return;
+    function refreshSolicitudes() {
+      listSolicitudesEliminacion({ estado: "PENDIENTE" })
+        .then(setSolicitudesEliminacion)
+        .catch(() => undefined);
+    }
+    refreshSolicitudes();
+    const interval = setInterval(refreshSolicitudes, 60_000);
+    window.addEventListener(SOLICITUD_ELIMINACION_CHANGED_EVENT, refreshSolicitudes);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener(SOLICITUD_ELIMINACION_CHANGED_EVENT, refreshSolicitudes);
+    };
+  }, [checked, session]);
+
   if (!checked) {
     return null;
   }
@@ -645,6 +717,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         isMobile={isMobile}
         sinRolUsers={sinRolUsers}
         onVerTodos={() => router.push("/admin/usuarios?sinRol=true")}
+        solicitudesEliminacion={solicitudesEliminacion}
         session={session}
       />
 

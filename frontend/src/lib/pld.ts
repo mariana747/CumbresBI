@@ -65,6 +65,101 @@ export function urlVerDocumento(idKycDoc: string): string {
   return `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/ver/`;
 }
 
+// Solicitud de eliminacion de documento (25/Ago/2026, requerimiento real
+// del cliente) - desde que gestionar archivos quedo exclusivo de Admin, el
+// analista (pld-compliance.editar) ya no puede borrar un documento directo;
+// pide su eliminacion con una razon breve, solo Admin (pld-documentos.editar)
+// la aprueba (borra de verdad) o la rechaza. Ver
+// services/pld-service/pld/views.py::PldSolicitudEliminacionDocViewSet.
+export type PldSolicitudEstado = "PENDIENTE" | "APROBADA" | "RECHAZADA";
+
+export interface PldSolicitudEliminacionDoc {
+  id_solicitud: string;
+  documento: string | null;
+  documento_kyc: string | null;
+  denominacion_doc: string | null;
+  razon: string;
+  estado: PldSolicitudEstado;
+  solicitado_por: string;
+  solicitado_en: string;
+  resuelto_por: string | null;
+  resuelto_en: string | null;
+  comentario_resolucion: string | null;
+}
+
+// Sin ?kyc= propio en el backend (el endpoint no conoce el expediente,
+// solo el documento) - el llamador filtra el resultado contra los
+// id_kyc_doc del expediente que le interesa (ver
+// app/pld/[idKyc]/page.tsx).
+export async function listSolicitudesEliminacion(params?: {
+  estado?: PldSolicitudEstado;
+}): Promise<PldSolicitudEliminacionDoc[]> {
+  const query = new URLSearchParams();
+  if (params?.estado) query.set("estado", params.estado);
+  const qs = query.toString();
+  const response = await apiFetch(
+    "PLD",
+    `${PLD_API_BASE_URL}/api/solicitudes-eliminacion-doc/${qs ? `?${qs}` : ""}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export async function crearSolicitudEliminacion(params: {
+  idKycDoc: string;
+  razon: string;
+  solicitadoPor: string;
+}): Promise<PldSolicitudEliminacionDoc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/solicitudes-eliminacion-doc/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      documento: params.idKycDoc,
+      razon: params.razon,
+      solicitado_por: params.solicitadoPor,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+async function _resolverSolicitud(
+  idSolicitud: string,
+  accion: "aprobar" | "rechazar",
+  actorUserId?: string | null,
+  comentarioResolucion?: string
+): Promise<PldSolicitudEliminacionDoc> {
+  const response = await apiFetch(
+    "PLD",
+    `${PLD_API_BASE_URL}/api/solicitudes-eliminacion-doc/${idSolicitud}/${accion}/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor_user_id: actorUserId, comentario_resolucion: comentarioResolucion }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export const aprobarSolicitudEliminacion = (
+  idSolicitud: string,
+  actorUserId?: string | null,
+  comentarioResolucion?: string
+) => _resolverSolicitud(idSolicitud, "aprobar", actorUserId, comentarioResolucion);
+
+export const rechazarSolicitudEliminacion = (
+  idSolicitud: string,
+  actorUserId?: string | null,
+  comentarioResolucion?: string
+) => _resolverSolicitud(idSolicitud, "rechazar", actorUserId, comentarioResolucion);
+
 export async function listKyc(params?: {
   estadoLlenado?: string;
   search?: string;
