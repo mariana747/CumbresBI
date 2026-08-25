@@ -114,7 +114,15 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
     `sociedad` es CharField plano (referencia laxa a
     general_sociedades.rfc, ver models.py) - primer modelo de este servicio
     con ScopedManager real (SCOPE_FIELD_SOCIEDAD), a diferencia de los
-    catalogos compartidos de arriba."""
+    catalogos compartidos de arriba.
+
+    proyecto/propiedad/centro/duracion/fecha_proyectada/concepto_factura/
+    link_carpeta/permiso/autorizacion (25/Ago/2026): ya estaban en el
+    modelo (ERD original) pero no en este serializer - mismo hallazgo que
+    en TesoreriaFlujoSerializer. `label` (etiqueta compuesta que se ve en
+    el AppSheet original) y un supuesto `autorizado_por` NO son columnas
+    reales de esta tabla (confirmado contra el detalle real del AppSheet,
+    25/Ago/2026) - no se agregan aqui."""
 
     contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
@@ -128,15 +136,24 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "tipo",
             "fecha_generacion",
             "fecha_vencimiento",
+            "proyecto",
+            "propiedad",
+            "centro",
             "tipo_pago",
             "frecuencia",
+            "duracion",
+            "fecha_proyectada",
             "moneda",
             "monto_periodo_iva_mxp",
             "monto_total_iva_mxp",
+            "concepto_factura",
+            "link_carpeta",
             "requiere_factura",
             "status",
             "comentarios",
             "link_contrato",
+            "permiso",
+            "autorizacion",
             "created_at",
             "created_by",
             "updated_at",
