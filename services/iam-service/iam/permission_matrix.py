@@ -51,6 +51,17 @@ SERVICIOS = [
     # sin inventar una accion nueva (13/Ago/2026, fase 4 de la migracion
     # async con Cloud Tasks).
     "docint",
+    # Archivos del expediente KYC (pld-service, 25/Ago/2026 - requerimiento
+    # real del cliente: "nadie modifica en Drive, todo desde CumbresBI").
+    # Separado de "pld-compliance" a proposito: antes agregar/eliminar un
+    # documento y editar los datos escritos del expediente compartian el
+    # mismo perm_key (pld-compliance.crear/editar), asi que el analista
+    # podia hacer ambas cosas. Ahora solo Admin (SUPER_ADMIN) gestiona
+    # archivos (subir/eliminar); el analista conserva pld-compliance.editar
+    # para los datos, pero solo "L" aqui (ve los documentos, no los toca).
+    # PLD_APROBADOR no se toca (su rol es aprobar/rechazar el expediente,
+    # no gestionar archivos - eso todavia no esta contemplado).
+    "pld-documentos",
 ]
 
 ACCION_POR_LETRA = {"L": "leer", "C": "crear", "E": "editar", "A": "aprobar"}
@@ -61,10 +72,14 @@ ROLE_ACCESS = {
         "ventas-vivienda": "LCEA", "materiales": "LCEA", "rentas": "LCEA",
         "tesoreria": "LCEA", "facturacion-cfdi": "LCEA", "compras": "LCEA",
         "rrhh": "LCEA", "tickets": "LCEA", "audit": "L", "docint": "LC", "obra": "LCEA",
+        "pld-documentos": "LCEA",
     },
     "IAM_ADMIN": {"iam": "LCEA", "audit": "L"},
     "AUDITOR": {s: "L" for s in SERVICIOS},
-    "PLD_ANALISTA": {"iam": "L", "contrapartes": "L", "pld-compliance": "LCE", "docint": "LC"},
+    "PLD_ANALISTA": {
+        "iam": "L", "contrapartes": "L", "pld-compliance": "LCE", "docint": "LC",
+        "pld-documentos": "L",
+    },
     "PLD_APROBADOR": {"iam": "L", "contrapartes": "L", "pld-compliance": "LEA", "docint": "LC"},
     "VENTAS_ASESOR": {
         "iam": "L", "contrapartes": "L", "ventas-vivienda": "LCE", "materiales": "L",

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
+from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
 
 
 class PldContraparteDocSerializer(serializers.ModelSerializer):
@@ -42,6 +42,49 @@ class PldContraparteDocSerializer(serializers.ModelSerializer):
         ]
 
 
+class PldSolicitudEliminacionDocSerializer(serializers.ModelSerializer):
+    # 25/Ago/2026 (notificacion en la campana de AppShell, Admin) - el
+    # frontend necesita saber a que expediente ir sin tener que resolver
+    # documento->kyc por su cuenta. Solo valido mientras "documento" siga
+    # ahi (siempre el caso para una solicitud PENDIENTE, que es la unica
+    # que le importa a la campana) - None despues de aprobar (SET_NULL).
+    documento_kyc = serializers.SerializerMethodField()
+
+    def get_documento_kyc(self, obj):
+        return obj.documento.kyc_id if obj.documento else None
+
+    class Meta:
+        model = PldSolicitudEliminacionDoc
+        fields = [
+            "id_solicitud",
+            "documento",
+            "documento_kyc",
+            "denominacion_doc",
+            "razon",
+            "estado",
+            "solicitado_por",
+            "solicitado_en",
+            "resuelto_por",
+            "resuelto_en",
+            "comentario_resolucion",
+        ]
+        # estado/resuelto_por/resuelto_en/comentario_resolucion solo los
+        # escriben aprobar()/rechazar() (ver views.py), nunca un PATCH
+        # directo - el analista que crea la solicitud no puede resolverla
+        # el mismo con un update generico. denominacion_doc se deriva sola
+        # en perform_create (snapshot del documento real), el cliente no
+        # la manda.
+        read_only_fields = [
+            "id_solicitud",
+            "denominacion_doc",
+            "estado",
+            "solicitado_en",
+            "resuelto_por",
+            "resuelto_en",
+            "comentario_resolucion",
+        ]
+
+
 class PldContraparteKycSerializer(serializers.ModelSerializer):
     """Expediente KYC (Fase 2, Semana 7). documentos es de solo lectura aqui
     - se administran via PldContraparteDocViewSet, filtrando por ?kyc=<id>."""
@@ -53,6 +96,17 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         fields = [
             "id_kyc",
             "id_contraparte",
+            # 25/Ago/2026 (hallazgo real: el campo "Sociedad" del dialogo de
+            # crear expediente en el frontend nunca funciono - mandaba
+            # sociedad_rfc en el body, pero al no estar en esta lista de
+            # fields, DRF lo ignoraba en silencio. Por eso los expedientes
+            # de prueba tienen sociedad_rfc=NULL pese a que el analista si
+            # lo lleno).
+            "sociedad_rfc",
+            # sociedad_nombre (25/Ago/2026) - snapshot de solo lectura, ver
+            # comentario en models.py. Lo llena create() en views.py
+            # (validado contra iam-service), nunca el cliente a mano.
+            "sociedad_nombre",
             "nombre_completo",
             "fecha_nac_const",
             "pais_nac_const",
@@ -99,6 +153,8 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
             "fecha_vencimiento",
+            "politicas_aceptadas_en",
+            "veracidad_declarada_en",
         ]
         # estado_llenado_manual NO esta aqui a proposito: no se expone para
         # setear directo, solo se prende solo (ver update() abajo) cuando el
@@ -112,6 +168,16 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "aprobado_en",
             "created_at",
             "updated_at",
+            # Consentimiento (25/Ago/2026) - de solo lectura a proposito, no
+            # se pueden setear por PATCH normal (un analista no puede fingir
+            # el consentimiento del cliente). Solo
+            # PldTicketClienteViewSet.actualizar_datos los escribe, via
+            # serializer.save(**kwargs) que si puede pisar read_only_fields.
+            "politicas_aceptadas_en",
+            "veracidad_declarada_en",
+            # sociedad_nombre (25/Ago/2026) - se llena en create() (ver
+            # views.py), nunca por PATCH directo.
+            "sociedad_nombre",
         ]
 
     def update(self, instance, validated_data):

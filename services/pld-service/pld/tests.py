@@ -18,9 +18,14 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from .audit_utils import emitir_evento_auditoria
-from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
+from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
 from .ticket_utils import hash_token
-from .views import PldContraparteDocViewSet, PldContraparteKycViewSet, PldTicketClienteViewSet
+from .views import (
+    PldContraparteDocViewSet,
+    PldContraparteKycViewSet,
+    PldSolicitudEliminacionDocViewSet,
+    PldTicketClienteViewSet,
+)
 
 RFC_TIZARA = "#####1"
 RFC_CAPITAL = "#####2"
@@ -204,14 +209,78 @@ class CumplimientoDePermisosEnEscrituraTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertTrue(PldContraparteDoc.objects.filter(pk=doc.id_kyc_doc).exists())
 
-    def test_borrar_documento_con_permiso_editar_si_funciona(self):
+    def test_borrar_documento_con_permiso_pld_compliance_editar_ya_no_alcanza(self):
+        # 25/Ago/2026 (requerimiento real del cliente: "nadie modifica en
+        # Drive, todo desde CumbresBI") - gestionar archivos (subir/borrar)
+        # se separo de editar datos del expediente. "pld-compliance.editar"
+        # ya no basta para borrar un documento, ver test siguiente.
         doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE duplicado")
         request = self.factory.delete(f"/api/kyc-docs/{doc.id_kyc_doc}/")
         request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
         view = PldContraparteDocViewSet.as_view({"delete": "destroy"})
         response = view(request, pk=doc.id_kyc_doc)
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(PldContraparteDoc.objects.filter(pk=doc.id_kyc_doc).exists())
+
+    def test_borrar_documento_con_permiso_pld_documentos_editar_si_funciona(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE duplicado")
+        request = self.factory.delete(f"/api/kyc-docs/{doc.id_kyc_doc}/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.editar",))
+        view = PldContraparteDocViewSet.as_view({"delete": "destroy"})
+        response = view(request, pk=doc.id_kyc_doc)
         self.assertEqual(response.status_code, 204)
         self.assertFalse(PldContraparteDoc.objects.filter(pk=doc.id_kyc_doc).exists())
+
+
+class ValidacionSociedadAlCrearTests(TestCase):
+    """25/Ago/2026 (requerimiento real del cliente: sociedad obligatoria,
+    elegida de un dropdown real contra el catalogo de iam-service, no texto
+    libre) - PldContraparteKycViewSet.create."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",))
+
+    def _crear(self, sociedad_rfc):
+        # Sin id_contraparte a proposito - el modelo lo autogenera (ver
+        # _short_id); si se manda, dispara ADEMAS _existe_contraparte_en_
+        # tesoreria, que usa el mismo requests.get mockeado aqui y
+        # contaminaria estas pruebas (son solo de la validacion de sociedad).
+        body = {"created_by": "usr00001", "updated_by": "usr00001"}
+        if sociedad_rfc is not None:
+            body["sociedad_rfc"] = sociedad_rfc
+        request = self.factory.post("/api/kyc/", body, format="json")
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_sin_sociedad_rfc_da_400(self):
+        response = self._crear(None)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sociedad_rfc", response.data)
+
+    def test_sociedad_inexistente_da_400(self):
+        with patch("pld.views.requests.get", return_value=Mock(status_code=404)):
+            response = self._crear(RFC_TIZARA)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sociedad_rfc", response.data)
+
+    def test_sociedad_real_guarda_el_nombre(self):
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara SA de CV"}),
+        ):
+            response = self._crear(RFC_TIZARA)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["sociedad_nombre"], "Tizara SA de CV")
+
+    def test_iam_service_caido_deja_pasar_sin_nombre(self):
+        # Fail-open, mismo criterio que _existe_contraparte_en_tesoreria -
+        # un problema de red no debe bloquear el alta de un expediente real.
+        with patch("pld.views.requests.get", side_effect=requests.RequestException()):
+            response = self._crear(RFC_TIZARA)
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.data["sociedad_nombre"])
 
 
 class PldTicketClienteTests(TestCase):
@@ -654,7 +723,12 @@ class ActualizarDatosPublicoTests(TestCase):
     def test_actualizar_datos_emite_evento_de_auditoria(self):
         request = self.factory.post(
             "/api/ticket-cliente/actualizar_datos/",
-            {"token": "token-datos", "campos": {"telefono_sms": "5511112222"}},
+            {
+                "token": "token-datos",
+                "campos": {"telefono_sms": "5511112222"},
+                "acepta_politicas": True,
+                "declara_veracidad": True,
+            },
             format="json",
         )
         request.effective_scope = EffectiveScope.anonymous()
@@ -664,7 +738,37 @@ class ActualizarDatosPublicoTests(TestCase):
         payload = mock_post.call_args.kwargs["json"]
         self.assertEqual(payload["accion"], "pld_contrapartes_kyc.actualizar_datos")
         self.assertEqual(payload["actor_user_id"], "externo")
-        self.assertEqual(payload["valores_nuevos"]["campos"], {"telefono_sms": "5511112222"})
+
+    def test_actualizar_datos_sin_consentimiento_da_400(self):
+        # 25/Ago/2026 (requerimiento real del cliente) - el backend rechaza
+        # la actualizacion si falta cualquiera de los dos consentimientos,
+        # aunque el frontend ya bloquee el boton (defensa en profundidad).
+        request = self.factory.post(
+            "/api/ticket-cliente/actualizar_datos/",
+            {"token": "token-datos", "campos": {"telefono_sms": "5511112222"}, "acepta_politicas": True},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        response = self.view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_actualizar_datos_guarda_el_consentimiento(self):
+        request = self.factory.post(
+            "/api/ticket-cliente/actualizar_datos/",
+            {
+                "token": "token-datos",
+                "campos": {"telefono_sms": "5511112222"},
+                "acepta_politicas": True,
+                "declara_veracidad": True,
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch("requests.post", return_value=Mock(status_code=200)):
+            self.view(request)
+        self.kyc.refresh_from_db()
+        self.assertIsNotNone(self.kyc.politicas_aceptadas_en)
+        self.assertIsNotNone(self.kyc.veracidad_declarada_en)
 
 
 class AuditoriaMotorDocumentalTests(TestCase):
@@ -680,7 +784,10 @@ class AuditoriaMotorDocumentalTests(TestCase):
         self.factory = APIRequestFactory()
         self.scope = EffectiveScope(
             is_global=True,
-            perm_keys=("pld-compliance.aprobar", "pld-compliance.editar", "pld-compliance.crear"),
+            perm_keys=(
+                "pld-compliance.aprobar", "pld-compliance.editar", "pld-compliance.crear",
+                "pld-documentos.crear", "pld-documentos.editar",
+            ),
         )
         self.kyc = _kyc("cp000200", RFC_TIZARA)
 
@@ -856,66 +963,161 @@ class EmitirEventoAuditoriaTests(TestCase):
 
 
 class SincronizarDocumentosDriveTests(TestCase):
-    """verificar_documentos (18/Ago/2026): PLD es Drive-first a proposito
-    (no hay upload interno propio, ver memoria de sesion
-    "google-picker-para-contratos-no-pld") - el analista puede subir un
-    archivo directo en drive.google.com, asi que "Verificar en Drive" debe
-    sincronizar en ambos sentidos: borrar lo que ya no existe (ya probado
-    en otras clases via _limpiar_documentos_borrados_en_drive) Y detectar
-    archivos nuevos que todavia no tienen PldContraparteDoc."""
+    """verificar_documentos (25/Ago/2026, requerimiento real del cliente:
+    "nadie modifica en Drive, todo desde CumbresBI") - revierte la decision
+    "Drive-first a proposito" del 18/Ago/2026: "Verificar en Drive" ya NO
+    detecta ni da de alta archivos subidos directo en drive.google.com (eso
+    legitimaba justo la edicion manual ahora prohibida). Solo se queda el
+    borrado de seguridad de documentos cuyo archivo ya no existe, probado
+    en otras clases via _limpiar_documentos_borrados_en_drive."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
         self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
         self.kyc = _kyc("cp000400", RFC_TIZARA)
 
-    def _verificar(self, respuesta_list_files):
+    def _verificar(self, respuesta_list_files=None):
         request = self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/verificar_documentos/", {"actor_user_id": "usr00007"})
         request.effective_scope = self.scope
         view = PldContraparteKycViewSet.as_view({"post": "verificar_documentos"})
-        with patch("pld.views.requests.get", return_value=Mock(status_code=200, json=lambda: respuesta_list_files)), \
-             patch("pld.audit_utils.requests.post") as mock_audit:
-            response = view(request, pk=self.kyc.id_kyc)
-        return response, mock_audit
+        response = view(request, pk=self.kyc.id_kyc)
+        return response
 
-    def test_crea_un_documento_por_cada_archivo_nuevo_en_drive(self):
-        respuesta = {
-            "archivos": [
-                {"file_id": "drive-abc", "nombre": "INE.pdf", "mime_type": "application/pdf", "web_view_link": "https://drive/abc"},
-            ]
-        }
-        response, mock_audit = self._verificar(respuesta)
+    def test_no_detecta_ni_agrega_archivos_subidos_directo_en_drive(self):
+        # Un archivo nuevo aparece del lado de Drive (ej. alguien lo subio a
+        # mano, algo ahora prohibido pero que puede pasar de todos modos) -
+        # verificar_documentos ya NO lo debe dar de alta.
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"archivos": []}),
+        ):
+            response = self._verificar()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data["documentos_agregados"]), 1)
-        doc = PldContraparteDoc.objects.get(kyc=self.kyc, drive_file_id="drive-abc")
-        self.assertEqual(doc.denominacion, "INE.pdf")
-        self.assertEqual(doc.status, PldContraparteDoc.STATUS_ENTREGADO)
-        self.assertEqual(doc.created_by, "usr00007")
+        self.assertNotIn("documentos_agregados", response.data)
+        self.assertEqual(PldContraparteDoc.objects.filter(kyc=self.kyc).count(), 0)
 
-        payload = mock_audit.call_args.kwargs["json"]
-        self.assertEqual(payload["accion"], "pld_contrapartes_docs.detectar_en_drive")
-        self.assertEqual(payload["actor_user_id"], "usr00007")
-
-    def test_no_duplica_un_archivo_ya_vinculado(self):
-        PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE.pdf", drive_file_id="drive-abc")
-        respuesta = {"archivos": [{"file_id": "drive-abc", "nombre": "INE.pdf"}]}
-        response, mock_audit = self._verificar(respuesta)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["documentos_agregados"], [])
-        mock_audit.assert_not_called()
-        self.assertEqual(PldContraparteDoc.objects.filter(kyc=self.kyc, drive_file_id="drive-abc").count(), 1)
-
-    def test_sin_archivos_nuevos_no_crea_nada(self):
-        response, mock_audit = self._verificar({"archivos": []})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["documentos_agregados"], [])
-        mock_audit.assert_not_called()
-
-    def test_drive_service_caido_no_truena_y_no_agrega_nada(self):
+    def test_drive_service_caido_no_truena(self):
         request = self.factory.post(f"/api/kyc/{self.kyc.id_kyc}/verificar_documentos/", {})
         request.effective_scope = self.scope
         view = PldContraparteKycViewSet.as_view({"post": "verificar_documentos"})
         with patch("pld.views.requests.get", side_effect=requests.RequestException()):
             response = view(request, pk=self.kyc.id_kyc)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["documentos_agregados"], [])
+
+
+class PermisosGestionDeArchivosTests(TestCase):
+    """25/Ago/2026 (requerimiento real del cliente): agregar/eliminar un
+    archivo es exclusivo de Admin (pld-documentos.crear/editar), separado
+    de editar los datos escritos del expediente (pld-compliance.editar,
+    que PLD_ANALISTA conserva)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000401", RFC_TIZARA)
+
+    def test_crear_documento_requiere_pld_documentos_crear(self):
+        request = self.factory.post(
+            "/api/kyc-docs/",
+            {"kyc": self.kyc.id_kyc, "denominacion": "INE", "created_by": "usr00001", "updated_by": "usr00001"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",))
+        view = PldContraparteDocViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_documento_con_pld_documentos_crear_si_funciona(self):
+        request = self.factory.post(
+            "/api/kyc-docs/",
+            {"kyc": self.kyc.id_kyc, "denominacion": "INE", "created_by": "usr00001", "updated_by": "usr00001"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.crear",))
+        view = PldContraparteDocViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+
+
+class SolicitudEliminacionDocTests(TestCase):
+    """25/Ago/2026 (requerimiento real del cliente) - el analista ya no
+    puede borrar un documento directo, pide su eliminacion con una razon;
+    solo Admin la aprueba (borra de verdad) o la rechaza (no toca nada)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000500", RFC_TIZARA)
+        self.doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE duplicado")
+
+    def _crear_solicitud(self, scope):
+        request = self.factory.post(
+            "/api/solicitudes-eliminacion-doc/",
+            {
+                "documento": self.doc.id_kyc_doc,
+                "razon": "Es un duplicado, ya subi el correcto",
+                "solicitado_por": "usr00001",
+            },
+            format="json",
+        )
+        request.effective_scope = scope
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_analista_sin_permiso_no_puede_solicitar(self):
+        response = self._crear_solicitud(EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_analista_con_pld_compliance_editar_si_puede_solicitar(self):
+        response = self._crear_solicitud(EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",)))
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["estado"], PldSolicitudEliminacionDoc.ESTADO_PENDIENTE)
+
+    def test_analista_no_puede_aprobar_su_propia_solicitud(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001"
+        )
+        request = self.factory.post(f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/aprobar/", {})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "aprobar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(PldContraparteDoc.objects.filter(pk=self.doc.pk).exists())
+
+    def test_admin_aprueba_borra_el_documento(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001"
+        )
+        request = self.factory.post(
+            f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/aprobar/",
+            {"actor_user_id": "usr00002"},
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "aprobar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], PldSolicitudEliminacionDoc.ESTADO_APROBADA)
+        self.assertFalse(PldContraparteDoc.objects.filter(pk=self.doc.pk).exists())
+
+    def test_admin_rechaza_no_toca_el_documento(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001"
+        )
+        request = self.factory.post(
+            f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/rechazar/",
+            {"actor_user_id": "usr00002", "comentario_resolucion": "No es duplicado, son documentos distintos"},
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "rechazar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], PldSolicitudEliminacionDoc.ESTADO_RECHAZADA)
+        self.assertTrue(PldContraparteDoc.objects.filter(pk=self.doc.pk).exists())
+
+    def test_no_puede_resolver_una_solicitud_ya_resuelta(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001", estado=PldSolicitudEliminacionDoc.ESTADO_APROBADA
+        )
+        request = self.factory.post(f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/rechazar/", {})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "rechazar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 400)

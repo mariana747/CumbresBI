@@ -26,11 +26,19 @@ class PldContraparteKyc(models.Model):
         (ESTADO_ENTREGADO, "Entregado"),
     ]
 
+    # 5 opciones estandar de la industria para Mexico (25/Ago/2026 - antes
+    # solo tenia Soltero/Casado, "se va a ampliar" segun Mariana).
     CIVIL_SOLTERO = "SOLTERO"
     CIVIL_CASADO = "CASADO"
+    CIVIL_DIVORCIADO = "DIVORCIADO"
+    CIVIL_VIUDO = "VIUDO"
+    CIVIL_UNION_LIBRE = "UNION_LIBRE"
     ESTADO_CIVIL_CHOICES = [
-        (CIVIL_SOLTERO, "Soltero"),
-        (CIVIL_CASADO, "Casado"),
+        (CIVIL_SOLTERO, "Soltero(a)"),
+        (CIVIL_CASADO, "Casado(a)"),
+        (CIVIL_DIVORCIADO, "Divorciado(a)"),
+        (CIVIL_VIUDO, "Viudo(a)"),
+        (CIVIL_UNION_LIBRE, "Unión libre / Concubinato"),
     ]
 
     # Estado de cuenta (17/Ago/2026, vista de detalle del expediente) -
@@ -72,7 +80,20 @@ class PldContraparteKyc(models.Model):
     # expediente KYC, para filtrar por SCOPE_FIELD_SOCIEDAD. blank/null
     # porque los expedientes creados antes de esta columna no tienen valor
     # todavia (backfill pendiente).
+    #
+    # 25/Ago/2026 (requerimiento real del cliente: "hay que implementar
+    # sociedad... se ponga en automatico el nombre de la sociedad") - se
+    # vuelve obligatorio para expedientes NUEVOS (ver
+    # PldContraparteKycViewSet.create), elegido de un dropdown real contra
+    # el catalogo de iam-service, no texto libre. Los 3 expedientes viejos
+    # con NULL se quedan asi (backfill aparte, fuera de este cambio).
     sociedad_rfc = models.CharField(max_length=13, blank=True, null=True)
+    # Snapshot del nombre de la sociedad al momento de crear el expediente
+    # (mismo criterio que PldSolicitudEliminacionDoc.denominacion_doc) - se
+    # usa para mostrarselo al cliente en el formulario publico
+    # (pld-ticket/[token]/page.tsx) sin que esa pagina publica, sin sesion,
+    # tenga que llamar a iam-service (que si requiere permiso real).
+    sociedad_nombre = models.CharField(max_length=250, blank=True, null=True)
     # A partir de aqui, los campos de "datos del cliente" son opcionales al
     # crear (decision 17/Ago/2026, Opcion B: expediente minimo autonomo -
     # ver memoria de sesion "pld-crear-expediente-opcion-b"): el analista
@@ -146,6 +167,20 @@ class PldContraparteKyc(models.Model):
     # define cuando el analista aprueba el expediente, no antes.
     fecha_vencimiento = models.DateField(blank=True, null=True)
 
+    # Consentimiento del cliente externo (25/Ago/2026, requerimiento real
+    # del cliente: el formulario publico de pld-ticket/[token]/page.tsx
+    # exige aceptar el aviso de privacidad y declarar bajo protesta de
+    # decir verdad antes de poder guardar sus datos). Se guardan aqui, no
+    # solo se validan en el frontend, para que quede evidencia real de
+    # cuando y desde donde se dio el consentimiento - ver
+    # PldTicketClienteViewSet.actualizar_datos. Ambos se re-escriben cada
+    # vez que el cliente vuelve a guardar datos con el mismo link (no solo
+    # la primera vez), asi el timestamp siempre refleja la ultima vez que
+    # confirmo que sus datos actuales son ciertos.
+    politicas_aceptadas_en = models.DateTimeField(blank=True, null=True)
+    veracidad_declarada_en = models.DateTimeField(blank=True, null=True)
+    consentimiento_ip = models.CharField(max_length=45, blank=True, null=True)
+
     # SCOPE_FIELD_SOCIEDAD ya resuelto (punto 2 del plan de Fase 1, ver
     # sociedad_rfc arriba). Un usuario de alcance SOCIEDAD ya puede ver los
     # expedientes de su(s) sociedad(es) - ya no es solo GLOBAL/nada, salvo
@@ -212,6 +247,72 @@ class PldContraparteDoc(models.Model):
 
     def __str__(self):
         return self.id_kyc_doc
+
+
+class PldSolicitudEliminacionDoc(models.Model):
+    """Solicitud de eliminacion de un documento (25/Ago/2026, requerimiento
+    real del cliente): desde que se separo "gestionar archivos" de "editar
+    datos" (ver PldContraparteDoc/permission_matrix.py, pld-documentos
+    exclusivo Admin), el analista ya no puede borrar un archivo el mismo -
+    si de verdad hace falta (ej. un duplicado viejo), manda esta solicitud
+    con una razon breve; solo Admin la aprueba o la rechaza. Aprobar borra
+    el documento de verdad (mismo criterio de auditoria que el destroy()
+    directo); rechazar solo cierra la solicitud, el documento se queda.
+
+    Quien puede CREAR una solicitud (pld-compliance.editar, mismo permiso
+    que ya tiene el analista para editar el expediente - no es un permiso
+    nuevo) es distinto de quien puede RESOLVERLA (pld-documentos.editar,
+    Admin) - ver PldSolicitudEliminacionDocViewSet.get_permissions."""
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_APROBADA = "APROBADA"
+    ESTADO_RECHAZADA = "RECHAZADA"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_APROBADA, "Aprobada"),
+        (ESTADO_RECHAZADA, "Rechazada"),
+    ]
+
+    id_solicitud = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    # on_delete=SET_NULL (no CASCADE) a proposito - hallazgo real: con
+    # CASCADE, aprobar() borra el documento y esa misma cascada borraba de
+    # paso el registro de la solicitud, perdiendo el historial de quien
+    # aprobo que. La solicitud debe sobrevivir a la eliminacion del
+    # documento que la origino.
+    documento = models.ForeignKey(
+        PldContraparteDoc,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="id_kyc_doc",
+        related_name="solicitudes_eliminacion",
+    )
+    # Snapshot al momento de crear la solicitud (mismo motivo que
+    # on_delete=SET_NULL arriba): denominacion/sociedad_rfc via
+    # "documento__..." dejan de resolver en cuanto el documento se borra -
+    # sin esto, una solicitud ya aprobada se volveria invisible para un
+    # usuario de alcance SOCIEDAD (el join a traves de documento=NULL no
+    # regresa nada) y perderia el nombre del archivo en pantalla.
+    denominacion_doc = models.CharField(max_length=250, blank=True, null=True)
+    sociedad_rfc = models.CharField(max_length=13, blank=True, null=True)
+    razon = models.CharField(max_length=500)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    solicitado_por = models.CharField(max_length=8)
+    solicitado_en = models.DateTimeField(auto_now_add=True)
+    resuelto_por = models.CharField(max_length=8, blank=True, null=True)
+    resuelto_en = models.DateTimeField(blank=True, null=True)
+    comentario_resolucion = models.CharField(max_length=500, blank=True, null=True)
+
+    # Via la columna propia sociedad_rfc (snapshot), no un join en vivo a
+    # traves de documento - sobrevive a que el documento se borre.
+    SCOPE_FIELD_SOCIEDAD = "sociedad_rfc"
+    objects = ScopedManager()
+
+    class Meta:
+        db_table = "pld_solicitudes_eliminacion_doc"
+
+    def __str__(self):
+        return self.id_solicitud
 
 
 class PldTicketCliente(models.Model):
