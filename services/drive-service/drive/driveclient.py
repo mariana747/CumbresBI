@@ -48,19 +48,36 @@ def _modo_real() -> bool:
     return bool(settings.DRIVE_SERVICE_ACCOUNT_JSON)
 
 
+_TIMEOUT_SEGUNDOS = 30
+
+
 def _servicio_real():
     """Construye el cliente de googleapiclient - import perezoso a proposito
     (google-api-python-client/google-auth solo hacen falta en modo real; el
     modo simulado no debe requerir que esten instalados para correr, ej. en
-    pruebas unitarias rapidas)."""
+    pruebas unitarias rapidas).
+
+    25/Ago/2026 (hallazgo real: una subida se quedaba "cargando" para
+    siempre en el formulario publico, sin log ni error) - build() con
+    credentials= construye su httplib2.Http() interno SIN timeout, asi que
+    un problema de red hacia Google (DNS lento, conexion colgada) bloqueaba
+    el worker de gunicorn indefinidamente, sin fallar nunca. Se arma el
+    Http explicito con timeout y se pasa como http= (no se puede pasar
+    credentials= y http= juntos) para que cualquier llamada falle rapido y
+    caiga en los except DriveError/502 que ya existian, en vez de colgarse."""
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
+    import google_auth_httplib2
+    import httplib2
 
     info = json.loads(settings.DRIVE_SERVICE_ACCOUNT_JSON)
     credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
     if settings.DRIVE_IMPERSONATE_SUBJECT:
         credentials = credentials.with_subject(settings.DRIVE_IMPERSONATE_SUBJECT)
-    return build("drive", "v3", credentials=credentials, cache_discovery=False)
+    http_autorizado = google_auth_httplib2.AuthorizedHttp(
+        credentials, http=httplib2.Http(timeout=_TIMEOUT_SEGUNDOS)
+    )
+    return build("drive", "v3", http=http_autorizado, cache_discovery=False)
 
 
 def ensure_folder_path(ruta: str) -> str:
