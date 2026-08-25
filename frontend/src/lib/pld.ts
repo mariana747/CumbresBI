@@ -29,6 +29,9 @@ export interface PldContraparteDoc {
 export interface PldContraparteKyc {
   id_kyc: string;
   id_contraparte: string;
+  // Snapshot de solo lectura (25/Ago/2026) - ver
+  // services/pld-service/pld/models.py::sociedad_nombre.
+  sociedad_nombre: string | null;
   nombre_completo: string | null;
   curp: string | null;
   nacionalidad: string | null;
@@ -192,7 +195,11 @@ export async function getKyc(idKyc: string): Promise<PldContraparteKyc & PldDato
 // (pld-ticket/[token]/page.tsx, actualizarDatosPublico).
 export async function createKyc(params: {
   createdBy: string;
-  sociedadRfc?: string;
+  // 25/Ago/2026 (requerimiento real del cliente) - obligatorio, elegido de
+  // un dropdown real (lib/iam.ts::listSociedades) - el backend tambien lo
+  // exige y valida contra iam-service, ver pld/views.py::
+  // PldContraparteKycViewSet.create.
+  sociedadRfc: string;
   idContraparte?: string;
 }): Promise<PldContraparteKyc> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/`, {
@@ -201,7 +208,7 @@ export async function createKyc(params: {
     body: JSON.stringify({
       created_by: params.createdBy,
       updated_by: params.createdBy,
-      sociedad_rfc: params.sociedadRfc || undefined,
+      sociedad_rfc: params.sociedadRfc,
       id_contraparte: params.idContraparte || undefined,
     }),
   });

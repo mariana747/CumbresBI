@@ -31,6 +31,7 @@ import AppShell from "@/components/AppShell";
 import ContraparteSelector from "@/components/ContraparteSelector";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { PldContraparteKyc, createKyc, listKyc } from "@/lib/pld";
 import { TesoreriaContraparte } from "@/lib/tesoreria";
 
@@ -72,6 +73,18 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   const [creando, setCreando] = useState(false);
   const [creandoError, setCreandoError] = useState<string | null>(null);
 
+  // Catalogo real de sociedades (25/Ago/2026, requerimiento real del
+  // cliente: "hay que implementar sociedad... se ponga en automatico el
+  // nombre") - antes era un TextField de RFC libre (opcional, y de hecho
+  // nunca funcionaba, ver pld-service/pld/serializers.py); ahora es
+  // obligatorio y se elige de este dropdown contra iam-service.
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  useEffect(() => {
+    listSociedades()
+      .then(setSociedades)
+      .catch(() => setSociedades([]));
+  }, []);
+
   function cargar() {
     setLoading(true);
     setError(null);
@@ -98,12 +111,16 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       setCreandoError("Busca o crea la contraparte antes de continuar.");
       return;
     }
+    if (!sociedadRfc) {
+      setCreandoError("Elige la sociedad antes de continuar.");
+      return;
+    }
     setCreando(true);
     setCreandoError(null);
     try {
       await createKyc({
         createdBy: session.user_id,
-        sociedadRfc: sociedadRfc || undefined,
+        sociedadRfc,
         idContraparte: contraparte.id_contraparte,
       });
       setDialogoAbierto(false);
@@ -181,13 +198,21 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                 label={tipoContraparte === "cliente" ? "Cliente" : "Proveedor"}
                 tipo={tipoContraparte}
               />
-              <TextField
-                size="small"
-                fullWidth
-                label="Sociedad (RFC, opcional)"
-                value={sociedadRfc}
-                onChange={(e) => setSociedadRfc(e.target.value)}
-              />
+              <FormControl size="small" fullWidth required>
+                <InputLabel id="sociedad-label">Sociedad</InputLabel>
+                <Select
+                  labelId="sociedad-label"
+                  label="Sociedad"
+                  value={sociedadRfc}
+                  onChange={(e) => setSociedadRfc(e.target.value)}
+                >
+                  {sociedades.map((sociedad) => (
+                    <MenuItem key={sociedad.rfc} value={sociedad.rfc}>
+                      {sociedad.razon_social || sociedad.rfc}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Stack>
             {creandoError && (
               <Alert severity="error" sx={{ mt: 2 }}>
@@ -197,7 +222,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setDialogoAbierto(false)}>Cancelar</Button>
-            <Button type="submit" variant="contained" disabled={creando || !contraparte}>
+            <Button type="submit" variant="contained" disabled={creando || !contraparte || !sociedadRfc}>
               {creando ? <CircularProgress size={20} color="inherit" /> : "Crear expediente"}
             </Button>
           </DialogActions>

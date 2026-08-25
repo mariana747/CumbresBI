@@ -165,6 +165,11 @@ export default function PldTicketPage() {
   const [estado, setEstado] = useState<"cargando" | "valido" | "invalido">("cargando");
   const [error, setError] = useState<string | null>(null);
   const [idContraparte, setIdContraparte] = useState<string | null>(null);
+  // 25/Ago/2026 (requerimiento real del cliente: mostrar la sociedad al
+  // cliente en esta pantalla) - snapshot de solo lectura del expediente
+  // (ver services/pld-service/pld/models.py::sociedad_nombre), no requiere
+  // que esta pagina publica (sin sesion) llame a iam-service.
+  const [sociedadNombre, setSociedadNombre] = useState<string | null>(null);
   const [tieneExpediente, setTieneExpediente] = useState(false);
 
   // Mismo patron que MotorDocumentalDialog: todos los archivos elegidos
@@ -209,6 +214,7 @@ export default function PldTicketPage() {
     validarTicketCliente(params.token)
       .then((resultado) => {
         setIdContraparte(resultado.kyc?.id_contraparte ?? null);
+        setSociedadNombre(resultado.kyc?.sociedad_nombre ?? null);
         setTieneExpediente(Boolean(resultado.kyc));
         if (resultado.kyc) {
           const todosLosCampos = GRUPOS_DATOS.flatMap((g) => g.campos.map((c) => c.campo));
@@ -360,6 +366,13 @@ export default function PldTicketPage() {
                     ? `Tu enlace es válido para el expediente ${idContraparte}.`
                     : "Tu enlace es válido."}
                 </Typography>
+                {/* 25/Ago/2026 (requerimiento real del cliente) - para que
+                    sepa con cual empresa del grupo esta tratando. */}
+                {sociedadNombre && (
+                  <Typography variant="body2" color="text.secondary">
+                    Estás llenando tus datos para <strong>{sociedadNombre}</strong>.
+                  </Typography>
+                )}
               </Stack>
 
               {!tieneExpediente ? (
