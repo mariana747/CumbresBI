@@ -37,6 +37,20 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Sin base de datos - el Gateway no tiene modelos propios.
 DATABASES = {}
 
+# 25/Ago/2026 (hallazgo real: una subida de 3 archivos ~4MB combinados se
+# quedaba "cargando" para siempre en el formulario publico de PLD, sin
+# llegar nunca a pld-service ni a drive-service) - gateway/views.py::proxy
+# lee request.body ANTES de reenviar (ver comentario ahi), asi que el
+# default de Django (2.5MB) rechazaba el body completo con
+# RequestDataTooBig antes de que la request pasara por aqui. pld-service ya
+# habia subido su propio limite a 12MB (services/pld-service/config/
+# settings.py, para su lote de 5 archivos x 2MB) pero el Gateway - el
+# primer punto que ve la request - se quedo en el default, asi que era el
+# eslabon mas debil. Mismo valor aqui para no repetir el problema con
+# cualquier otro servicio que suba archivos a traves del Gateway.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+
 # El frontend (Next.js, localhost:3000) es el unico origen que llama al
 # Gateway directo desde el navegador. CORS_ALLOW_CREDENTIALS=True porque la
 # cookie de sesion (cumbresbi_session, puesta por iam-service via el Gateway)
