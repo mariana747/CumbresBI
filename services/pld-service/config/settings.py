@@ -158,6 +158,12 @@ AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080"
 # catalogo maestro, antes de guardar el expediente KYC.
 TESORERIA_SERVICE_URL = env("TESORERIA_SERVICE_URL", default="http://tesoreria-service:8080")
 
+# iam-service (25/Ago/2026, requerimiento real del cliente: la sociedad se
+# elige de un dropdown real, no se escribe a mano) -
+# PldContraparteKycViewSet.create la usa para validar que sociedad_rfc
+# exista de verdad en el catalogo de sociedades (general_sociedades).
+IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
+
 # Secreto compartido servicio-a-servicio (docs/architecture/README.md sec.
 # 11: "secretos gestionados... secret key de reCAPTCHA"; este es distinto,
 # ver mas abajo) - PldTicketClienteViewSet.subir_documento es PUBLICO (sin

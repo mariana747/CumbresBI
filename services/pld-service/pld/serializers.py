@@ -96,6 +96,13 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         fields = [
             "id_kyc",
             "id_contraparte",
+            # 25/Ago/2026 (hallazgo real: el campo "Sociedad" del dialogo de
+            # crear expediente en el frontend nunca funciono - mandaba
+            # sociedad_rfc en el body, pero al no estar en esta lista de
+            # fields, DRF lo ignoraba en silencio. Por eso los expedientes
+            # de prueba tienen sociedad_rfc=NULL pese a que el analista si
+            # lo lleno).
+            "sociedad_rfc",
             "nombre_completo",
             "fecha_nac_const",
             "pais_nac_const",
