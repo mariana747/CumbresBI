@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
+from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
 
 
 class PldContraparteDocSerializer(serializers.ModelSerializer):
@@ -39,6 +39,49 @@ class PldContraparteDocSerializer(serializers.ModelSerializer):
             "mime_type",
             "tamano_bytes",
             "subido_en",
+        ]
+
+
+class PldSolicitudEliminacionDocSerializer(serializers.ModelSerializer):
+    # 25/Ago/2026 (notificacion en la campana de AppShell, Admin) - el
+    # frontend necesita saber a que expediente ir sin tener que resolver
+    # documento->kyc por su cuenta. Solo valido mientras "documento" siga
+    # ahi (siempre el caso para una solicitud PENDIENTE, que es la unica
+    # que le importa a la campana) - None despues de aprobar (SET_NULL).
+    documento_kyc = serializers.SerializerMethodField()
+
+    def get_documento_kyc(self, obj):
+        return obj.documento.kyc_id if obj.documento else None
+
+    class Meta:
+        model = PldSolicitudEliminacionDoc
+        fields = [
+            "id_solicitud",
+            "documento",
+            "documento_kyc",
+            "denominacion_doc",
+            "razon",
+            "estado",
+            "solicitado_por",
+            "solicitado_en",
+            "resuelto_por",
+            "resuelto_en",
+            "comentario_resolucion",
+        ]
+        # estado/resuelto_por/resuelto_en/comentario_resolucion solo los
+        # escriben aprobar()/rechazar() (ver views.py), nunca un PATCH
+        # directo - el analista que crea la solicitud no puede resolverla
+        # el mismo con un update generico. denominacion_doc se deriva sola
+        # en perform_create (snapshot del documento real), el cliente no
+        # la manda.
+        read_only_fields = [
+            "id_solicitud",
+            "denominacion_doc",
+            "estado",
+            "solicitado_en",
+            "resuelto_por",
+            "resuelto_en",
+            "comentario_resolucion",
         ]
 
 

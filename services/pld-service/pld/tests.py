@@ -18,9 +18,14 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from .audit_utils import emitir_evento_auditoria
-from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
+from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
 from .ticket_utils import hash_token
-from .views import PldContraparteDocViewSet, PldContraparteKycViewSet, PldTicketClienteViewSet
+from .views import (
+    PldContraparteDocViewSet,
+    PldContraparteKycViewSet,
+    PldSolicitudEliminacionDocViewSet,
+    PldTicketClienteViewSet,
+)
 
 RFC_TIZARA = "#####1"
 RFC_CAPITAL = "#####2"
@@ -980,3 +985,88 @@ class PermisosGestionDeArchivosTests(TestCase):
         view = PldContraparteDocViewSet.as_view({"post": "create"})
         response = view(request)
         self.assertEqual(response.status_code, 201)
+
+
+class SolicitudEliminacionDocTests(TestCase):
+    """25/Ago/2026 (requerimiento real del cliente) - el analista ya no
+    puede borrar un documento directo, pide su eliminacion con una razon;
+    solo Admin la aprueba (borra de verdad) o la rechaza (no toca nada)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000500", RFC_TIZARA)
+        self.doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE duplicado")
+
+    def _crear_solicitud(self, scope):
+        request = self.factory.post(
+            "/api/solicitudes-eliminacion-doc/",
+            {
+                "documento": self.doc.id_kyc_doc,
+                "razon": "Es un duplicado, ya subi el correcto",
+                "solicitado_por": "usr00001",
+            },
+            format="json",
+        )
+        request.effective_scope = scope
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_analista_sin_permiso_no_puede_solicitar(self):
+        response = self._crear_solicitud(EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_analista_con_pld_compliance_editar_si_puede_solicitar(self):
+        response = self._crear_solicitud(EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",)))
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["estado"], PldSolicitudEliminacionDoc.ESTADO_PENDIENTE)
+
+    def test_analista_no_puede_aprobar_su_propia_solicitud(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001"
+        )
+        request = self.factory.post(f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/aprobar/", {})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "aprobar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(PldContraparteDoc.objects.filter(pk=self.doc.pk).exists())
+
+    def test_admin_aprueba_borra_el_documento(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001"
+        )
+        request = self.factory.post(
+            f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/aprobar/",
+            {"actor_user_id": "usr00002"},
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "aprobar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], PldSolicitudEliminacionDoc.ESTADO_APROBADA)
+        self.assertFalse(PldContraparteDoc.objects.filter(pk=self.doc.pk).exists())
+
+    def test_admin_rechaza_no_toca_el_documento(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001"
+        )
+        request = self.factory.post(
+            f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/rechazar/",
+            {"actor_user_id": "usr00002", "comentario_resolucion": "No es duplicado, son documentos distintos"},
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "rechazar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], PldSolicitudEliminacionDoc.ESTADO_RECHAZADA)
+        self.assertTrue(PldContraparteDoc.objects.filter(pk=self.doc.pk).exists())
+
+    def test_no_puede_resolver_una_solicitud_ya_resuelta(self):
+        solicitud = PldSolicitudEliminacionDoc.objects.create(
+            documento=self.doc, razon="Duplicado", solicitado_por="usr00001", estado=PldSolicitudEliminacionDoc.ESTADO_APROBADA
+        )
+        request = self.factory.post(f"/api/solicitudes-eliminacion-doc/{solicitud.id_solicitud}/rechazar/", {})
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.editar",))
+        view = PldSolicitudEliminacionDocViewSet.as_view({"post": "rechazar"})
+        response = view(request, pk=solicitud.id_solicitud)
+        self.assertEqual(response.status_code, 400)

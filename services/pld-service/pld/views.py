@@ -15,10 +15,11 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet
 
 from .audit_utils import contexto_kyc, emitir_evento_auditoria
-from .models import PldContraparteDoc, PldContraparteKyc, PldTicketCliente
+from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
 from .serializers import (
     PldContraparteDocSerializer,
     PldContraparteKycSerializer,
+    PldSolicitudEliminacionDocSerializer,
     PldTicketClienteSerializer,
 )
 from . import recaptcha
@@ -624,17 +625,129 @@ class PldContraparteDocViewSet(ModelViewSet):
         cliente real y debe quedar auditada igual que subir/aprobar, no solo
         gateada por permiso."""
         doc = self.get_object()
-        contexto = {**contexto_kyc(doc.kyc), "denominacion": doc.denominacion, "drive_file_id": doc.drive_file_id}
-        doc_id = str(doc.id_kyc_doc)
         response = super().destroy(request, *args, **kwargs)
-        emitir_evento_auditoria(
-            "pld_contrapartes_docs.eliminar",
-            "pld_contrapartes_docs",
-            doc_id,
-            actor_user_id=request.data.get("actor_user_id"),
-            valores_previos=contexto,
-        )
+        _emitir_evento_eliminar_documento(doc, actor_user_id=request.data.get("actor_user_id"))
         return response
+
+
+def _emitir_evento_eliminar_documento(doc, actor_user_id, accion="pld_contrapartes_docs.eliminar"):
+    """Compartido entre PldContraparteDocViewSet.destroy (borrado directo,
+    Admin) y PldSolicitudEliminacionDocViewSet.aprobar (borrado via
+    solicitud aprobada) - misma auditoria en ambos casos, solo cambia la
+    accion registrada para poder distinguirlas despues en la bitacora."""
+    emitir_evento_auditoria(
+        accion,
+        "pld_contrapartes_docs",
+        str(doc.id_kyc_doc),
+        actor_user_id=actor_user_id,
+        valores_previos={**contexto_kyc(doc.kyc), "denominacion": doc.denominacion, "drive_file_id": doc.drive_file_id},
+    )
+
+
+class PldSolicitudEliminacionDocViewSet(ModelViewSet):
+    """Solicitud de eliminacion de un documento (25/Ago/2026, requerimiento
+    real del cliente) - el analista (pld-compliance.editar) ya no puede
+    borrar un archivo directo (ver pld-documentos, exclusivo Admin), asi
+    que pide su eliminacion con una razon breve; Admin (pld-documentos.editar)
+    la aprueba (borra el documento de verdad) o la rechaza (se queda como
+    esta, con el motivo)."""
+
+    queryset = PldSolicitudEliminacionDoc.objects.all().order_by("-solicitado_en")
+    serializer_class = PldSolicitudEliminacionDocSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("pld-compliance.editar")()]
+        if self.action in ("aprobar", "rechazar"):
+            return [require_permission("pld-documentos.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = PldSolicitudEliminacionDoc.objects.for_scope(self.request.effective_scope).order_by(
+            "-solicitado_en"
+        )
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado.upper())
+        return queryset
+
+    def perform_create(self, serializer):
+        # denominacion_doc/sociedad_rfc (25/Ago/2026) - snapshot al momento
+        # de crear, el cliente no los manda (se derivan del documento real,
+        # ver comentario en models.py sobre por que no es un join en vivo).
+        documento = serializer.validated_data["documento"]
+        solicitud = serializer.save(
+            denominacion_doc=documento.denominacion, sociedad_rfc=documento.kyc.sociedad_rfc
+        )
+        emitir_evento_auditoria(
+            "pld_solicitudes_eliminacion_doc.solicitar",
+            "pld_solicitudes_eliminacion_doc",
+            str(solicitud.id_solicitud),
+            actor_user_id=solicitud.solicitado_por,
+            valores_nuevos={
+                **contexto_kyc(solicitud.documento.kyc),
+                "denominacion": solicitud.documento.denominacion,
+                "razon": solicitud.razon,
+            },
+        )
+
+    @action(detail=True, methods=["post"])
+    def aprobar(self, request, pk=None):
+        """Aprueba la solicitud y borra el documento de verdad - mismo
+        criterio de auditoria que el destroy() directo
+        (PldContraparteDocViewSet), solo que la accion queda distinguida
+        como "eliminar_por_solicitud" para poder rastrear en la bitacora
+        que paso por este flujo y no un borrado directo de Admin."""
+        solicitud = self.get_object()
+        if solicitud.estado != PldSolicitudEliminacionDoc.ESTADO_PENDIENTE:
+            return Response({"detail": "Esta solicitud ya fue resuelta."}, status=400)
+
+        doc = solicitud.documento
+        actor_user_id = request.data.get("actor_user_id")
+        _emitir_evento_eliminar_documento(doc, actor_user_id, accion="pld_contrapartes_docs.eliminar_por_solicitud")
+        doc.delete()
+        # doc.delete() deja doc.pk en None (comportamiento normal de
+        # Django) - solicitud.documento en memoria sigue apuntando a ese
+        # mismo objeto ahora invalido. La FK real ya quedo en NULL en la
+        # base (on_delete=SET_NULL), asi que se limpia tambien aqui antes
+        # de guardar; sin esto, save() truena con "unsaved related object".
+        solicitud.documento = None
+
+        solicitud.estado = PldSolicitudEliminacionDoc.ESTADO_APROBADA
+        solicitud.resuelto_por = actor_user_id
+        solicitud.resuelto_en = timezone.now()
+        solicitud.comentario_resolucion = request.data.get("comentario_resolucion")
+        solicitud.save(
+            update_fields=["documento", "estado", "resuelto_por", "resuelto_en", "comentario_resolucion"]
+        )
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        """Rechaza la solicitud sin tocar el documento - se queda tal cual
+        estaba, solo con el motivo de rechazo para que el analista lo vea."""
+        solicitud = self.get_object()
+        if solicitud.estado != PldSolicitudEliminacionDoc.ESTADO_PENDIENTE:
+            return Response({"detail": "Esta solicitud ya fue resuelta."}, status=400)
+
+        actor_user_id = request.data.get("actor_user_id")
+        solicitud.estado = PldSolicitudEliminacionDoc.ESTADO_RECHAZADA
+        solicitud.resuelto_por = actor_user_id
+        solicitud.resuelto_en = timezone.now()
+        solicitud.comentario_resolucion = request.data.get("comentario_resolucion")
+        solicitud.save(update_fields=["estado", "resuelto_por", "resuelto_en", "comentario_resolucion"])
+        emitir_evento_auditoria(
+            "pld_solicitudes_eliminacion_doc.rechazar",
+            "pld_solicitudes_eliminacion_doc",
+            str(solicitud.id_solicitud),
+            actor_user_id=actor_user_id,
+            valores_nuevos={
+                **contexto_kyc(solicitud.documento.kyc),
+                "denominacion": solicitud.documento.denominacion,
+                "comentario_resolucion": solicitud.comentario_resolucion,
+            },
+        )
+        return Response(self.get_serializer(solicitud).data)
 
 
 class PldTicketClienteViewSet(ModelViewSet):
