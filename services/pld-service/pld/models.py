@@ -26,11 +26,19 @@ class PldContraparteKyc(models.Model):
         (ESTADO_ENTREGADO, "Entregado"),
     ]
 
+    # 5 opciones estandar de la industria para Mexico (25/Ago/2026 - antes
+    # solo tenia Soltero/Casado, "se va a ampliar" segun Mariana).
     CIVIL_SOLTERO = "SOLTERO"
     CIVIL_CASADO = "CASADO"
+    CIVIL_DIVORCIADO = "DIVORCIADO"
+    CIVIL_VIUDO = "VIUDO"
+    CIVIL_UNION_LIBRE = "UNION_LIBRE"
     ESTADO_CIVIL_CHOICES = [
-        (CIVIL_SOLTERO, "Soltero"),
-        (CIVIL_CASADO, "Casado"),
+        (CIVIL_SOLTERO, "Soltero(a)"),
+        (CIVIL_CASADO, "Casado(a)"),
+        (CIVIL_DIVORCIADO, "Divorciado(a)"),
+        (CIVIL_VIUDO, "Viudo(a)"),
+        (CIVIL_UNION_LIBRE, "Unión libre / Concubinato"),
     ]
 
     # Estado de cuenta (17/Ago/2026, vista de detalle del expediente) -
@@ -145,6 +153,20 @@ class PldContraparteKyc(models.Model):
     # Opcional al crear (mismo criterio de la Opcion B, ver arriba) - se
     # define cuando el analista aprueba el expediente, no antes.
     fecha_vencimiento = models.DateField(blank=True, null=True)
+
+    # Consentimiento del cliente externo (25/Ago/2026, requerimiento real
+    # del cliente: el formulario publico de pld-ticket/[token]/page.tsx
+    # exige aceptar el aviso de privacidad y declarar bajo protesta de
+    # decir verdad antes de poder guardar sus datos). Se guardan aqui, no
+    # solo se validan en el frontend, para que quede evidencia real de
+    # cuando y desde donde se dio el consentimiento - ver
+    # PldTicketClienteViewSet.actualizar_datos. Ambos se re-escriben cada
+    # vez que el cliente vuelve a guardar datos con el mismo link (no solo
+    # la primera vez), asi el timestamp siempre refleja la ultima vez que
+    # confirmo que sus datos actuales son ciertos.
+    politicas_aceptadas_en = models.DateTimeField(blank=True, null=True)
+    veracidad_declarada_en = models.DateTimeField(blank=True, null=True)
+    consentimiento_ip = models.CharField(max_length=45, blank=True, null=True)
 
     # SCOPE_FIELD_SOCIEDAD ya resuelto (punto 2 del plan de Fase 1, ver
     # sociedad_rfc arriba). Un usuario de alcance SOCIEDAD ya puede ver los

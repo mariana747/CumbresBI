@@ -99,6 +99,8 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
             "fecha_vencimiento",
+            "politicas_aceptadas_en",
+            "veracidad_declarada_en",
         ]
         # estado_llenado_manual NO esta aqui a proposito: no se expone para
         # setear directo, solo se prende solo (ver update() abajo) cuando el
@@ -112,6 +114,13 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "aprobado_en",
             "created_at",
             "updated_at",
+            # Consentimiento (25/Ago/2026) - de solo lectura a proposito, no
+            # se pueden setear por PATCH normal (un analista no puede fingir
+            # el consentimiento del cliente). Solo
+            # PldTicketClienteViewSet.actualizar_datos los escribe, via
+            # serializer.save(**kwargs) que si puede pisar read_only_fields.
+            "politicas_aceptadas_en",
+            "veracidad_declarada_en",
         ]
 
     def update(self, instance, validated_data):

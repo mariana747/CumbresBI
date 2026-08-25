@@ -4,6 +4,7 @@ import requests
 from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
+from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
@@ -90,67 +91,6 @@ def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
             doc.delete()
 
     return eliminados
-
-
-def _detectar_documentos_nuevos_en_drive(kyc, headers, cookies, actor_user_id):
-    """Contraparte de _limpiar_documentos_borrados_en_drive (18/Ago/2026):
-    el analista puede subir un archivo directo en drive.google.com (decision
-    de producto - PLD no tiene Picker ni upload interno propio, ver memoria
-    de sesion "google-picker-para-contratos-no-pld") sin pasar nunca por
-    esta app. Sin esto, ese archivo quedaba invisible para la plataforma
-    aunque existiera en Drive de verdad.
-
-    Lista la carpeta del cliente en Drive y crea un PldContraparteDoc por
-    cada archivo que todavia no tenga un documento con ese drive_file_id -
-    denominacion = nombre real del archivo (el analista lo puede renombrar
-    despues como cualquier otro documento). Regresa la lista de documentos
-    creados (para avisar en pantalla) - no lanza si drive-service no
-    responde, igual que su contraparte de limpieza."""
-    carpeta = f"PLD/Nuevos Clientes/{kyc.id_contraparte}"
-    ya_vinculados = set(kyc.documentos.exclude(drive_file_id__isnull=True).exclude(drive_file_id="").values_list(
-        "drive_file_id", flat=True
-    ))
-
-    try:
-        upstream = requests.get(
-            f"{settings.DRIVE_SERVICE_URL}/api/list/",
-            params={"perm": "pld-compliance.leer", "carpeta": carpeta},
-            headers=headers,
-            cookies=cookies,
-            timeout=15,
-        )
-    except requests.RequestException:
-        logger.warning("drive-service no respondio al listar la carpeta de %s", kyc.id_contraparte, exc_info=True)
-        return []
-
-    if upstream.status_code != 200:
-        return []
-
-    agregados = []
-    for archivo in upstream.json().get("archivos", []):
-        if archivo["file_id"] in ya_vinculados:
-            continue
-        doc = PldContraparteDoc.objects.create(
-            kyc=kyc,
-            denominacion=archivo["nombre"],
-            status=PldContraparteDoc.STATUS_ENTREGADO,
-            drive_file_id=archivo["file_id"],
-            link_documento=archivo.get("web_view_link"),
-            mime_type=archivo.get("mime_type"),
-            subido_en=timezone.now(),
-            created_by=actor_user_id or "sistema-sincronia-drive",
-            updated_by=actor_user_id or "sistema-sincronia-drive",
-        )
-        agregados.append({"id_kyc_doc": doc.id_kyc_doc, "denominacion": doc.denominacion})
-        emitir_evento_auditoria(
-            "pld_contrapartes_docs.detectar_en_drive",
-            "pld_contrapartes_docs",
-            str(doc.id_kyc_doc),
-            actor_user_id=actor_user_id or "sistema-sincronia-drive",
-            valores_nuevos={**contexto_kyc(kyc), "denominacion": doc.denominacion},
-        )
-
-    return agregados
 
 
 def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
@@ -412,35 +352,33 @@ class PldContraparteKycViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def verificar_documentos(self, request, pk=None):
-        """Botón interno "Verificar en Drive" - sincroniza en ambos
-        sentidos contra Drive real (18/Ago/2026: antes solo borraba lo que
-        desaparecía; el analista tambien puede subir un archivo directo en
-        drive.google.com sin pasar por la app - ver memoria de sesion
-        "google-picker-para-contratos-no-pld", PLD no tiene upload interno
-        propio, es Drive-first a proposito):
-        1. BORRA los documentos cuyo archivo ya no existe (ver
-           _limpiar_documentos_borrados_en_drive).
-        2. CREA un PldContraparteDoc por cada archivo nuevo que aparezca en
-           la carpeta del cliente y todavia no tenga registro (ver
-           _detectar_documentos_nuevos_en_drive).
-        Manual en vez de polling automático - Drive no tiene webhooks
-        configurados todavía y cada documento implica una llamada aparte a
-        drive-service, no algo para correr en cada carga de pantalla.
+        """Botón interno "Verificar en Drive" - BORRA los documentos cuyo
+        archivo ya no existe en Drive (ver _limpiar_documentos_borrados_en_drive).
 
-        Regresa el expediente actualizado más "documentos_eliminados" y
-        "documentos_agregados", para que el frontend pueda avisarle al
-        analista qué cambió."""
+        25/Ago/2026 (requerimiento real del cliente: "nadie modifica en
+        Drive, todo desde CumbresBI"): ya NO detecta ni da de alta archivos
+        subidos directo en drive.google.com - esa deteccion legitimaba
+        justo la edicion manual que ahora esta prohibida (revierte la
+        decision "Drive-first a proposito" del 18/Ago/2026). El unico
+        camino para agregar un documento es el uploader interno
+        (PldContraparteDocViewSet.subir), gateado por pld-documentos.crear
+        (solo Admin). Este botón se queda como limpieza de seguridad, no
+        como flujo de entrada esperado - si un archivo desaparece de Drive
+        por fuera del proceso normal, el expediente no debe seguir
+        mostrándolo como si siguiera ahí.
+
+        Manual en vez de polling automático - Drive no tiene webhooks
+        configurados todavía.
+
+        Regresa el expediente actualizado más "documentos_eliminados", para
+        que el frontend pueda avisarle al analista qué desapareció."""
         kyc = self.get_object()
         headers, cookies = forward_auth_headers(request)
         eliminados = _limpiar_documentos_borrados_en_drive(kyc, headers, cookies)
-        agregados = _detectar_documentos_nuevos_en_drive(
-            kyc, headers, cookies, request.data.get("actor_user_id")
-        )
 
         kyc.refresh_from_db()
         data = self.get_serializer(kyc).data
         data["documentos_eliminados"] = eliminados
-        data["documentos_agregados"] = agregados
         return Response(data)
 
     @action(detail=True, methods=["post"])
@@ -530,17 +468,38 @@ class PldContraparteDocViewSet(ModelViewSet):
     serializer_class = PldContraparteDocSerializer
 
     def get_permissions(self):
+        # "pld-documentos" (25/Ago/2026, requerimiento real del cliente:
+        # "nadie modifica en Drive, todo desde CumbresBI") - agregar/subir
+        # y eliminar un ARCHIVO es exclusivo de Admin, separado a proposito
+        # de "pld-compliance.editar" que usa el analista para los datos
+        # escritos del expediente. Antes ambas acciones compartian el mismo
+        # perm_key (pld-compliance.crear/editar) y el analista podia
+        # gestionar archivos igual que datos - ya no.
         if self.action in ("create", "subir"):
-            return [require_permission("pld-compliance.crear")()]
+            return [require_permission("pld-documentos.crear")()]
         # "destroy" agregado 18/Ago/2026 (hallazgo real: no estaba en esta
         # lista, asi que caia al default global de DRF - AllowAny, sin
         # exigir NINGUN permiso ni sesion. Cualquiera podia borrar
-        # documentos del expediente). Mismo permiso que editar - borrar un
-        # documento (ej. un duplicado, decision de Mariana 18/Ago/2026: se
-        # borra manual, no automatico) es una forma de edicion del
-        # expediente, no una accion con su propia regla.
-        if self.action in ("update", "partial_update", "destroy"):
+        # documentos del expediente). Mismo criterio letra->accion que el
+        # resto (borrar es una forma de "editar" el recurso), pero sobre
+        # pld-documentos en vez de pld-compliance desde el 25/Ago/2026 -
+        # eliminar un archivo es gestion de archivos, no edicion de datos.
+        if self.action == "destroy":
+            return [require_permission("pld-documentos.editar")()]
+        # "update"/"partial_update" (ej. renombrar denominacion, cambiar
+        # status/comentarios) sigue siendo edicion de datos del expediente,
+        # no gestion del archivo en si - se queda en pld-compliance.editar,
+        # el analista la conserva.
+        if self.action in ("update", "partial_update"):
             return [require_permission("pld-compliance.editar")()]
+        # "ver" (25/Ago/2026, hallazgo real de Mariana: un analista con
+        # permiso real en CumbresBI podia no tener acceso a la Unidad
+        # compartida de Google directamente - el link crudo de Drive le
+        # daba "No tienes acceso" aunque su rol si lo autorizara aqui).
+        # Mismo permiso que leer el expediente - ver un documento ya
+        # existente no es mas sensible que verlo listado.
+        if self.action == "ver":
+            return [require_permission("pld-compliance.leer")()]
         return super().get_permissions()
 
     def get_queryset(self):
@@ -577,7 +536,7 @@ class PldContraparteDocViewSet(ModelViewSet):
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
-                params={"perm": "pld-compliance.crear"},
+                params={"perm": "pld-documentos.crear"},
                 files={"file": (archivo.name, archivo.read(), archivo.content_type)},
                 data={"carpeta": carpeta},
                 headers=headers,
@@ -607,6 +566,56 @@ class PldContraparteDocViewSet(ModelViewSet):
             valores_nuevos={**contexto_kyc(doc.kyc), "denominacion": doc.denominacion, "nombre_archivo": archivo.name},
         )
         return Response(self.get_serializer(doc).data)
+
+    @action(detail=True, methods=["get"])
+    def ver(self, request, pk=None):
+        """Sirve el archivo real EN STREAMING a traves de pld-service (25/Ago/2026,
+        hallazgo real: el boton "Ver" mandaba al link crudo de Google Drive
+        - drive.google.com - cuyo acceso lo decide el ACL/grupo de Drive del
+        usuario, no el permiso que tiene en CumbresBI. Un analista con
+        pld-compliance.leer pero sin membresia real en el grupo de Google
+        de la Unidad compartida se topaba con "No tienes acceso" de Google,
+        aunque su rol si lo autorizara aqui.
+
+        Reenvia el JWT/cookie del usuario a drive-service (igual que
+        subir()) - drive-service valida el mismo perm_key contra el
+        EffectiveScope real del usuario antes de descargar via la cuenta de
+        servicio (domain-wide delegation), asi el acceso lo sigue
+        decidiendo el rol de CumbresBI de punta a punta, nunca la cuenta
+        personal de Google de quien mira.
+
+        Content-Disposition inline (no attachment) para que el navegador
+        intente mostrarlo (imagen/PDF) en vez de forzar la descarga -
+        Content-Type real desde doc.mime_type (el endpoint de Drive
+        siempre regresa application/octet-stream, no conoce el tipo real)."""
+        doc = self.get_object()
+        if not doc.drive_file_id:
+            return Response({"detail": "Este documento todavía no tiene un archivo subido."}, status=404)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
+        try:
+            upstream = requests.get(
+                f"{settings.DRIVE_SERVICE_URL}/api/download/{doc.drive_file_id}/",
+                params={"perm": "pld-compliance.leer", "carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                stream=True,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al servir el documento %s", doc.id_kyc_doc, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 200:
+            detalle = upstream.json() if upstream.content else {"detail": "Error al obtener el archivo de Drive"}
+            return Response(detalle, status=upstream.status_code if upstream.status_code in (403, 404) else 502)
+
+        response = StreamingHttpResponse(
+            upstream.iter_content(chunk_size=8192), content_type=doc.mime_type or "application/octet-stream"
+        )
+        response["Content-Disposition"] = f'inline; filename="{doc.denominacion or doc.id_kyc_doc}"'
+        return response
 
     def destroy(self, request, *args, **kwargs):
         """Override del destroy generico de DRF (18/Ago/2026) - eliminar un
@@ -905,6 +914,19 @@ class PldTicketClienteViewSet(ModelViewSet):
         if not isinstance(campos, dict) or not campos:
             return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
 
+        # Consentimiento (25/Ago/2026, requerimiento real del cliente): el
+        # formulario publico exige aceptar el aviso de privacidad y
+        # declarar bajo protesta de decir verdad antes de poder guardar -
+        # se valida tambien aqui, no solo en el frontend (el frontend ya
+        # bloquea el boton, pero un llamado directo a la API podria saltarse
+        # ese gate). No son parte de CAMPOS_CONFIRMABLES - son metadata del
+        # consentimiento, no datos de negocio del cliente.
+        if not request.data.get("acepta_politicas") or not request.data.get("declara_veracidad"):
+            return Response(
+                {"detail": "Debes aceptar el aviso de privacidad y declarar bajo protesta de decir verdad."},
+                status=400,
+            )
+
         datos_validos = {
             k: v for k, v in campos.items() if k in PldContraparteKycViewSet.CAMPOS_CONFIRMABLES
         }
@@ -913,15 +935,27 @@ class PldTicketClienteViewSet(ModelViewSet):
                 {"detail": "Ninguno de los campos enviados es editable por el cliente."}, status=400
             )
 
+        ahora = timezone.now()
+        ip_cliente = request.META.get("REMOTE_ADDR")
         serializer = PldContraparteKycSerializer(ticket.kyc, data=datos_validos, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save(updated_by="externo")
+        serializer.save(
+            updated_by="externo",
+            politicas_aceptadas_en=ahora,
+            veracidad_declarada_en=ahora,
+            consentimiento_ip=ip_cliente,
+        )
         emitir_evento_auditoria(
             "pld_contrapartes_kyc.actualizar_datos",
             "pld_contrapartes_kyc",
             str(ticket.kyc_id),
             actor_user_id="externo",
-            valores_nuevos={**contexto_kyc(ticket.kyc), "campos": datos_validos},
+            valores_nuevos={
+                **contexto_kyc(ticket.kyc),
+                "campos": datos_validos,
+                "consentimiento_en": ahora.isoformat(),
+                "consentimiento_ip": ip_cliente,
+            },
         )
         return Response(serializer.data)
 
