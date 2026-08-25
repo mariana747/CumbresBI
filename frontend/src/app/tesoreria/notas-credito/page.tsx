@@ -10,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   IconButton,
   InputAdornment,
   Paper,
@@ -23,10 +24,185 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileMinus, Pencil, Plus, Search, X as CloseIcon } from "lucide-react";
+import { FileMinus, Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
-import { TesoreriaNotaCredito, createNotaCredito, listNotasCredito, updateNotaCredito } from "@/lib/tesoreria";
+import {
+  NotaCreditoConcepto,
+  TesoreriaNotaCredito,
+  createNotaCredito,
+  createNotaCreditoConcepto,
+  deleteNotaCreditoConcepto,
+  listNotaCreditoConceptos,
+  listNotasCredito,
+  updateNotaCredito,
+} from "@/lib/tesoreria";
+
+// Renglones de la nota de credito (Sem 20, CRUD real agregado 24/Ago/2026 -
+// mismo criterio que PanelConceptos en /tesoreria/facturas: enlace logico
+// por uuid, sin FK real en el ERD). Solo aplica editando una nota ya
+// guardada (necesita el timbre_uuid real).
+function PanelConceptos({ uuidNota, puedeEditar }: { uuidNota: string; puedeEditar: boolean }) {
+  const [items, setItems] = useState<NotaCreditoConcepto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [nuevo, setNuevo] = useState({ descripcion: "", cantidad: "", claveUnidad: "", valorUnitario: "", importe: "" });
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function refresh() {
+    setLoading(true);
+    listNotaCreditoConceptos(uuidNota)
+      .then(setItems)
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(refresh, [uuidNota]);
+
+  async function handleAgregar() {
+    if (!nuevo.descripcion) {
+      setError("La descripción es obligatoria.");
+      return;
+    }
+    setGuardando(true);
+    setError(null);
+    try {
+      await createNotaCreditoConcepto(uuidNota, nuevo);
+      setNuevo({ descripcion: "", cantidad: "", claveUnidad: "", valorUnitario: "", importe: "" });
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function handleEliminar(id: number) {
+    setGuardando(true);
+    try {
+      await deleteNotaCreditoConcepto(id);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2">Conceptos</Typography>
+      {error && (
+        <Alert severity="error" onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Descripción</TableCell>
+              <TableCell>Cantidad</TableCell>
+              <TableCell>Unidad</TableCell>
+              <TableCell align="right">Valor unitario</TableCell>
+              <TableCell align="right">Importe</TableCell>
+              {puedeEditar && <TableCell align="right" />}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={6} align="center">
+                  <CircularProgress size={16} />
+                </TableCell>
+              </TableRow>
+            ) : items.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} align="center">
+                  <Typography variant="caption" color="text.secondary">
+                    Sin conceptos.
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : (
+              items.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell>{c.descripcion || "—"}</TableCell>
+                  <TableCell>{c.cantidad || "—"}</TableCell>
+                  <TableCell>{c.clave_unidad || "—"}</TableCell>
+                  <TableCell align="right">{c.valor_unitario || "—"}</TableCell>
+                  <TableCell align="right">{c.importe || "—"}</TableCell>
+                  {puedeEditar && (
+                    <TableCell align="right">
+                      <IconButton size="small" aria-label="Eliminar" onClick={() => handleEliminar(c.id)} disabled={guardando}>
+                        <Trash2 size={13} strokeWidth={1.5} />
+                      </IconButton>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))
+            )}
+            {puedeEditar && (
+              <TableRow>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    placeholder="Descripción"
+                    value={nuevo.descripcion}
+                    onChange={(e) => setNuevo({ ...nuevo, descripcion: e.target.value })}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.cantidad}
+                    onChange={(e) => setNuevo({ ...nuevo, cantidad: e.target.value })}
+                    sx={{ width: 60 }}
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.claveUnidad}
+                    onChange={(e) => setNuevo({ ...nuevo, claveUnidad: e.target.value })}
+                    sx={{ width: 60 }}
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.valorUnitario}
+                    onChange={(e) => setNuevo({ ...nuevo, valorUnitario: e.target.value })}
+                    sx={{ width: 90 }}
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <TextField
+                    size="small"
+                    variant="standard"
+                    value={nuevo.importe}
+                    onChange={(e) => setNuevo({ ...nuevo, importe: e.target.value })}
+                    sx={{ width: 90 }}
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <IconButton size="small" aria-label="Agregar concepto" onClick={handleAgregar} disabled={guardando}>
+                    <Plus size={14} strokeWidth={2} />
+                  </IconButton>
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
+  );
+}
 
 const FORM_VACIO = {
   timbreUuid: "",
@@ -227,7 +403,7 @@ export default function TesoreriaNotasCreditoPage() {
         </TableContainer>
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editing ? `Editar nota ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva nota de crédito"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -345,6 +521,12 @@ export default function TesoreriaNotasCreditoPage() {
               onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
               fullWidth
             />
+            {editing && (
+              <>
+                <Divider sx={{ pt: 1 }} />
+                <PanelConceptos uuidNota={editing.timbre_uuid} puedeEditar={puedeEditar} />
+              </>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>

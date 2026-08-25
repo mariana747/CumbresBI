@@ -377,6 +377,93 @@ class TesoreriaFacturaTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 400)
 
+    def test_estado_por_default_pendiente(self):
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-default", comprobante_folio="F-1")
+        self.assertEqual(factura.estado, TesoreriaFactura.ESTADO_PENDIENTE)
+
+    def test_patch_normal_no_puede_cambiar_estado(self):
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-patch", comprobante_folio="F-1")
+        request = self.factory.patch("/api/facturas/uuid-patch/", {"estado": "ACEPTADA"}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.editar",))
+        view = TesoreriaFacturaViewSet.as_view({"patch": "partial_update"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 200)
+        factura.refresh_from_db()
+        self.assertEqual(factura.estado, TesoreriaFactura.ESTADO_PENDIENTE)
+
+
+class TesoreriaFacturaMarcarEstadoTests(TestCase):
+    """marcar_estado() - ciclo de vida propio (24/Ago/2026, pedido explicito
+    de Mariana): PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA. Aceptar exige
+    link_pdf + link_xml ya cargados."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.editar",))
+        self.factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-estado", comprobante_folio="F-1")
+
+    def test_sin_permiso_da_403(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "EN_PROCESO"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.crear",))
+        view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 403)
+
+    def test_estado_invalido_da_400(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "NO_EXISTE"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 400)
+
+    def test_en_proceso_no_exige_archivos(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "EN_PROCESO"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "EN_PROCESO")
+
+    def test_aceptar_sin_archivos_da_400(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "ACEPTADA"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 400)
+        self.factura.refresh_from_db()
+        self.assertEqual(self.factura.estado, TesoreriaFactura.ESTADO_PENDIENTE)
+
+    def test_aceptar_con_pdf_y_xml_ok(self):
+        self.factura.link_pdf = "https://drive.google.com/pdf"
+        self.factura.link_xml = "https://drive.google.com/xml"
+        self.factura.save(update_fields=["link_pdf", "link_xml"])
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "ACEPTADA"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "ACEPTADA")
+
+    def test_rechazar_no_exige_archivos(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "RECHAZADA"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "RECHAZADA")
+
 
 class TesoreriaFlujoVincularFacturaTests(TestCase):
     """vincular_factura() liga un flujo ya capturado a una factura/

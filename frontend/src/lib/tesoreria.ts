@@ -352,8 +352,12 @@ export type TesoreriaValidacionEstado = "PENDIENTE" | "APROBADA" | "RECHAZADA";
 // Flujo de caja (24/Ago/2026, Sem 21 del cronograma) - segundo recurso con
 // alcance real por sociedad (via contrato.sociedad, ver
 // tesoreria/models.py::TesoreriaFlujo.SCOPE_FIELD_SOCIEDAD). factura/
-// complemento/nomina se quedan de solo lectura aqui (Facturacion CFDI es
-// Sem 20, sin CRUD propio todavia) - no se exponen en este cliente.
+// complemento/nomina son de solo lectura en el PATCH normal (ver
+// TesoreriaFlujoSerializer.read_only_fields) - se llenan unicamente via
+// vincularFactura(), que pega al endpoint vincular_factura/ (unico que
+// valida que el timbre_uuid exista de verdad antes de ligarlo). `nomina`
+// se expone de solo lectura nada mas: el backend todavia no tiene una
+// accion equivalente para vincularla (solo factura/complemento).
 export interface TesoreriaFlujo {
   id_flujo: string;
   contrato: string | null;
@@ -375,6 +379,9 @@ export interface TesoreriaFlujo {
   fecha_pago: string | null;
   descripcion_pago: string | null;
   link_comprobante_banco: string | null;
+  factura: string | null;
+  complemento: string | null;
+  nomina: string | null;
   validacion_estado: TesoreriaValidacionEstado | null;
   comentarios: string | null;
   created_at: string;
@@ -498,6 +505,28 @@ export async function registrarPagoFlujo(
   return response.json();
 }
 
+// Liga un flujo ya capturado a una factura/complemento de pago reales (ver
+// tesoreria/views.py::TesoreriaFlujoViewSet.vincular_factura) - manda el
+// timbre_uuid de cada uno, el backend valida que exista antes de guardar el
+// enlace (400 si no). Requiere tesoreria.editar, igual que registrarPago.
+export async function vincularFactura(
+  idFlujo: string,
+  params: { factura?: string; complemento?: string }
+): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/vincular_factura/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      factura: params.factura || undefined,
+      complemento: params.complemento || undefined,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function updateContrato(
   idContrato: string,
   params: Partial<{
@@ -560,15 +589,342 @@ export interface FacturaConcepto {
   updated_by: string | null;
 }
 
+// CRUD real de las lineas de detalle (Sem 20, agregado 24/Ago/2026 - antes
+// solo se veian de solo lectura dentro del dialogo de editar factura, ver
+// tesoreria/views.py::FacturaConceptoViewSet). Sin FK real hacia
+// TesoreriaFactura en el ERD (uuid es un CharField plano, ver docstring del
+// modelo) - el enlace real es el filtro ?uuid=<timbre_uuid de la factura>.
+export async function listFacturaConceptos(uuidFactura: string): Promise<FacturaConcepto[]> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/factura-conceptos/?uuid=${encodeURIComponent(uuidFactura)}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface FacturaConceptoInput {
+  claveProdServ?: string;
+  noIdentificacion?: string;
+  cantidad?: string;
+  claveUnidad?: string;
+  unidad?: string;
+  descripcion?: string;
+  valorUnitario?: string;
+  importe?: string;
+  descuento?: string;
+  objetoImp?: string;
+}
+
+function facturaConceptoBody(params: FacturaConceptoInput) {
+  return {
+    clave_prod_serv: params.claveProdServ || null,
+    no_identificacion: params.noIdentificacion || null,
+    cantidad: normalizaDecimal(params.cantidad),
+    clave_unidad: params.claveUnidad || null,
+    unidad: params.unidad || null,
+    descripcion: params.descripcion || null,
+    valor_unitario: normalizaDecimal(params.valorUnitario),
+    importe: normalizaDecimal(params.importe),
+    descuento: normalizaDecimal(params.descuento),
+    objeto_imp: params.objetoImp || null,
+  };
+}
+
+export async function createFacturaConcepto(
+  uuidFactura: string,
+  params: FacturaConceptoInput
+): Promise<FacturaConcepto> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/factura-conceptos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uuid: uuidFactura, ...facturaConceptoBody(params) }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateFacturaConcepto(id: number, params: FacturaConceptoInput): Promise<FacturaConcepto> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/factura-conceptos/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(facturaConceptoBody(params)),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteFacturaConcepto(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/factura-conceptos/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+// Linea de impuesto trasladado de una factura - mismo criterio de enlace
+// logico por ?uuid= (ver FacturaTrasladoViewSet).
+export interface FacturaTraslado {
+  id: number;
+  uuid: string | null;
+  base: string | null;
+  impuesto: string | null;
+  tipo_factor: string | null;
+  tasa_o_cuota: string | null;
+  importe: string | null;
+  rfc_propietario: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listFacturaTraslados(uuidFactura: string): Promise<FacturaTraslado[]> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/factura-traslados/?uuid=${encodeURIComponent(uuidFactura)}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface FacturaTrasladoInput {
+  base?: string;
+  impuesto?: string;
+  tipoFactor?: string;
+  tasaOCuota?: string;
+  importe?: string;
+}
+
+function facturaTrasladoBody(params: FacturaTrasladoInput) {
+  return {
+    base: normalizaDecimal(params.base),
+    impuesto: params.impuesto || null,
+    tipo_factor: params.tipoFactor || null,
+    tasa_o_cuota: params.tasaOCuota || null,
+    importe: normalizaDecimal(params.importe),
+  };
+}
+
+export async function createFacturaTraslado(
+  uuidFactura: string,
+  params: FacturaTrasladoInput
+): Promise<FacturaTraslado> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/factura-traslados/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uuid: uuidFactura, ...facturaTrasladoBody(params) }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteFacturaTraslado(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/factura-traslados/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+// Documento relacionado de una factura (parcialidades de pago) - enlace
+// logico por ?timbre_uuid= (ver FacturaDoctoRelacionadoViewSet).
+export interface FacturaDoctoRelacionado {
+  id: number;
+  timbre_uuid: string | null;
+  id_documento: string | null;
+  serie: string | null;
+  folio: string | null;
+  moneda_dr: string | null;
+  num_parcialidad: number | null;
+  imp_saldo_ant: string | null;
+  imp_pagado: string | null;
+  imp_saldo_insoluto: string | null;
+  rfc_propietario: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listFacturaDoctosRelacionados(timbreUuid: string): Promise<FacturaDoctoRelacionado[]> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/factura-doctos-relacionados/?timbre_uuid=${encodeURIComponent(timbreUuid)}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface FacturaDoctoRelacionadoInput {
+  idDocumento?: string;
+  serie?: string;
+  folio?: string;
+  monedaDr?: string;
+  numParcialidad?: string;
+  impSaldoAnt?: string;
+  impPagado?: string;
+  impSaldoInsoluto?: string;
+}
+
+function facturaDoctoRelacionadoBody(params: FacturaDoctoRelacionadoInput) {
+  return {
+    id_documento: params.idDocumento || null,
+    serie: params.serie || null,
+    folio: params.folio || null,
+    moneda_dr: params.monedaDr || null,
+    num_parcialidad: params.numParcialidad ? Number(params.numParcialidad) : null,
+    imp_saldo_ant: normalizaDecimal(params.impSaldoAnt),
+    imp_pagado: normalizaDecimal(params.impPagado),
+    imp_saldo_insoluto: normalizaDecimal(params.impSaldoInsoluto),
+  };
+}
+
+export async function createFacturaDoctoRelacionado(
+  timbreUuid: string,
+  params: FacturaDoctoRelacionadoInput
+): Promise<FacturaDoctoRelacionado> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/factura-doctos-relacionados/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ timbre_uuid: timbreUuid, ...facturaDoctoRelacionadoBody(params) }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteFacturaDoctoRelacionado(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/factura-doctos-relacionados/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+// Renglon de una nota de credito (distinto del encabezado TesoreriaNotaCredito)
+// - enlace logico por ?uuid=<uuid propio de la nota> (ver FacturaNotaCreditoViewSet).
+export interface NotaCreditoConcepto {
+  id: number;
+  uuid: string | null;
+  uuid_relacionado: string | null;
+  clave_prod_serv: string | null;
+  no_identificacion: string | null;
+  cantidad: string | null;
+  clave_unidad: string | null;
+  unidad: string | null;
+  descripcion: string | null;
+  valor_unitario: string | null;
+  importe: string | null;
+  objeto_imp: string | null;
+  rfc_propietario: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listNotaCreditoConceptos(uuidNota: string): Promise<NotaCreditoConcepto[]> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/nota-credito-conceptos/?uuid=${encodeURIComponent(uuidNota)}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface NotaCreditoConceptoInput {
+  claveProdServ?: string;
+  noIdentificacion?: string;
+  cantidad?: string;
+  claveUnidad?: string;
+  unidad?: string;
+  descripcion?: string;
+  valorUnitario?: string;
+  importe?: string;
+  objetoImp?: string;
+}
+
+function notaCreditoConceptoBody(params: NotaCreditoConceptoInput) {
+  return {
+    clave_prod_serv: params.claveProdServ || null,
+    no_identificacion: params.noIdentificacion || null,
+    cantidad: normalizaDecimal(params.cantidad),
+    clave_unidad: params.claveUnidad || null,
+    unidad: params.unidad || null,
+    descripcion: params.descripcion || null,
+    valor_unitario: normalizaDecimal(params.valorUnitario),
+    importe: normalizaDecimal(params.importe),
+    objeto_imp: params.objetoImp || null,
+  };
+}
+
+export async function createNotaCreditoConcepto(
+  uuidNota: string,
+  params: NotaCreditoConceptoInput
+): Promise<NotaCreditoConcepto> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/nota-credito-conceptos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uuid: uuidNota, ...notaCreditoConceptoBody(params) }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteNotaCreditoConcepto(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/nota-credito-conceptos/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+// Ciclo de vida propio de la factura (24/Ago/2026, pedido explicito de
+// Mariana) - distinto del ciclo de un TesoreriaFlujo, no se segrega
+// captura/aprobacion aqui (mismo permiso facturacion-cfdi.editar para
+// cualquier transicion, ver marcarEstadoFactura). Pasar a ACEPTADA exige
+// link_pdf + link_xml ya cargados (el backend lo valida, ver
+// TesoreriaFacturaViewSet.marcar_estado).
+export type TesoreriaFacturaEstado = "PENDIENTE" | "EN_PROCESO" | "ACEPTADA" | "RECHAZADA";
+
+// Catalogo c_TipoDeComprobante del SAT - en esta pantalla solo se ofrece
+// "I" (Ingreso): Egreso/Pago/Nomina ya tienen su propia tabla y pantalla
+// (tesoreria_notas_credito, tesoreria_complementos_pago,
+// tesoreria_rec_nominas), no se dan de alta desde Facturas.
+export type TesoreriaFacturaMetodoPago = "PUE" | "PPD";
+
 export interface TesoreriaFactura {
   id: number;
   comprobante_serie: string | null;
   comprobante_folio: string | null;
   comprobante_fecha: string | null;
   comprobante_forma_pago: string | null;
-  comprobante_metodo_pago: string | null;
+  comprobante_metodo_pago: TesoreriaFacturaMetodoPago | null;
   comprobante_moneda: string | null;
   comprobante_total: string | null;
+  comprobante_tipo_de_comprobante: string | null;
   tipo_relacion: string | null;
   uuid_relacionado: string | null;
   emisor_rfc: string | null;
@@ -580,7 +936,10 @@ export interface TesoreriaFactura {
   timbre_fecha_timbrado: string | null;
   tipo_factura: string | null;
   link_pdf: string | null;
-  estado: string | null;
+  link_xml: string | null;
+  // De solo lectura en el backend (ver TesoreriaFacturaSerializer.read_only_fields)
+  // - solo cambia via marcarEstadoFactura(), no via update/createFactura.
+  estado: TesoreriaFacturaEstado | null;
   conceptos: FacturaConcepto[];
   created_at: string;
   created_by: string | null;
@@ -603,9 +962,10 @@ export interface FacturaInput {
   comprobanteFolio?: string;
   comprobanteFecha?: string;
   comprobanteFormaPago?: string;
-  comprobanteMetodoPago?: string;
+  comprobanteMetodoPago?: TesoreriaFacturaMetodoPago | "";
   comprobanteMoneda?: string;
   comprobanteTotal?: string;
+  comprobanteTipoDeComprobante?: string;
   tipoRelacion?: string;
   uuidRelacionado?: string;
   emisorRfc?: string;
@@ -617,7 +977,11 @@ export interface FacturaInput {
   timbreFechaTimbrado?: string;
   tipoFactura?: string;
   linkPdf?: string;
-  estado?: string;
+  linkXml?: string;
+  // NO incluye "estado" - es de solo lectura en el backend (ver
+  // TesoreriaFacturaSerializer), se cambia unicamente via
+  // marcarEstadoFactura(). Mandarlo aqui no truena, el backend lo ignora
+  // en silencio, pero se omite del tipo para no sugerir que funciona.
 }
 
 // Los campos de monto de Facturacion CFDI son DecimalField en el backend
@@ -640,6 +1004,7 @@ function facturaBody(params: FacturaInput) {
     comprobante_metodo_pago: params.comprobanteMetodoPago || null,
     comprobante_moneda: params.comprobanteMoneda || null,
     comprobante_total: normalizaDecimal(params.comprobanteTotal),
+    comprobante_tipo_de_comprobante: params.comprobanteTipoDeComprobante || null,
     tipo_relacion: params.tipoRelacion || null,
     uuid_relacionado: params.uuidRelacionado || null,
     emisor_rfc: params.emisorRfc || null,
@@ -651,7 +1016,7 @@ function facturaBody(params: FacturaInput) {
     timbre_fecha_timbrado: params.timbreFechaTimbrado || null,
     tipo_factura: params.tipoFactura || null,
     link_pdf: params.linkPdf || null,
-    estado: params.estado || null,
+    link_xml: params.linkXml || null,
   };
 }
 
@@ -684,6 +1049,70 @@ export async function deleteFactura(id: number): Promise<void> {
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
+}
+
+// Cambia el estado del proceso de revision de la factura (PENDIENTE/
+// EN_PROCESO/ACEPTADA/RECHAZADA). Ver
+// services/tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet.marcar_estado -
+// el backend rechaza con 400 si se intenta ACEPTADA sin link_pdf/link_xml.
+export async function marcarEstadoFactura(id: number, estado: TesoreriaFacturaEstado): Promise<TesoreriaFactura> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/marcar_estado/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ estado }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Motor Documental para Facturacion CFDI (24/Ago/2026) - espejo en cliente
+// de TesoreriaFacturaViewSet.CAMPOS_CONFIRMABLES (views.py). Solo
+// informativo aqui (MotorDocumentalDialog filtra con esto antes de mandar),
+// el backend es quien realmente valida. timbre_uuid queda fuera a
+// proposito - es la identidad de la factura, no se pisa desde una
+// extraccion (mismo criterio documentado en el backend).
+export const TESORERIA_CAMPOS_CONFIRMABLES = [
+  "comprobante_serie",
+  "comprobante_folio",
+  "comprobante_fecha",
+  "comprobante_moneda",
+  "comprobante_forma_pago",
+  "comprobante_metodo_pago",
+  "comprobante_total",
+  "emisor_rfc",
+  "emisor_nombre",
+  "receptor_rfc",
+  "receptor_nombre",
+  "receptor_uso_cfdi",
+  "timbre_fecha_timbrado",
+] as const;
+
+// Version usada al CREAR una factura desde el Motor Documental (24/Ago/2026,
+// caso de uso real: alguien sube el escaneo de la factura a Drive antes de
+// que exista el registro en Tesoreria - a futuro desde MiCumbres, hoy el
+// analista lo sube directo) - aqui SI incluye timbre_uuid porque todavia no
+// hay ningun registro cuya identidad proteger (a diferencia de
+// TESORERIA_CAMPOS_CONFIRMABLES, que es para una factura ya guardada).
+export const TESORERIA_CAMPOS_CONFIRMABLES_NUEVA = [...TESORERIA_CAMPOS_CONFIRMABLES, "timbre_uuid"] as const;
+
+// Guarda en la factura los datos ya revisados por el analista (Motor
+// Documental -> docint/analyze -> correccion en pantalla -> este endpoint).
+// Ver services/tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet.confirmar_extraccion.
+export async function confirmarExtraccionFactura(
+  id: number,
+  campos: Record<string, unknown>
+): Promise<TesoreriaFactura> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/confirmar_extraccion/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ campos }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 export interface TesoreriaComplementoPago {

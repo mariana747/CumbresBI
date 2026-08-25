@@ -1,0 +1,535 @@
+<title>Inventario ERD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #f2f5f0;
+    --surface: #ffffff;
+    --surface-2: #e9ede5;
+    --ink: #182019;
+    --ink-soft: #52605a;
+    --ink-faint: #7c8880;
+    --line: #d3d9cd;
+    --line-strong: #aab3a2;
+
+    --accent: #0e6f5c;
+    --accent-strong: #0a5548;
+    --accent-soft: #dcefe9;
+
+    /* estado (semantico, distinto del accent) */
+    --ok: #2f7a4f;
+    --ok-soft: #dceee1;
+    --warn: #a6720b;
+    --warn-soft: #f6ecd4;
+    --missing: #a6485a;
+    --missing-soft: #f6e4e7;
+
+    /* chips de modulo */
+    --m-iam: #3b6fa0; --m-iam-soft: #e2ecf5;
+    --m-pld: #6b5b95; --m-pld-soft: #eae6f4;
+    --m-rrhh: #a6485a; --m-rrhh-soft: #f6e4e7;
+    --m-vivienda: #a9762c; --m-vivienda-soft: #f4ead9;
+    --m-rentas: #55606b; --m-rentas-soft: #e7e9eb;
+    --m-tesoreria: #0e6f5c; --m-tesoreria-soft: #dcefe9;
+    --m-docint: #2f8f7a; --m-docint-soft: #d9efe9;
+    --m-audit: #6b7280; --m-audit-soft: #eceef0;
+    --m-obra: #b5541f; --m-obra-soft: #f7e6da;
+    --m-materiales: #8a6d3b; --m-materiales-soft: #f2ead6;
+    --m-tickets: #8b8f8a; --m-tickets-soft: #eceeec;
+    --m-general: #476a55; --m-general-soft: #e2ebe4;
+
+    --font-display: "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Courier New", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10140e;
+      --surface: #171d15;
+      --surface-2: #1d241a;
+      --ink: #e9efe4;
+      --ink-soft: #a9b5a2;
+      --ink-faint: #7c8878;
+      --line: #2b3327;
+      --line-strong: #3c4636;
+
+      --accent: #3fcbab;
+      --accent-strong: #6fe0c4;
+      --accent-soft: #163830;
+
+      --ok: #6bc98f;
+      --ok-soft: #17301f;
+      --warn: #e0b84a;
+      --warn-soft: #3a2f10;
+      --missing: #e0919f;
+      --missing-soft: #331f24;
+
+      --m-iam: #7fb0e0; --m-iam-soft: #1c2c3a;
+      --m-pld: #b3a1e0; --m-pld-soft: #262038;
+      --m-rrhh: #e0919f; --m-rrhh-soft: #331f24;
+      --m-vivienda: #d9a256; --m-vivienda-soft: #332711;
+      --m-rentas: #9aa6ad; --m-rentas-soft: #232a2e;
+      --m-tesoreria: #3fcbab; --m-tesoreria-soft: #163830;
+      --m-docint: #5fd0b6; --m-docint-soft: #163830;
+      --m-audit: #9aa3ab; --m-audit-soft: #23262a;
+      --m-obra: #e0955c; --m-obra-soft: #3a2612;
+      --m-materiales: #cbb37c; --m-materiales-soft: #322b17;
+      --m-tickets: #9aa09a; --m-tickets-soft: #23261f;
+      --m-general: #8fc29d; --m-general-soft: #1c2a20;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10140e;
+    --surface: #171d15;
+    --surface-2: #1d241a;
+    --ink: #e9efe4;
+    --ink-soft: #a9b5a2;
+    --ink-faint: #7c8878;
+    --line: #2b3327;
+    --line-strong: #3c4636;
+
+    --accent: #3fcbab;
+    --accent-strong: #6fe0c4;
+    --accent-soft: #163830;
+
+    --ok: #6bc98f;
+    --ok-soft: #17301f;
+    --warn: #e0b84a;
+    --warn-soft: #3a2f10;
+    --missing: #e0919f;
+    --missing-soft: #331f24;
+
+    --m-iam: #7fb0e0; --m-iam-soft: #1c2c3a;
+    --m-pld: #b3a1e0; --m-pld-soft: #262038;
+    --m-rrhh: #e0919f; --m-rrhh-soft: #331f24;
+    --m-vivienda: #d9a256; --m-vivienda-soft: #332711;
+    --m-rentas: #9aa6ad; --m-rentas-soft: #232a2e;
+    --m-tesoreria: #3fcbab; --m-tesoreria-soft: #163830;
+    --m-docint: #5fd0b6; --m-docint-soft: #163830;
+    --m-audit: #9aa3ab; --m-audit-soft: #23262a;
+    --m-obra: #e0955c; --m-obra-soft: #3a2612;
+    --m-materiales: #cbb37c; --m-materiales-soft: #322b17;
+    --m-tickets: #9aa09a; --m-tickets-soft: #23261f;
+    --m-general: #8fc29d; --m-general-soft: #1c2a20;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 56px 28px 90px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  header {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 32px;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--accent); display: inline-block; }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(2.1rem, 4vw, 2.9rem);
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .lede { max-width: 70ch; color: var(--ink-soft); font-size: 1.05rem; }
+  .lede code {
+    font-family: var(--font-mono); font-size: 0.9em; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.4em; color: var(--ink);
+  }
+
+  /* ---------- KPI tiles ---------- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat .n {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 2.1rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .stat .label {
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+  }
+  .stat.ok .n { color: var(--ok); }
+  .stat.warn .n { color: var(--warn); }
+  .stat.missing .n { color: var(--missing); }
+  .stat.total .n { color: var(--ink); }
+  .stat.total { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* ---------- legend + filter ---------- */
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.84rem; color: var(--ink-soft); }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.missing { background: var(--missing); }
+
+  #buscar {
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    padding: 9px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    min-width: 220px;
+  }
+  #buscar:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #buscar::placeholder { color: var(--ink-faint); }
+
+  /* ---------- tabla ---------- */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    min-width: 640px;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  tbody td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface-2); }
+  td.tabla { font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink); }
+
+  tr.group-row td {
+    background: var(--surface-2);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  tr.group-row .m-count { color: var(--ink-soft); text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+  .m-chip {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-weight: 600;
+    white-space: nowrap;
+    display: inline-block;
+  }
+
+  .pill {
+    font-size: 0.76rem;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.missing { background: var(--missing-soft); color: var(--missing); }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .origen { font-size: 0.82rem; color: var(--ink-faint); font-family: var(--font-mono); }
+  .origen.nuevo { color: var(--accent-strong); font-weight: 600; }
+  .origen.modificada { color: var(--warn); font-weight: 600; }
+  .origen.modificada .detalle { display: block; color: var(--ink-faint); font-weight: 400; font-size: 0.92em; }
+
+  .no-match {
+    display: none;
+    text-align: center;
+    padding: 28px;
+    color: var(--ink-faint);
+    font-size: 0.9rem;
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+  }
+
+  @media (max-width: 640px) {
+    .page { padding: 36px 16px 70px; }
+    #buscar { min-width: 0; width: 100%; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <div class="eyebrow">CumbresBI · Inventario de base de datos</div>
+    <h1>Inventario ERD</h1>
+    <p class="lede">
+      Las 49 tablas de <code>20260727_Cumbres_ERD.sql</code> comparadas contra el código real
+      (<code>models.py</code> de cada microservicio), más las 24 tablas que se agregaron después
+      y no estaban en el documento original. 73 tablas en total, contadas una por una.
+    </p>
+  </header>
+
+  <section class="stats">
+    <div class="stat total">
+      <span class="n">73</span>
+      <span class="label">Tablas conocidas en total</span>
+    </div>
+    <div class="stat ok">
+      <span class="n">58</span>
+      <span class="label">Con modelo y CRUD real</span>
+    </div>
+    <div class="stat warn">
+      <span class="n">8</span>
+      <span class="label">Con modelo, sin CRUD todavía</span>
+    </div>
+    <div class="stat missing">
+      <span class="n">7</span>
+      <span class="label">Sin nada — módulo Tickets</span>
+    </div>
+    <div class="stat warn">
+      <span class="n">4</span>
+      <span class="label">Tablas del ERD original con esquema modificado</span>
+    </div>
+  </section>
+
+  <section style="display:flex; flex-direction:column; gap:16px;">
+    <div class="toolbar">
+      <div class="legend">
+        <span class="item"><span class="dot ok"></span> Con CRUD (pantalla + API funcionando)</span>
+        <span class="item"><span class="dot warn"></span> Modelo listo, falta la capa de negocio</span>
+        <span class="item"><span class="dot missing"></span> No existe ni el modelo</span>
+        <span class="item"><span class="origen modificada" style="font-size:inherit">ERD original · modificada</span> — el esquema de <code>20260727_Cumbres_ERD.sql</code> ya no es exacto, tiene columnas agregadas/alteradas después</span>
+      </div>
+      <input id="buscar" type="text" placeholder="Buscar tabla o módulo…" autocomplete="off">
+    </div>
+
+    <div class="table-wrap">
+      <table id="tabla-inventario">
+        <thead>
+          <tr>
+            <th>Tabla</th>
+            <th>Módulo</th>
+            <th>Origen</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <tr class="group-row" data-group="general"><td colspan="4">General <span class="m-count">— 1 tabla</span></td></tr>
+          <tr data-nombre="general_sociedades" data-modulo="general"><td class="tabla">general_sociedades</td><td><span class="m-chip" style="background:var(--m-general-soft); color:var(--m-general);">General</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="iam"><td colspan="4">IAM · Accesos <span class="m-count">— 13 tablas (8 originales + 5 nuevas)</span></td></tr>
+          <tr data-nombre="iam_users" data-modulo="iam"><td class="tabla">iam_users</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_identities" data-modulo="iam"><td class="tabla">iam_identities</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_roles" data-modulo="iam"><td class="tabla">iam_roles</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_permissions" data-modulo="iam"><td class="tabla">iam_permissions</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_role_permissions" data-modulo="iam"><td class="tabla">iam_role_permissions</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_user_roles" data-modulo="iam"><td class="tabla">iam_user_roles</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_user_centro_access" data-modulo="iam"><td class="tabla">iam_user_centro_access</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_user_contrato_access" data-modulo="iam"><td class="tabla">iam_user_contrato_access</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_groups" data-modulo="iam"><td class="tabla">iam_groups</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_user_groups" data-modulo="iam"><td class="tabla">iam_user_groups</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_invitations" data-modulo="iam"><td class="tabla">iam_invitations</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_magic_links" data-modulo="iam"><td class="tabla">iam_magic_links</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="iam_external_collaborators" data-modulo="iam"><td class="tabla">iam_external_collaborators</td><td><span class="m-chip" style="background:var(--m-iam-soft); color:var(--m-iam);">IAM</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="pld"><td colspan="4">PLD · Cumplimiento <span class="m-count">— 3 tablas</span></td></tr>
+          <tr data-nombre="pld_contrapartes_kyc" data-modulo="pld"><td class="tabla">pld_contrapartes_kyc</td><td><span class="m-chip" style="background:var(--m-pld-soft); color:var(--m-pld);">PLD</span></td><td class="origen modificada">ERD original<span class="detalle">+sociedad_rfc, +estado_llenado_manual, +estado_cuenta, +nombre_completo, dom_calle y otros ahora opcionales</span></td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="pld_contrapartes_docs" data-modulo="pld"><td class="tabla">pld_contrapartes_docs</td><td><span class="m-chip" style="background:var(--m-pld-soft); color:var(--m-pld);">PLD</span></td><td class="origen modificada">ERD original<span class="detalle">+drive_file_id, +mime_type, +tamano_bytes, +subido_en (integración real con Drive)</span></td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="pld_ticket_cliente" data-modulo="pld"><td class="tabla">pld_ticket_cliente</td><td><span class="m-chip" style="background:var(--m-pld-soft); color:var(--m-pld);">PLD</span></td><td class="origen modificada">ERD original<span class="detalle">token → token_hash, +email, +issued_at</span></td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="tesoreria"><td colspan="4">Tesorería <span class="m-count">— 16 tablas</span></td></tr>
+          <tr data-nombre="tesoreria_contrapartes" data-modulo="tesoreria"><td class="tabla">tesoreria_contrapartes</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen modificada">ERD original<span class="detalle">email y tipo_persona ahora opcionales (alta mínima solo con razón social)</span></td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_contrapartes_relacion" data-modulo="tesoreria"><td class="tabla">tesoreria_contrapartes_relacion</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_bancos" data-modulo="tesoreria"><td class="tabla">tesoreria_bancos</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_cuentas" data-modulo="tesoreria"><td class="tabla">tesoreria_cuentas</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_contratos" data-modulo="tesoreria"><td class="tabla">tesoreria_contratos</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_flujos" data-modulo="tesoreria"><td class="tabla">tesoreria_flujos</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_facturas" data-modulo="tesoreria"><td class="tabla">tesoreria_facturas</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_complementos_pago" data-modulo="tesoreria"><td class="tabla">tesoreria_complementos_pago</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_notas_credito" data-modulo="tesoreria"><td class="tabla">tesoreria_notas_credito</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="factura_conceptos" data-modulo="tesoreria"><td class="tabla">factura_conceptos</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="factura_traslados" data-modulo="tesoreria"><td class="tabla">factura_traslados</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="factura_doctos_relacionados" data-modulo="tesoreria"><td class="tabla">factura_doctos_relacionados</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="factura_notas_credito" data-modulo="tesoreria"><td class="tabla">factura_notas_credito</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_saldos" data-modulo="tesoreria"><td class="tabla">tesoreria_saldos</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_cortes_edc" data-modulo="tesoreria"><td class="tabla">tesoreria_cortes_edc</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="tesoreria_rec_nominas" data-modulo="tesoreria"><td class="tabla">tesoreria_rec_nominas</td><td><span class="m-chip" style="background:var(--m-tesoreria-soft); color:var(--m-tesoreria);">Tesorería</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="vivienda"><td colspan="4">Ventas / Vivienda <span class="m-count">— 6 tablas</span></td></tr>
+          <tr data-nombre="vivienda_proyectos" data-modulo="vivienda"><td class="tabla">vivienda_proyectos</td><td><span class="m-chip" style="background:var(--m-vivienda-soft); color:var(--m-vivienda);">Vivienda</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="vivienda_listado" data-modulo="vivienda"><td class="tabla">vivienda_listado</td><td><span class="m-chip" style="background:var(--m-vivienda-soft); color:var(--m-vivienda);">Vivienda</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="vivienda_ventas_asesores" data-modulo="vivienda"><td class="tabla">vivienda_ventas_asesores</td><td><span class="m-chip" style="background:var(--m-vivienda-soft); color:var(--m-vivienda);">Vivienda</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="vivienda_ventas_expedientes" data-modulo="vivienda"><td class="tabla">vivienda_ventas_expedientes</td><td><span class="m-chip" style="background:var(--m-vivienda-soft); color:var(--m-vivienda);">Vivienda</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="vivienda_ventas_expedientes_items" data-modulo="vivienda"><td class="tabla">vivienda_ventas_expedientes_items</td><td><span class="m-chip" style="background:var(--m-vivienda-soft); color:var(--m-vivienda);">Vivienda</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="vivienda_rel_expediente_clientes" data-modulo="vivienda"><td class="tabla">vivienda_rel_expediente_clientes</td><td><span class="m-chip" style="background:var(--m-vivienda-soft); color:var(--m-vivienda);">Vivienda</span></td><td class="origen">ERD original</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="rentas"><td colspan="4">Rentas <span class="m-count">— 6 tablas</span></td></tr>
+          <tr data-nombre="rentas_ubicaciones" data-modulo="rentas"><td class="tabla">rentas_ubicaciones</td><td><span class="m-chip" style="background:var(--m-rentas-soft); color:var(--m-rentas);">Rentas</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+          <tr data-nombre="rentas_inmuebles" data-modulo="rentas"><td class="tabla">rentas_inmuebles</td><td><span class="m-chip" style="background:var(--m-rentas-soft); color:var(--m-rentas);">Rentas</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+          <tr data-nombre="rentas_contratos" data-modulo="rentas"><td class="tabla">rentas_contratos</td><td><span class="m-chip" style="background:var(--m-rentas-soft); color:var(--m-rentas);">Rentas</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+          <tr data-nombre="rentas_inmuebles_contratos" data-modulo="rentas"><td class="tabla">rentas_inmuebles_contratos</td><td><span class="m-chip" style="background:var(--m-rentas-soft); color:var(--m-rentas);">Rentas</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+          <tr data-nombre="rentas_contratos_docs" data-modulo="rentas"><td class="tabla">rentas_contratos_docs</td><td><span class="m-chip" style="background:var(--m-rentas-soft); color:var(--m-rentas);">Rentas</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+          <tr data-nombre="rentas_referencias_pago" data-modulo="rentas"><td class="tabla">rentas_referencias_pago</td><td><span class="m-chip" style="background:var(--m-rentas-soft); color:var(--m-rentas);">Rentas</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="rrhh"><td colspan="4">RRHH <span class="m-count">— 2 tablas</span></td></tr>
+          <tr data-nombre="rrhh_empleados" data-modulo="rrhh"><td class="tabla">rrhh_empleados</td><td><span class="m-chip" style="background:var(--m-rrhh-soft); color:var(--m-rrhh);">RRHH</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+          <tr data-nombre="rrhh_puestos" data-modulo="rrhh"><td class="tabla">rrhh_puestos</td><td><span class="m-chip" style="background:var(--m-rrhh-soft); color:var(--m-rrhh);">RRHH</span></td><td class="origen">ERD original</td><td><span class="pill warn">Modelo, sin CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="tickets"><td colspan="4">Tickets <span class="m-count">— 7 tablas</span></td></tr>
+          <tr data-nombre="tickets" data-modulo="tickets"><td class="tabla">tickets</td><td><span class="m-chip" style="background:var(--m-tickets-soft); color:var(--m-tickets);">Tickets</span></td><td class="origen">ERD original</td><td><span class="pill missing">Sin construir</span></td></tr>
+          <tr data-nombre="tickets_centros" data-modulo="tickets"><td class="tabla">tickets_centros</td><td><span class="m-chip" style="background:var(--m-tickets-soft); color:var(--m-tickets);">Tickets</span></td><td class="origen">ERD original</td><td><span class="pill missing">Sin construir</span></td></tr>
+          <tr data-nombre="tickets_proyectos" data-modulo="tickets"><td class="tabla">tickets_proyectos</td><td><span class="m-chip" style="background:var(--m-tickets-soft); color:var(--m-tickets);">Tickets</span></td><td class="origen">ERD original</td><td><span class="pill missing">Sin construir</span></td></tr>
+          <tr data-nombre="tickets_proyectos_participantes" data-modulo="tickets"><td class="tabla">tickets_proyectos_participantes</td><td><span class="m-chip" style="background:var(--m-tickets-soft); color:var(--m-tickets);">Tickets</span></td><td class="origen">ERD original</td><td><span class="pill missing">Sin construir</span></td></tr>
+          <tr data-nombre="tickets_subproyectos" data-modulo="tickets"><td class="tabla">tickets_subproyectos</td><td><span class="m-chip" style="background:var(--m-tickets-soft); color:var(--m-tickets);">Tickets</span></td><td class="origen">ERD original</td><td><span class="pill missing">Sin construir</span></td></tr>
+          <tr data-nombre="tickets_dependencias" data-modulo="tickets"><td class="tabla">tickets_dependencias</td><td><span class="m-chip" style="background:var(--m-tickets-soft); color:var(--m-tickets);">Tickets</span></td><td class="origen">ERD original</td><td><span class="pill missing">Sin construir</span></td></tr>
+          <tr data-nombre="tickets_log" data-modulo="tickets"><td class="tabla">tickets_log</td><td><span class="m-chip" style="background:var(--m-tickets-soft); color:var(--m-tickets);">Tickets</span></td><td class="origen">ERD original</td><td><span class="pill missing">Sin construir</span></td></tr>
+
+          <tr class="group-row" data-group="obra"><td colspan="4">Obra <span class="m-count">— 7 tablas, ninguna en el ERD original</span></td></tr>
+          <tr data-nombre="obra_etapas" data-modulo="obra"><td class="tabla">obra_etapas</td><td><span class="m-chip" style="background:var(--m-obra-soft); color:var(--m-obra);">Obra</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="obra_lotes" data-modulo="obra"><td class="tabla">obra_lotes</td><td><span class="m-chip" style="background:var(--m-obra-soft); color:var(--m-obra);">Obra</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="obra_conceptos" data-modulo="obra"><td class="tabla">obra_conceptos</td><td><span class="m-chip" style="background:var(--m-obra-soft); color:var(--m-obra);">Obra</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="obra_estimaciones" data-modulo="obra"><td class="tabla">obra_estimaciones</td><td><span class="m-chip" style="background:var(--m-obra-soft); color:var(--m-obra);">Obra</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="obra_cortes_semanales" data-modulo="obra"><td class="tabla">obra_cortes_semanales</td><td><span class="m-chip" style="background:var(--m-obra-soft); color:var(--m-obra);">Obra</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="obra_cortes_semanales_detalle" data-modulo="obra"><td class="tabla">obra_cortes_semanales_detalle</td><td><span class="m-chip" style="background:var(--m-obra-soft); color:var(--m-obra);">Obra</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="obra_evidencias" data-modulo="obra"><td class="tabla">obra_evidencias</td><td><span class="m-chip" style="background:var(--m-obra-soft); color:var(--m-obra);">Obra</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="materiales"><td colspan="4">Materiales <span class="m-count">— 9 tablas, ninguna en el ERD original</span></td></tr>
+          <tr data-nombre="materiales_catalogo" data-modulo="materiales"><td class="tabla">materiales_catalogo</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_mano_obra_catalogo" data-modulo="materiales"><td class="tabla">materiales_mano_obra_catalogo</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_solicitudes" data-modulo="materiales"><td class="tabla">materiales_solicitudes</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_evidencias_recepcion" data-modulo="materiales"><td class="tabla">materiales_evidencias_recepcion</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_presupuestos" data-modulo="materiales"><td class="tabla">materiales_presupuestos</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_conceptos_presupuesto" data-modulo="materiales"><td class="tabla">materiales_conceptos_presupuesto</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_presupuesto_firmas" data-modulo="materiales"><td class="tabla">materiales_presupuesto_firmas</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_requisiciones" data-modulo="materiales"><td class="tabla">materiales_requisiciones</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="materiales_requisicion_lineas" data-modulo="materiales"><td class="tabla">materiales_requisicion_lineas</td><td><span class="m-chip" style="background:var(--m-materiales-soft); color:var(--m-materiales);">Materiales</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="docint"><td colspan="4">Motor Documental <span class="m-count">— 2 tablas, ninguna en el ERD original</span></td></tr>
+          <tr data-nombre="docint_analysis_job" data-modulo="docint"><td class="tabla">docint_analysis_job</td><td><span class="m-chip" style="background:var(--m-docint-soft); color:var(--m-docint);">Docint</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+          <tr data-nombre="docint_analysis_request_log" data-modulo="docint"><td class="tabla">docint_analysis_request_log</td><td><span class="m-chip" style="background:var(--m-docint-soft); color:var(--m-docint);">Docint</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+          <tr class="group-row" data-group="audit"><td colspan="4">Auditoría <span class="m-count">— 1 tabla, no está en el ERD original</span></td></tr>
+          <tr data-nombre="bitacora_auditoria" data-modulo="audit"><td class="tabla">bitacora_auditoria</td><td><span class="m-chip" style="background:var(--m-audit-soft); color:var(--m-audit);">Auditoría</span></td><td class="origen nuevo">Nuevo</td><td><span class="pill ok">Con CRUD</span></td></tr>
+
+        </tbody>
+      </table>
+      <p class="no-match" id="sin-resultados">Ninguna tabla coincide con la búsqueda.</p>
+    </div>
+  </section>
+
+  <footer>
+    Fuente: 20260727_Cumbres_ERD.sql (49 tablas originales) comparado contra db_table de cada models.py, más el esquema real de columnas (migraciones posteriores a 0001_initial) — revisado 24/Ago/2026.
+    "ERD original · modificada" = la tabla ya existía en el SQL, pero el esquema real trae columnas agregadas o alteradas después que el .sql no refleja: tesoreria_contrapartes, pld_contrapartes_kyc, pld_contrapartes_docs, pld_ticket_cliente. Revisado migración por migración en los 10 servicios — ninguna otra tabla del ERD original cambió de esquema (el único AlterField fuera de esta lista, sobre general_sociedades.grupo en iam-service, solo tocó el help_text, no el tipo/nulabilidad de la columna).
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var input = document.getElementById("buscar");
+    var rows = Array.prototype.slice.call(document.querySelectorAll("#tabla-inventario tbody tr[data-nombre]"));
+    var groups = Array.prototype.slice.call(document.querySelectorAll("#tabla-inventario tbody tr.group-row"));
+    var noMatch = document.getElementById("sin-resultados");
+
+    function aplicarFiltro() {
+      var q = input.value.trim().toLowerCase();
+      var algunaVisible = false;
+
+      groups.forEach(function (g) {
+        var groupName = g.getAttribute("data-group");
+        var rowsInGroup = rows.filter(function (r) { return r.getAttribute("data-modulo") === groupName; });
+        var visibleInGroup = 0;
+
+        rowsInGroup.forEach(function (r) {
+          var match = !q || r.getAttribute("data-nombre").toLowerCase().indexOf(q) !== -1 ||
+            r.getAttribute("data-modulo").toLowerCase().indexOf(q) !== -1;
+          r.style.display = match ? "" : "none";
+          if (match) { visibleInGroup++; algunaVisible = true; }
+        });
+
+        g.style.display = visibleInGroup > 0 ? "" : "none";
+      });
+
+      noMatch.style.display = algunaVisible ? "none" : "block";
+    }
+
+    input.addEventListener("input", aplicarFiltro);
+  })();
+</script>
+
+

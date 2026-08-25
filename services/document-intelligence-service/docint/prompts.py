@@ -94,6 +94,26 @@ PROMPTS = {
         "fecha_emision (YYYY-MM-DD), subtotal, iva, total, moneda, "
         "metodo_pago, forma_pago, uso_cfdi. " + _REGLA_COMUN
     ),
+    "tesoreria.cfdi_factura": (
+        "El documento es una factura (CFDI) recibida de un proveedor. Extrae "
+        "en extracted_data, con estos nombres exactos (columnas reales de "
+        "tesoreria_facturas, ver services/tesoreria-service/tesoreria/"
+        "models.py::TesoreriaFactura): timbre_uuid (el folio fiscal/UUID del "
+        "timbrado, NO el UUID de un CFDI relacionado), comprobante_serie, "
+        "comprobante_folio, comprobante_fecha (YYYY-MM-DD), "
+        "comprobante_moneda, comprobante_forma_pago (clave SAT, ej. '01'), "
+        "comprobante_metodo_pago ('PUE' o 'PPD'), comprobante_total, "
+        "comprobante_tipo_de_comprobante (catalogo c_TipoDeComprobante del "
+        "SAT: 'I' Ingreso, 'E' Egreso, 'P' Pago, 'N' Nomina, 'T' Traslado - "
+        "una factura de proveedor casi siempre es 'I'), tipo_relacion "
+        "(clave del catalogo c_TipoRelacion si el CFDI declara nodo "
+        "CfdiRelacionados, ej. '01' o '04', null si no aplica), "
+        "uuid_relacionado (el primer UUID del nodo CfdiRelacionados si "
+        "existe, null si no aplica), "
+        "emisor_rfc, emisor_nombre, receptor_rfc, receptor_nombre, "
+        "receptor_uso_cfdi (clave SAT, ej. 'G03'), timbre_fecha_timbrado "
+        "(YYYY-MM-DD HH:MM:SS). " + _REGLA_COMUN
+    ),
     "materiales.presupuesto": (
         "El documento es un presupuesto de obra o de materiales. Extrae en "
         "extracted_data: proyecto_nombre, fecha_presupuesto (YYYY-MM-DD), "

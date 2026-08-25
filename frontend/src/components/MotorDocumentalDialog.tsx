@@ -139,6 +139,27 @@ const SERVICIOS_SOLICITANTES = [
   "rrhh-service",
 ] as const;
 
+// Contexto generico (24/Ago/2026) - permite reusar este mismo dialogo desde
+// cualquier pantalla que ya sepa exactamente a que registro va a confirmar
+// la extraccion (ej. /tesoreria/facturas), sin pasar por los selectores de
+// "servicio solicitante"/"expediente KYC" que son especificos de PLD.
+// Mutuamente excluyente con kycPreseleccionado - si se manda `contexto`,
+// se ignora cualquier logica de PLD (carpeta/permKey/confirmar propios).
+export interface MotorDocumentalContexto {
+  // Texto libre mostrado en el aviso superior, ej. "factura F-00458".
+  etiqueta: string;
+  servicioSolicitante: string;
+  carpeta: string;
+  permKey: string;
+  // Si se manda, se usa igual para todos los archivos analizados en esta
+  // sesion del dialogo (a diferencia del modo PLD, que adivina un tipo por
+  // archivo via guessDocumentTypeFromFilename - aqui el llamador ya sabe
+  // que todo lo que se sube a esta carpeta es del mismo tipo de documento).
+  expectedDocumentType?: string;
+  camposConfirmables: readonly string[];
+  onConfirmar: (campos: Record<string, unknown>) => Promise<void>;
+}
+
 interface DocumentResult {
   archivo: DriveArchivo;
   expectedDocumentType: string;
@@ -170,6 +191,7 @@ export default function MotorDocumentalDialog({
   onClose,
   kycPreseleccionado,
   onDatosActualizados,
+  contexto,
 }: {
   open: boolean;
   onClose: () => void;
@@ -185,6 +207,9 @@ export default function MotorDocumentalDialog({
   // cualquier otra pantalla, si algun dia aplica), se comporta como antes:
   // el analista elige servicio + expediente a mano.
   kycPreseleccionado?: { id_kyc: string; id_contraparte: string };
+  // Ver docstring de MotorDocumentalContexto arriba - alterna este dialogo
+  // a modo generico para cualquier otro modulo (Facturacion CFDI hoy).
+  contexto?: MotorDocumentalContexto;
 }) {
   // Tipado explicito: SERVICIOS_SOLICITANTES es "as const" (tupla de
   // literales), asi que SERVICIOS_SOLICITANTES[0] solo, sin el generic,
@@ -222,12 +247,17 @@ export default function MotorDocumentalDialog({
   // "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): mismo prefijo que
   // pld/views.py (subir/subir_documento) - subcarpeta fija dentro de la
   // Unidad compartida PLD_CumbresBI, no la raiz directa.
-  const carpeta = kycPreseleccionado
-    ? `PLD/Nuevos Clientes/${kycPreseleccionado.id_contraparte}`
-    : kycSeleccionado
-      ? `PLD/Nuevos Clientes/${kycOptions.find((k) => k.id_kyc === kycSeleccionado)?.id_contraparte}`
-      : "";
-  const permKey = "pld-compliance.crear";
+  const carpeta = contexto
+    ? contexto.carpeta
+    : kycPreseleccionado
+      ? `PLD/Nuevos Clientes/${kycPreseleccionado.id_contraparte}`
+      : kycSeleccionado
+        ? `PLD/Nuevos Clientes/${kycOptions.find((k) => k.id_kyc === kycSeleccionado)?.id_contraparte}`
+        : "";
+  const permKey = contexto ? contexto.permKey : "pld-compliance.crear";
+  // Habilita "Analizar"/"Confirmar" - en modo contexto no depende de elegir
+  // un expediente KYC, el llamador ya trae su propio destino resuelto.
+  const destinoListo = contexto ? true : !!kycSeleccionado;
 
   const [driveFiles, setDriveFiles] = useState<DriveArchivo[]>([]);
   const [loadingDriveFiles, setLoadingDriveFiles] = useState(false);
@@ -247,11 +277,11 @@ export default function MotorDocumentalDialog({
   }, []);
 
   useEffect(() => {
-    if (!open || kycPreseleccionado || servicioSolicitante !== "pld-service") return;
+    if (!open || contexto || kycPreseleccionado || servicioSolicitante !== "pld-service") return;
     listKyc()
       .then(setKycOptions)
       .catch(() => setKycOptions([]));
-  }, [open, servicioSolicitante, kycPreseleccionado]);
+  }, [open, servicioSolicitante, kycPreseleccionado, contexto]);
 
   async function handleVerArchivosDrive() {
     if (!carpeta) return;
@@ -318,18 +348,20 @@ export default function MotorDocumentalDialog({
   // modelo y se descarta aqui mismo, antes de llamar al backend.
   async function handleConfirmarExtraccion(index: number) {
     const doc = documents[index];
-    if (!doc.result || !kycSeleccionado) return;
+    if (!doc.result) return;
+    if (!contexto && !kycSeleccionado) return;
 
+    const camposConfirmables = contexto ? contexto.camposConfirmables : PLD_CAMPOS_CONFIRMABLES;
     const campos = Object.fromEntries(
       Object.entries(doc.result.extracted_data).filter(
-        ([key, value]) => value !== null && (PLD_CAMPOS_CONFIRMABLES as readonly string[]).includes(key)
+        ([key, value]) => value !== null && (camposConfirmables as readonly string[]).includes(key)
       )
     );
     if (Object.keys(campos).length === 0) {
       setDocuments((prev) =>
         prev.map((d, i) =>
           i === index
-            ? { ...d, extraccionError: "Ningún dato extraído coincide con campos guardables del expediente." }
+            ? { ...d, extraccionError: "Ningún dato extraído coincide con campos guardables de este registro." }
             : d
         )
       );
@@ -337,7 +369,11 @@ export default function MotorDocumentalDialog({
     }
 
     try {
-      await confirmarExtraccionKyc(kycSeleccionado, campos, actorUserId);
+      if (contexto) {
+        await contexto.onConfirmar(campos);
+      } else {
+        await confirmarExtraccionKyc(kycSeleccionado, campos, actorUserId);
+      }
       setDocuments((prev) =>
         prev.map((d, i) =>
           i === index ? { ...d, extraccionConfirmadaEn: new Date().toISOString(), extraccionError: undefined } : d
@@ -368,7 +404,7 @@ export default function MotorDocumentalDialog({
     try {
       const iniciales: DocumentResult[] = elegidos.map((archivo) => ({
         archivo,
-        expectedDocumentType: guessDocumentTypeFromFilename(archivo.nombre),
+        expectedDocumentType: contexto?.expectedDocumentType ?? guessDocumentTypeFromFilename(archivo.nombre),
       }));
       setDocuments(iniciales);
 
@@ -382,7 +418,7 @@ export default function MotorDocumentalDialog({
               nombreArchivo: doc.archivo.nombre,
               mimeType: doc.archivo.mime_type ?? undefined,
               expectedDocumentType: doc.expectedDocumentType,
-              servicioSolicitante: servicioSolicitante || "desconocido",
+              servicioSolicitante: contexto?.servicioSolicitante ?? servicioSolicitante ?? "desconocido",
             });
             setDocuments((prev) =>
               prev.map((d, i) => (i === index ? { ...d, analysisId, estadoAnalisis: status, error: undefined } : d))
@@ -446,13 +482,19 @@ export default function MotorDocumentalDialog({
         </Typography>
 
         <Stack component="form" spacing={2} onSubmit={handleSubmit}>
-          {kycPreseleccionado && (
+          {contexto && (
+            <Alert severity="info" variant="outlined">
+              Analizando documentos de <strong>{contexto.etiqueta}</strong>.
+            </Alert>
+          )}
+
+          {kycPreseleccionado && !contexto && (
             <Alert severity="info" variant="outlined">
               Analizando documentos del expediente <strong>{kycPreseleccionado.id_contraparte}</strong>.
             </Alert>
           )}
 
-          {!kycPreseleccionado && (
+          {!kycPreseleccionado && !contexto && (
             <FormControl size="small" fullWidth>
               <InputLabel id="servicio-solicitante-label">Servicio solicitante</InputLabel>
               <Select
@@ -474,14 +516,14 @@ export default function MotorDocumentalDialog({
             </FormControl>
           )}
 
-          {!kycPreseleccionado && servicioSolicitante !== "pld-service" ? (
+          {!contexto && !kycPreseleccionado && servicioSolicitante !== "pld-service" ? (
             <Alert severity="info">
               Este servicio todavía no tiene una carpeta de Drive resuelta —
               por ahora solo "pld-service" puede listar/analizar documentos.
             </Alert>
           ) : (
             <>
-              {!kycPreseleccionado && (
+              {!kycPreseleccionado && !contexto && (
                 <FormControl size="small" fullWidth>
                   <InputLabel id="kyc-select-label">Expediente KYC</InputLabel>
                   <Select
@@ -507,7 +549,7 @@ export default function MotorDocumentalDialog({
                 startIcon={
                   loadingDriveFiles ? <CircularProgress size={18} /> : <FolderSearch size={18} strokeWidth={1.5} />
                 }
-                disabled={!kycSeleccionado || loadingDriveFiles}
+                disabled={!destinoListo || loadingDriveFiles}
                 onClick={handleVerArchivosDrive}
                 sx={{ justifyContent: "flex-start" }}
               >
@@ -543,7 +585,7 @@ export default function MotorDocumentalDialog({
                 </List>
               )}
 
-              {driveFiles.length === 0 && !loadingDriveFiles && kycSeleccionado && (
+              {driveFiles.length === 0 && !loadingDriveFiles && destinoListo && (
                 <Typography variant="caption" color="text.secondary">
                   Sin archivos listados todavía — clic en "Ver archivos en
                   Drive" (o la carpeta está vacía).
@@ -695,7 +737,7 @@ export default function MotorDocumentalDialog({
                             size="small"
                             variant="contained"
                             startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
-                            disabled={!kycSeleccionado}
+                            disabled={!destinoListo}
                             onClick={() => handleConfirmarExtraccion(index)}
                             sx={{ alignSelf: "flex-start" }}
                           >

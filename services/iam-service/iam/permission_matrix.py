@@ -97,9 +97,11 @@ ROLE_ACCESS = {
     "FINANZAS_MANAGER": {
         "iam": "L", "contrapartes": "LCE", "ventas-vivienda": "L", "materiales": "L",
         "rentas": "LCE", "tesoreria": "LCEA", "facturacion-cfdi": "LCE", "compras": "LCEA",
+        "docint": "LC",
     },
     "TESORERIA_ANALISTA": {
         "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "LC",
+        "docint": "LC",
     },
     "COMPRAS_ANALISTA": {
         "iam": "L", "contrapartes": "L", "materiales": "LCE", "tesoreria": "L", "compras": "LCEA",

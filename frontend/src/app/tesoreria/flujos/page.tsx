@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Button,
   Chip,
   CircularProgress,
@@ -30,22 +31,27 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { ArrowLeftRight, Check, Pencil, Plus, Search, ThumbsUp, X, X as CloseIcon } from "lucide-react";
+import { ArrowLeftRight, Check, Link2, Pencil, Plus, Search, ThumbsUp, X, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
+  TesoreriaComplementoPago,
   TesoreriaContrato,
   TesoreriaCuenta,
+  TesoreriaFactura,
   TesoreriaFlujo,
   TesoreriaValidacionEstado,
   aprobarFlujo,
   createFlujo,
+  listComplementosPago,
   listContratos,
   listCuentas,
+  listFacturas,
   listFlujos,
   rechazarFlujo,
   registrarPagoFlujo,
   updateFlujo,
+  vincularFactura,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -76,6 +82,8 @@ export default function TesoreriaFlujosPage() {
   const [flujos, setFlujos] = useState<TesoreriaFlujo[]>([]);
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
   const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
+  const [facturas, setFacturas] = useState<TesoreriaFactura[]>([]);
+  const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,16 +93,108 @@ export default function TesoreriaFlujosPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [accionando, setAccionando] = useState<string | null>(null);
+  const [vinculando, setVinculando] = useState<TesoreriaFlujo | null>(null);
+  const [vinculoFactura, setVinculoFactura] = useState<TesoreriaFactura | null>(null);
+  const [vinculoComplemento, setVinculoComplemento] = useState<TesoreriaComplementoPago | null>(null);
+  const [buscaFactura, setBuscaFactura] = useState("");
+  const [buscaComplemento, setBuscaComplemento] = useState("");
+  const [opcionesFactura, setOpcionesFactura] = useState<TesoreriaFactura[]>([]);
+  const [opcionesComplemento, setOpcionesComplemento] = useState<TesoreriaComplementoPago[]>([]);
+  const [buscandoFactura, setBuscandoFactura] = useState(false);
+  const [buscandoComplemento, setBuscandoComplemento] = useState(false);
+  const [vinculoError, setVinculoError] = useState<string | null>(null);
+  const [guardandoVinculo, setGuardandoVinculo] = useState(false);
+
+  // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
+  // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
+  // completo visible sin tener que escribir primero) - la factura/
+  // complemento debe existir de antemano (vincular_factura la valida por
+  // timbre_uuid), a diferencia de ContraparteSelector no se puede "crear"
+  // una aqui mismo.
+  useEffect(() => {
+    if (!vinculando) return;
+    setBuscandoFactura(true);
+    const timeout = setTimeout(() => {
+      listFacturas(buscaFactura || undefined)
+        .then(setOpcionesFactura)
+        .catch(() => setOpcionesFactura([]))
+        .finally(() => setBuscandoFactura(false));
+    }, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buscaFactura, vinculando]);
+
+  useEffect(() => {
+    if (!vinculando) return;
+    setBuscandoComplemento(true);
+    const timeout = setTimeout(() => {
+      listComplementosPago(buscaComplemento || undefined)
+        .then(setOpcionesComplemento)
+        .catch(() => setOpcionesComplemento([]))
+        .finally(() => setBuscandoComplemento(false));
+    }, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buscaComplemento, vinculando]);
 
   useEffect(() => {
     getSession().then(setSession);
     listContratos().then(setContratos).catch(() => setContratos([]));
     listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listFacturas().then(setFacturas).catch(() => setFacturas([]));
+    listComplementosPago().then(setComplementos).catch(() => setComplementos([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
   const puedeAprobar = session?.perm_keys.includes("tesoreria.aprobar") ?? false;
+
+  // Muestra el folio de la factura/complemento ya vinculado en vez del
+  // timbre_uuid crudo - busca en las listas ya cargadas arriba (mismo
+  // criterio que contraparte_nombre en Contratos: el backend no manda el
+  // folio denormalizado en TesoreriaFlujoSerializer, se resuelve aqui).
+  function folioFactura(timbreUuid: string | null): string | null {
+    if (!timbreUuid) return null;
+    const f = facturas.find((x) => x.timbre_uuid === timbreUuid);
+    return f ? f.comprobante_folio || f.timbre_uuid : timbreUuid;
+  }
+
+  function folioComplemento(timbreUuid: string | null): string | null {
+    if (!timbreUuid) return null;
+    const c = complementos.find((x) => x.timbre_uuid === timbreUuid);
+    return c ? c.folio || c.timbre_uuid : timbreUuid;
+  }
+
+  function abrirVinculo(f: TesoreriaFlujo) {
+    setVinculando(f);
+    setVinculoFactura(facturas.find((x) => x.timbre_uuid === f.factura) || null);
+    setVinculoComplemento(complementos.find((x) => x.timbre_uuid === f.complemento) || null);
+    setBuscaFactura("");
+    setBuscaComplemento("");
+    setVinculoError(null);
+  }
+
+  async function handleGuardarVinculo() {
+    if (!vinculando) return;
+    if (!vinculoFactura && !vinculoComplemento) {
+      setVinculoError("Selecciona al menos una factura o un complemento de pago.");
+      return;
+    }
+    setGuardandoVinculo(true);
+    setVinculoError(null);
+    try {
+      await vincularFactura(vinculando.id_flujo, {
+        factura: vinculoFactura?.timbre_uuid || undefined,
+        complemento: vinculoComplemento?.timbre_uuid || undefined,
+      });
+      setVinculando(null);
+      refresh();
+    } catch (err) {
+      setVinculoError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setGuardandoVinculo(false);
+    }
+  }
 
   function refresh() {
     setLoading(true);
@@ -259,6 +359,7 @@ export default function TesoreriaFlujosPage() {
                 <TableCell>Cuenta</TableCell>
                 <TableCell>Concepto</TableCell>
                 <TableCell align="right">Total MXP</TableCell>
+                <TableCell>CFDI vinculado</TableCell>
                 <TableCell>Estado</TableCell>
                 <TableCell>Pagado</TableCell>
                 <TableCell align="right">Acciones</TableCell>
@@ -267,13 +368,13 @@ export default function TesoreriaFlujosPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : flujos.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin flujos registrados.
                     </Typography>
@@ -290,6 +391,18 @@ export default function TesoreriaFlujosPage() {
                       {f.total_mxp
                         ? Number(f.total_mxp).toLocaleString("es-MX", { style: "currency", currency: "MXN" })
                         : "—"}
+                    </TableCell>
+                    <TableCell>
+                      {f.factura || f.complemento ? (
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                          {f.factura && <Chip size="small" label={`Factura ${folioFactura(f.factura)}`} variant="outlined" />}
+                          {f.complemento && (
+                            <Chip size="small" label={`REP ${folioComplemento(f.complemento)}`} variant="outlined" />
+                          )}
+                        </Stack>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                     <TableCell>
                       <Chip
@@ -318,6 +431,18 @@ export default function TesoreriaFlujosPage() {
                               disabled={!puedeEditar}
                             >
                               <Pencil size={14} strokeWidth={1.5} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Vincular factura/complemento">
+                          <span>
+                            <IconButton
+                              size="small"
+                              aria-label="Vincular factura/complemento"
+                              onClick={() => abrirVinculo(f)}
+                              disabled={!puedeEditar}
+                            >
+                              <Link2 size={14} strokeWidth={1.5} />
                             </IconButton>
                           </span>
                         </Tooltip>
@@ -485,6 +610,88 @@ export default function TesoreriaFlujosPage() {
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
           <Button variant="contained" onClick={handleGuardar} disabled={saving}>
             {saving ? <CircularProgress size={16} /> : "Guardar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!vinculando} onClose={() => setVinculando(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {vinculando ? `Vincular CFDI a ${vinculando.id_flujo}` : ""}
+          <IconButton onClick={() => setVinculando(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {vinculoError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {vinculoError}
+            </Alert>
+          )}
+          <Stack spacing={2}>
+            <Autocomplete
+              openOnFocus
+              size="small"
+              fullWidth
+              loading={buscandoFactura}
+              value={vinculoFactura}
+              inputValue={buscaFactura}
+              onInputChange={(_, nuevoValor) => setBuscaFactura(nuevoValor)}
+              onChange={(_, seleccion) => setVinculoFactura(seleccion)}
+              options={opcionesFactura}
+              getOptionLabel={(f) => `${f.comprobante_folio || f.timbre_uuid}${f.emisor_nombre ? ` — ${f.emisor_nombre}` : ""}`}
+              isOptionEqualToValue={(a, b) => a.timbre_uuid === b.timbre_uuid}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Factura"
+                  helperText="Escribe para buscar por folio, UUID o nombre."
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {buscandoFactura && <CircularProgress size={16} />}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+            />
+            <Autocomplete
+              openOnFocus
+              size="small"
+              fullWidth
+              loading={buscandoComplemento}
+              value={vinculoComplemento}
+              inputValue={buscaComplemento}
+              onInputChange={(_, nuevoValor) => setBuscaComplemento(nuevoValor)}
+              onChange={(_, seleccion) => setVinculoComplemento(seleccion)}
+              options={opcionesComplemento}
+              getOptionLabel={(c) => `${c.folio || c.timbre_uuid}${c.emisor_nombre ? ` — ${c.emisor_nombre}` : ""}`}
+              isOptionEqualToValue={(a, b) => a.timbre_uuid === b.timbre_uuid}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Complemento de pago"
+                  helperText="Escribe para buscar por folio, UUID o nombre."
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {buscandoComplemento && <CircularProgress size={16} />}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVinculando(null)}>Cancelar</Button>
+          <Button variant="contained" onClick={handleGuardarVinculo} disabled={guardandoVinculo}>
+            {guardandoVinculo ? <CircularProgress size={16} /> : "Guardar"}
           </Button>
         </DialogActions>
       </Dialog>

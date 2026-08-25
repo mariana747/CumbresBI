@@ -1,0 +1,448 @@
+<title>Conexiones de Tesorería</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #f2f5f0;
+    --surface: #ffffff;
+    --surface-2: #e9ede5;
+    --ink: #182019;
+    --ink-soft: #52605a;
+    --ink-faint: #7c8880;
+    --line: #d3d9cd;
+    --line-strong: #aab3a2;
+
+    --accent: #0e6f5c;
+    --accent-strong: #0a5548;
+    --accent-soft: #dcefe9;
+
+    /* tipos de enlace - el mismo morado de "PLD" en piezas-de-tesoreria.html,
+       reusado a proposito para reforzar "esto cruza de servicio" */
+    --fk: #182019;
+    --logico: #a6720b;
+    --logico-soft: #f6ecd4;
+    --http: #6b5b95;
+    --http-soft: #eae6f4;
+    --bloqueado: #9aa3ab;
+    --bloqueado-soft: #eceef0;
+
+    --font-display: "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Courier New", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10140e; --surface: #171d15; --surface-2: #1d241a;
+      --ink: #e9efe4; --ink-soft: #a9b5a2; --ink-faint: #7c8878;
+      --line: #2b3327; --line-strong: #3c4636;
+      --accent: #3fcbab; --accent-strong: #6fe0c4; --accent-soft: #163830;
+      --fk: #e9efe4;
+      --logico: #e0b84a; --logico-soft: #3a2f10;
+      --http: #b3a1e0; --http-soft: #262038;
+      --bloqueado: #9aa3ab; --bloqueado-soft: #23262a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10140e; --surface: #171d15; --surface-2: #1d241a;
+    --ink: #e9efe4; --ink-soft: #a9b5a2; --ink-faint: #7c8878;
+    --line: #2b3327; --line-strong: #3c4636;
+    --accent: #3fcbab; --accent-strong: #6fe0c4; --accent-soft: #163830;
+    --fk: #e9efe4;
+    --logico: #e0b84a; --logico-soft: #3a2f10;
+    --http: #b3a1e0; --http-soft: #262038;
+    --bloqueado: #9aa3ab; --bloqueado-soft: #23262a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1280px; margin: 0 auto; padding: 56px 28px 90px;
+    display: flex; flex-direction: column; gap: 40px;
+  }
+  header {
+    display: flex; flex-direction: column; gap: 14px;
+    border-bottom: 1px solid var(--line); padding-bottom: 32px;
+  }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent-strong);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--accent); display: inline-block; }
+  h1 {
+    font-family: var(--font-display); font-weight: 800; font-size: clamp(2rem, 3.6vw, 2.7rem);
+    letter-spacing: -0.02em; margin: 0; text-wrap: balance;
+  }
+  .lede { max-width: 74ch; color: var(--ink-soft); font-size: 1.02rem; }
+  .lede code {
+    font-family: var(--font-mono); font-size: 0.9em; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.4em; color: var(--ink);
+  }
+
+  .objetivo {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 18px 22px;
+    font-size: 0.98rem;
+    color: var(--ink);
+  }
+  .objetivo strong { color: var(--accent-strong); }
+
+  .grupo { display: flex; flex-direction: column; gap: 10px; }
+  .grupo-titulo {
+    font-family: var(--font-mono); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-faint); display: flex; align-items: center; gap: 8px;
+  }
+  .grupo-titulo .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .tabla-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  table.proposito { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 640px; }
+  table.proposito th {
+    text-align: left; font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--ink-faint); font-weight: 600; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); background: var(--surface-2);
+  }
+  table.proposito td { padding: 10px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.proposito tr:last-child td { border-bottom: none; }
+  table.proposito tr:hover td { background: var(--surface-2); }
+  table.proposito td.pieza { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; }
+  table.proposito td.desc { color: var(--ink-soft); }
+
+  .diagram-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 20px 20px 8px;
+  }
+  .diagram-scroll { overflow-x: auto; }
+  svg.mapa { display: block; min-width: 1120px; width: 100%; height: auto; font-family: var(--font-body); }
+  figcaption {
+    font-size: 0.86rem; color: var(--ink-faint); padding: 14px 4px 4px;
+    border-top: 1px solid var(--line); margin-top: 14px;
+  }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 20px; row-gap: 10px;
+    font-size: 0.84rem; color: var(--ink-soft);
+  }
+  .legend .item { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .legend svg { flex-shrink: 0; }
+
+  .notas {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px;
+  }
+  .nota {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+  }
+  .nota h3 {
+    font-family: var(--font-mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;
+    margin: 0 0 8px; display: flex; align-items: center; gap: 8px;
+  }
+  .nota .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .nota p { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
+  .nota code {
+    font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.35em; color: var(--ink);
+  }
+
+  footer {
+    border-top: 1px solid var(--line); padding-top: 20px;
+    font-size: 0.82rem; color: var(--ink-faint); font-family: var(--font-mono);
+  }
+
+  @media (max-width: 640px) { .page { padding: 36px 16px 70px; } }
+</style>
+
+<div class="page">
+
+  <header>
+    <div class="eyebrow">CumbresBI · Tesorería</div>
+    <h1>Cómo se unen los componentes de Tesorería</h1>
+    <p class="lede">
+      Las 16 tablas de <code>tesoreria_*</code> no se conectan todas igual: unas por llave foránea real,
+      otras solo por convención de la aplicación (un <code>uuid</code> de texto plano sin restricción en
+      la base), y dos por una llamada HTTP a otro microservicio. Distinguir cuál es cuál importa — una
+      llave foránea la protege la base de datos; un enlace lógico solo lo protege el código que lo escribió.
+    </p>
+  </header>
+
+  <div class="objetivo">
+    <strong>Objetivo del módulo:</strong> tener control real de cada peso que entra o sale de la empresa
+    — con quién se acordó (Contrato), el movimiento real de dinero con su aprobación (Flujo), y el
+    respaldo fiscal ante el SAT (Factura/Complemento/Nota de crédito/Nómina) — para que Finanzas cierre
+    el ciclo compras → pago → comprobación sin depender de hojas de cálculo sueltas.
+  </div>
+
+  <div class="grupo">
+    <div class="grupo-titulo"><span class="dot" style="background:var(--ink-faint)"></span>Catálogos compartidos</div>
+    <div class="tabla-wrap">
+      <table class="proposito">
+        <thead><tr><th>Pieza</th><th>Para qué sirve</th></tr></thead>
+        <tbody>
+          <tr><td class="pieza">Contraparte</td><td class="desc">El registro único de cada cliente/proveedor/persona con la que Cumbres tiene una relación económica — para que PLD, Ventas y Tesorería hablen del mismo tercero, no de tres copias distintas.</td></tr>
+          <tr><td class="pieza">ContraparteRelación</td><td class="desc">Quién es el representante legal o el beneficiario controlador de una contraparte moral — dato que pide cumplimiento (PLD/AML), no la operación fiscal en sí.</td></tr>
+          <tr><td class="pieza">Banco</td><td class="desc">Catálogo de bancos (Banxico) para no volver a teclear el nombre del banco cada vez que se da de alta una cuenta.</td></tr>
+          <tr><td class="pieza">Cuenta</td><td class="desc">Las cuentas bancarias reales de la empresa — el lugar físico de donde sale y a donde entra el dinero de cada Flujo.</td></tr>
+          <tr><td class="pieza">CorteEdc</td><td class="desc">El PDF del estado de cuenta del banco, guardado para poder conciliar contra lo que Tesorería capturó en Flujos.</td></tr>
+          <tr><td class="pieza">Saldo</td><td class="desc">Una fotografía del saldo de una cuenta en una fecha — para el reporte del día a día sin tener que sumar el histórico completo de flujos cada vez.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grupo">
+    <div class="grupo-titulo"><span class="dot" style="background:var(--accent)"></span>La ruta del dinero</div>
+    <div class="tabla-wrap">
+      <table class="proposito">
+        <thead><tr><th>Pieza</th><th>Para qué sirve</th></tr></thead>
+        <tbody>
+          <tr><td class="pieza">Contrato</td><td class="desc">El compromiso económico acordado con una contraparte — qué se le va a pagar o cobrar y bajo qué condiciones. De aquí cuelgan los flujos reales.</td></tr>
+          <tr><td class="pieza">Flujo</td><td class="desc">
+            El movimiento de dinero que de verdad ocurre — pago a proveedor, cobro, <strong>reembolso a un empleado</strong> o nómina — con su propio ciclo de aprobar/registrar pago. Es el corazón operativo del módulo.
+            <br><span style="font-size:0.85em; color:var(--ink-faint)">Un reembolso es un Flujo con <code>reembolso=true</code> + <code>id_empleado_reembolso</code> — si el gasto trae CFDI real (ej. una factura de hotel/gasolina a nombre de la empresa), esa factura se liga con <code>vincular_factura</code>; si es solo un ticket sin CFDI, el Flujo queda sin factura ligada. Hoy el empleado no la captura él mismo — eso es justo lo que falta del lado de MiCumbres (ver Backlog RRHH).</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grupo">
+    <div class="grupo-titulo"><span class="dot" style="background:var(--ink)"></span>Facturación CFDI (el respaldo fiscal)</div>
+    <div class="tabla-wrap">
+      <table class="proposito">
+        <thead><tr><th>Pieza</th><th>Para qué sirve</th></tr></thead>
+        <tbody>
+          <tr><td class="pieza">Factura</td><td class="desc">El CFDI de Ingreso recibido de un proveedor — el respaldo fiscal de un gasto (incluye el de un reembolso, cuando el empleado sí trae factura a nombre de la empresa).</td></tr>
+          <tr><td class="pieza">ComplementoPago</td><td class="desc">El CFDI (REP) que certifica ante el SAT que una factura a crédito (PPD) ya se pagó — y qué facturas exactas liquida ("Facturas PPD a liquidar").</td></tr>
+          <tr><td class="pieza">NotaCrédito</td><td class="desc">Ajuste fiscal sobre una factura ya emitida — un descuento o una devolución, ligada a la factura original.</td></tr>
+          <tr><td class="pieza">RecNómina</td><td class="desc">El CFDI de nómina de un empleado — encabezado listo, pero bloqueado en la práctica hasta que exista un catálogo real de empleados en RRHH.</td></tr>
+          <tr><td class="pieza">Líneas de detalle</td><td class="desc">Conceptos, Traslados, Documentos relacionados y renglones de Nota de crédito — el desglose línea por línea (importes, impuestos) que exige el SAT dentro de cada CFDI.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="diagram-card">
+    <div class="diagram-scroll">
+      <figure style="margin:0">
+        <svg class="mapa" viewBox="0 0 1180 760" role="img" aria-label="Mapa de como se conectan las tablas de tesoreria-service entre si y con PLD, Ventas y el Motor Documental">
+          <defs>
+            <marker id="a-fk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+            </marker>
+            <marker id="a-logico" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--logico)" />
+            </marker>
+            <marker id="a-http" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--http)" />
+            </marker>
+          </defs>
+
+          <!-- ============ catalogos ============ -->
+          <rect x="30" y="30" width="150" height="46" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="105" y="48" text-anchor="middle" font-size="12.5" font-weight="600">Contraparte</text>
+          <text x="105" y="64" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--ink-faint)">catálogo maestro</text>
+
+          <rect x="220" y="30" width="180" height="46" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="310" y="48" text-anchor="middle" font-size="12.5" font-weight="600">ContraparteRelación</text>
+          <text x="310" y="64" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--ink-faint)">representante legal</text>
+
+          <rect x="480" y="30" width="130" height="46" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="545" y="53" text-anchor="middle" font-size="12.5" font-weight="600">Banco</text>
+
+          <rect x="650" y="30" width="130" height="46" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="715" y="53" text-anchor="middle" font-size="12.5" font-weight="600">Cuenta</text>
+
+          <rect x="820" y="30" width="130" height="46" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="885" y="48" text-anchor="middle" font-size="12.5" font-weight="600">CorteEdc</text>
+          <text x="885" y="64" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--ink-faint)">estado de cuenta</text>
+
+          <rect x="990" y="30" width="130" height="46" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="1055" y="53" text-anchor="middle" font-size="12.5" font-weight="600">Saldo</text>
+
+          <!-- self-loop ContraparteRelacion -->
+          <path d="M400,45 h35" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a-fk)"/>
+          <path d="M310,76 q0,26 -60,26 q-60,0 -60,-26" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a-fk)"/>
+          <text x="255" y="118" text-anchor="middle" font-size="10" fill="var(--ink-faint)">2 FK a la misma tabla</text>
+
+          <!-- Contraparte -> Contrato -->
+          <path d="M105,76 v34 q0,10 10,10 h95" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a-fk)"/>
+
+          <!-- Banco -> Cuenta -->
+          <path d="M610,53 h40" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a-fk)"/>
+          <!-- Cuenta -> CorteEdc -->
+          <path d="M780,53 h40" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a-fk)"/>
+          <!-- Saldo (sin FK, columna cuenta en texto plano) -->
+          <path d="M950,53 h40" fill="none" stroke="var(--logico)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a-logico)"/>
+          <text x="970" y="42" text-anchor="middle" font-size="9.5" fill="var(--logico)">cuenta (texto)</text>
+
+          <!-- ============ bisagra ============ -->
+          <rect x="210" y="150" width="160" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="290" y="171" text-anchor="middle" font-size="13" font-weight="700">Contrato</text>
+          <text x="290" y="188" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--accent-strong)">alcance por sociedad</text>
+
+          <rect x="470" y="150" width="160" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="550" y="171" text-anchor="middle" font-size="13" font-weight="700">Flujo</text>
+          <text x="550" y="188" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--accent-strong)">bisagra de dinero real</text>
+
+          <!-- Contrato -> Flujo -->
+          <path d="M370,175 h90" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#a-fk)"/>
+          <!-- Cuenta -> Flujo -->
+          <path d="M715,76 v40 q0,10 -10,10 h-95 q-10,0 -10,10 v14" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#a-fk)"/>
+
+          <!-- ============ CFDI headers ============ -->
+          <rect x="470" y="290" width="150" height="50" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="545" y="311" text-anchor="middle" font-size="12.5" font-weight="600">Factura</text>
+          <text x="545" y="328" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--ink-faint)">CFDI Ingreso</text>
+
+          <rect x="660" y="290" width="170" height="50" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="745" y="311" text-anchor="middle" font-size="12.5" font-weight="600">ComplementoPago</text>
+          <text x="745" y="328" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--ink-faint)">CFDI Pago (REP)</text>
+
+          <rect x="870" y="290" width="150" height="50" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="945" y="311" text-anchor="middle" font-size="12.5" font-weight="600">NotaCrédito</text>
+          <text x="945" y="328" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--ink-faint)">CFDI Egreso</text>
+
+          <rect x="1040" y="290" width="140" height="50" rx="8" fill="var(--bloqueado-soft)" stroke="var(--line-strong)"/>
+          <text x="1110" y="311" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--bloqueado)">RecNómina</text>
+          <text x="1110" y="328" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--bloqueado)">bloqueada · sin RRHH</text>
+
+          <!-- Flujo -> Factura / Complemento / Nomina (FK reales, timbre_uuid) -->
+          <path d="M550,200 v45 q0,10 -5,20 q-5,10 0,20 v5" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#a-fk)"/>
+          <path d="M600,200 q150,40 145,90" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#a-fk)"/>
+          <path d="M610,190 q300,10 490,100" fill="none" stroke="var(--bloqueado)" stroke-width="1.4" stroke-dasharray="2 4" marker-end="url(#a-fk)"/>
+          <text x="640" y="240" font-size="10" fill="var(--ink-faint)">factura_uuid / complemento_uuid</text>
+          <text x="900" y="255" font-size="10" fill="var(--bloqueado)">nomina_uuid — sin acción para vincularla</text>
+
+          <!-- vincular_factura action label -->
+          <rect x="470" y="220" width="230" height="20" rx="4" fill="var(--accent-soft)" />
+          <text x="585" y="234" text-anchor="middle" font-size="9.5" fill="var(--accent-strong)" font-family="var(--font-mono)">POST /flujos/&lt;id&gt;/vincular_factura/</text>
+
+          <!-- NotaCredito -> Factura (FK real) -->
+          <path d="M870,308 h-160" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#a-fk)"/>
+          <text x="790" y="298" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">uuid_relacionado → timbre_uuid</text>
+
+          <!-- ComplementoPago -> Factura (logico, texto plano) -->
+          <path d="M660,320 q-40,20 -95,10" fill="none" stroke="var(--logico)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a-logico)"/>
+          <text x="600" y="352" text-anchor="middle" font-size="9.5" fill="var(--logico)">uuid_relacion (texto, sin FK)</text>
+
+          <!-- Factura self tipo_relacion -->
+          <path d="M545,290 q0,-20 -30,-20 q-30,0 -30,20" fill="none" stroke="var(--logico)" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#a-logico)"/>
+          <text x="500" y="255" text-anchor="middle" font-size="9.5" fill="var(--logico)">tipo_relación / uuid_relacionado</text>
+          <text x="500" y="267" text-anchor="middle" font-size="9" fill="var(--ink-faint)">(CfdiRelacionados, otra Factura)</text>
+
+          <!-- ============ lineas de detalle ============ -->
+          <rect x="470" y="430" width="150" height="56" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="545" y="450" text-anchor="middle" font-size="11.5" font-weight="600">FacturaConcepto</text>
+          <text x="545" y="465" text-anchor="middle" font-size="11.5" font-weight="600">FacturaTraslado</text>
+          <text x="545" y="479" text-anchor="middle" font-size="9.5" font-family="var(--font-mono)" fill="var(--logico)">?uuid=timbre_uuid</text>
+
+          <rect x="660" y="430" width="170" height="56" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="745" y="450" text-anchor="middle" font-size="11.5" font-weight="600">FacturaDoctoRelacionado</text>
+          <text x="745" y="465" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">"Facturas PPD a liquidar"</text>
+          <text x="745" y="479" text-anchor="middle" font-size="9.5" font-family="var(--font-mono)" fill="var(--logico)">?timbre_uuid=</text>
+
+          <rect x="870" y="430" width="150" height="56" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="945" y="450" text-anchor="middle" font-size="11.5" font-weight="600">FacturaNotaCrédito</text>
+          <text x="945" y="465" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">renglones</text>
+          <text x="945" y="479" text-anchor="middle" font-size="9.5" font-family="var(--font-mono)" fill="var(--logico)">?uuid=</text>
+
+          <path d="M545,340 v90" fill="none" stroke="var(--logico)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a-logico)"/>
+          <path d="M745,340 v90" fill="none" stroke="var(--logico)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a-logico)"/>
+          <path d="M945,340 v90" fill="none" stroke="var(--logico)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a-logico)"/>
+
+          <!-- nota: panel movido -->
+          <text x="745" y="500" text-anchor="middle" font-size="9" fill="var(--ink-faint)">vive en la pantalla de ComplementoPago, no en Factura</text>
+
+          <!-- ============ externos ============ -->
+          <rect x="30" y="180" width="130" height="56" rx="8" fill="var(--http-soft)" stroke="var(--http)"/>
+          <text x="95" y="203" text-anchor="middle" font-size="12" font-weight="700" fill="var(--http)">PLD</text>
+          <text x="95" y="219" text-anchor="middle" font-size="10" fill="var(--http)">expediente KYC</text>
+
+          <rect x="30" y="250" width="130" height="56" rx="8" fill="var(--http-soft)" stroke="var(--http)"/>
+          <text x="95" y="273" text-anchor="middle" font-size="12" font-weight="700" fill="var(--http)">Ventas</text>
+          <text x="95" y="289" text-anchor="middle" font-size="10" fill="var(--http)">cliente/acreditado</text>
+
+          <path d="M105,180 q0,-30 20,-58 q30,-40 -20,-46" fill="none" stroke="var(--http)" stroke-width="1.4" stroke-dasharray="1 4" marker-end="url(#a-http)"/>
+          <path d="M105,236 v-160" fill="none" stroke="var(--http)" stroke-width="1.4" stroke-dasharray="1 4" marker-end="url(#a-http)"/>
+          <path d="M160,278 q120,-40 -25,-215" fill="none" stroke="var(--http)" stroke-width="1.4" stroke-dasharray="1 4" marker-end="url(#a-http)"/>
+          <text x="185" y="140" font-size="10" fill="var(--http)">HTTP, valida id_contraparte</text>
+
+          <rect x="470" y="600" width="150" height="56" rx="8" fill="var(--http-soft)" stroke="var(--http)"/>
+          <text x="545" y="623" text-anchor="middle" font-size="12" font-weight="700" fill="var(--http)">Motor Documental</text>
+          <text x="545" y="639" text-anchor="middle" font-size="10" fill="var(--http)">docint (Gemini)</text>
+
+          <path d="M545,600 v-114" fill="none" stroke="var(--http)" stroke-width="1.4" stroke-dasharray="1 4" marker-end="url(#a-http)"/>
+          <text x="545" y="585" text-anchor="middle" font-size="9.5" fill="var(--http)" font-family="var(--font-mono)">confirmar_extraccion</text>
+
+          <!-- estado de la factura -->
+          <rect x="30" y="600" width="330" height="120" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="50" y="626" font-size="11" font-weight="700" font-family="var(--font-mono)" fill="var(--ink-faint)">CICLO DE LA FACTURA</text>
+          <text x="50" y="654" font-size="12.5">PENDIENTE → EN_PROCESO → ACEPTADA</text>
+          <text x="50" y="674" font-size="12.5">                              ↳ RECHAZADA</text>
+          <text x="50" y="700" font-size="10" fill="var(--ink-faint)">ACEPTADA exige link_pdf + link_xml</text>
+        </svg>
+        <figcaption>
+          Verde = tabla en la ruta principal del dinero (Contrato → Flujo → CFDI). Flecha sólida negra = llave
+          foránea real; flecha punteada ámbar = enlace lógico (columna de texto sin restricción en la base);
+          flecha morada = llamada HTTP a otro microservicio. RecNómina queda conectada solo en el papel —
+          sin acción para vincularla desde Flujo todavía.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="item">
+      <svg width="28" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="currentColor" stroke-width="1.6"/><polygon points="24,5 18,2 18,8" fill="currentColor"/></svg>
+      Llave foránea real — la protege la base de datos
+    </span>
+    <span class="item">
+      <svg width="28" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="var(--logico)" stroke-width="1.6" stroke-dasharray="4 3"/><polygon points="24,5 18,2 18,8" fill="var(--logico)"/></svg>
+      Enlace lógico — <code>uuid</code> de texto plano, sin restricción en la base
+    </span>
+    <span class="item">
+      <svg width="28" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="var(--http)" stroke-width="1.6" stroke-dasharray="1 4"/><polygon points="24,5 18,2 18,8" fill="var(--http)"/></svg>
+      Llamada HTTP entre microservicios
+    </span>
+  </div>
+
+  <div class="notas">
+    <div class="nota">
+      <h3><span class="dot" style="background:var(--accent)"></span>La única ruta con llaves foráneas de punta a punta</h3>
+      <p>
+        <code>Contraparte → Contrato → Flujo</code> es la cadena real (con restricción de base de datos)
+        que conecta a quién le pagas con el movimiento de dinero. Todo lo demás — de Flujo hacia las
+        4 cabeceras CFDI — ya depende de <code>timbre_uuid</code> como llave foránea real
+        (factura/complemento sí, nómina no tiene acción para vincularse).
+      </p>
+    </div>
+    <div class="nota">
+      <h3><span class="dot" style="background:var(--logico)"></span>Las líneas de detalle no tienen FK — nunca la tuvieron</h3>
+      <p>
+        Conceptos, Traslados, Documentos relacionados y renglones de Nota de crédito se enlazan a su
+        cabecera por un <code>uuid</code> de texto plano filtrado con <code>?uuid=</code>/<code>?timbre_uuid=</code>.
+        Así venía en el ERD heredado — borrar la cabecera no borra ni bloquea sus líneas.
+      </p>
+    </div>
+    <div class="nota">
+      <h3><span class="dot" style="background:var(--http)"></span>Tesorería presta su catálogo, no al revés</h3>
+      <p>
+        PLD y Ventas validan por HTTP que un <code>id_contraparte</code> exista en Tesorería antes de
+        guardarlo (fail-open si Tesorería no responde). El Motor Documental hace lo inverso: Tesorería
+        le pide un análisis y confirma el resultado sobre su propia Factura.
+      </p>
+    </div>
+  </div>
+
+  <footer>
+    Fuente: services/tesoreria-service/tesoreria/models.py + views.py — revisado 24/Ago/2026.
+  </footer>
+
+</div>

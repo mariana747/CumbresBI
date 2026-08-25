@@ -1,0 +1,648 @@
+<title>Manual de Facturación CFDI</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f6f5f1;
+    --bg-raised: #ffffff;
+    --ink: #21261f;
+    --ink-soft: #565f52;
+    --border: #dcd9cf;
+    --accent: #2f5d4f;
+    --accent-soft: #e4ede9;
+    --accent-ink: #1d4438;
+    --warn-bg: #f7ecd9;
+    --warn-ink: #7a5416;
+    --code-bg: #eceae2;
+    --shadow: 0 1px 2px rgba(33,38,31,0.06), 0 8px 24px rgba(33,38,31,0.05);
+  }
+
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #171a15;
+      --bg-raised: #1f231c;
+      --ink: #e9e7dd;
+      --ink-soft: #a8ab9c;
+      --border: #33382c;
+      --accent: #6fae97;
+      --accent-soft: #223129;
+      --accent-ink: #9fd2bd;
+      --warn-bg: #332c17;
+      --warn-ink: #e0bd7c;
+      --code-bg: #23271e;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #171a15;
+    --bg-raised: #1f231c;
+    --ink: #e9e7dd;
+    --ink-soft: #a8ab9c;
+    --border: #33382c;
+    --accent: #6fae97;
+    --accent-soft: #223129;
+    --accent-ink: #9fd2bd;
+    --warn-bg: #332c17;
+    --warn-ink: #e0bd7c;
+    --code-bg: #23271e;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 {
+    font-family: "Source Serif 4", Georgia, serif;
+    text-wrap: balance;
+    color: var(--ink);
+    margin: 0;
+  }
+
+  a { color: var(--accent-ink); }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 720px);
+    justify-content: center;
+    gap: 56px;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    font-size: 0.86rem;
+  }
+
+  nav.toc .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    margin-bottom: 14px;
+    font-weight: 600;
+  }
+
+  nav.toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    counter-reset: toc;
+  }
+
+  nav.toc li { counter-increment: toc; }
+
+  nav.toc a {
+    display: flex;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    text-decoration: none;
+    color: var(--ink-soft);
+  }
+
+  nav.toc a:hover { background: var(--accent-soft); color: var(--accent-ink); }
+
+  nav.toc a::before {
+    content: counter(toc, decimal-leading-zero);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+    color: var(--accent);
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+
+  main { min-width: 0; }
+
+  header.hero {
+    padding-bottom: 32px;
+    margin-bottom: 40px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  header.hero .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.72rem;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    margin-bottom: 18px;
+  }
+
+  header.hero h1 { font-size: clamp(1.9rem, 3.4vw, 2.5rem); font-weight: 600; }
+
+  header.hero p.lede {
+    margin-top: 14px;
+    max-width: 62ch;
+    color: var(--ink-soft);
+    font-size: 1.02rem;
+  }
+
+  section.module {
+    margin-bottom: 52px;
+    scroll-margin-top: 24px;
+  }
+
+  section.module > h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  section.module > h2 .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--ink-soft);
+    text-transform: none;
+    letter-spacing: 0.02em;
+  }
+
+  section.module > p.desc {
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 22px;
+  }
+
+  .card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 22px 24px;
+    margin-bottom: 16px;
+  }
+
+  .card h3 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+
+  ol.steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  ol.steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 12px;
+  }
+
+  ol.steps li::before {
+    content: counter(step);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  ol.steps li p { margin: 0; padding-top: 2px; }
+  ol.steps li p.hint { color: var(--ink-soft); font-size: 0.9rem; margin-top: 4px; }
+
+  code, .field {
+    font-family: "IBM Plex Mono", monospace;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.86em;
+  }
+
+  .table-wrap { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  th {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    font-weight: 600;
+  }
+
+  td.req { white-space: nowrap; }
+
+  .pill {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 2px 9px;
+    border-radius: 100px;
+    font-family: "IBM Plex Sans", sans-serif;
+  }
+  .pill.oblig { background: var(--warn-bg); color: var(--warn-ink); }
+  .pill.opc { background: var(--accent-soft); color: var(--accent-ink); }
+
+  .callout {
+    display: flex;
+    gap: 12px;
+    background: var(--warn-bg);
+    color: var(--warn-ink);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 0.9rem;
+    margin: 18px 0;
+  }
+  .callout strong { color: inherit; }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .permkey {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.86rem;
+    color: var(--ink-soft);
+    margin-top: 4px;
+  }
+
+  .col-added {
+    background: var(--accent-soft);
+    position: relative;
+  }
+
+  .col-added::after {
+    content: "nueva";
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent-ink);
+    display: block;
+    margin-top: 2px;
+  }
+
+  th.col-added::after { content: none; }
+
+  .example {
+    background: var(--accent-soft);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+  }
+
+  .example h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-ink);
+  }
+
+  .example h3::before {
+    content: "✓";
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+  }
+
+  dl.sample {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    row-gap: 8px;
+    column-gap: 18px;
+    margin: 0;
+    font-size: 0.88rem;
+  }
+
+  dl.sample dt {
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    padding-top: 2px;
+  }
+
+  dl.sample dd {
+    margin: 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.87rem;
+    word-break: break-word;
+  }
+
+  footer.page-footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+  }
+
+  @media (max-width: 880px) {
+    .shell { grid-template-columns: 1fr; }
+    nav.toc { position: static; margin-bottom: 24px; }
+    nav.toc ol { flex-direction: row; flex-wrap: wrap; }
+  }
+</style>
+
+<div class="shell">
+  <nav class="toc">
+    <div class="eyebrow">En esta guía</div>
+    <ol>
+      <li><a href="#facturas">Facturas CFDI</a></li>
+      <li><a href="#complementos">Complementos de pago</a></li>
+      <li><a href="#notas">Notas de crédito</a></li>
+      <li><a href="#nominas">Recibos de nómina</a></li>
+      <li><a href="#flujos">Vínculo con Flujos</a></li>
+      <li><a href="#permisos">Permisos</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <span class="eyebrow">Tesorería · Facturación CFDI</span>
+      <h1>Cómo registrar y consultar CFDI en Tesorería</h1>
+      <p class="lede">
+        Cuatro catálogos nuevos dentro de <strong>Tesorería</strong>: Facturas, Complementos de pago,
+        Notas de crédito y Recibos de nómina. Por ahora la captura es manual —todavía no existe el motor
+        que lea el PDF/XML automáticamente—, así que cada campo se llena a mano desde el formulario.
+      </p>
+    </header>
+
+    <section class="module" id="facturas">
+      <h2>Facturas CFDI <span class="tag">/tesoreria/facturas</span></h2>
+      <p class="desc">Facturas recibidas de proveedores. Cada factura ya guardada muestra sus conceptos (líneas) en modo lectura al editarla.</p>
+
+      <div class="card">
+        <h3>Dar de alta una factura</h3>
+        <ol class="steps">
+          <li><p>Entra a <strong>Tesorería → Facturas CFDI</strong> y da clic en <strong>Nueva factura</strong>.</p></li>
+          <li><p>Captura el <span class="field">UUID de timbrado</span> — es el único dato obligatorio y no se puede cambiar después.</p><p class="hint">Es el folio fiscal de 36 caracteres que trae el CFDI timbrado por el SAT.</p></li>
+          <li><p>Llena serie, folio, fecha, moneda y total del comprobante.</p></li>
+          <li><p>Captura RFC y nombre del emisor y del receptor.</p></li>
+          <li><p>Si ya tienes el PDF en Drive, pega el link en <span class="field">Link al PDF</span>, y anota el <span class="field">Estado</span> (por ejemplo <em>vigente</em> o <em>cancelada</em>).</p></li>
+          <li><p>Da clic en <strong>Guardar</strong>.</p></li>
+        </ol>
+      </div>
+
+      <div class="example">
+        <h3>Ejemplo capturado</h3>
+        <dl class="sample">
+          <dt>UUID de timbrado</dt><dd>A1B2C3D4-5E6F-4A1B-9C2D-1234567890AB</dd>
+          <dt>Serie / Folio</dt><dd>MAT / 00458</dd>
+          <dt>Fecha del comprobante</dt><dd>2026-08-18</dd>
+          <dt>Moneda</dt><dd>MXP</dd>
+          <dt>Total</dt><dd>84360.00</dd>
+          <dt>RFC / nombre emisor</dt><dd>PMS950214LK3 — Proveedora de Materiales del Sureste SA de CV</dd>
+          <dt>RFC / nombre receptor</dt><dd>TIZ190611AB2 — Tizara SA de CV</dd>
+          <dt>Tipo de factura</dt><dd>PPD</dd>
+          <dt>Estado</dt><dd>vigente</dd>
+        </dl>
+      </div>
+
+      <div class="card">
+        <h3>Buscar y editar</h3>
+        <p style="margin:0 0 10px">El buscador filtra por folio, UUID, o nombre de emisor/receptor. Para editar, usa el lápiz al final de la fila.</p>
+        <div class="callout">
+          <span>⚠</span>
+          <span><strong>El UUID de timbrado no se puede editar</strong> una vez guardada la factura — si te equivocaste al capturarlo, hay que darla de baja y crearla de nuevo.</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Referencia de campos</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Campo en pantalla</th><th></th><th>Notas</th></tr></thead>
+            <tbody>
+              <tr><td>UUID de timbrado</td><td class="req"><span class="pill oblig">Obligatorio</span></td><td>Folio fiscal del SAT, único por factura</td></tr>
+              <tr><td>Serie / Folio</td><td class="req"><span class="pill opc">Opcional</span></td><td>Como aparecen en el comprobante</td></tr>
+              <tr><td>Fecha, moneda, total</td><td class="req"><span class="pill opc">Opcional</span></td><td>Del encabezado del CFDI</td></tr>
+              <tr><td>RFC / nombre emisor y receptor</td><td class="req"><span class="pill opc">Opcional</span></td><td>Identifican a las dos partes</td></tr>
+              <tr><td>Tipo de factura, Estado</td><td class="req"><span class="pill opc">Opcional</span></td><td>Texto libre, ej. "vigente" / "cancelada"</td></tr>
+              <tr><td>Link al PDF</td><td class="req"><span class="pill opc">Opcional</span></td><td>Se pega a mano; no hay carga de archivo todavía</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="module" id="complementos">
+      <h2>Complementos de pago <span class="tag">/tesoreria/complementos-pago</span></h2>
+      <p class="desc">CFDI tipo REP — confirma que una factura a crédito ya se pagó.</p>
+      <div class="card">
+        <h3>Dar de alta un complemento</h3>
+        <ol class="steps">
+          <li><p>Da clic en <strong>Nuevo complemento</strong> y captura el <span class="field">UUID de timbrado</span> propio del complemento (obligatorio).</p></li>
+          <li><p>En <span class="field">UUID de factura relacionada</span>, pega el UUID de la factura que este complemento está pagando.</p><p class="hint">Aquí es un campo de texto libre, no un buscador — cópialo tal cual de la factura original.</p></li>
+          <li><p>Captura fecha de pago y monto pagado.</p></li>
+          <li><p>Guarda igual que una factura.</p></li>
+        </ol>
+      </div>
+
+      <div class="example">
+        <h3>Ejemplo capturado</h3>
+        <dl class="sample">
+          <dt>UUID de timbrado</dt><dd>B7F1E2A0-8C3D-4F55-A011-9988776655CC</dd>
+          <dt>Serie / Folio</dt><dd>REP / 00019</dd>
+          <dt>Fecha del comprobante</dt><dd>2026-08-22</dd>
+          <dt>Moneda</dt><dd>MXP</dd>
+          <dt>Total</dt><dd>84360.00</dd>
+          <dt>RFC / nombre emisor</dt><dd>PMS950214LK3 — Proveedora de Materiales del Sureste SA de CV</dd>
+          <dt>RFC / nombre receptor</dt><dd>TIZ190611AB2 — Tizara SA de CV</dd>
+          <dt>Fecha de pago</dt><dd>2026-08-22</dd>
+          <dt>Monto pagado</dt><dd>84360.00</dd>
+          <dt>UUID de factura relacionada</dt><dd>A1B2C3D4-5E6F-4A1B-9C2D-1234567890AB</dd>
+          <dt>Tipo de factura</dt><dd>P</dd>
+          <dt>Estado</dt><dd>vigente</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="module" id="notas">
+      <h2>Notas de crédito <span class="tag">/tesoreria/notas-credito</span></h2>
+      <p class="desc">Ajuste fiscal sobre una factura ya emitida (CFDI de egreso).</p>
+      <div class="card">
+        <h3>Dar de alta una nota de crédito</h3>
+        <ol class="steps">
+          <li><p>Da clic en <strong>Nueva nota de crédito</strong> y captura su propio <span class="field">UUID de timbrado</span>.</p></li>
+          <li><p>En <span class="field">UUID de la factura relacionada</span> pega el UUID de la factura original.</p><p class="hint">A diferencia del complemento de pago, aquí el sistema sí valida que ese UUID exista como factura — si la tabla no muestra el folio de la factura relacionada, revisa que el UUID esté bien escrito.</p></li>
+          <li><p>Llena serie, folio, fecha y total, y guarda.</p></li>
+        </ol>
+      </div>
+
+      <div class="example">
+        <h3>Ejemplo capturado</h3>
+        <dl class="sample">
+          <dt>UUID de timbrado</dt><dd>C4D5E6F7-1A2B-4C3D-8E9F-AABBCCDDEEFF</dd>
+          <dt>Serie / Folio</dt><dd>NC / 00007</dd>
+          <dt>UUID de factura relacionada</dt><dd>A1B2C3D4-5E6F-4A1B-9C2D-1234567890AB</dd>
+          <dt>Fecha del comprobante</dt><dd>2026-08-23</dd>
+          <dt>Total</dt><dd>3200.00</dd>
+          <dt>RFC / nombre emisor</dt><dd>PMS950214LK3 — Proveedora de Materiales del Sureste SA de CV</dd>
+          <dt>RFC / nombre receptor</dt><dd>TIZ190611AB2 — Tizara SA de CV</dd>
+          <dt>Estado</dt><dd>vigente</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="module" id="nominas">
+      <h2>Recibos de nómina <span class="tag">/tesoreria/rec-nominas</span></h2>
+      <p class="desc">Encabezado y resumen del CFDI de nómina de un empleado. El detalle de percepciones y deducciones vive en el PDF/XML del recibo, no se captura campo por campo aquí.</p>
+      <div class="card">
+        <h3>Dar de alta un recibo</h3>
+        <div class="grid-2">
+          <ol class="steps">
+            <li><p>Da clic en <strong>Nuevo recibo</strong>.</p></li>
+            <li><p>El <span class="field">UUID de timbrado</span> es opcional aquí (a veces se captura el resumen antes de tener el timbre).</p></li>
+            <li><p>Captura folio, fecha, moneda y total.</p></li>
+          </ol>
+          <ol class="steps" style="counter-reset: step 3;">
+            <li><p>Anota el <span class="field">No. de empleado</span> y RFC/nombre del receptor.</p></li>
+            <li><p>Captura la fecha de pago de nómina y guarda.</p></li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="example">
+        <h3>Ejemplo capturado</h3>
+        <dl class="sample">
+          <dt>UUID de timbrado</dt><dd>D8E9F0A1-2B3C-4D5E-9F60-112233445566</dd>
+          <dt>Folio</dt><dd>NOM-2026-16</dd>
+          <dt>Fecha del comprobante</dt><dd>2026-08-15</dd>
+          <dt>Moneda</dt><dd>MXP</dd>
+          <dt>Total</dt><dd>18540.30</dd>
+          <dt>RFC / nombre emisor</dt><dd>CPC110305QW9 — Consultoría y Proyectos Cumbres SA de CV</dd>
+          <dt>RFC / nombre receptor</dt><dd>ROGJ890423H2 — Juana Rodríguez Gómez</dd>
+          <dt>No. de empleado</dt><dd>EMP-0142</dd>
+          <dt>Fecha de pago de nómina</dt><dd>2026-08-15</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="module" id="flujos">
+      <h2>Vínculo con Flujos <span class="tag">/tesoreria/flujos</span></h2>
+      <p class="desc">
+        Flujos ya existía (Fase 4, Sem 21). Con Facturación CFDI se le agregó la posibilidad de ligar cada
+        movimiento a la factura y/o complemento de pago reales que lo respaldan.
+      </p>
+
+      <div class="card">
+        <h3>Qué cambió en la tabla de Flujos</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID de flujo</th>
+                <th>Contrato</th>
+                <th>Cuenta</th>
+                <th>Concepto</th>
+                <th>Total MXP</th>
+                <th class="col-added">CFDI vinculado</th>
+                <th>Estado</th>
+                <th>Pagado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>FLJ-000900</td>
+                <td>TIZ-...-001</td>
+                <td>Cuenta operativa</td>
+                <td>Pago a proveedor</td>
+                <td>84360.00</td>
+                <td class="col-added">Factura 00458</td>
+                <td>APROBADA</td>
+                <td>Pagado</td>
+                <td>✎ 🔗 ✓ ✕</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin:10px 0 0; color:var(--ink-soft); font-size:0.86rem">
+          La única columna nueva es <strong>CFDI vinculado</strong> — el resto de la tabla (columnas y acciones
+          de aprobar/rechazar/registrar pago) sigue igual que antes. Si no hay factura ni complemento ligados,
+          la celda muestra <span class="field">—</span>.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Cómo vincular una factura o complemento a un flujo</h3>
+        <ol class="steps">
+          <li><p>En la fila del flujo, da clic en el ícono de <strong>enlace 🔗 ("Vincular factura/complemento")</strong> — es un botón nuevo, junto al de editar.</p></li>
+          <li><p>Busca la <span class="field">Factura</span> y/o el <span class="field">Complemento de pago</span> por folio, UUID o nombre — el buscador muestra el catálogo completo desde que abres el campo, igual que el selector de Contraparte en Ventas/PLD.</p></li>
+          <li><p>Puedes ligar solo factura, solo complemento, o ambos.</p><p class="hint">A diferencia de ese selector, aquí no puedes crear una factura nueva desde este cuadro — tiene que existir de antemano en Facturas CFDI.</p></li>
+          <li><p>Da clic en <strong>Guardar</strong>. El chip aparece de inmediato en la columna "CFDI vinculado".</p></li>
+        </ol>
+        <div class="callout">
+          <span>ℹ</span>
+          <span>Esta acción todavía no soporta ligar un <strong>Recibo de nómina</strong> — solo Factura y Complemento de pago. Un flujo de nómina se sigue capturando como hasta ahora, sin CFDI vinculado.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="module" id="permisos">
+      <h2>Permisos</h2>
+      <p class="desc">Estas 4 pantallas comparten un permiso propio, separado del resto de Tesorería.</p>
+      <div class="card">
+        <h3>Qué necesitas para ver cada botón</h3>
+        <div class="permkey"><span class="pill opc">Ver</span> Cualquier rol con acceso a Tesorería puede ver las tablas.</div>
+        <div class="permkey"><span class="pill oblig">Crear</span> Requiere el permiso <code>facturacion-cfdi.crear</code> — sin él, no aparece el botón "Nuevo".</div>
+        <div class="permkey"><span class="pill oblig">Editar</span> Requiere <code>facturacion-cfdi.editar</code> — sin él, el lápiz de cada fila aparece deshabilitado.</div>
+        <div class="callout">
+          <span>ℹ</span>
+          <span>Son permisos distintos a <code>tesoreria.crear</code>/<code>tesoreria.editar</code> (los que usan Contrapartes, Cuentas, Contratos y Flujos). Si te falta acceso, pide que te asignen el rol correspondiente en <strong>IAM → Usuarios</strong>.</span>
+        </div>
+      </div>
+    </section>
+
+    <footer class="page-footer">
+      Manual de uso · Facturación CFDI dentro de Tesorería · CumbresBI
+    </footer>
+  </main>
+</div>
