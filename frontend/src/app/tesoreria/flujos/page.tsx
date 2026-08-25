@@ -11,9 +11,8 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
-  FormControlLabel,
-  Checkbox,
   IconButton,
   InputAdornment,
   InputLabel,
@@ -21,17 +20,33 @@ import {
   Paper,
   Select,
   Stack,
+  Switch,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
-import { ArrowLeftRight, Check, Link2, Pencil, Plus, Search, ThumbsUp, X, X as CloseIcon } from "lucide-react";
+import {
+  Banknote,
+  Check,
+  FileCheck2,
+  Link2,
+  Pencil,
+  Plus,
+  Search,
+  ThumbsUp,
+  Undo2,
+  X,
+  X as CloseIcon,
+  type LucideIcon,
+} from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
@@ -55,6 +70,7 @@ import {
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
+  // Detalles
   contrato: "",
   cuenta: "",
   totalMxp: "",
@@ -63,7 +79,77 @@ const FORM_VACIO = {
   reembolso: false,
   idEmpleadoReembolso: "",
   comentarios: "",
+  // Referencias
+  idEmpleado: "",
+  idRequisicion: "",
+  linkReferencia: "",
+  // CFDI
+  estadoCfdi: "",
+  requiereComplemento: false,
+  // Control
+  comprobacionAsignadaA: "",
+  aprobacionLista: false,
+  permisoEnviarPago: "",
+  permiso: "",
+  informacionEnvio: "",
 };
+
+// Pestañas del formulario de creacion (25/Ago/2026) - agrupan los 36
+// campos de tesoreria_flujos (20260727_Cumbres_ERD.sql) segun a que le
+// sirven: Detalles = datos del movimiento, Referencias = comprobantes y
+// enlaces del pago, CFDI = lo que se conecta con facturacion (factura/
+// complemento/nomina se ligan aparte con vincular_factura, no aqui - solo
+// se muestra donde va eso), Control = seguimiento/permisos internos, casi
+// todo de solo lectura porque lo llenan aprobar/rechazar/registrar_pago.
+const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Control"] as const;
+type TabFlujo = (typeof TABS_FLUJO)[number];
+
+// Tarjeta con icono + switch para los campos Y/N del formulario (25/Ago/2026)
+// - mismo look en las 4 pestañas para "Es un reembolso"/"Requiere
+// complemento de pago"/"Listo para aprobación", en vez de un Checkbox
+// plano suelto.
+function ToggleCard({
+  icon: Icon,
+  title,
+  description,
+  checked,
+  onChange,
+  disabled,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 1.5,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        borderColor: checked ? "primary.main" : "divider",
+        opacity: disabled ? 0.6 : 1,
+      }}
+    >
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ color: checked ? "primary.main" : "text.secondary" }}>
+        <Icon size={18} strokeWidth={1.5} />
+        <Stack spacing={0}>
+          <Typography variant="body2" color="text.primary">
+            {title}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {description}
+          </Typography>
+        </Stack>
+      </Stack>
+      <Switch checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+    </Paper>
+  );
+}
 
 const VALIDACION_COLOR: Record<TesoreriaValidacionEstado, "warning" | "success" | "error"> = {
   PENDIENTE: "warning",
@@ -90,6 +176,7 @@ export default function TesoreriaFlujosPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFlujo | null>(null);
   const [form, setForm] = useState(FORM_VACIO);
+  const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [accionando, setAccionando] = useState<string | null>(null);
@@ -213,6 +300,7 @@ export default function TesoreriaFlujosPage() {
   function abrirAlta() {
     setEditing(null);
     setForm(FORM_VACIO);
+    setTab("Detalles");
     setFormError(null);
     setDialogOpen(true);
   }
@@ -226,9 +314,20 @@ export default function TesoreriaFlujosPage() {
       fechaEfectiva: f.fecha_efectiva || "",
       concepto: f.concepto || "",
       reembolso: f.reembolso ?? false,
+      idEmpleado: f.id_empleado || "",
       idEmpleadoReembolso: f.id_empleado_reembolso || "",
+      idRequisicion: f.id_requisicion || "",
       comentarios: f.comentarios || "",
+      linkReferencia: f.link_referencia || "",
+      comprobacionAsignadaA: f.comprobacion_asignada_a || "",
+      estadoCfdi: f.estado_cfdi || "",
+      requiereComplemento: f.requiere_complemento ?? false,
+      aprobacionLista: f.aprobacion_lista ?? false,
+      permisoEnviarPago: f.permiso_enviar_pago || "",
+      permiso: f.permiso || "",
+      informacionEnvio: f.informacion_envio || "",
     });
+    setTab("Detalles");
     setFormError(null);
     setDialogOpen(true);
   }
@@ -256,7 +355,17 @@ export default function TesoreriaFlujosPage() {
           fechaEfectiva: form.fechaEfectiva || undefined,
           concepto: form.concepto || undefined,
           reembolso: form.reembolso,
+          idEmpleado: form.idEmpleado || undefined,
           idEmpleadoReembolso: form.idEmpleadoReembolso || undefined,
+          idRequisicion: form.idRequisicion || undefined,
+          linkReferencia: form.linkReferencia || undefined,
+          comprobacionAsignadaA: form.comprobacionAsignadaA || undefined,
+          estadoCfdi: form.estadoCfdi || undefined,
+          requiereComplemento: form.requiereComplemento,
+          aprobacionLista: form.aprobacionLista,
+          permisoEnviarPago: form.permisoEnviarPago || undefined,
+          permiso: form.permiso || undefined,
+          informacionEnvio: form.informacionEnvio || undefined,
           comentarios: form.comentarios || undefined,
         });
       }
@@ -309,7 +418,7 @@ export default function TesoreriaFlujosPage() {
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
-        <ArrowLeftRight size={22} strokeWidth={1.5} />
+        <Banknote size={22} strokeWidth={1.5} />
         <Typography variant="h5">Flujos</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -354,10 +463,12 @@ export default function TesoreriaFlujosPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
-                <TableCell>ID de flujo</TableCell>
-                <TableCell>Contrato</TableCell>
-                <TableCell>Cuenta</TableCell>
+                <TableCell>ID Flujo</TableCell>
+                <TableCell>ID Contrato</TableCell>
+                <TableCell>Descripción de Pago</TableCell>
+                <TableCell>Fecha Efectiva</TableCell>
                 <TableCell>Concepto</TableCell>
+
                 <TableCell align="right">Total MXP</TableCell>
                 <TableCell>CFDI vinculado</TableCell>
                 <TableCell>Estado</TableCell>
@@ -508,69 +619,50 @@ export default function TesoreriaFlujosPage() {
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
         </DialogTitle>
+        <Tabs
+          value={tab}
+          onChange={(_, value: TabFlujo) => setTab(value)}
+          variant="fullWidth"
+          sx={{ borderBottom: 1, borderColor: "divider" }}
+        >
+          {TABS_FLUJO.map((t) => (
+            <Tab key={t} label={t} value={t} />
+          ))}
+        </Tabs>
         <DialogContent dividers>
           {formError && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {formError}
             </Alert>
           )}
-          <Stack spacing={2}>
-            {!editing && (
-              <>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="contrato-label">Contrato (opcional)</InputLabel>
-                  <Select
-                    labelId="contrato-label"
-                    label="Contrato (opcional)"
-                    value={form.contrato}
-                    onChange={(e) => setForm({ ...form, contrato: e.target.value })}
-                  >
-                    <MenuItem value="">
-                      <em>Sin contrato (ej. reembolso suelto)</em>
+
+          {tab === "Detalles" && (
+            <Stack spacing={2}>
+              <TextField
+                size="small"
+                label="ID de flujo"
+                value={editing ? editing.id_flujo : "Se genera automático al guardar (FLJ-000000)"}
+                disabled
+                fullWidth
+              />
+              <FormControl size="small" fullWidth disabled={!!editing}>
+                <InputLabel id="contrato-label">Contrato (opcional)</InputLabel>
+                <Select
+                  labelId="contrato-label"
+                  label="Contrato (opcional)"
+                  value={form.contrato}
+                  onChange={(e) => setForm({ ...form, contrato: e.target.value })}
+                >
+                  <MenuItem value="">
+                    <em>Sin contrato (ej. reembolso suelto)</em>
+                  </MenuItem>
+                  {contratos.map((c) => (
+                    <MenuItem key={c.id_contrato} value={c.id_contrato}>
+                      {c.id_contrato} — {c.contraparte_nombre}
                     </MenuItem>
-                    {contratos.map((c) => (
-                      <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                        {c.id_contrato} — {c.contraparte_nombre}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="cuenta-label">Cuenta bancaria</InputLabel>
-                  <Select
-                    labelId="cuenta-label"
-                    label="Cuenta bancaria"
-                    value={form.cuenta}
-                    onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
-                  >
-                    {cuentas.map((c) => (
-                      <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                        {c.alias || c.clabe}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={form.reembolso}
-                      onChange={(e) => setForm({ ...form, reembolso: e.target.checked })}
-                    />
-                  }
-                  label="Es un reembolso"
-                />
-                {form.reembolso && (
-                  <TextField
-                    size="small"
-                    label="ID de empleado (reembolso)"
-                    value={form.idEmpleadoReembolso}
-                    onChange={(e) => setForm({ ...form, idEmpleadoReembolso: e.target.value })}
-                    fullWidth
-                  />
-                )}
-              </>
-            )}
-            <Stack direction="row" spacing={2}>
+                  ))}
+                </Select>
+              </FormControl>
               <TextField
                 size="small"
                 type="date"
@@ -582,29 +674,205 @@ export default function TesoreriaFlujosPage() {
               />
               <TextField
                 size="small"
+                label="Concepto"
+                value={form.concepto}
+                onChange={(e) => setForm({ ...form, concepto: e.target.value })}
+                fullWidth
+              />
+              <ToggleCard
+                icon={Undo2}
+                title="Es un reembolso"
+                description="El dinero regresa a un empleado, no a un proveedor"
+                checked={form.reembolso}
+                disabled={!!editing}
+                onChange={(checked) => setForm({ ...form, reembolso: checked })}
+              />
+              {form.reembolso && (
+                <TextField
+                  size="small"
+                  label="ID de empleado (reembolso)"
+                  value={form.idEmpleadoReembolso}
+                  disabled={!!editing}
+                  onChange={(e) => setForm({ ...form, idEmpleadoReembolso: e.target.value })}
+                  fullWidth
+                />
+              )}
+              <FormControl size="small" fullWidth disabled={!!editing}>
+                <InputLabel id="cuenta-label">Cuenta bancaria</InputLabel>
+                <Select
+                  labelId="cuenta-label"
+                  label="Cuenta bancaria"
+                  value={form.cuenta}
+                  onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
+                >
+                  {cuentas.map((c) => (
+                    <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
+                      {c.alias || c.clabe}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <TextField
+                size="small"
                 label="Total (MXP)"
                 value={form.totalMxp}
                 onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
                 fullWidth
               />
+              <Typography variant="caption" color="text.secondary">
+                Autorización / autorizado por / fecha de autorización, y pagado / fecha de
+                pago / descripción del pago / comprobante (se sube el archivo, no un link) se
+                capturan con las acciones Aprobar / Rechazar / Registrar pago, no aquí.
+              </Typography>
             </Stack>
-            <TextField
-              size="small"
-              label="Concepto"
-              value={form.concepto}
-              onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              size="small"
-              label="Comentarios"
-              value={form.comentarios}
-              onChange={(e) => setForm({ ...form, comentarios: e.target.value })}
-              multiline
-              minRows={2}
-              fullWidth
-            />
-          </Stack>
+          )}
+
+          {tab === "Referencias" && (
+            <Stack spacing={2}>
+              <TextField
+                size="small"
+                label="ID de empleado"
+                value={form.idEmpleado}
+                onChange={(e) => setForm({ ...form, idEmpleado: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="ID de requisición"
+                value={form.idRequisicion}
+                onChange={(e) => setForm({ ...form, idRequisicion: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Link de referencia"
+                value={form.linkReferencia}
+                onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+          )}
+
+          {tab === "CFDI" && (
+            <Stack spacing={2}>
+              <Typography variant="caption" color="text.secondary">
+                Factura, complemento de pago y recibo de nómina se vinculan {editing ? "" : "después de crear el flujo, "}
+                con «Vincular CFDI» en la tabla (Facturación CFDI todavía no tiene catálogo de
+                nóminas propio).
+              </Typography>
+              <ToggleCard
+                icon={FileCheck2}
+                title="Requiere complemento de pago"
+                description="El proveedor debe timbrar un complemento (REP) además de la factura"
+                checked={form.requiereComplemento}
+                onChange={(checked) => setForm({ ...form, requiereComplemento: checked })}
+              />
+              <TextField
+                size="small"
+                label="Estado del CFDI"
+                value={form.estadoCfdi}
+                onChange={(e) => setForm({ ...form, estadoCfdi: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+          )}
+
+          {tab === "Control" && (
+            <Stack spacing={2}>
+              <TextField
+                size="small"
+                label="Comprobación asignada a"
+                value={form.comprobacionAsignadaA}
+                onChange={(e) => setForm({ ...form, comprobacionAsignadaA: e.target.value })}
+                fullWidth
+              />
+              <ToggleCard
+                icon={ThumbsUp}
+                title="Listo para aprobación"
+                description="Marca que ya se revisó y puede pasar a Aprobar / Rechazar"
+                checked={form.aprobacionLista}
+                onChange={(checked) => setForm({ ...form, aprobacionLista: checked })}
+              />
+              <TextField
+                size="small"
+                label="Estado de validación"
+                value={editing ? editing.validacion_estado || "PENDIENTE" : "PENDIENTE"}
+                disabled
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Permiso para enviar pago"
+                value={form.permisoEnviarPago}
+                onChange={(e) => setForm({ ...form, permisoEnviarPago: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Información de envío"
+                value={form.informacionEnvio}
+                onChange={(e) => setForm({ ...form, informacionEnvio: e.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Último envío"
+                value={editing?.ultimo_envio ? new Date(editing.ultimo_envio).toLocaleString("es-MX") : "—"}
+                disabled
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Comentarios"
+                value={form.comentarios}
+                onChange={(e) => setForm({ ...form, comentarios: e.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Permiso"
+                value={form.permiso}
+                onChange={(e) => setForm({ ...form, permiso: e.target.value })}
+                fullWidth
+              />
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="overline" color="text.secondary">
+                Auditoría
+              </Typography>
+              {editing ? (
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    size="small"
+                    label="Fecha de alta"
+                    value={new Date(editing.created_at).toLocaleString("es-MX")}
+                    disabled
+                    fullWidth
+                  />
+                  <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
+                </Stack>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Fecha de alta y registrado por se llenan solos al guardar.
+                </Typography>
+              )}
+              {editing && (
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    size="small"
+                    label="Última modificación"
+                    value={new Date(editing.updated_at).toLocaleString("es-MX")}
+                    disabled
+                    fullWidth
+                  />
+                  <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
+                </Stack>
+              )}
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>

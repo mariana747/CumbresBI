@@ -358,6 +358,13 @@ export type TesoreriaValidacionEstado = "PENDIENTE" | "APROBADA" | "RECHAZADA";
 // valida que el timbre_uuid exista de verdad antes de ligarlo). `nomina`
 // se expone de solo lectura nada mas: el backend todavia no tiene una
 // accion equivalente para vincularla (solo factura/complemento).
+//
+// estado_cfdi/requiere_complemento/comprobacion_asignada_a/aprobacion_lista/
+// permiso_enviar_pago/informacion_envio/ultimo_envio/permiso/
+// fecha_pago_original (25/Ago/2026): columnas del ERD heredadas del
+// AppSheet original sin accion propia todavia en el ViewSet - se agregan
+// aqui de escritura libre, como comentarios, para la pestaña
+// Referencias/CFDI/Control del formulario de creacion.
 export interface TesoreriaFlujo {
   id_flujo: string;
   contrato: string | null;
@@ -377,12 +384,21 @@ export interface TesoreriaFlujo {
   link_referencia: string | null;
   pagado: boolean | null;
   fecha_pago: string | null;
+  fecha_pago_original: string | null;
   descripcion_pago: string | null;
   link_comprobante_banco: string | null;
   factura: string | null;
   complemento: string | null;
   nomina: string | null;
+  estado_cfdi: string | null;
+  requiere_complemento: boolean | null;
+  comprobacion_asignada_a: string | null;
   validacion_estado: TesoreriaValidacionEstado | null;
+  aprobacion_lista: boolean | null;
+  permiso_enviar_pago: string | null;
+  informacion_envio: string | null;
+  ultimo_envio: string | null;
+  permiso: string | null;
   comentarios: string | null;
   created_at: string;
   created_by: string | null;
@@ -408,8 +424,17 @@ export async function createFlujo(params: {
   fechaEfectiva?: string;
   concepto?: string;
   reembolso?: boolean;
+  idEmpleado?: string;
   idEmpleadoReembolso?: string;
+  idRequisicion?: string;
   linkReferencia?: string;
+  comprobacionAsignadaA?: string;
+  estadoCfdi?: string;
+  requiereComplemento?: boolean;
+  aprobacionLista?: boolean;
+  permisoEnviarPago?: string;
+  permiso?: string;
+  informacionEnvio?: string;
   comentarios?: string;
 }): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/`, {
@@ -422,8 +447,17 @@ export async function createFlujo(params: {
       fecha_efectiva: params.fechaEfectiva || null,
       concepto: params.concepto || null,
       reembolso: params.reembolso ?? false,
+      id_empleado: params.idEmpleado || null,
       id_empleado_reembolso: params.idEmpleadoReembolso || null,
+      id_requisicion: params.idRequisicion || null,
       link_referencia: params.linkReferencia || null,
+      comprobacion_asignada_a: params.comprobacionAsignadaA || null,
+      estado_cfdi: params.estadoCfdi || null,
+      requiere_complemento: params.requiereComplemento ?? null,
+      aprobacion_lista: params.aprobacionLista ?? null,
+      permiso_enviar_pago: params.permisoEnviarPago || null,
+      permiso: params.permiso || null,
+      informacion_envio: params.informacionEnvio || null,
       comentarios: params.comentarios || null,
     }),
   });
