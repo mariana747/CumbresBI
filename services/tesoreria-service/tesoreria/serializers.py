@@ -157,7 +157,16 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
     `fecha_pago` los llenan las acciones `aprobar`/`registrar_pago` del
     ViewSet, no un PATCH directo - ver views.py. Mismo criterio que
     PldContraparteKycViewSet: "quien captura no aprueba"
-    (docs/architecture/roles-y-permisos.md sec. 2)."""
+    (docs/architecture/roles-y-permisos.md sec. 2).
+
+    `estado_cfdi`/`requiere_complemento`/`comprobacion_asignada_a`/
+    `aprobacion_lista`/`permiso_enviar_pago`/`informacion_envio`/
+    `ultimo_envio`/`permiso`/`fecha_pago_original` son columnas heredadas
+    del AppSheet original (20260727_Cumbres_ERD.sql) sin ninguna accion
+    del ViewSet que las llene todavia - se dejan de escritura libre (igual
+    que comentarios) hasta que exista esa automatizacion; por ahora las
+    llena quien captura, en las pestañas Referencias/CFDI/Control del
+    formulario de creacion (frontend/src/app/tesoreria/flujos/page.tsx)."""
 
     contrato_sociedad = serializers.CharField(source="contrato.sociedad", read_only=True, default=None)
     cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
@@ -183,12 +192,21 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "link_referencia",
             "pagado",
             "fecha_pago",
+            "fecha_pago_original",
             "descripcion_pago",
             "link_comprobante_banco",
             "factura",
             "complemento",
             "nomina",
+            "estado_cfdi",
+            "requiere_complemento",
+            "comprobacion_asignada_a",
             "validacion_estado",
+            "aprobacion_lista",
+            "permiso_enviar_pago",
+            "informacion_envio",
+            "ultimo_envio",
+            "permiso",
             "comentarios",
             "created_at",
             "created_by",
