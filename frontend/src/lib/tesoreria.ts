@@ -284,15 +284,24 @@ export interface TesoreriaContrato {
   tipo: TesoreriaContratoTipo | null;
   fecha_generacion: string | null;
   fecha_vencimiento: string | null;
+  proyecto: string | null;
+  propiedad: string | null;
+  centro: string | null;
   tipo_pago: TesoreriaTipoPago | null;
   frecuencia: TesoreriaFrecuencia | null;
+  duracion: string | null;
+  fecha_proyectada: string | null;
   moneda: TesoreriaMoneda | null;
   monto_periodo_iva_mxp: string | null;
   monto_total_iva_mxp: string | null;
+  concepto_factura: string | null;
+  link_carpeta: string | null;
   requiere_factura: boolean | null;
   status: TesoreriaContratoStatus | null;
   comentarios: string | null;
   link_contrato: string | null;
+  permiso: string | null;
+  autorizacion: boolean | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -315,13 +324,24 @@ export async function createContrato(params: {
   tipo?: TesoreriaContratoTipo;
   fechaGeneracion?: string;
   fechaVencimiento?: string;
+  proyecto?: string;
+  propiedad?: string;
+  centro?: string;
   tipoPago?: TesoreriaTipoPago;
   frecuencia?: TesoreriaFrecuencia;
+  duracion?: string;
+  fechaProyectada?: string;
   moneda?: TesoreriaMoneda;
+  montoPeriodoIvaMxp?: string;
   montoTotalIvaMxp?: string;
+  conceptoFactura?: string;
+  linkCarpeta?: string;
+  linkContrato?: string;
   requiereFactura?: boolean;
   status?: TesoreriaContratoStatus;
   comentarios?: string;
+  permiso?: string;
+  autorizacion?: boolean;
 }): Promise<TesoreriaContrato> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/`, {
     method: "POST",
@@ -332,13 +352,24 @@ export async function createContrato(params: {
       tipo: params.tipo || null,
       fecha_generacion: params.fechaGeneracion || null,
       fecha_vencimiento: params.fechaVencimiento || null,
+      proyecto: params.proyecto || null,
+      propiedad: params.propiedad || null,
+      centro: params.centro || null,
       tipo_pago: params.tipoPago || null,
       frecuencia: params.frecuencia || null,
+      duracion: params.duracion || null,
+      fecha_proyectada: params.fechaProyectada || null,
       moneda: params.moneda || null,
+      monto_periodo_iva_mxp: params.montoPeriodoIvaMxp || null,
       monto_total_iva_mxp: params.montoTotalIvaMxp || null,
+      concepto_factura: params.conceptoFactura || null,
+      link_carpeta: params.linkCarpeta || null,
+      link_contrato: params.linkContrato || null,
       requiere_factura: params.requiereFactura ?? false,
       status: params.status || "ACTIVO",
       comentarios: params.comentarios || null,
+      permiso: params.permiso || null,
+      autorizacion: params.autorizacion ?? null,
     }),
   });
   if (!response.ok) {
@@ -567,13 +598,24 @@ export async function updateContrato(
     tipo: TesoreriaContratoTipo;
     fechaGeneracion: string;
     fechaVencimiento: string;
+    proyecto: string;
+    propiedad: string;
+    centro: string;
     tipoPago: TesoreriaTipoPago;
     frecuencia: TesoreriaFrecuencia;
+    duracion: string;
+    fechaProyectada: string;
     moneda: TesoreriaMoneda;
+    montoPeriodoIvaMxp: string;
     montoTotalIvaMxp: string;
+    conceptoFactura: string;
+    linkCarpeta: string;
+    linkContrato: string;
     requiereFactura: boolean;
     status: TesoreriaContratoStatus;
     comentarios: string;
+    permiso: string;
+    autorizacion: boolean;
   }>
 ): Promise<TesoreriaContrato> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/${idContrato}/`, {
@@ -583,13 +625,24 @@ export async function updateContrato(
       tipo: params.tipo,
       fecha_generacion: params.fechaGeneracion,
       fecha_vencimiento: params.fechaVencimiento,
+      proyecto: params.proyecto,
+      propiedad: params.propiedad,
+      centro: params.centro,
       tipo_pago: params.tipoPago,
       frecuencia: params.frecuencia,
+      duracion: params.duracion,
+      fecha_proyectada: params.fechaProyectada,
       moneda: params.moneda,
+      monto_periodo_iva_mxp: params.montoPeriodoIvaMxp,
       monto_total_iva_mxp: params.montoTotalIvaMxp,
+      concepto_factura: params.conceptoFactura,
+      link_carpeta: params.linkCarpeta,
+      link_contrato: params.linkContrato,
       requiere_factura: params.requiereFactura,
       status: params.status,
       comentarios: params.comentarios,
+      permiso: params.permiso,
+      autorizacion: params.autorizacion,
     }),
   });
   if (!response.ok) {
@@ -1467,6 +1520,93 @@ export async function updateRecNomina(id: number, params: RecNominaInput): Promi
 
 export async function deleteRecNomina(id: number): Promise<void> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/rec-nominas/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+// Saldo (bloque 5 de Tesoreria, ver piezas-de-tesoreria.html) - foto del
+// saldo de una cuenta en una fecha, se ve como una "balanza" (paneles de
+// cuadros agrupados por fecha, ver tesoreria/saldos/page.tsx). El backend
+// documenta que esto se piensa llenar por proceso/carga de archivo, no
+// dato por dato a mano (ver TesoreriaSaldoSerializer) - todavia no existe
+// ese importador, asi que este cliente solo cubre la captura manual
+// mientras tanto. `id` no se autogenera en el modelo (CharField sin
+// default) - lo genera el llamador (ver generarIdSaldo() en la pagina,
+// mismo formato hex corto que ya trae la captura real del AppSheet
+// original), no se le pide al usuario que invente un ID.
+export interface TesoreriaSaldo {
+  id: string;
+  fecha: string;
+  cuenta: string;
+  saldo: string;
+  cambio_dinero: string | null;
+  cambio_porcentual: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listSaldos(cuenta?: string): Promise<TesoreriaSaldo[]> {
+  const params = new URLSearchParams();
+  if (cuenta) params.set("cuenta", cuenta);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function createSaldo(params: {
+  id: string;
+  fecha: string;
+  cuenta: string;
+  saldo: string;
+  cambioDinero?: string;
+  cambioPorcentual?: string;
+}): Promise<TesoreriaSaldo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: params.id,
+      fecha: params.fecha,
+      cuenta: params.cuenta,
+      saldo: params.saldo,
+      cambio_dinero: params.cambioDinero || null,
+      cambio_porcentual: params.cambioPorcentual || null,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateSaldo(
+  id: string,
+  params: Partial<{ saldo: string; cambioDinero: string; cambioPorcentual: string }>
+): Promise<TesoreriaSaldo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      saldo: params.saldo,
+      cambio_dinero: params.cambioDinero,
+      cambio_porcentual: params.cambioPorcentual,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteSaldo(id: string): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/${id}/`, {
     method: "DELETE",
   });
   if (!response.ok) {

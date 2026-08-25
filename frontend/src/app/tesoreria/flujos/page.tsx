@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
@@ -20,7 +20,6 @@ import {
   Paper,
   Select,
   Stack,
-  Switch,
   Tab,
   Table,
   TableBody,
@@ -45,9 +44,9 @@ import {
   Undo2,
   X,
   X as CloseIcon,
-  type LucideIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   TesoreriaComplementoPago,
@@ -104,53 +103,6 @@ const FORM_VACIO = {
 const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Control"] as const;
 type TabFlujo = (typeof TABS_FLUJO)[number];
 
-// Tarjeta con icono + switch para los campos Y/N del formulario (25/Ago/2026)
-// - mismo look en las 4 pestañas para "Es un reembolso"/"Requiere
-// complemento de pago"/"Listo para aprobación", en vez de un Checkbox
-// plano suelto.
-function ToggleCard({
-  icon: Icon,
-  title,
-  description,
-  checked,
-  onChange,
-  disabled,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Paper
-      variant="outlined"
-      sx={{
-        p: 1.5,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        borderColor: checked ? "primary.main" : "divider",
-        opacity: disabled ? 0.6 : 1,
-      }}
-    >
-      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ color: checked ? "primary.main" : "text.secondary" }}>
-        <Icon size={18} strokeWidth={1.5} />
-        <Stack spacing={0}>
-          <Typography variant="body2" color="text.primary">
-            {title}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {description}
-          </Typography>
-        </Stack>
-      </Stack>
-      <Switch checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-    </Paper>
-  );
-}
-
 const VALIDACION_COLOR: Record<TesoreriaValidacionEstado, "warning" | "success" | "error"> = {
   PENDIENTE: "warning",
   APROBADA: "success",
@@ -171,6 +123,9 @@ export default function TesoreriaFlujosPage() {
   const [facturas, setFacturas] = useState<TesoreriaFactura[]>([]);
   const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
   const [search, setSearch] = useState("");
+  const [filtroContrato, setFiltroContrato] = useState("");
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -285,7 +240,7 @@ export default function TesoreriaFlujosPage() {
 
   function refresh() {
     setLoading(true);
-    listFlujos({ search: search || undefined })
+    listFlujos({ search: search || undefined, contrato: filtroContrato || undefined })
       .then(setFlujos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -295,7 +250,18 @@ export default function TesoreriaFlujosPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, filtroContrato]);
+
+  // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
+  // del cliente: listFlujos no tiene parametro de fecha en el backend
+  // todavia (solo ?search=/?contrato=, ver TesoreriaFlujoViewSet).
+  const flujosFiltrados = useMemo(() => {
+    return flujos.filter((f) => {
+      if (filtroFechaDesde && (!f.fecha_efectiva || f.fecha_efectiva < filtroFechaDesde)) return false;
+      if (filtroFechaHasta && (!f.fecha_efectiva || f.fecha_efectiva > filtroFechaHasta)) return false;
+      return true;
+    });
+  }, [flujos, filtroFechaDesde, filtroFechaHasta]);
 
   function abrirAlta() {
     setEditing(null);
@@ -432,7 +398,7 @@ export default function TesoreriaFlujosPage() {
       )}
 
       <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2, flexWrap: "wrap" }}>
           <TextField
             size="small"
             placeholder="Buscar por ID de flujo o concepto..."
@@ -446,6 +412,40 @@ export default function TesoreriaFlujosPage() {
                 </InputAdornment>
               ),
             }}
+          />
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
+            <Select
+              labelId="filtro-contrato-label"
+              label="Filtrar por contrato"
+              value={filtroContrato}
+              onChange={(e) => setFiltroContrato(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Todos los contratos</em>
+              </MenuItem>
+              {contratos.map((c) => (
+                <MenuItem key={c.id_contrato} value={c.id_contrato}>
+                  {c.id_contrato} — {c.contraparte_nombre}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            size="small"
+            type="date"
+            label="Fecha desde"
+            value={filtroFechaDesde}
+            onChange={(e) => setFiltroFechaDesde(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+          />
+          <TextField
+            size="small"
+            type="date"
+            label="Fecha hasta"
+            value={filtroFechaHasta}
+            onChange={(e) => setFiltroFechaHasta(e.target.value)}
+            InputLabelProps={{ shrink: true }}
           />
           {puedeCrear && (
             <Button
@@ -483,7 +483,7 @@ export default function TesoreriaFlujosPage() {
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : flujos.length === 0 ? (
+              ) : flujosFiltrados.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -492,7 +492,7 @@ export default function TesoreriaFlujosPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                flujos.map((f) => (
+                flujosFiltrados.map((f) => (
                   <TableRow key={f.id_flujo} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.id_flujo}</TableCell>
                     <TableCell>{f.contrato || "—"}</TableCell>
