@@ -39,6 +39,7 @@ import {
 import {
   Banknote,
   Check,
+  Copy,
   FileCheck2,
   Link2,
   MoreVertical,
@@ -321,6 +322,44 @@ export default function TesoreriaFlujosPage() {
     });
     setTab("Detalles");
     setFormError(null);
+    setDialogOpen(true);
+  }
+
+  // Duplicar (26/Ago/2026, finanzas.md: "Transactions can have the option
+  // to copy and edit the copy for faster registration") - mismo criterio
+  // que abrirDuplicado() en saldos/page.tsx: prellena el alta con los
+  // mismos datos del flujo elegido, pero sin id/fecha/estado de pago (se
+  // crea uno nuevo, no se edita el original).
+  function abrirDuplicado(f: TesoreriaFlujo) {
+    setEditing(null);
+    setForm({
+      contrato: f.contrato || "",
+      cuenta: f.cuenta,
+      totalMxp: f.total_mxp || "",
+      fechaEfectiva: new Date().toISOString().slice(0, 10),
+      concepto: f.concepto || "",
+      reembolso: f.reembolso ?? false,
+      idEmpleado: f.id_empleado || "",
+      idEmpleadoReembolso: f.id_empleado_reembolso || "",
+      idRequisicion: f.id_requisicion || "",
+      comentarios: f.comentarios || "",
+      linkReferencia: f.link_referencia || "",
+      comprobacionAsignadaA: f.comprobacion_asignada_a || "",
+      estadoCfdi: f.estado_cfdi || "",
+      requiereComplemento: f.requiere_complemento ?? false,
+      aprobacionLista: false,
+      permisoEnviarPago: f.permiso_enviar_pago || "",
+      permiso: f.permiso || "",
+      informacionEnvio: "",
+      fechaPagoOriginal: "",
+      linkComprobanteBanco: "",
+    });
+    setTab("Detalles");
+    setFormError(null);
+    setIdFlujoPrevio("");
+    listFlujos()
+      .then((todos) => setIdFlujoPrevio(`FLJ-${(todos.length + 1).toString().padStart(6, "0")}`))
+      .catch(() => setIdFlujoPrevio(""));
     setDialogOpen(true);
   }
 
@@ -1125,6 +1164,19 @@ export default function TesoreriaFlujosPage() {
         }}
       >
         {menuFlujo && [
+          <MenuItem
+            key="duplicar"
+            disabled={!puedeCrear}
+            onClick={() => {
+              abrirDuplicado(menuFlujo);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Copy size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Duplicar</ListItemText>
+          </MenuItem>,
           <MenuItem
             key="vincular"
             disabled={!puedeEditar}

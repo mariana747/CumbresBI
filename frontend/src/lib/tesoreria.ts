@@ -293,9 +293,16 @@ export async function deleteBanco(idBanxico: string): Promise<void> {
   }
 }
 
+export type TesoreriaCuentaTipo = "CHEQUES" | "INVERSION" | "NOMINA" | "OTRA";
+
 export interface TesoreriaCuenta {
   id_cuenta_bancaria: string;
   rfc_razon_social: string | null;
+  // Referencia laxa a general_sociedades.rfc (26/Ago/2026, para poder
+  // filtrar el reporte diario de saldos por empresa) - mismo criterio que
+  // TesoreriaContrato.sociedad, ver tesoreria/models.py.
+  sociedad: string | null;
+  tipo: TesoreriaCuentaTipo;
   banco: string | null;
   banco_nombre: string | null;
   cuenta: string | null;
@@ -326,6 +333,8 @@ export async function createCuenta(params: {
   // frontend antes de abrir el dialogo, mismo patron que TesoreriaSaldo.id.
   idCuentaBancaria: string;
   rfcRazonSocial?: string;
+  sociedad?: string;
+  tipo?: TesoreriaCuentaTipo;
   banco: string;
   cuenta?: string;
   clabe?: string;
@@ -340,6 +349,8 @@ export async function createCuenta(params: {
     body: JSON.stringify({
       id_cuenta_bancaria: params.idCuentaBancaria,
       rfc_razon_social: params.rfcRazonSocial || null,
+      sociedad: params.sociedad || null,
+      tipo: params.tipo || "CHEQUES",
       banco: params.banco,
       cuenta: params.cuenta || null,
       clabe: params.clabe || null,
@@ -357,7 +368,14 @@ export async function createCuenta(params: {
 
 export async function updateCuenta(
   idCuentaBancaria: string,
-  params: Partial<{ alias: string; label: string; activa: boolean; cierre: string | null }>
+  params: Partial<{
+    alias: string;
+    label: string;
+    activa: boolean;
+    cierre: string | null;
+    sociedad: string | null;
+    tipo: TesoreriaCuentaTipo;
+  }>
 ): Promise<TesoreriaCuenta> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/cuentas/${idCuentaBancaria}/`, {
     method: "PATCH",
@@ -1965,4 +1983,86 @@ export async function deleteSaldo(id: string): Promise<void> {
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
+}
+
+// Reporte diario de saldos (26/Ago/2026, ver documentos/finanzas.md:
+// "Generate daily reports on bank transactions") - por empresa (seleccion
+// multiple), compara las transacciones (Flujos) del dia contra el cambio
+// de saldo de cada cuenta. Calculo real vive en tesoreria-service/
+// tesoreria/reportes.py, este cliente solo pega al endpoint.
+export interface ReporteDiarioTransaccion {
+  id_flujo: string;
+  concepto: string | null;
+  total_mxp: string | null;
+}
+
+export interface ReporteDiarioCuenta {
+  id_cuenta_bancaria: string;
+  alias: string;
+  tipo: TesoreriaCuentaTipo;
+  saldo_anterior: string;
+  saldo_hoy: string | null;
+  tiene_saldo_hoy: boolean;
+  cambio: string | null;
+  suma_transacciones: string;
+  diferencia: string | null;
+  cuadra: boolean | null;
+  transacciones: ReporteDiarioTransaccion[];
+}
+
+export interface ReporteDiarioSociedad {
+  sociedad: string;
+  cuentas: ReporteDiarioCuenta[];
+}
+
+export interface ReporteDiario {
+  fecha: string;
+  sociedades: ReporteDiarioSociedad[];
+  consolidado: {
+    saldo_anterior_total: string;
+    saldo_hoy_total: string | null;
+    cambio_neto: string | null;
+  };
+}
+
+export async function getReporteDiario(sociedades: string[], fecha: string): Promise<ReporteDiario> {
+  const params = new URLSearchParams({ sociedades: sociedades.join(","), fecha });
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/reporte_diario/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// "Arrastrar" el saldo del dia anterior (finanzas.md: "There must be an
+// option to carry the same balance from the previous day") - crea el
+// TesoreriaSaldo de `fecha` copiando el ultimo saldo capturado antes de
+// esa fecha para esa cuenta. 400 si ya hay un saldo capturado o si no hay
+// nada que arrastrar.
+export async function arrastrarSaldo(cuenta: string, fecha: string): Promise<TesoreriaSaldo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/arrastrar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cuenta, fecha }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function enviarReporteDiario(
+  sociedades: string[],
+  fecha: string,
+  destinatarios: string[]
+): Promise<{ enviado: boolean }> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/enviar_reporte/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sociedades, fecha, destinatarios }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }

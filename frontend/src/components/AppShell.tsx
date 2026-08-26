@@ -54,6 +54,7 @@ import {
   ChevronDown,
   ChevronRight,
   FilePenLine,
+  FileBarChart,
   Menu as MenuIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -263,8 +264,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine },
         { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
-
-
+        { label: "Reporte diario", href: "/tesoreria/reportes", icon: FileBarChart },
         { label: "Notas de crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
