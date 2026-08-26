@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -11,28 +12,46 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
-  FormControlLabel,
-  Checkbox,
   IconButton,
   InputAdornment,
   InputLabel,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
-import { ArrowLeftRight, Check, Link2, Pencil, Plus, Search, ThumbsUp, X, X as CloseIcon } from "lucide-react";
+import {
+  Banknote,
+  Check,
+  FileCheck2,
+  Link2,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Search,
+  ThumbsUp,
+  Undo2,
+  X,
+  X as CloseIcon,
+} from "lucide-react";
 import AppShell from "@/components/AppShell";
+import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   TesoreriaComplementoPago,
@@ -55,6 +74,7 @@ import {
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
+  // Detalles
   contrato: "",
   cuenta: "",
   totalMxp: "",
@@ -63,7 +83,32 @@ const FORM_VACIO = {
   reembolso: false,
   idEmpleadoReembolso: "",
   comentarios: "",
+  fechaPagoOriginal: "",
+  linkComprobanteBanco: "",
+  // Referencias
+  idEmpleado: "",
+  idRequisicion: "",
+  linkReferencia: "",
+  // CFDI
+  estadoCfdi: "",
+  requiereComplemento: false,
+  // Control
+  comprobacionAsignadaA: "",
+  aprobacionLista: false,
+  permisoEnviarPago: "",
+  permiso: "",
+  informacionEnvio: "",
 };
+
+// Pestañas del formulario de creacion (25/Ago/2026) - agrupan los 36
+// campos de tesoreria_flujos (20260727_Cumbres_ERD.sql) segun a que le
+// sirven: Detalles = datos del movimiento, Referencias = comprobantes y
+// enlaces del pago, CFDI = lo que se conecta con facturacion (factura/
+// complemento/nomina se ligan aparte con vincular_factura, no aqui - solo
+// se muestra donde va eso), Control = seguimiento/permisos internos, casi
+// todo de solo lectura porque lo llenan aprobar/rechazar/registrar_pago.
+const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Control"] as const;
+type TabFlujo = (typeof TABS_FLUJO)[number];
 
 const VALIDACION_COLOR: Record<TesoreriaValidacionEstado, "warning" | "success" | "error"> = {
   PENDIENTE: "warning",
@@ -85,11 +130,15 @@ export default function TesoreriaFlujosPage() {
   const [facturas, setFacturas] = useState<TesoreriaFactura[]>([]);
   const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
   const [search, setSearch] = useState("");
+  const [filtroContrato, setFiltroContrato] = useState("");
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFlujo | null>(null);
   const [form, setForm] = useState(FORM_VACIO);
+  const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [accionando, setAccionando] = useState<string | null>(null);
@@ -104,6 +153,19 @@ export default function TesoreriaFlujosPage() {
   const [buscandoComplemento, setBuscandoComplemento] = useState(false);
   const [vinculoError, setVinculoError] = useState<string | null>(null);
   const [guardandoVinculo, setGuardandoVinculo] = useState(false);
+  // Previsualiza el proximo id_flujo (mismo consecutivo global que usa
+  // perform_create en el backend, ver views.py) - es solo una vista previa,
+  // el ID real siempre lo asigna el servidor al guardar; si otro flujo se
+  // crea justo entre abrir este dialogo y guardar, el numero real puede no
+  // coincidir con el mostrado aqui (mismo riesgo ya documentado y aceptado
+  // en TesoreriaContratoViewSet.perform_create).
+  const [idFlujoPrevio, setIdFlujoPrevio] = useState("");
+  // Menu compacto de acciones por fila (25/Ago/2026, "se ven muy llenas") -
+  // solo Editar queda como icono suelto, el resto (Vincular/Aprobar/
+  // Rechazar/Registrar pago) vive detras de un solo boton "⋮" para no
+  // amontonar hasta 5 iconos por fila.
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [menuFlujo, setMenuFlujo] = useState<TesoreriaFlujo | null>(null);
 
   // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
   // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
@@ -198,7 +260,7 @@ export default function TesoreriaFlujosPage() {
 
   function refresh() {
     setLoading(true);
-    listFlujos({ search: search || undefined })
+    listFlujos({ search: search || undefined, contrato: filtroContrato || undefined })
       .then(setFlujos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -208,12 +270,28 @@ export default function TesoreriaFlujosPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, filtroContrato]);
+
+  // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
+  // del cliente: listFlujos no tiene parametro de fecha en el backend
+  // todavia (solo ?search=/?contrato=, ver TesoreriaFlujoViewSet).
+  const flujosFiltrados = useMemo(() => {
+    return flujos.filter((f) => {
+      if (filtroFechaDesde && (!f.fecha_efectiva || f.fecha_efectiva < filtroFechaDesde)) return false;
+      if (filtroFechaHasta && (!f.fecha_efectiva || f.fecha_efectiva > filtroFechaHasta)) return false;
+      return true;
+    });
+  }, [flujos, filtroFechaDesde, filtroFechaHasta]);
 
   function abrirAlta() {
     setEditing(null);
     setForm(FORM_VACIO);
+    setTab("Detalles");
     setFormError(null);
+    setIdFlujoPrevio("");
+    listFlujos()
+      .then((todos) => setIdFlujoPrevio(`FLJ-${(todos.length + 1).toString().padStart(6, "0")}`))
+      .catch(() => setIdFlujoPrevio(""));
     setDialogOpen(true);
   }
 
@@ -226,9 +304,22 @@ export default function TesoreriaFlujosPage() {
       fechaEfectiva: f.fecha_efectiva || "",
       concepto: f.concepto || "",
       reembolso: f.reembolso ?? false,
+      idEmpleado: f.id_empleado || "",
       idEmpleadoReembolso: f.id_empleado_reembolso || "",
+      idRequisicion: f.id_requisicion || "",
       comentarios: f.comentarios || "",
+      linkReferencia: f.link_referencia || "",
+      comprobacionAsignadaA: f.comprobacion_asignada_a || "",
+      estadoCfdi: f.estado_cfdi || "",
+      requiereComplemento: f.requiere_complemento ?? false,
+      aprobacionLista: f.aprobacion_lista ?? false,
+      permisoEnviarPago: f.permiso_enviar_pago || "",
+      permiso: f.permiso || "",
+      informacionEnvio: f.informacion_envio || "",
+      fechaPagoOriginal: f.fecha_pago_original || "",
+      linkComprobanteBanco: f.link_comprobante_banco || "",
     });
+    setTab("Detalles");
     setFormError(null);
     setDialogOpen(true);
   }
@@ -247,6 +338,8 @@ export default function TesoreriaFlujosPage() {
           fechaEfectiva: form.fechaEfectiva || undefined,
           totalMxp: form.totalMxp || undefined,
           comentarios: form.comentarios || undefined,
+          fechaPagoOriginal: form.fechaPagoOriginal || undefined,
+          linkComprobanteBanco: form.linkComprobanteBanco || undefined,
         });
       } else {
         await createFlujo({
@@ -256,8 +349,20 @@ export default function TesoreriaFlujosPage() {
           fechaEfectiva: form.fechaEfectiva || undefined,
           concepto: form.concepto || undefined,
           reembolso: form.reembolso,
+          idEmpleado: form.idEmpleado || undefined,
           idEmpleadoReembolso: form.idEmpleadoReembolso || undefined,
+          idRequisicion: form.idRequisicion || undefined,
+          linkReferencia: form.linkReferencia || undefined,
+          comprobacionAsignadaA: form.comprobacionAsignadaA || undefined,
+          estadoCfdi: form.estadoCfdi || undefined,
+          requiereComplemento: form.requiereComplemento,
+          aprobacionLista: form.aprobacionLista,
+          permisoEnviarPago: form.permisoEnviarPago || undefined,
+          permiso: form.permiso || undefined,
+          informacionEnvio: form.informacionEnvio || undefined,
           comentarios: form.comentarios || undefined,
+          fechaPagoOriginal: form.fechaPagoOriginal || undefined,
+          linkComprobanteBanco: form.linkComprobanteBanco || undefined,
         });
       }
       setDialogOpen(false);
@@ -309,7 +414,7 @@ export default function TesoreriaFlujosPage() {
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
-        <ArrowLeftRight size={22} strokeWidth={1.5} />
+        <Banknote size={22} strokeWidth={1.5} />
         <Typography variant="h5">Flujos</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -323,41 +428,91 @@ export default function TesoreriaFlujosPage() {
       )}
 
       <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por ID de flujo o concepto..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems={{ xs: "stretch", md: "flex-start" }}
+          justifyContent="space-between"
+          sx={{ p: 2 }}
+        >
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+            <TextField
+              size="small"
+              placeholder="Buscar por ID de flujo o concepto..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              sx={{ minWidth: 240 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search size={16} strokeWidth={1.5} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
+              <Select
+                labelId="filtro-contrato-label"
+                label="Filtrar por contrato"
+                value={filtroContrato}
+                onChange={(e) => setFiltroContrato(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Todos los contratos</em>
+                </MenuItem>
+                {contratos.map((c) => (
+                  <MenuItem key={c.id_contrato} value={c.id_contrato}>
+                    {c.id_contrato} — {c.contraparte_nombre}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              type="date"
+              label="Fecha desde"
+              value={filtroFechaDesde}
+              onChange={(e) => setFiltroFechaDesde(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 160 }}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="Fecha hasta"
+              value={filtroFechaHasta}
+              onChange={(e) => setFiltroFechaHasta(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 160 }}
+            />
+          </Stack>
           {puedeCrear && (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
+              sx={{ flexShrink: 0 }}
             >
               Nuevo flujo
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - una tabla de 10 columnas no cabe en
+        un telefono sin scroll horizontal incomodo. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
               <TableRow>
-                <TableCell>ID de flujo</TableCell>
-                <TableCell>Contrato</TableCell>
-                <TableCell>Cuenta</TableCell>
+                <TableCell>ID Flujo</TableCell>
+                <TableCell>ID Contrato</TableCell>
+                <TableCell>Descripción de Pago</TableCell>
+                <TableCell>Fecha Efectiva</TableCell>
                 <TableCell>Concepto</TableCell>
+
                 <TableCell align="right">Total MXP</TableCell>
                 <TableCell>CFDI vinculado</TableCell>
                 <TableCell>Estado</TableCell>
@@ -368,24 +523,25 @@ export default function TesoreriaFlujosPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : flujos.length === 0 ? (
+              ) : flujosFiltrados.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin flujos registrados.
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                flujos.map((f) => (
+                flujosFiltrados.map((f) => (
                   <TableRow key={f.id_flujo} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.id_flujo}</TableCell>
                     <TableCell>{f.contrato || "—"}</TableCell>
-                    <TableCell>{f.cuenta_alias || f.cuenta}</TableCell>
+                    <TableCell>{f.descripcion_pago || "—"}</TableCell>
+                    <TableCell>{f.fecha_efectiva || "—"}</TableCell>
                     <TableCell>{f.concepto || "—"}</TableCell>
                     <TableCell align="right">
                       {f.total_mxp
@@ -434,63 +590,16 @@ export default function TesoreriaFlujosPage() {
                             </IconButton>
                           </span>
                         </Tooltip>
-                        <Tooltip title="Vincular factura/complemento">
-                          <span>
-                            <IconButton
-                              size="small"
-                              aria-label="Vincular factura/complemento"
-                              onClick={() => abrirVinculo(f)}
-                              disabled={!puedeEditar}
-                            >
-                              <Link2 size={14} strokeWidth={1.5} />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                        {puedeAprobar && f.validacion_estado !== "APROBADA" && (
-                          <Tooltip title="Aprobar">
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Aprobar"
-                                color="success"
-                                onClick={() => handleAprobar(f)}
-                                disabled={accionando === f.id_flujo}
-                              >
-                                <ThumbsUp size={14} strokeWidth={1.5} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {puedeAprobar && f.validacion_estado !== "RECHAZADA" && (
-                          <Tooltip title="Rechazar">
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Rechazar"
-                                color="error"
-                                onClick={() => handleRechazar(f)}
-                                disabled={accionando === f.id_flujo}
-                              >
-                                <X size={14} strokeWidth={1.5} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {puedeEditar && !f.pagado && (
-                          <Tooltip title={f.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}>
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Registrar pago"
-                                color="primary"
-                                onClick={() => handleRegistrarPago(f)}
-                                disabled={!f.autorizacion || accionando === f.id_flujo}
-                              >
-                                <Check size={14} strokeWidth={1.5} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
+                        <IconButton
+                          size="small"
+                          aria-label="Más acciones"
+                          onClick={(e) => {
+                            setMenuAnchor(e.currentTarget);
+                            setMenuFlujo(f);
+                          }}
+                        >
+                          <MoreVertical size={14} strokeWidth={1.5} />
+                        </IconButton>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -499,6 +608,98 @@ export default function TesoreriaFlujosPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : flujosFiltrados.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin flujos registrados.
+            </Typography>
+          ) : (
+            flujosFiltrados.map((f) => (
+              <Paper key={f.id_flujo} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {f.id_flujo}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {f.descripcion_pago || "—"}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <Tooltip title="Editar">
+                      <span>
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <IconButton
+                      size="small"
+                      aria-label="Más acciones"
+                      onClick={(e) => {
+                        setMenuAnchor(e.currentTarget);
+                        setMenuFlujo(f);
+                      }}
+                    >
+                      <MoreVertical size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>ID Contrato:</strong> {f.contrato || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Fecha efectiva:</strong> {f.fecha_efectiva || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Concepto:</strong> {f.concepto || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Total MXP:</strong>{" "}
+                    {f.total_mxp
+                      ? Number(f.total_mxp).toLocaleString("es-MX", { style: "currency", currency: "MXN" })
+                      : "—"}
+                  </Typography>
+                  <Typography variant="body2" component="div">
+                    <strong>CFDI vinculado:</strong>{" "}
+                    {f.factura || f.complemento ? (
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                        {f.factura && <Chip size="small" label={`Factura ${folioFactura(f.factura)}`} variant="outlined" />}
+                        {f.complemento && (
+                          <Chip size="small" label={`REP ${folioComplemento(f.complemento)}`} variant="outlined" />
+                        )}
+                      </Stack>
+                    ) : (
+                      "—"
+                    )}
+                  </Typography>
+                  <Stack direction="row" spacing={0.5}>
+                    <Chip
+                      size="small"
+                      label={f.validacion_estado || "PENDIENTE"}
+                      color={VALIDACION_COLOR[f.validacion_estado || "PENDIENTE"]}
+                      variant="outlined"
+                    />
+                    <Chip
+                      size="small"
+                      label={f.pagado ? "Pagado" : "Sin pagar"}
+                      color={f.pagado ? "success" : "default"}
+                      variant={f.pagado ? "filled" : "outlined"}
+                    />
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
@@ -508,69 +709,53 @@ export default function TesoreriaFlujosPage() {
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
         </DialogTitle>
+        <Tabs
+          value={tab}
+          onChange={(_, value: TabFlujo) => setTab(value)}
+          variant="fullWidth"
+          sx={{ borderBottom: 1, borderColor: "divider" }}
+        >
+          {TABS_FLUJO.map((t) => (
+            <Tab key={t} label={t} value={t} />
+          ))}
+        </Tabs>
         <DialogContent dividers>
           {formError && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {formError}
             </Alert>
           )}
-          <Stack spacing={2}>
-            {!editing && (
-              <>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="contrato-label">Contrato (opcional)</InputLabel>
-                  <Select
-                    labelId="contrato-label"
-                    label="Contrato (opcional)"
-                    value={form.contrato}
-                    onChange={(e) => setForm({ ...form, contrato: e.target.value })}
-                  >
-                    <MenuItem value="">
-                      <em>Sin contrato (ej. reembolso suelto)</em>
+
+          {tab === "Detalles" && (
+            <Stack spacing={2}>
+              <TextField
+                size="small"
+                label="ID de flujo"
+                value={editing ? editing.id_flujo : idFlujoPrevio}
+                disabled
+                fullWidth
+              />
+              <FormControl size="small" fullWidth disabled={!!editing}>
+                <InputLabel id="contrato-label">Contrato (opcional)</InputLabel>
+                <Select
+                  labelId="contrato-label"
+                  label="Contrato (opcional)"
+                  value={form.contrato}
+                  onChange={(e) => setForm({ ...form, contrato: e.target.value })}
+                >
+                  <MenuItem value="">
+                    <em>Sin contrato (ej. reembolso suelto)</em>
+                  </MenuItem>
+                  {contratos.map((c) => (
+                    <MenuItem key={c.id_contrato} value={c.id_contrato}>
+                      {c.id_contrato} — {c.contraparte_nombre}
                     </MenuItem>
-                    {contratos.map((c) => (
-                      <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                        {c.id_contrato} — {c.contraparte_nombre}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="cuenta-label">Cuenta bancaria</InputLabel>
-                  <Select
-                    labelId="cuenta-label"
-                    label="Cuenta bancaria"
-                    value={form.cuenta}
-                    onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
-                  >
-                    {cuentas.map((c) => (
-                      <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                        {c.alias || c.clabe}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={form.reembolso}
-                      onChange={(e) => setForm({ ...form, reembolso: e.target.checked })}
-                    />
-                  }
-                  label="Es un reembolso"
-                />
-                {form.reembolso && (
-                  <TextField
-                    size="small"
-                    label="ID de empleado (reembolso)"
-                    value={form.idEmpleadoReembolso}
-                    onChange={(e) => setForm({ ...form, idEmpleadoReembolso: e.target.value })}
-                    fullWidth
-                  />
-                )}
-              </>
-            )}
-            <Stack direction="row" spacing={2}>
+                  ))}
+                </Select>
+              </FormControl>
+              {editing && editing.descripcion_pago && (
+                <TextField size="small" label="Descripción de pago" value={editing.descripcion_pago} disabled fullWidth />
+              )}
               <TextField
                 size="small"
                 type="date"
@@ -582,29 +767,262 @@ export default function TesoreriaFlujosPage() {
               />
               <TextField
                 size="small"
+                label="Concepto"
+                value={form.concepto}
+                onChange={(e) => setForm({ ...form, concepto: e.target.value })}
+                fullWidth
+              />
+              <ToggleCard
+                icon={Undo2}
+                title="Es un reembolso"
+                description="El dinero regresa a un empleado, no a un proveedor"
+                checked={form.reembolso}
+                disabled={!!editing}
+                onChange={(checked) => setForm({ ...form, reembolso: checked })}
+              />
+              {form.reembolso && (
+                <TextField
+                  size="small"
+                  label="ID de empleado (reembolso)"
+                  value={form.idEmpleadoReembolso}
+                  disabled={!!editing}
+                  onChange={(e) => setForm({ ...form, idEmpleadoReembolso: e.target.value })}
+                  fullWidth
+                />
+              )}
+              <FormControl size="small" fullWidth disabled={!!editing}>
+                <InputLabel id="cuenta-label">Cuenta bancaria</InputLabel>
+                <Select
+                  labelId="cuenta-label"
+                  label="Cuenta bancaria"
+                  value={form.cuenta}
+                  onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
+                >
+                  {cuentas.map((c) => (
+                    <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
+                      {c.alias || c.clabe}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <TextField
+                size="small"
                 label="Total (MXP)"
                 value={form.totalMxp}
                 onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
                 fullWidth
               />
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  size="small"
+                  type="date"
+                  label="Fecha de pago original"
+                  value={form.fechaPagoOriginal}
+                  onChange={(e) => setForm({ ...form, fechaPagoOriginal: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="Comprobante de banco (link)"
+                  value={form.linkComprobanteBanco}
+                  onChange={(e) => setForm({ ...form, linkComprobanteBanco: e.target.value })}
+                  fullWidth
+                />
+              </Stack>
+              {editing ? (
+                <>
+                  <Divider sx={{ my: 1 }} />
+                  <TextField
+                    size="small"
+                    label="Autorización"
+                    value={editing.autorizacion ? "Sí" : "No"}
+                    disabled
+                    fullWidth
+                  />
+                  {editing.autorizacion && (
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                      <TextField
+                        size="small"
+                        label="Autorizado por"
+                        value={editing.autorizado_por || "—"}
+                        disabled
+                        fullWidth
+                      />
+                      <TextField
+                        size="small"
+                        label="Fecha de autorización"
+                        value={editing.fecha_autorizacion || "—"}
+                        disabled
+                        fullWidth
+                      />
+                    </Stack>
+                  )}
+                  <TextField size="small" label="Pagado" value={editing.pagado ? "Sí" : "No"} disabled fullWidth />
+                  {editing.pagado && (
+                    <TextField size="small" label="Fecha de pago" value={editing.fecha_pago || "—"} disabled fullWidth />
+                  )}
+                  <Typography variant="caption" color="text.secondary">
+                    Se actualizan con las acciones Aprobar / Rechazar / Registrar pago, no
+                    aquí.
+                  </Typography>
+                </>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Autorización / autorizado por / fecha de autorización, y pagado / fecha de
+                  pago / descripción del pago / comprobante (se sube el archivo, no un link) se
+                  capturan con las acciones Aprobar / Rechazar / Registrar pago, no aquí.
+                </Typography>
+              )}
             </Stack>
-            <TextField
-              size="small"
-              label="Concepto"
-              value={form.concepto}
-              onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              size="small"
-              label="Comentarios"
-              value={form.comentarios}
-              onChange={(e) => setForm({ ...form, comentarios: e.target.value })}
-              multiline
-              minRows={2}
-              fullWidth
-            />
-          </Stack>
+          )}
+
+          {tab === "Referencias" && (
+            <Stack spacing={2}>
+              <TextField
+                size="small"
+                label="ID de empleado"
+                value={form.idEmpleado}
+                onChange={(e) => setForm({ ...form, idEmpleado: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="ID de requisición"
+                value={form.idRequisicion}
+                onChange={(e) => setForm({ ...form, idRequisicion: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Link de referencia"
+                value={form.linkReferencia}
+                onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+          )}
+
+          {tab === "CFDI" && (
+            <Stack spacing={2}>
+              <Typography variant="caption" color="text.secondary">
+                Factura, complemento de pago y recibo de nómina se vinculan {editing ? "" : "después de crear el flujo, "}
+                con «Vincular CFDI» en la tabla (Facturación CFDI todavía no tiene catálogo de
+                nóminas propio).
+              </Typography>
+              <ToggleCard
+                icon={FileCheck2}
+                title="Requiere complemento de pago"
+                description="El proveedor debe timbrar un complemento (REP) además de la factura"
+                checked={form.requiereComplemento}
+                onChange={(checked) => setForm({ ...form, requiereComplemento: checked })}
+              />
+              <TextField
+                size="small"
+                label="Estado del CFDI"
+                value={form.estadoCfdi}
+                onChange={(e) => setForm({ ...form, estadoCfdi: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+          )}
+
+          {tab === "Control" && (
+            <Stack spacing={2}>
+              <TextField
+                size="small"
+                label="Comprobación asignada a"
+                value={form.comprobacionAsignadaA}
+                onChange={(e) => setForm({ ...form, comprobacionAsignadaA: e.target.value })}
+                fullWidth
+              />
+              <ToggleCard
+                icon={ThumbsUp}
+                title="Listo para aprobación"
+                description="Marca que ya se revisó y puede pasar a Aprobar / Rechazar"
+                checked={form.aprobacionLista}
+                onChange={(checked) => setForm({ ...form, aprobacionLista: checked })}
+              />
+              <TextField
+                size="small"
+                label="Estado de validación"
+                value={editing ? editing.validacion_estado || "PENDIENTE" : "PENDIENTE"}
+                disabled
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Permiso para enviar pago"
+                value={form.permisoEnviarPago}
+                onChange={(e) => setForm({ ...form, permisoEnviarPago: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Información de envío"
+                value={form.informacionEnvio}
+                onChange={(e) => setForm({ ...form, informacionEnvio: e.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Último envío"
+                value={editing?.ultimo_envio ? new Date(editing.ultimo_envio).toLocaleString("es-MX") : "—"}
+                disabled
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Comentarios"
+                value={form.comentarios}
+                onChange={(e) => setForm({ ...form, comentarios: e.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Permiso"
+                value={form.permiso}
+                onChange={(e) => setForm({ ...form, permiso: e.target.value })}
+                fullWidth
+              />
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="overline" color="text.secondary">
+                Auditoría
+              </Typography>
+              {editing ? (
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  <TextField
+                    size="small"
+                    label="Fecha de alta"
+                    value={new Date(editing.created_at).toLocaleString("es-MX")}
+                    disabled
+                    fullWidth
+                  />
+                  <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
+                </Stack>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Fecha de alta y registrado por se llenan solos al guardar.
+                </Typography>
+              )}
+              {editing && (
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  <TextField
+                    size="small"
+                    label="Última modificación"
+                    value={new Date(editing.updated_at).toLocaleString("es-MX")}
+                    disabled
+                    fullWidth
+                  />
+                  <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
+                </Stack>
+              )}
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
@@ -695,6 +1113,80 @@ export default function TesoreriaFlujosPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Menu compacto de acciones por fila - un solo lugar para tabla y
+      tarjetas (ver setMenuAnchor/setMenuFlujo arriba). */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor}
+        onClose={() => {
+          setMenuAnchor(null);
+          setMenuFlujo(null);
+        }}
+      >
+        {menuFlujo && [
+          <MenuItem
+            key="vincular"
+            disabled={!puedeEditar}
+            onClick={() => {
+              abrirVinculo(menuFlujo);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Link2 size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Vincular factura/complemento</ListItemText>
+          </MenuItem>,
+          puedeAprobar && menuFlujo.validacion_estado !== "APROBADA" && (
+            <MenuItem
+              key="aprobar"
+              disabled={accionando === menuFlujo.id_flujo}
+              onClick={() => {
+                handleAprobar(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <ThumbsUp size={16} strokeWidth={1.5} color="var(--mui-palette-success-main, #2e7d32)" />
+              </ListItemIcon>
+              <ListItemText>Aprobar</ListItemText>
+            </MenuItem>
+          ),
+          puedeAprobar && menuFlujo.validacion_estado !== "RECHAZADA" && (
+            <MenuItem
+              key="rechazar"
+              disabled={accionando === menuFlujo.id_flujo}
+              onClick={() => {
+                handleRechazar(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <X size={16} strokeWidth={1.5} color="var(--mui-palette-error-main, #d32f2f)" />
+              </ListItemIcon>
+              <ListItemText>Rechazar</ListItemText>
+            </MenuItem>
+          ),
+          puedeEditar && !menuFlujo.pagado && (
+            <MenuItem
+              key="registrar-pago"
+              disabled={!menuFlujo.autorizacion || accionando === menuFlujo.id_flujo}
+              onClick={() => {
+                handleRegistrarPago(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <Check size={16} strokeWidth={1.5} />
+              </ListItemIcon>
+              <ListItemText>
+                {menuFlujo.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}
+              </ListItemText>
+            </MenuItem>
+          ),
+        ]}
+      </Menu>
     </AppShell>
   );
 }

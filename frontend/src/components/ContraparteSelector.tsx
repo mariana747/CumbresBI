@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Autocomplete, CircularProgress, TextField } from "@mui/material";
-import { TesoreriaContraparte, createContraparte, listContrapartes } from "@/lib/tesoreria";
+import { TesoreriaContraparte, createContraparte, generarIdCorto, listContrapartes } from "@/lib/tesoreria";
 
 const OPCION_NUEVA_ID = "__nueva__";
 
@@ -87,6 +87,7 @@ export default function ContraparteSelector({
     setCreando(true);
     try {
       const nueva = await createContraparte({
+        idContraparte: generarIdCorto(),
         razonSocial: seleccion.razon_social,
         cliente: tipo === "cliente",
         proveedor: tipo === "proveedor",

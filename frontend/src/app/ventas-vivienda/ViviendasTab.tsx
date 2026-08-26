@@ -310,7 +310,7 @@ export default function ViviendasTab({
               onChange={(e) => setForm({ ...form, denominacion: e.target.value })}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="No. oficial"
@@ -326,7 +326,7 @@ export default function ViviendasTab({
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Tipo"
@@ -342,7 +342,7 @@ export default function ViviendasTab({
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Habitaciones"

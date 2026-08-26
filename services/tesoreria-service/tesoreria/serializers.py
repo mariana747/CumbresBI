@@ -57,7 +57,17 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_contraparte", "created_at", "updated_at"]
+        # id_contraparte YA NO es read_only (25/Ago/2026) - el modelo sigue
+        # generandolo solo si el cliente no manda nada (default=_short_id,
+        # ver models.py), pero ahora el frontend lo genera antes de abrir el
+        # dialogo de alta y lo manda explicito, mismo patron que
+        # TesoreriaSaldo.id (ver serializer de Saldo mas abajo) - asi la
+        # pantalla puede mostrar el ID real desde antes de guardar, no un
+        # ejemplo. Sin este cambio el campo se ignoraba en silencio en el
+        # POST (DRF descarta valores de campos read_only) y el ID que se
+        # veia en pantalla nunca coincidia con el que de verdad quedaba
+        # guardado.
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class TesoreriaBancoSerializer(serializers.ModelSerializer):
@@ -97,7 +107,9 @@ class TesoreriaCuentaSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_cuenta_bancaria", "created_at", "updated_at"]
+        # Ver comentario equivalente en TesoreriaContraparteSerializer -
+        # id_cuenta_bancaria ya no es read_only, mismo motivo.
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class TesoreriaContratoSerializer(serializers.ModelSerializer):
@@ -114,7 +126,15 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
     `sociedad` es CharField plano (referencia laxa a
     general_sociedades.rfc, ver models.py) - primer modelo de este servicio
     con ScopedManager real (SCOPE_FIELD_SOCIEDAD), a diferencia de los
-    catalogos compartidos de arriba."""
+    catalogos compartidos de arriba.
+
+    proyecto/propiedad/centro/duracion/fecha_proyectada/concepto_factura/
+    link_carpeta/permiso/autorizacion (25/Ago/2026): ya estaban en el
+    modelo (ERD original) pero no en este serializer - mismo hallazgo que
+    en TesoreriaFlujoSerializer. `label` (etiqueta compuesta que se ve en
+    el AppSheet original) y un supuesto `autorizado_por` NO son columnas
+    reales de esta tabla (confirmado contra el detalle real del AppSheet,
+    25/Ago/2026) - no se agregan aqui."""
 
     contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
@@ -128,15 +148,24 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "tipo",
             "fecha_generacion",
             "fecha_vencimiento",
+            "proyecto",
+            "propiedad",
+            "centro",
             "tipo_pago",
             "frecuencia",
+            "duracion",
+            "fecha_proyectada",
             "moneda",
             "monto_periodo_iva_mxp",
             "monto_total_iva_mxp",
+            "concepto_factura",
+            "link_carpeta",
             "requiere_factura",
             "status",
             "comentarios",
             "link_contrato",
+            "permiso",
+            "autorizacion",
             "created_at",
             "created_by",
             "updated_at",
@@ -157,7 +186,16 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
     `fecha_pago` los llenan las acciones `aprobar`/`registrar_pago` del
     ViewSet, no un PATCH directo - ver views.py. Mismo criterio que
     PldContraparteKycViewSet: "quien captura no aprueba"
-    (docs/architecture/roles-y-permisos.md sec. 2)."""
+    (docs/architecture/roles-y-permisos.md sec. 2).
+
+    `estado_cfdi`/`requiere_complemento`/`comprobacion_asignada_a`/
+    `aprobacion_lista`/`permiso_enviar_pago`/`informacion_envio`/
+    `ultimo_envio`/`permiso`/`fecha_pago_original` son columnas heredadas
+    del AppSheet original (20260727_Cumbres_ERD.sql) sin ninguna accion
+    del ViewSet que las llene todavia - se dejan de escritura libre (igual
+    que comentarios) hasta que exista esa automatizacion; por ahora las
+    llena quien captura, en las pestañas Referencias/CFDI/Control del
+    formulario de creacion (frontend/src/app/tesoreria/flujos/page.tsx)."""
 
     contrato_sociedad = serializers.CharField(source="contrato.sociedad", read_only=True, default=None)
     cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
@@ -183,12 +221,21 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "link_referencia",
             "pagado",
             "fecha_pago",
+            "fecha_pago_original",
             "descripcion_pago",
             "link_comprobante_banco",
             "factura",
             "complemento",
             "nomina",
+            "estado_cfdi",
+            "requiere_complemento",
+            "comprobacion_asignada_a",
             "validacion_estado",
+            "aprobacion_lista",
+            "permiso_enviar_pago",
+            "informacion_envio",
+            "ultimo_envio",
+            "permiso",
             "comentarios",
             "created_at",
             "created_by",
@@ -260,28 +307,47 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
     documentos/PldContraparteDocViewSet en pld-service."""
 
     conceptos = serializers.SerializerMethodField()
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
     class Meta:
         model = TesoreriaFactura
         fields = [
             "id",
+            # contraparte (25/Ago/2026, "vista por proveedor") - de solo
+            # lectura aqui: se llena automatico por RFC al crear/confirmar
+            # extraccion (ver TesoreriaFacturaViewSet._vincular_contraparte),
+            # no se captura a mano.
+            "contraparte",
+            "contraparte_nombre",
+            "comprobante_version",
             "comprobante_serie",
             "comprobante_folio",
             "comprobante_fecha",
             "comprobante_forma_pago",
-            "comprobante_metodo_pago",
+            "comprobante_no_certificado",
+            "comprobante_sub_total",
             "comprobante_moneda",
+            "comprobante_exportacion",
+            "comprobante_tipo_cambio",
             "comprobante_total",
             "comprobante_tipo_de_comprobante",
+            "comprobante_metodo_pago",
+            "comprobante_lugar_expedicion",
             "tipo_relacion",
             "uuid_relacionado",
             "emisor_rfc",
             "emisor_nombre",
+            "emisor_regimen_fiscal",
             "receptor_rfc",
             "receptor_nombre",
+            "receptor_domicilio_fiscal_receptor",
+            "receptor_regimen_fiscal_receptor",
             "receptor_uso_cfdi",
+            "timbre_version",
             "timbre_uuid",
             "timbre_fecha_timbrado",
+            "timbre_rfc_prov_certif",
+            "timbre_no_certificado_sat",
             "tipo_factura",
             "link_pdf",
             "link_xml",
@@ -292,7 +358,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "estado", "created_at", "updated_at"]
+        read_only_fields = ["id", "contraparte", "estado", "created_at", "updated_at"]
 
     def get_conceptos(self, obj):
         conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)
@@ -302,23 +368,48 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
 class TesoreriaComplementoPagoSerializer(serializers.ModelSerializer):
     """CFDI complemento de pago - confirma fiscalmente que una factura a
     credito ya se pago. Mismo criterio de alta manual que TesoreriaFactura
-    en este primer corte."""
+    en este primer corte.
+
+    version/no_certificado/lugar_expedicion/tipo_de_comprobante/
+    exportacion, emisor_regimen_fiscal, receptor_domicilio_fiscal_receptor/
+    regimen_fiscal_receptor/uso_cfdi, timbre_version/fecha_timbrado/
+    rfc_prov_certif/no_certificado_sat (25/Ago/2026): mismo hallazgo que en
+    Factura/Flujo/Contrato/NotaCredito - ya estaban en el modelo, faltaban
+    aqui."""
+
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
     class Meta:
         model = TesoreriaComplementoPago
         fields = [
             "id",
+            # Ver comentario en TesoreriaFacturaSerializer - mismo criterio.
+            "contraparte",
+            "contraparte_nombre",
+            "version",
             "timbre_uuid",
             "serie",
             "folio",
             "fecha",
+            "no_certificado",
+            "lugar_expedicion",
             "moneda",
+            "tipo_de_comprobante",
+            "exportacion",
             "sub_total",
             "total",
             "emisor_rfc",
             "emisor_nombre",
+            "emisor_regimen_fiscal",
             "receptor_rfc",
             "receptor_nombre",
+            "receptor_domicilio_fiscal_receptor",
+            "receptor_regimen_fiscal_receptor",
+            "receptor_uso_cfdi",
+            "timbre_version",
+            "timbre_fecha_timbrado",
+            "timbre_rfc_prov_certif",
+            "timbre_no_certificado_sat",
             "fecha_de_pago",
             "monto_pagado",
             "uuid_relacion",
@@ -330,33 +421,64 @@ class TesoreriaComplementoPagoSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "contraparte", "created_at", "updated_at"]
 
 
 class TesoreriaNotaCreditoSerializer(serializers.ModelSerializer):
     """Nota de credito - ajuste fiscal sobre una factura ya emitida
     (uuid_relacionado es FK real a TesoreriaFactura.timbre_uuid, a
     diferencia de ComplementoPago que solo trae el UUID en texto plano -
-    asi esta declarado en el ERD/models.py)."""
+    asi esta declarado en el ERD/models.py).
+
+    comprobante_version/forma_pago/no_certificado/sub_total/moneda/
+    exportacion/tipo_cambio/tipo_de_comprobante/metodo_pago/
+    lugar_expedicion, tipo_relacion, emisor_regimen_fiscal,
+    receptor_domicilio_fiscal_receptor/regimen_fiscal_receptor/uso_cfdi,
+    timbre_version/rfc_prov_certif/no_certificado_sat (25/Ago/2026): ya
+    estaban en el modelo (encabezado CFDI completo, mismo patron que
+    TesoreriaFactura) pero no en este serializer - mismo hallazgo que en
+    Flujo/Contrato."""
 
     factura_folio = serializers.CharField(source="uuid_relacionado.comprobante_folio", read_only=True, default=None)
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
     class Meta:
         model = TesoreriaNotaCredito
         fields = [
             "id",
+            # Ver comentario en TesoreriaFacturaSerializer - mismo criterio.
+            "contraparte",
+            "contraparte_nombre",
+            "comprobante_version",
             "comprobante_serie",
             "comprobante_folio",
             "comprobante_fecha",
+            "comprobante_forma_pago",
+            "comprobante_no_certificado",
+            "comprobante_sub_total",
+            "comprobante_moneda",
+            "comprobante_exportacion",
+            "comprobante_tipo_cambio",
             "comprobante_total",
+            "comprobante_tipo_de_comprobante",
+            "comprobante_metodo_pago",
+            "comprobante_lugar_expedicion",
+            "tipo_relacion",
             "uuid_relacionado",
             "factura_folio",
             "emisor_rfc",
             "emisor_nombre",
+            "emisor_regimen_fiscal",
             "receptor_rfc",
             "receptor_nombre",
+            "receptor_domicilio_fiscal_receptor",
+            "receptor_regimen_fiscal_receptor",
+            "receptor_uso_cfdi",
+            "timbre_version",
             "timbre_uuid",
             "timbre_fecha_timbrado",
+            "timbre_rfc_prov_certif",
+            "timbre_no_certificado_sat",
             "tipo_factura",
             "link_pdf",
             "estado",
@@ -365,7 +487,7 @@ class TesoreriaNotaCreditoSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "contraparte", "created_at", "updated_at"]
 
 
 class TesoreriaContraparteRelacionSerializer(serializers.ModelSerializer):
@@ -392,7 +514,10 @@ class TesoreriaContraparteRelacionSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_relacion", "created_at", "updated_at"]
+        # Ver comentario en TesoreriaContraparteSerializer - id_relacion ya
+        # no es read_only, mismo motivo (mostrar el ID real en pantalla
+        # antes de guardar).
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class TesoreriaCorteEdcSerializer(serializers.ModelSerializer):
@@ -420,7 +545,9 @@ class TesoreriaCorteEdcSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        # Ver comentario en TesoreriaContraparteSerializer - id ya no es
+        # read_only, mismo motivo.
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class TesoreriaSaldoSerializer(serializers.ModelSerializer):

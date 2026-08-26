@@ -1,8 +1,16 @@
+import sys
 from pathlib import Path
 
 import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# True cuando corre "manage.py test" - las migraciones de datos demo
+# (tesoreria/migrations/000X_seed_*.py) lo usan para no insertar filas en
+# la base de datos de pruebas (Django corre TODAS las migraciones, incluidas
+# las de datos, al crear esa base) - de otro modo los tests que asumen una
+# base vacia (conteos exactos) truenan por filas que no esperaban ver.
+TESTING = "test" in sys.argv
 
 env = environ.Env(DJANGO_DEBUG=(bool, False))
 environ.Env.read_env(BASE_DIR / ".env")
@@ -59,6 +67,10 @@ CORS_ALLOWED_ORIGINS = env.list(
     "TESORERIA_CORS_ALLOWED_ORIGINS",
     default=["http://localhost:3000", "http://127.0.0.1:3000"],
 )
+
+# URL de audit-service (bitacora central) - ver tesoreria/audit_utils.py.
+# Mismo default de desarrollo que pld-service/config/settings.py.
+AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
 
 ROOT_URLCONF = "config.urls"
 

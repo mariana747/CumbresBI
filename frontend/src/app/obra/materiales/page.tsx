@@ -666,7 +666,7 @@ export default function MaterialesPage() {
               onChange={(e) => setFormEvidencia({ ...formEvidencia, linkDrive: e.target.value })}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Fecha"
