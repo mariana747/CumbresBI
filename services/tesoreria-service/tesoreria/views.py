@@ -1,5 +1,4 @@
 import logging
-from datetime import timedelta
 
 import requests
 from cumbresbi_scope import forward_auth_headers
@@ -14,8 +13,6 @@ from rest_framework.viewsets import ModelViewSet
 
 from .audit_utils import emitir_evento_auditoria
 from .mail_utils import enviar_factura, enviar_reporte_diario
-
-logger = logging.getLogger(__name__)
 from .reportes import calcular_reporte_diario
 from .models import (
     _short_id,
@@ -54,6 +51,8 @@ from .serializers import (
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class _PermisosCatalogoTesoreriaMixin:
