@@ -5,6 +5,7 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from .audit_utils import emitir_evento_auditoria
 from .models import (
     FacturaConcepto,
     FacturaDoctoRelacionado,
@@ -216,6 +217,13 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         flujo.save(
             update_fields=["autorizacion", "autorizado_por", "fecha_autorizacion", "validacion_estado"]
         )
+        emitir_evento_auditoria(
+            "tesoreria_flujos.aprobar",
+            "tesoreria_flujos",
+            flujo.id_flujo,
+            actor_user_id=autorizado_por,
+            valores_nuevos={"total_mxp": str(flujo.total_mxp) if flujo.total_mxp is not None else None},
+        )
         return Response(self.get_serializer(flujo).data)
 
     @action(detail=True, methods=["post"])
@@ -228,6 +236,12 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         flujo.autorizacion = False
         flujo.validacion_estado = TesoreriaFlujo.VALIDACION_RECHAZADA
         flujo.save(update_fields=["autorizacion", "validacion_estado"])
+        emitir_evento_auditoria(
+            "tesoreria_flujos.rechazar",
+            "tesoreria_flujos",
+            flujo.id_flujo,
+            actor_user_id=request.data.get("actor_user_id"),
+        )
         return Response(self.get_serializer(flujo).data)
 
     @action(detail=True, methods=["post"])
@@ -250,6 +264,16 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         )
         flujo.save(
             update_fields=["pagado", "fecha_pago", "descripcion_pago", "link_comprobante_banco"]
+        )
+        emitir_evento_auditoria(
+            "tesoreria_flujos.registrar_pago",
+            "tesoreria_flujos",
+            flujo.id_flujo,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={
+                "fecha_pago": str(flujo.fecha_pago) if flujo.fecha_pago else None,
+                "link_comprobante_banco": flujo.link_comprobante_banco,
+            },
         )
         return Response(self.get_serializer(flujo).data)
 
@@ -335,7 +359,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     queryset = TesoreriaFactura.objects.all().order_by("-created_at")
     serializer_class = TesoreriaFacturaSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre"]
+    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
 
     # Whitelist de columnas que confirmar_extraccion puede escribir - mismo
     # criterio que PldContraparteKycViewSet.CAMPOS_CONFIRMABLES (ver
@@ -345,22 +369,34 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     # frontend la deja fija/no editable despues - no se debe poder pisar
     # por una extraccion que leyo mal un documento).
     CAMPOS_CONFIRMABLES = {
+        "comprobante_version",
         "comprobante_serie",
         "comprobante_folio",
         "comprobante_fecha",
+        "comprobante_no_certificado",
+        "comprobante_sub_total",
         "comprobante_moneda",
+        "comprobante_exportacion",
+        "comprobante_tipo_cambio",
         "comprobante_forma_pago",
         "comprobante_metodo_pago",
         "comprobante_total",
         "comprobante_tipo_de_comprobante",
+        "comprobante_lugar_expedicion",
         "tipo_relacion",
         "uuid_relacionado",
         "emisor_rfc",
         "emisor_nombre",
+        "emisor_regimen_fiscal",
         "receptor_rfc",
         "receptor_nombre",
+        "receptor_domicilio_fiscal_receptor",
+        "receptor_regimen_fiscal_receptor",
         "receptor_uso_cfdi",
+        "timbre_version",
         "timbre_fecha_timbrado",
+        "timbre_rfc_prov_certif",
+        "timbre_no_certificado_sat",
     }
 
     def get_permissions(self):
@@ -403,10 +439,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
         Body: {"campos": {<nombre_de_campo>: <valor>, ...}} - solo se
         aceptan campos en CAMPOS_CONFIRMABLES, cualquier otra llave
-        (incluido timbre_uuid) se ignora silenciosamente. NOTA: a diferencia
-        de pld-service, todavia no emite evento de auditoria -
-        tesoreria-service no tiene audit_utils.py (ver docs/CumbresBI_estado.md,
-        hallazgo 24/Ago/2026, pendiente aparte)."""
+        (incluido timbre_uuid) se ignora silenciosamente."""
         campos = request.data.get("campos")
         if not isinstance(campos, dict) or not campos:
             return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
@@ -422,6 +455,13 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         serializer = self.get_serializer(factura, data=datos_validos, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        emitir_evento_auditoria(
+            "tesoreria_facturas.confirmar_extraccion",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"campos": datos_validos},
+        )
         return Response(serializer.data)
 
 
@@ -432,7 +472,7 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
     queryset = TesoreriaComplementoPago.objects.all().order_by("-created_at")
     serializer_class = TesoreriaComplementoPagoSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre"]
+    search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
 
 
 class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
@@ -442,7 +482,7 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     queryset = TesoreriaNotaCredito.objects.select_related("uuid_relacionado").order_by("-created_at")
     serializer_class = TesoreriaNotaCreditoSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre"]
+    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
 
 
 class TesoreriaContraparteRelacionViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):

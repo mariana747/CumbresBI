@@ -60,6 +60,10 @@ CORS_ALLOWED_ORIGINS = env.list(
     default=["http://localhost:3000", "http://127.0.0.1:3000"],
 )
 
+# URL de audit-service (bitacora central) - ver tesoreria/audit_utils.py.
+# Mismo default de desarrollo que pld-service/config/settings.py.
+AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
