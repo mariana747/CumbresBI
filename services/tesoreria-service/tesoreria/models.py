@@ -130,8 +130,33 @@ class TesoreriaContraparteRelacion(models.Model):
 
 
 class TesoreriaCuenta(models.Model):
+    # Catalogo real del ERD, no libre - INVERSION habilita la accion
+    # RENDIMIENTOS en el reporte diario de saldos (ver finanzas.md:
+    # "In case the account type is investment, the user will have the
+    # option to add a transaction record with the description
+    # 'RENDIMIENTOS'..."). Default CHEQUES porque es lo que ya tienen todas
+    # las cuentas existentes (ninguna tenia un campo de tipo antes de esto).
+    TIPO_CHEQUES = "CHEQUES"
+    TIPO_INVERSION = "INVERSION"
+    TIPO_NOMINA = "NOMINA"
+    TIPO_OTRA = "OTRA"
+    TIPO_CHOICES = [
+        (TIPO_CHEQUES, "Cheques"),
+        (TIPO_INVERSION, "Inversión"),
+        (TIPO_NOMINA, "Nómina"),
+        (TIPO_OTRA, "Otra"),
+    ]
+
     id_cuenta_bancaria = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     rfc_razon_social = models.CharField(max_length=50, blank=True, null=True)
+    # Referencia laxa a general_sociedades.rfc (iam-service, fuera de este
+    # esquema) - mismo criterio que TesoreriaContrato.sociedad (26/Ago/2026,
+    # se agrega para poder filtrar el reporte diario de saldos "por
+    # empresa (seleccion multiple)", ver finanzas.md). Nullable a proposito:
+    # las cuentas existentes antes de este cambio no tienen este dato
+    # capturado todavia.
+    sociedad = models.CharField(max_length=13, blank=True, null=True)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_CHEQUES)
     banco = models.ForeignKey(
         TesoreriaBanco,
         db_column="banco",

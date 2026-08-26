@@ -93,6 +93,8 @@ class TesoreriaCuentaSerializer(serializers.ModelSerializer):
         fields = [
             "id_cuenta_bancaria",
             "rfc_razon_social",
+            "sociedad",
+            "tipo",
             "banco",
             "banco_nombre",
             "cuenta",

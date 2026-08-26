@@ -72,6 +72,11 @@ CORS_ALLOWED_ORIGINS = env.list(
 # Mismo default de desarrollo que pld-service/config/settings.py.
 AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
 
+# mail-service (Gmail API) - reporte diario de saldos por correo, ver
+# tesoreria/mail_utils.py. Mismo default de desarrollo que pld-service/
+# config/settings.py.
+MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
