@@ -17,6 +17,9 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -38,6 +41,7 @@ import {
   Check,
   FileCheck2,
   Link2,
+  MoreVertical,
   Pencil,
   Plus,
   Search,
@@ -156,6 +160,12 @@ export default function TesoreriaFlujosPage() {
   // coincidir con el mostrado aqui (mismo riesgo ya documentado y aceptado
   // en TesoreriaContratoViewSet.perform_create).
   const [idFlujoPrevio, setIdFlujoPrevio] = useState("");
+  // Menu compacto de acciones por fila (25/Ago/2026, "se ven muy llenas") -
+  // solo Editar queda como icono suelto, el resto (Vincular/Aprobar/
+  // Rechazar/Registrar pago) vive detras de un solo boton "⋮" para no
+  // amontonar hasta 5 iconos por fila.
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [menuFlujo, setMenuFlujo] = useState<TesoreriaFlujo | null>(null);
 
   // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
   // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
@@ -580,63 +590,16 @@ export default function TesoreriaFlujosPage() {
                             </IconButton>
                           </span>
                         </Tooltip>
-                        <Tooltip title="Vincular factura/complemento">
-                          <span>
-                            <IconButton
-                              size="small"
-                              aria-label="Vincular factura/complemento"
-                              onClick={() => abrirVinculo(f)}
-                              disabled={!puedeEditar}
-                            >
-                              <Link2 size={14} strokeWidth={1.5} />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                        {puedeAprobar && f.validacion_estado !== "APROBADA" && (
-                          <Tooltip title="Aprobar">
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Aprobar"
-                                color="success"
-                                onClick={() => handleAprobar(f)}
-                                disabled={accionando === f.id_flujo}
-                              >
-                                <ThumbsUp size={14} strokeWidth={1.5} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {puedeAprobar && f.validacion_estado !== "RECHAZADA" && (
-                          <Tooltip title="Rechazar">
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Rechazar"
-                                color="error"
-                                onClick={() => handleRechazar(f)}
-                                disabled={accionando === f.id_flujo}
-                              >
-                                <X size={14} strokeWidth={1.5} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {puedeEditar && !f.pagado && (
-                          <Tooltip title={f.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}>
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Registrar pago"
-                                color="primary"
-                                onClick={() => handleRegistrarPago(f)}
-                                disabled={!f.autorizacion || accionando === f.id_flujo}
-                              >
-                                <Check size={14} strokeWidth={1.5} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
+                        <IconButton
+                          size="small"
+                          aria-label="Más acciones"
+                          onClick={(e) => {
+                            setMenuAnchor(e.currentTarget);
+                            setMenuFlujo(f);
+                          }}
+                        >
+                          <MoreVertical size={14} strokeWidth={1.5} />
+                        </IconButton>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -677,63 +640,16 @@ export default function TesoreriaFlujosPage() {
                         </IconButton>
                       </span>
                     </Tooltip>
-                    <Tooltip title="Vincular factura/complemento">
-                      <span>
-                        <IconButton
-                          size="small"
-                          aria-label="Vincular factura/complemento"
-                          onClick={() => abrirVinculo(f)}
-                          disabled={!puedeEditar}
-                        >
-                          <Link2 size={14} strokeWidth={1.5} />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    {puedeAprobar && f.validacion_estado !== "APROBADA" && (
-                      <Tooltip title="Aprobar">
-                        <span>
-                          <IconButton
-                            size="small"
-                            aria-label="Aprobar"
-                            color="success"
-                            onClick={() => handleAprobar(f)}
-                            disabled={accionando === f.id_flujo}
-                          >
-                            <ThumbsUp size={14} strokeWidth={1.5} />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                    )}
-                    {puedeAprobar && f.validacion_estado !== "RECHAZADA" && (
-                      <Tooltip title="Rechazar">
-                        <span>
-                          <IconButton
-                            size="small"
-                            aria-label="Rechazar"
-                            color="error"
-                            onClick={() => handleRechazar(f)}
-                            disabled={accionando === f.id_flujo}
-                          >
-                            <X size={14} strokeWidth={1.5} />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                    )}
-                    {puedeEditar && !f.pagado && (
-                      <Tooltip title={f.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}>
-                        <span>
-                          <IconButton
-                            size="small"
-                            aria-label="Registrar pago"
-                            color="primary"
-                            onClick={() => handleRegistrarPago(f)}
-                            disabled={!f.autorizacion || accionando === f.id_flujo}
-                          >
-                            <Check size={14} strokeWidth={1.5} />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                    )}
+                    <IconButton
+                      size="small"
+                      aria-label="Más acciones"
+                      onClick={(e) => {
+                        setMenuAnchor(e.currentTarget);
+                        setMenuFlujo(f);
+                      }}
+                    >
+                      <MoreVertical size={14} strokeWidth={1.5} />
+                    </IconButton>
                   </Stack>
                 </Stack>
                 <Stack spacing={0.5} sx={{ mt: 1 }}>
@@ -1197,6 +1113,80 @@ export default function TesoreriaFlujosPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Menu compacto de acciones por fila - un solo lugar para tabla y
+      tarjetas (ver setMenuAnchor/setMenuFlujo arriba). */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor}
+        onClose={() => {
+          setMenuAnchor(null);
+          setMenuFlujo(null);
+        }}
+      >
+        {menuFlujo && [
+          <MenuItem
+            key="vincular"
+            disabled={!puedeEditar}
+            onClick={() => {
+              abrirVinculo(menuFlujo);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Link2 size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Vincular factura/complemento</ListItemText>
+          </MenuItem>,
+          puedeAprobar && menuFlujo.validacion_estado !== "APROBADA" && (
+            <MenuItem
+              key="aprobar"
+              disabled={accionando === menuFlujo.id_flujo}
+              onClick={() => {
+                handleAprobar(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <ThumbsUp size={16} strokeWidth={1.5} color="var(--mui-palette-success-main, #2e7d32)" />
+              </ListItemIcon>
+              <ListItemText>Aprobar</ListItemText>
+            </MenuItem>
+          ),
+          puedeAprobar && menuFlujo.validacion_estado !== "RECHAZADA" && (
+            <MenuItem
+              key="rechazar"
+              disabled={accionando === menuFlujo.id_flujo}
+              onClick={() => {
+                handleRechazar(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <X size={16} strokeWidth={1.5} color="var(--mui-palette-error-main, #d32f2f)" />
+              </ListItemIcon>
+              <ListItemText>Rechazar</ListItemText>
+            </MenuItem>
+          ),
+          puedeEditar && !menuFlujo.pagado && (
+            <MenuItem
+              key="registrar-pago"
+              disabled={!menuFlujo.autorizacion || accionando === menuFlujo.id_flujo}
+              onClick={() => {
+                handleRegistrarPago(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <Check size={16} strokeWidth={1.5} />
+              </ListItemIcon>
+              <ListItemText>
+                {menuFlujo.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}
+              </ListItemText>
+            </MenuItem>
+          ),
+        ]}
+      </Menu>
     </AppShell>
   );
 }

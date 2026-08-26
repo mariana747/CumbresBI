@@ -18,6 +18,12 @@ import {
   Paper,
   Select,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Tooltip,
   Typography,
@@ -293,10 +299,69 @@ export default function TesoreriaSaldosPage() {
               </Typography>
               <Chip size="small" label={grupo.length} />
             </Stack>
+
+            {/* Tabla en pantallas >= sm (mismo modelo que el resto de
+            Tesoreria: tabla en escritorio, tarjetas en celular); las
+            tarjetas de balanza siguen siendo la vista de xs, ver abajo. */}
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Cuenta</TableCell>
+                      <TableCell>ID</TableCell>
+                      <TableCell align="right">Saldo</TableCell>
+                      <TableCell align="right">Cambio</TableCell>
+                      <TableCell align="right">Acciones</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {grupo.map((s) => (
+                      <TableRow key={s.id} hover onClick={() => setDetalle(s)} sx={{ cursor: "pointer" }}>
+                        <TableCell>{aliasCuenta(s.cuenta)}</TableCell>
+                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{s.id}</TableCell>
+                        <TableCell align="right">
+                          {Number(s.saldo).toLocaleString("es-MX", { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell align="right">
+                          {s.cambio_dinero
+                            ? `${Number(s.cambio_dinero).toLocaleString("es-MX", { minimumFractionDigits: 2 })}${
+                                s.cambio_porcentual ? ` (${s.cambio_porcentual}%)` : ""
+                              }`
+                            : "—"}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Stack direction="row" spacing={0.5} justifyContent="flex-end" onClick={(e) => e.stopPropagation()}>
+                            <Tooltip title="Editar">
+                              <span>
+                                <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(s)} disabled={!puedeEditar}>
+                                  <Pencil size={13} strokeWidth={1.5} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Borrar">
+                              <span>
+                                <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(s)} disabled={!puedeEditar}>
+                                  <Trash2 size={13} strokeWidth={1.5} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+
+            {/* Tarjetas de balanza - solo celular (xs), ver comentario
+            arriba (feedback original: paneles de cuadros, no tabla plana -
+            se conserva en xs, en sm+ ahora hay tabla). */}
             <Box
               sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)" },
+                display: { xs: "grid", sm: "none" },
+                gridTemplateColumns: "1fr",
                 gap: 2,
               }}
             >
