@@ -30,7 +30,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CreditCard, FileText, Pencil, Plus, Search, ShieldCheck, X as CloseIcon } from "lucide-react";
+import { CreditCard, FilePenLine, Pencil, Plus, Search, ShieldCheck, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -110,6 +110,13 @@ export default function TesoreriaContratosPage() {
   const [tab, setTab] = useState<TabContrato>("Detalles");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Previsualiza el proximo id_contrato ("{sociedad}-{contraparte}-{consecutivo}",
+  // ver perform_create en views.py) - solo se puede calcular una vez que
+  // sociedad Y contraparte estan elegidas (el consecutivo es por esa
+  // combinacion). Es solo vista previa: el ID real siempre lo asigna el
+  // servidor al guardar, mismo riesgo de condicion de carrera ya
+  // documentado y aceptado en TesoreriaContratoViewSet.perform_create.
+  const [idContratoPrevio, setIdContratoPrevio] = useState("");
 
   useEffect(() => {
     getSession().then(setSession);
@@ -152,8 +159,23 @@ export default function TesoreriaContratosPage() {
     setForm(FORM_VACIO);
     setTab("Detalles");
     setFormError(null);
+    setIdContratoPrevio("");
     setDialogOpen(true);
   }
+
+  useEffect(() => {
+    if (editing || !dialogOpen || !form.sociedad || !form.contraparte) {
+      if (!editing) setIdContratoPrevio("");
+      return;
+    }
+    listContratos()
+      .then((todos) => {
+        const consecutivo =
+          todos.filter((c) => c.sociedad === form.sociedad && c.contraparte === form.contraparte).length + 1;
+        setIdContratoPrevio(`${form.sociedad}-${form.contraparte}-${consecutivo.toString().padStart(3, "0")}`);
+      })
+      .catch(() => setIdContratoPrevio(""));
+  }, [dialogOpen, editing, form.sociedad, form.contraparte]);
 
   function abrirEdicion(c: TesoreriaContrato) {
     setEditing(c);
@@ -258,7 +280,7 @@ export default function TesoreriaContratosPage() {
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
-        <FileText size={22} strokeWidth={1.5} />
+        <FilePenLine size={22} strokeWidth={1.5} />
         <Typography variant="h5">Contratos</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -272,62 +294,72 @@ export default function TesoreriaContratosPage() {
       )}
 
       <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2, flexWrap: "wrap" }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por ID de contrato o sociedad..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel id="filtro-sociedad-label">Filtrar por sociedad</InputLabel>
-            <Select
-              labelId="filtro-sociedad-label"
-              label="Filtrar por sociedad"
-              value={filtroSociedad}
-              onChange={(e) => setFiltroSociedad(e.target.value)}
-            >
-              <MenuItem value="">
-                <em>Todas las sociedades</em>
-              </MenuItem>
-              {sociedades.map((s) => (
-                <MenuItem key={s.rfc} value={s.rfc}>
-                  {s.razon_social || s.rfc}
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems={{ xs: "stretch", md: "flex-start" }}
+          justifyContent="space-between"
+          sx={{ p: 2 }}
+        >
+          <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+            <TextField
+              size="small"
+              placeholder="Buscar por ID de contrato o sociedad..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              sx={{ minWidth: 240 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search size={16} strokeWidth={1.5} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="filtro-sociedad-label">Filtrar por sociedad</InputLabel>
+              <Select
+                labelId="filtro-sociedad-label"
+                label="Filtrar por sociedad"
+                value={filtroSociedad}
+                onChange={(e) => setFiltroSociedad(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Todas las sociedades</em>
                 </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            size="small"
-            type="date"
-            label="Fecha desde"
-            value={filtroFechaDesde}
-            onChange={(e) => setFiltroFechaDesde(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
-          <TextField
-            size="small"
-            type="date"
-            label="Fecha hasta"
-            value={filtroFechaHasta}
-            onChange={(e) => setFiltroFechaHasta(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
+                {sociedades.map((s) => (
+                  <MenuItem key={s.rfc} value={s.rfc}>
+                    {s.razon_social || s.rfc}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              type="date"
+              label="Fecha desde"
+              value={filtroFechaDesde}
+              onChange={(e) => setFiltroFechaDesde(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 160 }}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="Fecha hasta"
+              value={filtroFechaHasta}
+              onChange={(e) => setFiltroFechaHasta(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 160 }}
+            />
+          </Stack>
           {puedeCrear && (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
+              sx={{ flexShrink: 0 }}
             >
               Nuevo contrato
             </Button>
@@ -416,7 +448,11 @@ export default function TesoreriaContratosPage() {
               <TextField
                 size="small"
                 label="ID de contrato"
-                value={editing ? editing.id_contrato : "Se genera automático al guardar (sociedad-contraparte-###)"}
+                value={
+                  editing
+                    ? editing.id_contrato
+                    : idContratoPrevio || "Elige sociedad y contraparte para ver el ID"
+                }
                 disabled
                 fullWidth
               />

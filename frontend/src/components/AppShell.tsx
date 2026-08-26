@@ -53,6 +53,7 @@ import {
   ListTree,
   ChevronDown,
   ChevronRight,
+  FilePenLine,
   Menu as MenuIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -251,16 +252,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       ],
     });
   }
-  // Tesoreria (18/Ago/2026, arranque formal de Fase 4) ya tiene pantalla
-  // real de Contrapartes - reemplaza el placeholder "en desarrollo" que
-  // tenia su propio apartado suelto en el sidebar (docs/architecture/
-  // README.md sec. 11.2 #7: "fusion definitiva", Contrapartes vive dentro
-  // de tesoreria-service, no un microservicio propio - asi que un solo
-  // apartado, no dos "Contrapartes" distintos). Se incluye el permiso
-  // "contrapartes" en el gate (no solo tesoreria/facturacion-cfdi) porque
-  // varios roles de PLD solo tienen contrapartes.leer (ej. PLD_ANALISTA)
-  // y deben poder VER el catalogo real aunque no puedan crear/editar ahi -
-  // el propio boton "Nueva contraparte" ya se oculta sin tesoreria.crear.
+
   if (tieneAlgunPermiso(session, ["contrapartes", "tesoreria", "facturacion-cfdi"])) {
     items.push({
       label: "Tesorería",
@@ -269,11 +261,13 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       enabled: true,
       children: [
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
-        { label: "Contratos", href: "/tesoreria/contratos", icon: FileText },
+        { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine },
+        { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
+
+
         { label: "Notas de crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
-        { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
         { label: "Facturas", href: "/tesoreria/facturas", icon: FileText },
         { label: "Complementos de pago", href: "/tesoreria/complementos-pago", icon: Receipt },
         { label: "Recibos de nómina", href: "/tesoreria/rec-nominas", icon: Wallet2 },

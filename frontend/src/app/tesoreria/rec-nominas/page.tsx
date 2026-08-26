@@ -182,6 +182,7 @@ export default function TesoreriaRecNominasPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell>UUID</TableCell>
                 <TableCell>Folio</TableCell>
                 <TableCell>Empleado</TableCell>
                 <TableCell>Receptor</TableCell>
@@ -194,13 +195,13 @@ export default function TesoreriaRecNominasPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin recibos de nómina registrados.
                     </Typography>
@@ -209,6 +210,7 @@ export default function TesoreriaRecNominasPage() {
               ) : (
                 items.map((n) => (
                   <TableRow key={n.id} hover>
+                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{n.timbre_uuid}</TableCell>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{n.folio || "—"}</TableCell>
                     <TableCell>{n.nom_receptor_num_empleado || "—"}</TableCell>
                     <TableCell>{n.receptor_nombre || n.receptor_rfc || "—"}</TableCell>

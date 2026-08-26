@@ -369,6 +369,7 @@ export default function TesoreriaComplementosPagoPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell>UUID</TableCell>
                 <TableCell>Folio</TableCell>
                 <TableCell>Emisor</TableCell>
                 <TableCell>Receptor</TableCell>
@@ -381,13 +382,13 @@ export default function TesoreriaComplementosPagoPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin complementos registrados.
                     </Typography>
@@ -396,6 +397,7 @@ export default function TesoreriaComplementosPagoPage() {
               ) : (
                 items.map((c) => (
                   <TableRow key={c.id} hover>
+                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.timbre_uuid}</TableCell>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {c.serie || ""}
                       {c.folio || "—"}

@@ -78,6 +78,8 @@ const FORM_VACIO = {
   reembolso: false,
   idEmpleadoReembolso: "",
   comentarios: "",
+  fechaPagoOriginal: "",
+  linkComprobanteBanco: "",
   // Referencias
   idEmpleado: "",
   idRequisicion: "",
@@ -146,6 +148,13 @@ export default function TesoreriaFlujosPage() {
   const [buscandoComplemento, setBuscandoComplemento] = useState(false);
   const [vinculoError, setVinculoError] = useState<string | null>(null);
   const [guardandoVinculo, setGuardandoVinculo] = useState(false);
+  // Previsualiza el proximo id_flujo (mismo consecutivo global que usa
+  // perform_create en el backend, ver views.py) - es solo una vista previa,
+  // el ID real siempre lo asigna el servidor al guardar; si otro flujo se
+  // crea justo entre abrir este dialogo y guardar, el numero real puede no
+  // coincidir con el mostrado aqui (mismo riesgo ya documentado y aceptado
+  // en TesoreriaContratoViewSet.perform_create).
+  const [idFlujoPrevio, setIdFlujoPrevio] = useState("");
 
   // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
   // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
@@ -268,6 +277,10 @@ export default function TesoreriaFlujosPage() {
     setForm(FORM_VACIO);
     setTab("Detalles");
     setFormError(null);
+    setIdFlujoPrevio("");
+    listFlujos()
+      .then((todos) => setIdFlujoPrevio(`FLJ-${(todos.length + 1).toString().padStart(6, "0")}`))
+      .catch(() => setIdFlujoPrevio(""));
     setDialogOpen(true);
   }
 
@@ -292,6 +305,8 @@ export default function TesoreriaFlujosPage() {
       permisoEnviarPago: f.permiso_enviar_pago || "",
       permiso: f.permiso || "",
       informacionEnvio: f.informacion_envio || "",
+      fechaPagoOriginal: f.fecha_pago_original || "",
+      linkComprobanteBanco: f.link_comprobante_banco || "",
     });
     setTab("Detalles");
     setFormError(null);
@@ -312,6 +327,8 @@ export default function TesoreriaFlujosPage() {
           fechaEfectiva: form.fechaEfectiva || undefined,
           totalMxp: form.totalMxp || undefined,
           comentarios: form.comentarios || undefined,
+          fechaPagoOriginal: form.fechaPagoOriginal || undefined,
+          linkComprobanteBanco: form.linkComprobanteBanco || undefined,
         });
       } else {
         await createFlujo({
@@ -333,6 +350,8 @@ export default function TesoreriaFlujosPage() {
           permiso: form.permiso || undefined,
           informacionEnvio: form.informacionEnvio || undefined,
           comentarios: form.comentarios || undefined,
+          fechaPagoOriginal: form.fechaPagoOriginal || undefined,
+          linkComprobanteBanco: form.linkComprobanteBanco || undefined,
         });
       }
       setDialogOpen(false);
@@ -398,62 +417,72 @@ export default function TesoreriaFlujosPage() {
       )}
 
       <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2, flexWrap: "wrap" }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por ID de flujo o concepto..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
-            <Select
-              labelId="filtro-contrato-label"
-              label="Filtrar por contrato"
-              value={filtroContrato}
-              onChange={(e) => setFiltroContrato(e.target.value)}
-            >
-              <MenuItem value="">
-                <em>Todos los contratos</em>
-              </MenuItem>
-              {contratos.map((c) => (
-                <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                  {c.id_contrato} — {c.contraparte_nombre}
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems={{ xs: "stretch", md: "flex-start" }}
+          justifyContent="space-between"
+          sx={{ p: 2 }}
+        >
+          <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+            <TextField
+              size="small"
+              placeholder="Buscar por ID de flujo o concepto..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              sx={{ minWidth: 240 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search size={16} strokeWidth={1.5} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
+              <Select
+                labelId="filtro-contrato-label"
+                label="Filtrar por contrato"
+                value={filtroContrato}
+                onChange={(e) => setFiltroContrato(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Todos los contratos</em>
                 </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            size="small"
-            type="date"
-            label="Fecha desde"
-            value={filtroFechaDesde}
-            onChange={(e) => setFiltroFechaDesde(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
-          <TextField
-            size="small"
-            type="date"
-            label="Fecha hasta"
-            value={filtroFechaHasta}
-            onChange={(e) => setFiltroFechaHasta(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
+                {contratos.map((c) => (
+                  <MenuItem key={c.id_contrato} value={c.id_contrato}>
+                    {c.id_contrato} — {c.contraparte_nombre}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              type="date"
+              label="Fecha desde"
+              value={filtroFechaDesde}
+              onChange={(e) => setFiltroFechaDesde(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 160 }}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="Fecha hasta"
+              value={filtroFechaHasta}
+              onChange={(e) => setFiltroFechaHasta(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 160 }}
+            />
+          </Stack>
           {puedeCrear && (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
+              sx={{ flexShrink: 0 }}
             >
               Nuevo flujo
             </Button>
@@ -479,13 +508,13 @@ export default function TesoreriaFlujosPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : flujosFiltrados.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin flujos registrados.
                     </Typography>
@@ -496,7 +525,8 @@ export default function TesoreriaFlujosPage() {
                   <TableRow key={f.id_flujo} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.id_flujo}</TableCell>
                     <TableCell>{f.contrato || "—"}</TableCell>
-                    <TableCell>{f.cuenta_alias || f.cuenta}</TableCell>
+                    <TableCell>{f.descripcion_pago || "—"}</TableCell>
+                    <TableCell>{f.fecha_efectiva || "—"}</TableCell>
                     <TableCell>{f.concepto || "—"}</TableCell>
                     <TableCell align="right">
                       {f.total_mxp
@@ -641,7 +671,7 @@ export default function TesoreriaFlujosPage() {
               <TextField
                 size="small"
                 label="ID de flujo"
-                value={editing ? editing.id_flujo : "Se genera automático al guardar (FLJ-000000)"}
+                value={editing ? editing.id_flujo : idFlujoPrevio}
                 disabled
                 fullWidth
               />
@@ -663,6 +693,9 @@ export default function TesoreriaFlujosPage() {
                   ))}
                 </Select>
               </FormControl>
+              {editing && editing.descripcion_pago && (
+                <TextField size="small" label="Descripción de pago" value={editing.descripcion_pago} disabled fullWidth />
+              )}
               <TextField
                 size="small"
                 type="date"
@@ -719,11 +752,68 @@ export default function TesoreriaFlujosPage() {
                 onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
                 fullWidth
               />
-              <Typography variant="caption" color="text.secondary">
-                Autorización / autorizado por / fecha de autorización, y pagado / fecha de
-                pago / descripción del pago / comprobante (se sube el archivo, no un link) se
-                capturan con las acciones Aprobar / Rechazar / Registrar pago, no aquí.
-              </Typography>
+              <Stack direction="row" spacing={2}>
+                <TextField
+                  size="small"
+                  type="date"
+                  label="Fecha de pago original"
+                  value={form.fechaPagoOriginal}
+                  onChange={(e) => setForm({ ...form, fechaPagoOriginal: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="Comprobante de banco (link)"
+                  value={form.linkComprobanteBanco}
+                  onChange={(e) => setForm({ ...form, linkComprobanteBanco: e.target.value })}
+                  fullWidth
+                />
+              </Stack>
+              {editing ? (
+                <>
+                  <Divider sx={{ my: 1 }} />
+                  <TextField
+                    size="small"
+                    label="Autorización"
+                    value={editing.autorizacion ? "Sí" : "No"}
+                    disabled
+                    fullWidth
+                  />
+                  {editing.autorizacion && (
+                    <Stack direction="row" spacing={2}>
+                      <TextField
+                        size="small"
+                        label="Autorizado por"
+                        value={editing.autorizado_por || "—"}
+                        disabled
+                        fullWidth
+                      />
+                      <TextField
+                        size="small"
+                        label="Fecha de autorización"
+                        value={editing.fecha_autorizacion || "—"}
+                        disabled
+                        fullWidth
+                      />
+                    </Stack>
+                  )}
+                  <TextField size="small" label="Pagado" value={editing.pagado ? "Sí" : "No"} disabled fullWidth />
+                  {editing.pagado && (
+                    <TextField size="small" label="Fecha de pago" value={editing.fecha_pago || "—"} disabled fullWidth />
+                  )}
+                  <Typography variant="caption" color="text.secondary">
+                    Se actualizan con las acciones Aprobar / Rechazar / Registrar pago, no
+                    aquí.
+                  </Typography>
+                </>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Autorización / autorizado por / fecha de autorización, y pagado / fecha de
+                  pago / descripción del pago / comprobante (se sube el archivo, no un link) se
+                  capturan con las acciones Aprobar / Rechazar / Registrar pago, no aquí.
+                </Typography>
+              )}
             </Stack>
           )}
 

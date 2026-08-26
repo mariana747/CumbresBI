@@ -210,48 +210,58 @@ export default function TesoreriaSaldosPage() {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Balanza — el saldo de cada cuenta bancaria, agrupado por fecha de corte.
       </Typography>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ mb: 3, flexWrap: "wrap" }}>
-        <FormControl size="small" sx={{ minWidth: 220 }}>
-          <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
-          <Select
-            labelId="filtro-cuenta-label"
-            label="Filtrar por cuenta"
-            value={filtroCuenta}
-            onChange={(e) => setFiltroCuenta(e.target.value)}
-          >
-            <MenuItem value="">
-              <em>Todas las cuentas</em>
-            </MenuItem>
-            {cuentas.map((c) => (
-              <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                {c.alias || c.clabe || c.id_cuenta_bancaria}
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        spacing={2}
+        alignItems={{ xs: "stretch", md: "flex-start" }}
+        justifyContent="space-between"
+        sx={{ mb: 3 }}
+      >
+        <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
+            <Select
+              labelId="filtro-cuenta-label"
+              label="Filtrar por cuenta"
+              value={filtroCuenta}
+              onChange={(e) => setFiltroCuenta(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Todas las cuentas</em>
               </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <TextField
-          size="small"
-          type="date"
-          label="Fecha desde"
-          value={filtroFechaDesde}
-          onChange={(e) => setFiltroFechaDesde(e.target.value)}
-          InputLabelProps={{ shrink: true }}
-        />
-        <TextField
-          size="small"
-          type="date"
-          label="Fecha hasta"
-          value={filtroFechaHasta}
-          onChange={(e) => setFiltroFechaHasta(e.target.value)}
-          InputLabelProps={{ shrink: true }}
-        />
+              {cuentas.map((c) => (
+                <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
+                  {c.alias || c.clabe || c.id_cuenta_bancaria}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            size="small"
+            type="date"
+            label="Fecha desde"
+            value={filtroFechaDesde}
+            onChange={(e) => setFiltroFechaDesde(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 160 }}
+          />
+          <TextField
+            size="small"
+            type="date"
+            label="Fecha hasta"
+            value={filtroFechaHasta}
+            onChange={(e) => setFiltroFechaHasta(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 160 }}
+          />
+        </Stack>
         {puedeCrear && (
           <Button
             size="small"
             variant="contained"
             startIcon={<Plus size={14} strokeWidth={2} />}
             onClick={abrirAlta}
-            sx={{ ml: { sm: "auto" } }}
+            sx={{ flexShrink: 0 }}
           >
             Nuevo saldo
           </Button>

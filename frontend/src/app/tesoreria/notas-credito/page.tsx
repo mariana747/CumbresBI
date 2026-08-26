@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Button,
   Chip,
   CircularProgress,
@@ -29,10 +30,12 @@ import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   NotaCreditoConcepto,
+  TesoreriaFactura,
   TesoreriaNotaCredito,
   createNotaCredito,
   createNotaCreditoConcepto,
   deleteNotaCreditoConcepto,
+  listFacturas,
   listNotaCreditoConceptos,
   listNotasCredito,
   updateNotaCredito,
@@ -206,15 +209,33 @@ function PanelConceptos({ uuidNota, puedeEditar }: { uuidNota: string; puedeEdit
 
 const FORM_VACIO = {
   timbreUuid: "",
+  comprobanteVersion: "",
   comprobanteSerie: "",
   comprobanteFolio: "",
   comprobanteFecha: "",
+  comprobanteFormaPago: "",
+  comprobanteNoCertificado: "",
+  comprobanteSubTotal: "",
+  comprobanteMoneda: "",
+  comprobanteExportacion: "",
+  comprobanteTipoCambio: "",
   comprobanteTotal: "",
-  uuidRelacionado: "",
+  comprobanteTipoDeComprobante: "",
+  comprobanteMetodoPago: "",
+  comprobanteLugarExpedicion: "",
+  tipoRelacion: "",
   emisorRfc: "",
   emisorNombre: "",
+  emisorRegimenFiscal: "",
   receptorRfc: "",
   receptorNombre: "",
+  receptorDomicilioFiscalReceptor: "",
+  receptorRegimenFiscalReceptor: "",
+  receptorUsoCfdi: "",
+  timbreVersion: "",
+  timbreFechaTimbrado: "",
+  timbreRfcProvCertif: "",
+  timbreNoCertificadoSat: "",
   tipoFactura: "",
   linkPdf: "",
   estado: "",
@@ -235,9 +256,31 @@ export default function TesoreriaNotasCreditoPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Factura relacionada (25/Ago/2026, confirmado contra el ERD:
+  // tesoreria_notas_credito.UUID_Relacionado tiene FK real a
+  // tesoreria_facturas.Timbre_UUID, no es texto libre) - Autocomplete con
+  // busqueda en vivo, mismo patron que vincularFactura en Flujos.
+  const [facturaRelacionada, setFacturaRelacionada] = useState<TesoreriaFactura | null>(null);
+  const [buscaFactura, setBuscaFactura] = useState("");
+  const [opcionesFactura, setOpcionesFactura] = useState<TesoreriaFactura[]>([]);
+  const [buscandoFactura, setBuscandoFactura] = useState(false);
+
   useEffect(() => {
     getSession().then(setSession);
   }, []);
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    setBuscandoFactura(true);
+    const timeout = setTimeout(() => {
+      listFacturas(buscaFactura || undefined)
+        .then(setOpcionesFactura)
+        .catch(() => setOpcionesFactura([]))
+        .finally(() => setBuscandoFactura(false));
+    }, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buscaFactura, dialogOpen]);
 
   const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
@@ -259,23 +302,51 @@ export default function TesoreriaNotasCreditoPage() {
   function abrirAlta() {
     setEditing(null);
     setForm(FORM_VACIO);
+    setFacturaRelacionada(null);
+    setBuscaFactura("");
     setFormError(null);
     setDialogOpen(true);
   }
 
   function abrirEdicion(n: TesoreriaNotaCredito) {
     setEditing(n);
+    setBuscaFactura("");
+    if (n.uuid_relacionado) {
+      listFacturas(n.uuid_relacionado)
+        .then((facturas) => setFacturaRelacionada(facturas.find((f) => f.timbre_uuid === n.uuid_relacionado) || null))
+        .catch(() => setFacturaRelacionada(null));
+    } else {
+      setFacturaRelacionada(null);
+    }
     setForm({
       timbreUuid: n.timbre_uuid || "",
+      comprobanteVersion: n.comprobante_version || "",
       comprobanteSerie: n.comprobante_serie || "",
       comprobanteFolio: n.comprobante_folio || "",
       comprobanteFecha: n.comprobante_fecha ? n.comprobante_fecha.slice(0, 10) : "",
+      comprobanteFormaPago: n.comprobante_forma_pago || "",
+      comprobanteNoCertificado: n.comprobante_no_certificado || "",
+      comprobanteSubTotal: n.comprobante_sub_total || "",
+      comprobanteMoneda: n.comprobante_moneda || "",
+      comprobanteExportacion: n.comprobante_exportacion || "",
+      comprobanteTipoCambio: n.comprobante_tipo_cambio || "",
       comprobanteTotal: n.comprobante_total || "",
-      uuidRelacionado: n.uuid_relacionado || "",
+      comprobanteTipoDeComprobante: n.comprobante_tipo_de_comprobante || "",
+      comprobanteMetodoPago: n.comprobante_metodo_pago || "",
+      comprobanteLugarExpedicion: n.comprobante_lugar_expedicion || "",
+      tipoRelacion: n.tipo_relacion || "",
       emisorRfc: n.emisor_rfc || "",
       emisorNombre: n.emisor_nombre || "",
+      emisorRegimenFiscal: n.emisor_regimen_fiscal || "",
       receptorRfc: n.receptor_rfc || "",
       receptorNombre: n.receptor_nombre || "",
+      receptorDomicilioFiscalReceptor: n.receptor_domicilio_fiscal_receptor || "",
+      receptorRegimenFiscalReceptor: n.receptor_regimen_fiscal_receptor || "",
+      receptorUsoCfdi: n.receptor_uso_cfdi || "",
+      timbreVersion: n.timbre_version || "",
+      timbreFechaTimbrado: n.timbre_fecha_timbrado || "",
+      timbreRfcProvCertif: n.timbre_rfc_prov_certif || "",
+      timbreNoCertificadoSat: n.timbre_no_certificado_sat || "",
       tipoFactura: n.tipo_factura || "",
       linkPdf: n.link_pdf || "",
       estado: n.estado || "",
@@ -292,10 +363,11 @@ export default function TesoreriaNotasCreditoPage() {
     setSaving(true);
     setFormError(null);
     try {
+      const params = { ...form, uuidRelacionado: facturaRelacionada?.timbre_uuid || undefined };
       if (editing) {
-        await updateNotaCredito(editing.id, form);
+        await updateNotaCredito(editing.id, params);
       } else {
-        await createNotaCredito(form);
+        await createNotaCredito(params);
       }
       setDialogOpen(false);
       refresh();
@@ -354,6 +426,7 @@ export default function TesoreriaNotasCreditoPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell>UUID</TableCell>
                 <TableCell>Folio</TableCell>
                 <TableCell>Factura relacionada</TableCell>
                 <TableCell>Emisor</TableCell>
@@ -366,13 +439,13 @@ export default function TesoreriaNotasCreditoPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin notas de crédito registradas.
                     </Typography>
@@ -381,6 +454,7 @@ export default function TesoreriaNotasCreditoPage() {
               ) : (
                 items.map((n) => (
                   <TableRow key={n.id} hover>
+                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{n.timbre_uuid}</TableCell>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {n.comprobante_serie || ""}
                       {n.comprobante_folio || "—"}
@@ -425,12 +499,34 @@ export default function TesoreriaNotasCreditoPage() {
               disabled={!!editing}
               fullWidth
             />
-            <TextField
+            <Autocomplete
+              openOnFocus
               size="small"
-              label="UUID de la factura relacionada"
-              value={form.uuidRelacionado}
-              onChange={(e) => setForm({ ...form, uuidRelacionado: e.target.value })}
               fullWidth
+              loading={buscandoFactura}
+              value={facturaRelacionada}
+              inputValue={buscaFactura}
+              onInputChange={(_, nuevoValor) => setBuscaFactura(nuevoValor)}
+              onChange={(_, seleccion) => setFacturaRelacionada(seleccion)}
+              options={opcionesFactura}
+              getOptionLabel={(f) => `${f.comprobante_folio || f.timbre_uuid}${f.emisor_nombre ? ` — ${f.emisor_nombre}` : ""}`}
+              isOptionEqualToValue={(a, b) => a.timbre_uuid === b.timbre_uuid}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Factura relacionada"
+                  helperText="Escribe para buscar por folio, UUID o nombre — es un FK real, no texto libre."
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {buscandoFactura && <CircularProgress size={16} />}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
             />
             <Stack direction="row" spacing={2}>
               <TextField
@@ -460,9 +556,92 @@ export default function TesoreriaNotasCreditoPage() {
               />
               <TextField
                 size="small"
+                label="Versión"
+                value={form.comprobanteVersion}
+                onChange={(e) => setForm({ ...form, comprobanteVersion: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Sub total"
+                value={form.comprobanteSubTotal}
+                onChange={(e) => setForm({ ...form, comprobanteSubTotal: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
                 label="Total"
                 value={form.comprobanteTotal}
                 onChange={(e) => setForm({ ...form, comprobanteTotal: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Moneda"
+                value={form.comprobanteMoneda}
+                onChange={(e) => setForm({ ...form, comprobanteMoneda: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Tipo de cambio"
+                value={form.comprobanteTipoCambio}
+                onChange={(e) => setForm({ ...form, comprobanteTipoCambio: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Forma de pago"
+                value={form.comprobanteFormaPago}
+                onChange={(e) => setForm({ ...form, comprobanteFormaPago: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Método de pago"
+                value={form.comprobanteMetodoPago}
+                onChange={(e) => setForm({ ...form, comprobanteMetodoPago: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Tipo de comprobante"
+                value={form.comprobanteTipoDeComprobante}
+                onChange={(e) => setForm({ ...form, comprobanteTipoDeComprobante: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Exportación"
+                value={form.comprobanteExportacion}
+                onChange={(e) => setForm({ ...form, comprobanteExportacion: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="No. de certificado"
+                value={form.comprobanteNoCertificado}
+                onChange={(e) => setForm({ ...form, comprobanteNoCertificado: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Lugar de expedición"
+                value={form.comprobanteLugarExpedicion}
+                onChange={(e) => setForm({ ...form, comprobanteLugarExpedicion: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Tipo de relación"
+                value={form.tipoRelacion}
+                onChange={(e) => setForm({ ...form, tipoRelacion: e.target.value })}
                 fullWidth
               />
             </Stack>
@@ -481,6 +660,13 @@ export default function TesoreriaNotasCreditoPage() {
                 onChange={(e) => setForm({ ...form, emisorNombre: e.target.value })}
                 fullWidth
               />
+              <TextField
+                size="small"
+                label="Régimen fiscal emisor"
+                value={form.emisorRegimenFiscal}
+                onChange={(e) => setForm({ ...form, emisorRegimenFiscal: e.target.value })}
+                fullWidth
+              />
             </Stack>
             <Stack direction="row" spacing={2}>
               <TextField
@@ -495,6 +681,64 @@ export default function TesoreriaNotasCreditoPage() {
                 label="Nombre receptor"
                 value={form.receptorNombre}
                 onChange={(e) => setForm({ ...form, receptorNombre: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Domicilio fiscal receptor"
+                value={form.receptorDomicilioFiscalReceptor}
+                onChange={(e) => setForm({ ...form, receptorDomicilioFiscalReceptor: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Régimen fiscal receptor"
+                value={form.receptorRegimenFiscalReceptor}
+                onChange={(e) => setForm({ ...form, receptorRegimenFiscalReceptor: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Uso de CFDI"
+                value={form.receptorUsoCfdi}
+                onChange={(e) => setForm({ ...form, receptorUsoCfdi: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Divider sx={{ pt: 1 }} />
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Versión del timbre"
+                value={form.timbreVersion}
+                onChange={(e) => setForm({ ...form, timbreVersion: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                type="datetime-local"
+                label="Fecha de timbrado"
+                value={form.timbreFechaTimbrado ? form.timbreFechaTimbrado.slice(0, 16) : ""}
+                onChange={(e) => setForm({ ...form, timbreFechaTimbrado: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="RFC proveedor de certificación"
+                value={form.timbreRfcProvCertif}
+                onChange={(e) => setForm({ ...form, timbreRfcProvCertif: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="No. de certificado SAT"
+                value={form.timbreNoCertificadoSat}
+                onChange={(e) => setForm({ ...form, timbreNoCertificadoSat: e.target.value })}
                 fullWidth
               />
             </Stack>
@@ -521,6 +765,12 @@ export default function TesoreriaNotasCreditoPage() {
               onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
               fullWidth
             />
+            {editing && (
+              <Stack direction="row" spacing={2}>
+                <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
+                <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
+              </Stack>
+            )}
             {editing && (
               <>
                 <Divider sx={{ pt: 1 }} />

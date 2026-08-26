@@ -65,10 +65,16 @@ import {
 
 const FORM_VACIO = {
   timbreUuid: "",
+  comprobanteVersion: "",
   comprobanteSerie: "",
   comprobanteFolio: "",
   comprobanteFecha: "",
+  comprobanteFormaPago: "",
+  comprobanteNoCertificado: "",
+  comprobanteSubTotal: "",
   comprobanteMoneda: "",
+  comprobanteExportacion: "",
+  comprobanteTipoCambio: "",
   comprobanteTotal: "",
   // Catalogo real del SAT (c_TipoDeComprobante) - en esta pantalla siempre
   // "I" (Ingreso): Egreso/Pago/Nomina ya tienen su propia tabla y pantalla
@@ -76,12 +82,22 @@ const FORM_VACIO = {
   // TesoreriaFacturaMetodoPago en tesoreria.ts.
   comprobanteTipoDeComprobante: "I",
   comprobanteMetodoPago: "" as "" | "PUE" | "PPD",
+  comprobanteLugarExpedicion: "",
   tipoRelacion: "",
   uuidRelacionado: "",
   emisorRfc: "",
   emisorNombre: "",
+  emisorRegimenFiscal: "",
   receptorRfc: "",
   receptorNombre: "",
+  receptorDomicilioFiscalReceptor: "",
+  receptorRegimenFiscalReceptor: "",
+  receptorUsoCfdi: "",
+  timbreVersion: "",
+  timbreFechaTimbrado: "",
+  timbreRfcProvCertif: "",
+  timbreNoCertificadoSat: "",
+  tipoFactura: "",
   linkPdf: "",
   linkXml: "",
 };
@@ -504,19 +520,35 @@ export default function TesoreriaFacturasPage() {
   function formDesdeFactura(f: TesoreriaFactura): typeof FORM_VACIO {
     return {
       timbreUuid: f.timbre_uuid || "",
+      comprobanteVersion: f.comprobante_version || "",
       comprobanteSerie: f.comprobante_serie || "",
       comprobanteFolio: f.comprobante_folio || "",
       comprobanteFecha: f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "",
+      comprobanteFormaPago: f.comprobante_forma_pago || "",
+      comprobanteNoCertificado: f.comprobante_no_certificado || "",
+      comprobanteSubTotal: f.comprobante_sub_total || "",
       comprobanteMoneda: f.comprobante_moneda || "",
+      comprobanteExportacion: f.comprobante_exportacion || "",
+      comprobanteTipoCambio: f.comprobante_tipo_cambio || "",
       comprobanteTotal: f.comprobante_total || "",
       comprobanteTipoDeComprobante: f.comprobante_tipo_de_comprobante || "I",
       comprobanteMetodoPago: f.comprobante_metodo_pago || "",
+      comprobanteLugarExpedicion: f.comprobante_lugar_expedicion || "",
       tipoRelacion: f.tipo_relacion || "",
       uuidRelacionado: f.uuid_relacionado || "",
       emisorRfc: f.emisor_rfc || "",
       emisorNombre: f.emisor_nombre || "",
+      emisorRegimenFiscal: f.emisor_regimen_fiscal || "",
       receptorRfc: f.receptor_rfc || "",
       receptorNombre: f.receptor_nombre || "",
+      receptorDomicilioFiscalReceptor: f.receptor_domicilio_fiscal_receptor || "",
+      receptorRegimenFiscalReceptor: f.receptor_regimen_fiscal_receptor || "",
+      receptorUsoCfdi: f.receptor_uso_cfdi || "",
+      timbreVersion: f.timbre_version || "",
+      timbreFechaTimbrado: f.timbre_fecha_timbrado ? f.timbre_fecha_timbrado.slice(0, 10) : "",
+      timbreRfcProvCertif: f.timbre_rfc_prov_certif || "",
+      timbreNoCertificadoSat: f.timbre_no_certificado_sat || "",
+      tipoFactura: f.tipo_factura || "",
       linkPdf: f.link_pdf || "",
       linkXml: f.link_xml || "",
     };
@@ -652,6 +684,7 @@ export default function TesoreriaFacturasPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell>UUID</TableCell>
                 <TableCell>Folio</TableCell>
                 <TableCell>Emisor</TableCell>
                 <TableCell>Receptor</TableCell>
@@ -664,13 +697,13 @@ export default function TesoreriaFacturasPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : facturas.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin facturas registradas.
                     </Typography>
@@ -679,6 +712,7 @@ export default function TesoreriaFacturasPage() {
               ) : (
                 facturas.map((f) => (
                   <TableRow key={f.id} hover>
+                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.timbre_uuid}</TableCell>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {f.comprobante_serie || ""}
                       {f.comprobante_folio || "—"}
@@ -814,6 +848,70 @@ export default function TesoreriaFacturasPage() {
                 </Select>
               </FormControl>
             </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Forma de pago"
+                value={form.comprobanteFormaPago}
+                onChange={(e) => setForm({ ...form, comprobanteFormaPago: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Versión del comprobante"
+                value={form.comprobanteVersion}
+                onChange={(e) => setForm({ ...form, comprobanteVersion: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="No. certificado"
+                value={form.comprobanteNoCertificado}
+                onChange={(e) => setForm({ ...form, comprobanteNoCertificado: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Lugar de expedición"
+                value={form.comprobanteLugarExpedicion}
+                onChange={(e) => setForm({ ...form, comprobanteLugarExpedicion: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Exportación"
+                value={form.comprobanteExportacion}
+                onChange={(e) => setForm({ ...form, comprobanteExportacion: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Tipo de factura"
+                value={form.tipoFactura}
+                onChange={(e) => setForm({ ...form, tipoFactura: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Subtotal"
+                value={form.comprobanteSubTotal}
+                onChange={(e) => setForm({ ...form, comprobanteSubTotal: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Tipo de cambio"
+                value={form.comprobanteTipoCambio}
+                onChange={(e) => setForm({ ...form, comprobanteTipoCambio: e.target.value })}
+                fullWidth
+              />
+            </Stack>
             <TextField
               size="small"
               label="Total"
@@ -837,6 +935,13 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
+            <TextField
+              size="small"
+              label="Régimen fiscal emisor"
+              value={form.emisorRegimenFiscal}
+              onChange={(e) => setForm({ ...form, emisorRegimenFiscal: e.target.value })}
+              fullWidth
+            />
             <Stack direction="row" spacing={2}>
               <TextField
                 size="small"
@@ -850,6 +955,63 @@ export default function TesoreriaFacturasPage() {
                 label="Nombre receptor"
                 value={form.receptorNombre}
                 onChange={(e) => setForm({ ...form, receptorNombre: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <TextField
+              size="small"
+              label="Domicilio fiscal receptor"
+              value={form.receptorDomicilioFiscalReceptor}
+              onChange={(e) => setForm({ ...form, receptorDomicilioFiscalReceptor: e.target.value })}
+              fullWidth
+            />
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Régimen fiscal receptor"
+                value={form.receptorRegimenFiscalReceptor}
+                onChange={(e) => setForm({ ...form, receptorRegimenFiscalReceptor: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Uso CFDI"
+                value={form.receptorUsoCfdi}
+                onChange={(e) => setForm({ ...form, receptorUsoCfdi: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Versión del timbre"
+                value={form.timbreVersion}
+                onChange={(e) => setForm({ ...form, timbreVersion: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                type="date"
+                label="Fecha de timbrado"
+                value={form.timbreFechaTimbrado}
+                onChange={(e) => setForm({ ...form, timbreFechaTimbrado: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="RFC proveedor certificador"
+                value={form.timbreRfcProvCertif}
+                onChange={(e) => setForm({ ...form, timbreRfcProvCertif: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="No. certificado SAT"
+                value={form.timbreNoCertificadoSat}
+                onChange={(e) => setForm({ ...form, timbreNoCertificadoSat: e.target.value })}
                 fullWidth
               />
             </Stack>
@@ -930,6 +1092,12 @@ export default function TesoreriaFacturasPage() {
                 }}
               />
             </Stack>
+            {editing && (
+              <Stack direction="row" spacing={2}>
+                <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
+                <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
+              </Stack>
+            )}
             {editing && (
               <Stack spacing={1}>
                 <Typography variant="subtitle2">Estado del proceso</Typography>

@@ -29,17 +29,28 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, Search, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { Pencil, Plus, Search, Shield, Trash2, Users, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   TesoreriaContraparte,
+  TesoreriaContraparteRelacion,
   TesoreriaTipoPersona,
+  TesoreriaTipoRelacion,
   createContraparte,
+  createContraparteRelacion,
   deleteContraparte,
+  deleteContraparteRelacion,
+  generarIdCorto,
+  listContraparteRelaciones,
   listContrapartes,
   updateContraparte,
 } from "@/lib/tesoreria";
+
+const TIPO_RELACION_LABELS: Record<TesoreriaTipoRelacion, string> = {
+  "REP LEGAL": "Representante legal",
+  "BENEF CONTROLADOR": "Beneficiario controlador",
+};
 
 const TIPO_PERSONA_LABELS: Record<TesoreriaTipoPersona, string> = {
   fisica: "Física",
@@ -51,10 +62,13 @@ const TIPO_PERSONA_LABELS: Record<TesoreriaTipoPersona, string> = {
 const FORM_VACIO = {
   razonSocial: "",
   rfc: "",
+  apellidoPaterno: "",
+  apellidoMaterno: "",
   // "" cabe aqui (union con TesoreriaTipoPersona) porque una contraparte
   // pudo haberse dado de alta minima desde otro modulo (ej. PLD, ver
   // docs/architecture, "contraparte maestra unica") sin este campo todavia.
   tipoPersona: "moral" as TesoreriaTipoPersona | "",
+  genero: "" as "MUJER" | "HOMBRE" | "",
   email: "",
   contacto: "",
   telefonoSms: "",
@@ -79,6 +93,21 @@ export default function TesoreriaContrapartesPage() {
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // ID mostrado en el dialogo de alta - generado al abrirlo, ver abrirAlta().
+  const [idNuevo, setIdNuevo] = useState("");
+
+  // Relaciones (rep. legal / benef. controlador, dato pedido por PLD/AML) -
+  // dialogo por contraparte, ver TesoreriaContraparteRelacionViewSet
+  // (filtro ?contraparte=<id>).
+  const [relacionesContraparte, setRelacionesContraparte] = useState<TesoreriaContraparte | null>(null);
+  const [relaciones, setRelaciones] = useState<TesoreriaContraparteRelacion[]>([]);
+  const [loadingRelaciones, setLoadingRelaciones] = useState(false);
+  const [relacionFormOpen, setRelacionFormOpen] = useState(false);
+  const [relacionForm, setRelacionForm] = useState({ contraparteRelacion: "", tipoRelacion: "REP LEGAL" as TesoreriaTipoRelacion });
+  const [savingRelacion, setSavingRelacion] = useState(false);
+  const [relacionFormError, setRelacionFormError] = useState<string | null>(null);
+  // ID mostrado en el formulario inline de alta - generado al abrirlo.
+  const [idRelacionNueva, setIdRelacionNueva] = useState("");
 
   useEffect(() => {
     getSession().then(setSession);
@@ -104,6 +133,7 @@ export default function TesoreriaContrapartesPage() {
   function abrirAlta() {
     setEditing(null);
     setForm(FORM_VACIO);
+    setIdNuevo(generarIdCorto());
     setFormError(null);
     setDialogOpen(true);
   }
@@ -113,7 +143,10 @@ export default function TesoreriaContrapartesPage() {
     setForm({
       razonSocial: c.razon_social,
       rfc: c.rfc || "",
+      apellidoPaterno: c.apellido_paterno || "",
+      apellidoMaterno: c.apellido_materno || "",
       tipoPersona: c.tipo_persona || "",
+      genero: c.genero || "",
       email: c.email || "",
       contacto: c.contacto || "",
       telefonoSms: c.telefono_sms || "",
@@ -136,7 +169,10 @@ export default function TesoreriaContrapartesPage() {
       const params = {
         razonSocial: form.razonSocial,
         rfc: form.rfc || null,
+        apellidoPaterno: form.apellidoPaterno || null,
+        apellidoMaterno: form.apellidoMaterno || null,
         tipoPersona: form.tipoPersona || null,
+        genero: form.genero || null,
         email: form.email || null,
         contacto: form.contacto || null,
         telefonoSms: form.telefonoSms || null,
@@ -147,7 +183,7 @@ export default function TesoreriaContrapartesPage() {
       if (editing) {
         await updateContraparte(editing.id_contraparte, params);
       } else {
-        await createContraparte(params);
+        await createContraparte({ ...params, idContraparte: idNuevo });
       }
       setDialogOpen(false);
       refresh();
@@ -165,6 +201,59 @@ export default function TesoreriaContrapartesPage() {
     try {
       await deleteContraparte(c.id_contraparte);
       refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
+  function abrirRelaciones(c: TesoreriaContraparte) {
+    setRelacionesContraparte(c);
+    setRelacionForm({ contraparteRelacion: "", tipoRelacion: "REP LEGAL" });
+    setRelacionFormError(null);
+    setRelacionFormOpen(false);
+    refreshRelaciones(c.id_contraparte);
+  }
+
+  function refreshRelaciones(idContraparte: string) {
+    setLoadingRelaciones(true);
+    listContraparteRelaciones(idContraparte)
+      .then(setRelaciones)
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoadingRelaciones(false));
+  }
+
+  async function handleGuardarRelacion() {
+    if (!relacionesContraparte) return;
+    if (!relacionForm.contraparteRelacion) {
+      setRelacionFormError("Selecciona la persona relacionada.");
+      return;
+    }
+    setSavingRelacion(true);
+    setRelacionFormError(null);
+    try {
+      await createContraparteRelacion({
+        idRelacion: idRelacionNueva,
+        contraparte: relacionesContraparte.id_contraparte,
+        contraparteRelacion: relacionForm.contraparteRelacion,
+        tipoRelacion: relacionForm.tipoRelacion,
+      });
+      setRelacionFormOpen(false);
+      refreshRelaciones(relacionesContraparte.id_contraparte);
+    } catch (err) {
+      setRelacionFormError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setSavingRelacion(false);
+    }
+  }
+
+  async function handleBorrarRelacion(r: TesoreriaContraparteRelacion) {
+    if (!relacionesContraparte) return;
+    if (!window.confirm("¿Borrar esta relación? Esta acción no se puede deshacer.")) {
+      return;
+    }
+    try {
+      await deleteContraparteRelacion(r.id_relacion);
+      refreshRelaciones(relacionesContraparte.id_contraparte);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     }
@@ -219,6 +308,7 @@ export default function TesoreriaContrapartesPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell>ID</TableCell>
                 <TableCell>Razón social</TableCell>
                 <TableCell>RFC</TableCell>
                 <TableCell>Tipo</TableCell>
@@ -230,13 +320,13 @@ export default function TesoreriaContrapartesPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : contrapartes.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin contrapartes registradas.
                     </Typography>
@@ -245,6 +335,7 @@ export default function TesoreriaContrapartesPage() {
               ) : (
                 contrapartes.map((c) => (
                   <TableRow key={c.id_contraparte} hover>
+                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contraparte}</TableCell>
                     <TableCell>{c.razon_social}</TableCell>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.rfc || "—"}</TableCell>
                     <TableCell>{c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}</TableCell>
@@ -257,6 +348,9 @@ export default function TesoreriaContrapartesPage() {
                       </Stack>
                     </TableCell>
                     <TableCell align="right">
+                      <IconButton size="small" aria-label="Relaciones (PLD)" onClick={() => abrirRelaciones(c)}>
+                        <Shield size={14} strokeWidth={1.5} />
+                      </IconButton>
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
                       </IconButton>
@@ -286,6 +380,39 @@ export default function TesoreriaContrapartesPage() {
             </Alert>
           )}
           <Stack spacing={2}>
+            {/* Campos de solo lectura - generados por el sistema, se
+            muestran siempre (incluso al crear) para que se vea que existen
+            aunque todavia no tengan valor. */}
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="ID contraparte"
+                value={editing ? editing.id_contraparte : idNuevo}
+                disabled
+                fullWidth
+              />
+              {editing && (
+                <TextField size="small" label="Creado por" value={editing.created_by || "—"} disabled fullWidth />
+              )}
+            </Stack>
+            {editing && (
+              <Stack direction="row" spacing={2}>
+                <TextField
+                  size="small"
+                  label="Creado el"
+                  value={new Date(editing.created_at).toLocaleString("es-MX")}
+                  disabled
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="Última actualización"
+                  value={new Date(editing.updated_at).toLocaleString("es-MX")}
+                  disabled
+                  fullWidth
+                />
+              </Stack>
+            )}
             <TextField
               size="small"
               label="Razón social"
@@ -300,21 +427,51 @@ export default function TesoreriaContrapartesPage() {
               onChange={(e) => setForm({ ...form, rfc: e.target.value })}
               fullWidth
             />
-            <FormControl size="small" fullWidth>
-              <InputLabel id="tipo-persona-label">Tipo de persona</InputLabel>
-              <Select
-                labelId="tipo-persona-label"
-                label="Tipo de persona"
-                value={form.tipoPersona}
-                onChange={(e) => setForm({ ...form, tipoPersona: e.target.value as TesoreriaTipoPersona | "" })}
-              >
-                {Object.entries(TIPO_PERSONA_LABELS).map(([value, label]) => (
-                  <MenuItem key={value} value={value}>
-                    {label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small"
+                label="Apellido paterno"
+                value={form.apellidoPaterno}
+                onChange={(e) => setForm({ ...form, apellidoPaterno: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Apellido materno"
+                value={form.apellidoMaterno}
+                onChange={(e) => setForm({ ...form, apellidoMaterno: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="tipo-persona-label">Tipo de persona</InputLabel>
+                <Select
+                  labelId="tipo-persona-label"
+                  label="Tipo de persona"
+                  value={form.tipoPersona}
+                  onChange={(e) => setForm({ ...form, tipoPersona: e.target.value as TesoreriaTipoPersona | "" })}
+                >
+                  {Object.entries(TIPO_PERSONA_LABELS).map(([value, label]) => (
+                    <MenuItem key={value} value={value}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="genero-label">Género</InputLabel>
+                <Select
+                  labelId="genero-label"
+                  label="Género"
+                  value={form.genero}
+                  onChange={(e) => setForm({ ...form, genero: e.target.value as "MUJER" | "HOMBRE" | "" })}
+                >
+                  <MenuItem value="MUJER">Mujer</MenuItem>
+                  <MenuItem value="HOMBRE">Hombre</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
             <TextField
               size="small"
               label="Correo"
@@ -372,6 +529,124 @@ export default function TesoreriaContrapartesPage() {
           <Button variant="contained" onClick={handleGuardar} disabled={saving}>
             {saving ? <CircularProgress size={16} /> : "Guardar"}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Relaciones (rep. legal / benef. controlador) de una contraparte */}
+      <Dialog open={!!relacionesContraparte} onClose={() => setRelacionesContraparte(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Relaciones — {relacionesContraparte?.razon_social}
+          <IconButton onClick={() => setRelacionesContraparte(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Representante legal / beneficiario controlador — dato requerido por PLD/AML.
+          </Typography>
+          {puedeCrear && !relacionFormOpen && (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<Plus size={14} strokeWidth={2} />}
+              onClick={() => {
+                setIdRelacionNueva(generarIdCorto());
+                setRelacionFormOpen(true);
+              }}
+              sx={{ mb: 2 }}
+            >
+              Nueva relación
+            </Button>
+          )}
+          {relacionFormOpen && (
+            <Stack spacing={2} sx={{ mb: 2, p: 2, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+              {relacionFormError && <Alert severity="error">{relacionFormError}</Alert>}
+              <TextField size="small" label="ID" value={idRelacionNueva} disabled fullWidth />
+              <FormControl size="small" fullWidth>
+                <InputLabel id="relacion-contraparte-label">Persona relacionada</InputLabel>
+                <Select
+                  labelId="relacion-contraparte-label"
+                  label="Persona relacionada"
+                  value={relacionForm.contraparteRelacion}
+                  onChange={(e) => setRelacionForm({ ...relacionForm, contraparteRelacion: e.target.value })}
+                >
+                  {contrapartes
+                    .filter((c) => c.id_contraparte !== relacionesContraparte?.id_contraparte)
+                    .map((c) => (
+                      <MenuItem key={c.id_contraparte} value={c.id_contraparte}>
+                        {c.razon_social}
+                      </MenuItem>
+                    ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="relacion-tipo-label">Tipo de relación</InputLabel>
+                <Select
+                  labelId="relacion-tipo-label"
+                  label="Tipo de relación"
+                  value={relacionForm.tipoRelacion}
+                  onChange={(e) => setRelacionForm({ ...relacionForm, tipoRelacion: e.target.value as TesoreriaTipoRelacion })}
+                >
+                  {Object.entries(TIPO_RELACION_LABELS).map(([value, label]) => (
+                    <MenuItem key={value} value={value}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Button size="small" onClick={() => setRelacionFormOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button size="small" variant="contained" onClick={handleGuardarRelacion} disabled={savingRelacion}>
+                  {savingRelacion ? <CircularProgress size={16} /> : "Guardar"}
+                </Button>
+              </Stack>
+            </Stack>
+          )}
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Persona</TableCell>
+                  <TableCell>Tipo</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {loadingRelaciones ? (
+                  <TableRow>
+                    <TableCell colSpan={3} align="center" sx={{ py: 3 }}>
+                      <CircularProgress size={20} />
+                    </TableCell>
+                  </TableRow>
+                ) : relaciones.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} align="center" sx={{ py: 3 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin relaciones registradas.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  relaciones.map((r) => (
+                    <TableRow key={r.id_relacion} hover>
+                      <TableCell>{r.contraparte_relacion_nombre}</TableCell>
+                      <TableCell>{TIPO_RELACION_LABELS[r.tipo_relacion] ?? r.tipo_relacion}</TableCell>
+                      <TableCell align="right">
+                        <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarRelacion(r)} disabled={!puedeEditar}>
+                          <Trash2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRelacionesContraparte(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
     </AppShell>
