@@ -821,10 +821,8 @@ class TesoreriaFlujo(models.Model):
     contrato = models.ForeignKey(
         TesoreriaContrato,
         db_column="id_contrato",
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="flujos",
-        blank=True,
-        null=True,
     )
     id_empleado = models.CharField(max_length=255, blank=True, null=True)
     id_requisicion = models.CharField(max_length=255, blank=True, null=True)
@@ -844,7 +842,13 @@ class TesoreriaFlujo(models.Model):
     fecha_pago = models.DateField(blank=True, null=True)
     fecha_pago_original = models.DateField(blank=True, null=True)
     descripcion_pago = models.CharField(max_length=150, blank=True, null=True)
+    # link_comprobante_banco se llenaba pegando la URL a mano; desde
+    # subir_comprobante() (finanzas.md, decision 26/Ago/2026: "upload
+    # receipts/references from their computer") se llena con el
+    # web_view_link real que regresa drive-service, y drive_file_id_comprobante
+    # guarda el ID del archivo (permite reemplazarlo despues sin duplicar).
     link_comprobante_banco = models.TextField(blank=True, null=True)
+    drive_file_id_comprobante = models.TextField(blank=True, null=True)
     factura = models.ForeignKey(
         TesoreriaFactura,
         db_column="factura_uuid",
@@ -890,10 +894,12 @@ class TesoreriaFlujo(models.Model):
     # Alcance por sociedad (24/Ago/2026, Sem 21 del cronograma) via el
     # contrato relacionado - TesoreriaFlujo no tiene su propia columna de
     # sociedad (viene heredado de AppSheet asi), pero ScopedQuerySet.for_scope
-    # soporta lookups con doble guion bajo (ver libs/cumbresbi-scope). Limitacion
-    # conocida: `contrato` es nullable (un flujo sin contrato, ej. un
-    # reembolso suelto a un empleado) queda fuera de cualquier alcance por
-    # sociedad y solo lo ve GLOBAL - documentado, no un descuido.
+    # soporta lookups con doble guion bajo (ver libs/cumbresbi-scope).
+    # `contrato` es obligatorio (finanzas.md sec. "General Notes": "No
+    # transaction can be registered without a linked contract", decision
+    # 26/Ago/2026: sin excepcion, incluyendo reembolsos - estos usan un
+    # contrato generico de la misma plantilla, ver migracion 0011), asi que
+    # ya no hay flujos fuera de alcance por sociedad.
     SCOPE_FIELD_SOCIEDAD = "contrato__sociedad"
     objects = ScopedManager()
 

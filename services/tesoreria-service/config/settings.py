@@ -77,6 +77,14 @@ AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080"
 # config/settings.py.
 MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
 
+# drive-service - subida real de comprobantes/PDF/XML (finanzas.md, decision
+# 26/Ago/2026), ver tesoreria/views.py::TesoreriaFlujoViewSet.subir_comprobante.
+# Mismo default de desarrollo que pld-service/config/settings.py. Sin carpeta
+# propia dada de alta en DRIVE_MODULE_FOLDER_IDS todavia - drive-service cae
+# al fallback de DRIVE_ROOT_FOLDER_ID (Unidad compartida CumbresBI) con la
+# subcarpeta convencional "Tesoreria/...".
+DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
