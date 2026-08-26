@@ -92,6 +92,70 @@ def _renderizar_reporte(reporte: dict) -> str:
 """.strip()
 
 
+def _renderizar_factura(factura) -> str:
+    total_texto = f"{factura.comprobante_total:,.2f}" if factura.comprobante_total is not None else "—"
+    folio_texto = f"{factura.comprobante_serie or ''}{factura.comprobante_folio or factura.timbre_uuid}"
+    return f"""
+<div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;background:#FFFFFF;border-radius:12px;
+              border:1px solid #E1E4E9;padding:36px 34px 30px;">
+    <div style="font-size:15px;font-weight:800;letter-spacing:-0.01em;color:{_CHARCOAL};
+                margin-bottom:8px;">
+      <span style="display:inline-block;width:22px;height:22px;border-radius:6px;
+                    background:{_AZUL};color:#fff;font-size:12px;font-weight:800;
+                    text-align:center;line-height:22px;margin-right:8px;">C</span>CumbresBI
+    </div>
+    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 20px;
+               letter-spacing:-0.01em;">Factura {escape(folio_texto)}</h1>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;color:#4B4F58;">
+      <tbody>
+        <tr><td style="padding:6px 0;">UUID</td><td style="padding:6px 0;text-align:right;">{escape(factura.timbre_uuid)}</td></tr>
+        <tr><td style="padding:6px 0;">Emisor</td><td style="padding:6px 0;text-align:right;">{escape(factura.emisor_nombre or factura.emisor_rfc or "—")}</td></tr>
+        <tr><td style="padding:6px 0;">Fecha</td><td style="padding:6px 0;text-align:right;">{escape(str(factura.comprobante_fecha or "—"))}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:700;">Total</td><td style="padding:6px 0;text-align:right;font-weight:700;">{total_texto}</td></tr>
+      </tbody>
+    </table>
+    {"".join(f'<p style="margin-top:16px;"><a href="{escape(link)}" style="color:{_AZUL};">{etiqueta}</a></p>' for link, etiqueta in [(factura.link_pdf, "Ver PDF"), (factura.link_xml, "Ver XML")] if link)}
+    <div style="margin-top:26px;padding-top:16px;border-top:1px solid #EEEFF1;
+                font-size:11.5px;color:#9BA0AB;">
+      Consultoría y Proyectos Cumbres · este correo se generó automáticamente, no respondas a él.
+    </div>
+  </div>
+</div>
+""".strip()
+
+
+def enviar_factura(request, destinatario: str, factura) -> bool:
+    """Envia UNA factura por correo via mail-service - se llama una vez por
+    factura seleccionada desde TesoreriaFacturaViewSet.enviar_masivo (envio
+    "por separado", ver finanzas.md: "Multiple invoices can be selected to
+    send massively (separately)"). No propaga la excepcion, mismo criterio
+    que enviar_reporte_diario."""
+    headers, cookies = forward_auth_headers(request)
+    html_body = _renderizar_factura(factura)
+    folio_texto = f"{factura.comprobante_serie or ''}{factura.comprobante_folio or factura.timbre_uuid}"
+    try:
+        respuesta = requests.post(
+            f"{settings.MAIL_SERVICE_URL}/api/send/",
+            params={"perm": "facturacion-cfdi.editar"},
+            json={
+                "to": destinatario,
+                "subject": f"Factura {folio_texto}",
+                "html_body": html_body,
+            },
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_SEGUNDOS,
+        )
+    except requests.RequestException:
+        logger.warning("mail-service no respondio al enviar la factura %s a %s", factura.timbre_uuid, destinatario, exc_info=True)
+        return False
+    if respuesta.status_code != 201:
+        logger.warning("mail-service rechazo la factura %s para %s: %s", factura.timbre_uuid, destinatario, respuesta.text)
+        return False
+    return True
+
+
 def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> bool:
     """Envia el reporte diario de saldos por correo via mail-service (Gmail
     API) - mismo patron que pld-service/pld/mail_utils.py::enviar_correo_ticket_cliente.
