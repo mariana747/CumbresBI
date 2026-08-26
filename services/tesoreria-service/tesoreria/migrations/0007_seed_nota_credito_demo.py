@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import migrations
 
 # Nota de credito de ejemplo (25/Ago/2026, dato real de CFDI que compartio
@@ -44,6 +45,9 @@ NOTA_CREDITO_DEMO = {
 
 
 def seed(apps, schema_editor):
+    # Ver settings.TESTING - mismo motivo que 0004_seed_saldos_demo.
+    if settings.TESTING:
+        return
     TesoreriaNotaCredito = apps.get_model("tesoreria", "TesoreriaNotaCredito")
     TesoreriaNotaCredito.objects.get_or_create(
         timbre_uuid=NOTA_CREDITO_DEMO["timbre_uuid"], defaults=NOTA_CREDITO_DEMO

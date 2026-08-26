@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import migrations
 
 # Mas ejemplos de Flujo (25/Ago/2026) - variando los estados que importan
@@ -68,6 +69,9 @@ FLUJOS_DEMO = [
 
 
 def seed(apps, schema_editor):
+    # Ver settings.TESTING - mismo motivo que 0004_seed_saldos_demo.
+    if settings.TESTING:
+        return
     TesoreriaFlujo = apps.get_model("tesoreria", "TesoreriaFlujo")
     for datos in FLUJOS_DEMO:
         defaults = {"contrato_id": CONTRATO_DEMO_ID, **datos, "cuenta_id": CUENTA_DEMO_ID}

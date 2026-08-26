@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import migrations
 
 # Un flujo de ejemplo completo (25/Ago/2026, para ver las 4 pestañas del
@@ -46,6 +47,9 @@ FLUJO_DEMO = {
 
 
 def seed(apps, schema_editor):
+    # Ver settings.TESTING - mismo motivo que 0004_seed_saldos_demo.
+    if settings.TESTING:
+        return
     TesoreriaContraparte = apps.get_model("tesoreria", "TesoreriaContraparte")
     TesoreriaCuenta = apps.get_model("tesoreria", "TesoreriaCuenta")
     TesoreriaContrato = apps.get_model("tesoreria", "TesoreriaContrato")

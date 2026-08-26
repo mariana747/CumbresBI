@@ -307,11 +307,18 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
     documentos/PldContraparteDocViewSet en pld-service."""
 
     conceptos = serializers.SerializerMethodField()
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
     class Meta:
         model = TesoreriaFactura
         fields = [
             "id",
+            # contraparte (25/Ago/2026, "vista por proveedor") - de solo
+            # lectura aqui: se llena automatico por RFC al crear/confirmar
+            # extraccion (ver TesoreriaFacturaViewSet._vincular_contraparte),
+            # no se captura a mano.
+            "contraparte",
+            "contraparte_nombre",
             "comprobante_version",
             "comprobante_serie",
             "comprobante_folio",
@@ -351,7 +358,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "estado", "created_at", "updated_at"]
+        read_only_fields = ["id", "contraparte", "estado", "created_at", "updated_at"]
 
     def get_conceptos(self, obj):
         conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)
@@ -370,10 +377,15 @@ class TesoreriaComplementoPagoSerializer(serializers.ModelSerializer):
     Factura/Flujo/Contrato/NotaCredito - ya estaban en el modelo, faltaban
     aqui."""
 
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
+
     class Meta:
         model = TesoreriaComplementoPago
         fields = [
             "id",
+            # Ver comentario en TesoreriaFacturaSerializer - mismo criterio.
+            "contraparte",
+            "contraparte_nombre",
             "version",
             "timbre_uuid",
             "serie",
@@ -409,7 +421,7 @@ class TesoreriaComplementoPagoSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "contraparte", "created_at", "updated_at"]
 
 
 class TesoreriaNotaCreditoSerializer(serializers.ModelSerializer):
@@ -428,11 +440,15 @@ class TesoreriaNotaCreditoSerializer(serializers.ModelSerializer):
     Flujo/Contrato."""
 
     factura_folio = serializers.CharField(source="uuid_relacionado.comprobante_folio", read_only=True, default=None)
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
     class Meta:
         model = TesoreriaNotaCredito
         fields = [
             "id",
+            # Ver comentario en TesoreriaFacturaSerializer - mismo criterio.
+            "contraparte",
+            "contraparte_nombre",
             "comprobante_version",
             "comprobante_serie",
             "comprobante_folio",
@@ -471,7 +487,7 @@ class TesoreriaNotaCreditoSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "contraparte", "created_at", "updated_at"]
 
 
 class TesoreriaContraparteRelacionSerializer(serializers.ModelSerializer):

@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import migrations
 
 # Datos de ejemplo (25/Ago/2026, para poder ver algo en /tesoreria/saldos
@@ -28,6 +29,10 @@ SALDOS_DEMO = [
 
 
 def seed(apps, schema_editor):
+    # Ver settings.TESTING - no insertar filas demo en la base de pruebas,
+    # tronaba conteos exactos en tests.py que asumen una base vacia.
+    if settings.TESTING:
+        return
     TesoreriaBanco = apps.get_model("tesoreria", "TesoreriaBanco")
     TesoreriaCuenta = apps.get_model("tesoreria", "TesoreriaCuenta")
     TesoreriaSaldo = apps.get_model("tesoreria", "TesoreriaSaldo")

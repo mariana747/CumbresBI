@@ -283,6 +283,22 @@ class TesoreriaComplementoPago(models.Model):
     (PascalCase), tal como en el ERD heredado."""
 
     id = models.AutoField(primary_key=True)
+    # Vinculo real con el catalogo maestro de contrapartes (25/Ago/2026,
+    # "vista por proveedor") - se llena automatico al capturar/confirmar
+    # extraccion buscando una TesoreriaContraparte cuyo rfc == emisor_rfc
+    # (aqui el emisor del CFDI es siempre el proveedor, Cumbres es el
+    # receptor - ver TesoreriaComplementoPagoViewSet._vincular_contraparte).
+    # Nullable a proposito: si el RFC del emisor no esta dado de alta como
+    # contraparte (o el CFDI no trae RFC valido todavia), el registro sigue
+    # existiendo sin vinculo, no se bloquea la captura por esto.
+    contraparte = models.ForeignKey(
+        TesoreriaContraparte,
+        db_column="id_contraparte",
+        on_delete=models.PROTECT,
+        related_name="complementos_pago",
+        blank=True,
+        null=True,
+    )
     timbre_uuid = models.CharField(db_column="Timbre_UUID", max_length=36, unique=True)
     version = models.CharField(db_column="Version", max_length=5, blank=True, null=True)
     serie = models.CharField(db_column="Serie", max_length=25, blank=True, null=True)
@@ -361,6 +377,16 @@ class TesoreriaFactura(models.Model):
     ]
 
     id = models.AutoField(primary_key=True)
+    # Ver comentario equivalente en TesoreriaComplementoPago - mismo motivo
+    # y mismo criterio de auto-llenado por emisor_rfc.
+    contraparte = models.ForeignKey(
+        TesoreriaContraparte,
+        db_column="id_contraparte",
+        on_delete=models.PROTECT,
+        related_name="facturas",
+        blank=True,
+        null=True,
+    )
     comprobante_version = models.CharField(
         db_column="Comprobante_Version", max_length=10, blank=True, null=True
     )
@@ -452,6 +478,16 @@ class TesoreriaFactura(models.Model):
 
 class TesoreriaNotaCredito(models.Model):
     id = models.AutoField(primary_key=True)
+    # Ver comentario equivalente en TesoreriaComplementoPago - mismo motivo
+    # y mismo criterio de auto-llenado por emisor_rfc.
+    contraparte = models.ForeignKey(
+        TesoreriaContraparte,
+        db_column="id_contraparte",
+        on_delete=models.PROTECT,
+        related_name="notas_credito_emitidas",
+        blank=True,
+        null=True,
+    )
     comprobante_version = models.CharField(
         db_column="Comprobante_Version", max_length=10, blank=True, null=True
     )

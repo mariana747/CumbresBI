@@ -348,6 +348,25 @@ class _PermisosFacturacionCfdiMixin:
         return super().get_permissions()
 
 
+def _vincular_contraparte_por_rfc(instance):
+    """Auto-llena instance.contraparte buscando una TesoreriaContraparte
+    cuyo rfc == instance.emisor_rfc (el emisor del CFDI es siempre el
+    proveedor, Cumbres es el receptor - ver TesoreriaFactura.contraparte en
+    models.py). Se llama despues de crear o de confirmar_extraccion (cuando
+    emisor_rfc pudo haber cambiado). No truena si no hay match ni si hay
+    mas de una contraparte con el mismo RFC (no deberia pasar, rfc es
+    unique, pero no es razon para tumbar la operacion real)."""
+    if not instance.emisor_rfc:
+        return
+    try:
+        contraparte = TesoreriaContraparte.objects.get(rfc=instance.emisor_rfc)
+    except (TesoreriaContraparte.DoesNotExist, TesoreriaContraparte.MultipleObjectsReturned):
+        return
+    if instance.contraparte_id != contraparte.id_contraparte:
+        instance.contraparte = contraparte
+        instance.save(update_fields=["contraparte"])
+
+
 class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     """Factura CFDI recibida de un proveedor (Fase 4, Sem 20 del
     cronograma) - primer corte de encabezado, alta manual via API/
@@ -356,10 +375,22 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     PldContraparteKycViewSet.confirmar_extraccion en pld-service). Busqueda
     de texto libre (?search=) sobre folio/UUID/nombres de emisor-receptor."""
 
-    queryset = TesoreriaFactura.objects.all().order_by("-created_at")
     serializer_class = TesoreriaFacturaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+
+    def get_queryset(self):
+        # Filtro ?contraparte=<id> desde la "vista por proveedor" en la
+        # pantalla de Contrapartes (25/Ago/2026).
+        queryset = TesoreriaFactura.objects.select_related("contraparte").order_by("-created_at")
+        contraparte_id = self.request.query_params.get("contraparte")
+        if contraparte_id:
+            queryset = queryset.filter(contraparte_id=contraparte_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        _vincular_contraparte_por_rfc(instance)
 
     # Whitelist de columnas que confirmar_extraccion puede escribir - mismo
     # criterio que PldContraparteKycViewSet.CAMPOS_CONFIRMABLES (ver
@@ -455,6 +486,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         serializer = self.get_serializer(factura, data=datos_validos, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        _vincular_contraparte_por_rfc(factura)
         emitir_evento_auditoria(
             "tesoreria_facturas.confirmar_extraccion",
             "tesoreria_facturas",
@@ -469,20 +501,44 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
     """Complemento de pago (REP) - confirma fiscalmente que una factura a
     credito ya se pago. Mismo criterio de alta manual que Factura."""
 
-    queryset = TesoreriaComplementoPago.objects.all().order_by("-created_at")
     serializer_class = TesoreriaComplementoPagoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+
+    def get_queryset(self):
+        # Ver comentario equivalente en TesoreriaFacturaViewSet.
+        queryset = TesoreriaComplementoPago.objects.select_related("contraparte").order_by("-created_at")
+        contraparte_id = self.request.query_params.get("contraparte")
+        if contraparte_id:
+            queryset = queryset.filter(contraparte_id=contraparte_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        _vincular_contraparte_por_rfc(instance)
 
 
 class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     """Nota de credito - ajuste fiscal sobre una factura ya emitida
     (uuid_relacionado es FK real, ver docstring del serializer)."""
 
-    queryset = TesoreriaNotaCredito.objects.select_related("uuid_relacionado").order_by("-created_at")
     serializer_class = TesoreriaNotaCreditoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+
+    def get_queryset(self):
+        # Ver comentario equivalente en TesoreriaFacturaViewSet.
+        queryset = (
+            TesoreriaNotaCredito.objects.select_related("uuid_relacionado", "contraparte").order_by("-created_at")
+        )
+        contraparte_id = self.request.query_params.get("contraparte")
+        if contraparte_id:
+            queryset = queryset.filter(contraparte_id=contraparte_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        _vincular_contraparte_por_rfc(instance)
 
 
 class TesoreriaContraparteRelacionViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
