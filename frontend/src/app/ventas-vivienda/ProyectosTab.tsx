@@ -282,7 +282,7 @@ export default function ProyectosTab({
               onChange={(e) => setForm({ ...form, propietario: e.target.value })}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Calle"
@@ -305,7 +305,7 @@ export default function ProyectosTab({
                 sx={{ maxWidth: 120 }}
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Colonia"
@@ -321,7 +321,7 @@ export default function ProyectosTab({
                 sx={{ maxWidth: 120 }}
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Municipio / Alcaldía"
