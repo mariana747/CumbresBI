@@ -626,6 +626,7 @@ export interface TesoreriaFlujo {
   fecha_pago_original: string | null;
   descripcion_pago: string | null;
   link_comprobante_banco: string | null;
+  drive_file_id_comprobante: string | null;
   factura: string | null;
   complemento: string | null;
   nomina: string | null;
@@ -657,7 +658,7 @@ export async function listFlujos(params?: { search?: string; contrato?: string }
 }
 
 export async function createFlujo(params: {
-  contrato?: string;
+  contrato: string;
   cuenta: string;
   totalMxp?: string;
   fechaEfectiva?: string;
@@ -682,7 +683,7 @@ export async function createFlujo(params: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contrato: params.contrato || null,
+      contrato: params.contrato,
       cuenta: params.cuenta,
       total_mxp: params.totalMxp || null,
       fecha_efectiva: params.fechaEfectiva || null,
@@ -779,6 +780,33 @@ export async function registrarPagoFlujo(
       descripcion_pago: params?.descripcionPago || null,
       link_comprobante_banco: params?.linkComprobanteBanco || null,
     }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Sube el comprobante/referencia de pago real a Drive para un flujo ya
+// creado (finanzas.md, decision 26/Ago/2026 - ver
+// services/tesoreria-service/tesoreria/views.py::TesoreriaFlujoViewSet.
+// subir_comprobante). Mismo patron que lib/pld.ts::subirArchivoDocumento.
+// Llenar link_comprobante_banco a mano en el formulario de "Registrar pago"
+// sigue funcionando (compatibilidad), pero la UI ya usa esta subida real.
+export async function subirComprobanteFlujo(
+  idFlujo: string,
+  archivo: File,
+  actorUserId?: string
+): Promise<TesoreriaFlujo> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  if (actorUserId) {
+    formData.append("actor_user_id", actorUserId);
+  }
+
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/subir_comprobante/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1224,6 +1252,9 @@ export interface TesoreriaFactura {
   // - de solo lectura aqui, ver TesoreriaFacturaSerializer.read_only_fields.
   contraparte: string | null;
   contraparte_nombre: string | null;
+  // Correo por defecto para envio masivo (ver enviarMasivoFacturas) -
+  // editable en pantalla, no se manda automatico.
+  contraparte_email: string | null;
   comprobante_version: string | null;
   comprobante_serie: string | null;
   comprobante_folio: string | null;
@@ -1409,6 +1440,32 @@ export async function marcarEstadoFactura(id: number, estado: TesoreriaFacturaEs
     throw await friendlyApiError("TESORERIA", response);
   }
   return response.json();
+}
+
+export interface EnvioMasivoResultado {
+  factura: number;
+  enviado: boolean;
+  detail?: string;
+}
+
+// Envio masivo de facturas por correo (finanzas.md: "Multiple invoices can
+// be selected to send massively (separately)") - un correo individual por
+// factura, cada uno con su propio destinatario (editable en pantalla, ver
+// facturas/page.tsx). Ver
+// services/tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet.enviar_masivo.
+export async function enviarMasivoFacturas(
+  envios: { factura: number; destinatario: string }[]
+): Promise<EnvioMasivoResultado[]> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/enviar_masivo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ envios }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  const data = await response.json();
+  return data.resultados;
 }
 
 // Motor Documental para Facturacion CFDI (24/Ago/2026) - espejo en cliente
