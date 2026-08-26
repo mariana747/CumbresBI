@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -422,6 +423,10 @@ export default function TesoreriaNotasCreditoPage() {
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - una tabla de 8 columnas no cabe en un
+        telefono sin scroll horizontal incomodo. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -475,6 +480,56 @@ export default function TesoreriaNotasCreditoPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : items.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin notas de crédito registradas.
+            </Typography>
+          ) : (
+            items.map((n) => (
+              <Paper key={n.id} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {n.comprobante_serie || ""}
+                      {n.comprobante_folio || "—"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)", wordBreak: "break-all" }}>
+                      {n.timbre_uuid}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(n)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Factura relacionada:</strong> {n.factura_folio || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Emisor:</strong> {n.emisor_nombre || n.emisor_rfc || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Receptor:</strong> {n.receptor_nombre || n.receptor_rfc || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Total:</strong> {n.comprobante_total || "—"}
+                  </Typography>
+                  {n.estado && <Chip size="small" label={n.estado} variant="outlined" sx={{ alignSelf: "flex-start" }} />}
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
@@ -528,7 +583,7 @@ export default function TesoreriaNotasCreditoPage() {
                 />
               )}
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Serie"
@@ -544,7 +599,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 type="date"
@@ -562,7 +617,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Sub total"
@@ -592,7 +647,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Forma de pago"
@@ -622,7 +677,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="No. de certificado"
@@ -645,7 +700,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="RFC emisor"
@@ -668,7 +723,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="RFC receptor"
@@ -684,7 +739,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Domicilio fiscal receptor"
@@ -708,7 +763,7 @@ export default function TesoreriaNotasCreditoPage() {
               />
             </Stack>
             <Divider sx={{ pt: 1 }} />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Versión del timbre"
@@ -726,7 +781,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="RFC proveedor de certificación"
@@ -742,7 +797,7 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Tipo de factura"
@@ -766,7 +821,7 @@ export default function TesoreriaNotasCreditoPage() {
               fullWidth
             />
             {editing && (
-              <Stack direction="row" spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
                 <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
               </Stack>

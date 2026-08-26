@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Checkbox,
   Chip,
@@ -351,6 +352,10 @@ export default function TesoreriaCuentasPage() {
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - una tabla de 6+ columnas no cabe en
+        un telefono sin scroll horizontal incomodo. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -412,6 +417,63 @@ export default function TesoreriaCuentasPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loadingCuentas ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : cuentas.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin cuentas registradas.
+            </Typography>
+          ) : (
+            cuentas.map((c) => (
+              <Paper key={c.id_cuenta_bancaria} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2">{c.alias || c.label || "—"}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {c.id_cuenta_bancaria}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <IconButton size="small" aria-label="Cortes / EDC" onClick={() => abrirCortes(c)}>
+                      <FileText size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionCuenta(c)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarCuenta(c)} disabled={!puedeEditar}>
+                      <Trash2 size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Banco:</strong> {c.banco_nombre || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>CLABE:</strong> {c.clabe || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Titular:</strong> {c.rfc_razon_social || "—"}
+                  </Typography>
+                  <Stack direction="row" spacing={0.5}>
+                    <Chip
+                      size="small"
+                      label={c.activa ? "Activa" : "Cerrada"}
+                      color={c.activa ? "success" : "default"}
+                      variant="outlined"
+                    />
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Paper variant="outlined">
@@ -432,6 +494,9 @@ export default function TesoreriaCuentasPage() {
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo). */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -477,6 +542,46 @@ export default function TesoreriaCuentasPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loadingBancos ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : bancos.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin bancos registrados.
+            </Typography>
+          ) : (
+            bancos.map((b) => (
+              <Paper key={b.id_banxico} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2">{b.banco || "—"}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {b.id_banxico}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionBanco(b)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarBanco(b)} disabled={!puedeEditar}>
+                      <Trash2 size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Alias:</strong> {b.alias || "—"}
+                  </Typography>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       {/* Alta/edicion de cuenta */}
@@ -588,7 +693,7 @@ export default function TesoreriaCuentasPage() {
                   InputLabelProps={{ shrink: true }}
                   fullWidth
                 />
-                <Stack direction="row" spacing={2}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <TextField size="small" label="Registrado por" value={editingCuenta.created_by || "—"} disabled fullWidth />
                   <TextField size="small" label="Modificado por" value={editingCuenta.updated_by || "—"} disabled fullWidth />
                 </Stack>
@@ -642,7 +747,7 @@ export default function TesoreriaCuentasPage() {
               fullWidth
             />
             {editingBanco && (
-              <Stack direction="row" spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField size="small" label="Registrado por" value={editingBanco.created_by || "—"} disabled fullWidth />
                 <TextField size="small" label="Modificado por" value={editingBanco.updated_by || "—"} disabled fullWidth />
               </Stack>

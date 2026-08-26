@@ -1202,6 +1202,10 @@ export type TesoreriaFacturaMetodoPago = "PUE" | "PPD";
 
 export interface TesoreriaFactura {
   id: number;
+  // Se llena automatico por RFC (emisor_rfc) al crear/confirmar extraccion
+  // - de solo lectura aqui, ver TesoreriaFacturaSerializer.read_only_fields.
+  contraparte: string | null;
+  contraparte_nombre: string | null;
   comprobante_version: string | null;
   comprobante_serie: string | null;
   comprobante_folio: string | null;
@@ -1244,9 +1248,10 @@ export interface TesoreriaFactura {
   updated_by: string | null;
 }
 
-export async function listFacturas(search?: string): Promise<TesoreriaFactura[]> {
+export async function listFacturas(search?: string, contraparte?: string): Promise<TesoreriaFactura[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (contraparte) params.set("contraparte", contraparte);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1450,6 +1455,8 @@ export async function confirmarExtraccionFactura(
 
 export interface TesoreriaComplementoPago {
   id: number;
+  contraparte: string | null;
+  contraparte_nombre: string | null;
   version: string | null;
   timbre_uuid: string;
   serie: string | null;
@@ -1486,9 +1493,13 @@ export interface TesoreriaComplementoPago {
   updated_by: string | null;
 }
 
-export async function listComplementosPago(search?: string): Promise<TesoreriaComplementoPago[]> {
+export async function listComplementosPago(
+  search?: string,
+  contraparte?: string
+): Promise<TesoreriaComplementoPago[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (contraparte) params.set("contraparte", contraparte);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/complementos-pago/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1599,6 +1610,8 @@ export async function deleteComplementoPago(id: number): Promise<void> {
 
 export interface TesoreriaNotaCredito {
   id: number;
+  contraparte: string | null;
+  contraparte_nombre: string | null;
   comprobante_version: string | null;
   comprobante_serie: string | null;
   comprobante_folio: string | null;
@@ -1638,9 +1651,10 @@ export interface TesoreriaNotaCredito {
   updated_by: string | null;
 }
 
-export async function listNotasCredito(search?: string): Promise<TesoreriaNotaCredito[]> {
+export async function listNotasCredito(search?: string, contraparte?: string): Promise<TesoreriaNotaCredito[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (contraparte) params.set("contraparte", contraparte);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/notas-credito/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

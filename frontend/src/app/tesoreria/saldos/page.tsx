@@ -217,7 +217,7 @@ export default function TesoreriaSaldosPage() {
         justifyContent="space-between"
         sx={{ mb: 3 }}
       >
-        <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
             <Select

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -424,7 +425,7 @@ export default function TesoreriaFlujosPage() {
           justifyContent="space-between"
           sx={{ p: 2 }}
         >
-          <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
             <TextField
               size="small"
               placeholder="Buscar por ID de flujo o concepto..."
@@ -488,6 +489,10 @@ export default function TesoreriaFlujosPage() {
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - una tabla de 10 columnas no cabe en
+        un telefono sin scroll horizontal incomodo. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -640,6 +645,145 @@ export default function TesoreriaFlujosPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : flujosFiltrados.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin flujos registrados.
+            </Typography>
+          ) : (
+            flujosFiltrados.map((f) => (
+              <Paper key={f.id_flujo} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {f.id_flujo}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {f.descripcion_pago || "—"}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <Tooltip title="Editar">
+                      <span>
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="Vincular factura/complemento">
+                      <span>
+                        <IconButton
+                          size="small"
+                          aria-label="Vincular factura/complemento"
+                          onClick={() => abrirVinculo(f)}
+                          disabled={!puedeEditar}
+                        >
+                          <Link2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    {puedeAprobar && f.validacion_estado !== "APROBADA" && (
+                      <Tooltip title="Aprobar">
+                        <span>
+                          <IconButton
+                            size="small"
+                            aria-label="Aprobar"
+                            color="success"
+                            onClick={() => handleAprobar(f)}
+                            disabled={accionando === f.id_flujo}
+                          >
+                            <ThumbsUp size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {puedeAprobar && f.validacion_estado !== "RECHAZADA" && (
+                      <Tooltip title="Rechazar">
+                        <span>
+                          <IconButton
+                            size="small"
+                            aria-label="Rechazar"
+                            color="error"
+                            onClick={() => handleRechazar(f)}
+                            disabled={accionando === f.id_flujo}
+                          >
+                            <X size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {puedeEditar && !f.pagado && (
+                      <Tooltip title={f.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            aria-label="Registrar pago"
+                            color="primary"
+                            onClick={() => handleRegistrarPago(f)}
+                            disabled={!f.autorizacion || accionando === f.id_flujo}
+                          >
+                            <Check size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>ID Contrato:</strong> {f.contrato || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Fecha efectiva:</strong> {f.fecha_efectiva || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Concepto:</strong> {f.concepto || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Total MXP:</strong>{" "}
+                    {f.total_mxp
+                      ? Number(f.total_mxp).toLocaleString("es-MX", { style: "currency", currency: "MXN" })
+                      : "—"}
+                  </Typography>
+                  <Typography variant="body2" component="div">
+                    <strong>CFDI vinculado:</strong>{" "}
+                    {f.factura || f.complemento ? (
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                        {f.factura && <Chip size="small" label={`Factura ${folioFactura(f.factura)}`} variant="outlined" />}
+                        {f.complemento && (
+                          <Chip size="small" label={`REP ${folioComplemento(f.complemento)}`} variant="outlined" />
+                        )}
+                      </Stack>
+                    ) : (
+                      "—"
+                    )}
+                  </Typography>
+                  <Stack direction="row" spacing={0.5}>
+                    <Chip
+                      size="small"
+                      label={f.validacion_estado || "PENDIENTE"}
+                      color={VALIDACION_COLOR[f.validacion_estado || "PENDIENTE"]}
+                      variant="outlined"
+                    />
+                    <Chip
+                      size="small"
+                      label={f.pagado ? "Pagado" : "Sin pagar"}
+                      color={f.pagado ? "success" : "default"}
+                      variant={f.pagado ? "filled" : "outlined"}
+                    />
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
@@ -752,7 +896,7 @@ export default function TesoreriaFlujosPage() {
                 onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
                 fullWidth
               />
-              <Stack direction="row" spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
                   size="small"
                   type="date"
@@ -781,7 +925,7 @@ export default function TesoreriaFlujosPage() {
                     fullWidth
                   />
                   {editing.autorizacion && (
-                    <Stack direction="row" spacing={2}>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                       <TextField
                         size="small"
                         label="Autorizado por"
@@ -934,7 +1078,7 @@ export default function TesoreriaFlujosPage() {
                 Auditoría
               </Typography>
               {editing ? (
-                <Stack direction="row" spacing={2}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <TextField
                     size="small"
                     label="Fecha de alta"
@@ -950,7 +1094,7 @@ export default function TesoreriaFlujosPage() {
                 </Typography>
               )}
               {editing && (
-                <Stack direction="row" spacing={2}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <TextField
                     size="small"
                     label="Última modificación"

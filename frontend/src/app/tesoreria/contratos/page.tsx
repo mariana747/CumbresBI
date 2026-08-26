@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -301,7 +302,7 @@ export default function TesoreriaContratosPage() {
           justifyContent="space-between"
           sx={{ p: 2 }}
         >
-          <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
             <TextField
               size="small"
               placeholder="Buscar por ID de contrato o sociedad..."
@@ -365,6 +366,10 @@ export default function TesoreriaContratosPage() {
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - una tabla de 7 columnas no cabe en un
+        telefono sin scroll horizontal incomodo. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -417,6 +422,59 @@ export default function TesoreriaContratosPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : contratosFiltrados.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin contratos registrados.
+            </Typography>
+          ) : (
+            contratosFiltrados.map((c) => (
+              <Paper key={c.id_contrato} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {c.id_contrato}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {c.contraparte_nombre}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Sociedad:</strong> {c.sociedad}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Contraparte:</strong> {c.contraparte_nombre}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Tipo:</strong> {c.tipo || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Vencimiento:</strong> {c.fecha_vencimiento || "—"}
+                  </Typography>
+                  {c.status && (
+                    <Stack direction="row" spacing={0.5}>
+                      <Chip size="small" label={c.status} color={STATUS_COLOR[c.status]} variant="outlined" />
+                    </Stack>
+                  )}
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
@@ -456,7 +514,7 @@ export default function TesoreriaContratosPage() {
                 disabled
                 fullWidth
               />
-              <Stack direction="row" spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
                   size="small"
                   type="date"
@@ -582,7 +640,7 @@ export default function TesoreriaContratosPage() {
                   ))}
                 </Select>
               </FormControl>
-              <Stack direction="row" spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
                   size="small"
                   label="Duración (periodos)"
@@ -706,7 +764,7 @@ export default function TesoreriaContratosPage() {
                   <Typography variant="overline" color="text.secondary">
                     Auditoría
                   </Typography>
-                  <Stack direction="row" spacing={2}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                     <TextField
                       size="small"
                       label="Fecha de alta"
@@ -716,7 +774,7 @@ export default function TesoreriaContratosPage() {
                     />
                     <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
                   </Stack>
-                  <Stack direction="row" spacing={2}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                     <TextField
                       size="small"
                       label="Última modificación"

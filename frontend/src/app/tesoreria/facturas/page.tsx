@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -680,6 +681,10 @@ export default function TesoreriaFacturasPage() {
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - una tabla de 8 columnas no cabe en un
+        telefono sin scroll horizontal incomodo. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -751,6 +756,76 @@ export default function TesoreriaFacturasPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : facturas.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin facturas registradas.
+            </Typography>
+          ) : (
+            facturas.map((f) => (
+              <Paper key={f.id} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {f.comprobante_serie || ""}
+                      {f.comprobante_folio || "—"}
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontFamily: "var(--font-mono, monospace)", wordBreak: "break-all" }}
+                    >
+                      {f.timbre_uuid}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    {f.link_pdf && (
+                      <IconButton
+                        size="small"
+                        aria-label="Ver PDF"
+                        component="a"
+                        href={f.link_pdf}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    )}
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Emisor:</strong> {f.emisor_nombre || f.emisor_rfc || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Receptor:</strong> {f.receptor_nombre || f.receptor_rfc || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Fecha:</strong> {f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Total:</strong> {f.comprobante_total || "—"}
+                  </Typography>
+                  {f.estado && (
+                    <Stack direction="row" spacing={0.5}>
+                      <Chip size="small" label={ESTADO_LABEL[f.estado]} color={ESTADO_COLOR[f.estado]} variant="outlined" />
+                    </Stack>
+                  )}
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
@@ -786,7 +861,7 @@ export default function TesoreriaFacturasPage() {
               disabled={!!editing}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Serie"
@@ -802,7 +877,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 type="date"
@@ -820,7 +895,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <FormControl size="small" fullWidth>
                 <InputLabel id="tipo-comprobante-label">Tipo de comprobante</InputLabel>
                 <Select
@@ -848,7 +923,7 @@ export default function TesoreriaFacturasPage() {
                 </Select>
               </FormControl>
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Forma de pago"
@@ -864,7 +939,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="No. certificado"
@@ -880,7 +955,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Exportación"
@@ -896,7 +971,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Subtotal"
@@ -919,7 +994,7 @@ export default function TesoreriaFacturasPage() {
               onChange={(e) => setForm({ ...form, comprobanteTotal: e.target.value })}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="RFC emisor"
@@ -942,7 +1017,7 @@ export default function TesoreriaFacturasPage() {
               onChange={(e) => setForm({ ...form, emisorRegimenFiscal: e.target.value })}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="RFC receptor"
@@ -965,7 +1040,7 @@ export default function TesoreriaFacturasPage() {
               onChange={(e) => setForm({ ...form, receptorDomicilioFiscalReceptor: e.target.value })}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Régimen fiscal receptor"
@@ -981,7 +1056,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Versión del timbre"
@@ -999,7 +1074,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="RFC proveedor certificador"
@@ -1015,7 +1090,7 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <FormControl size="small" fullWidth>
                 <InputLabel id="tipo-relacion-label">Tipo de relación (opcional)</InputLabel>
                 <Select
@@ -1044,7 +1119,7 @@ export default function TesoreriaFacturasPage() {
                 />
               )}
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Link al PDF (vista previa)"
@@ -1093,7 +1168,7 @@ export default function TesoreriaFacturasPage() {
               />
             </Stack>
             {editing && (
-              <Stack direction="row" spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
                 <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
               </Stack>

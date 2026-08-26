@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Checkbox,
   Chip,
@@ -29,12 +30,15 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, Search, Shield, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { FileText, Pencil, Plus, Search, Shield, Trash2, Users, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
+  TesoreriaComplementoPago,
   TesoreriaContraparte,
   TesoreriaContraparteRelacion,
+  TesoreriaFactura,
+  TesoreriaNotaCredito,
   TesoreriaTipoPersona,
   TesoreriaTipoRelacion,
   createContraparte,
@@ -42,8 +46,11 @@ import {
   deleteContraparte,
   deleteContraparteRelacion,
   generarIdCorto,
+  listComplementosPago,
   listContraparteRelaciones,
   listContrapartes,
+  listFacturas,
+  listNotasCredito,
   updateContraparte,
 } from "@/lib/tesoreria";
 
@@ -108,6 +115,15 @@ export default function TesoreriaContrapartesPage() {
   const [relacionFormError, setRelacionFormError] = useState<string | null>(null);
   // ID mostrado en el formulario inline de alta - generado al abrirlo.
   const [idRelacionNueva, setIdRelacionNueva] = useState("");
+
+  // Documentos (vista por proveedor, 25/Ago/2026) - facturas/complementos/
+  // notas de credito ligados a esta contraparte via el FK contraparte
+  // (auto-llenado por RFC, ver _vincular_contraparte_por_rfc en views.py).
+  const [documentosContraparte, setDocumentosContraparte] = useState<TesoreriaContraparte | null>(null);
+  const [docFacturas, setDocFacturas] = useState<TesoreriaFactura[]>([]);
+  const [docComplementos, setDocComplementos] = useState<TesoreriaComplementoPago[]>([]);
+  const [docNotasCredito, setDocNotasCredito] = useState<TesoreriaNotaCredito[]>([]);
+  const [loadingDocumentos, setLoadingDocumentos] = useState(false);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -204,6 +220,23 @@ export default function TesoreriaContrapartesPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     }
+  }
+
+  function abrirDocumentos(c: TesoreriaContraparte) {
+    setDocumentosContraparte(c);
+    setLoadingDocumentos(true);
+    Promise.all([
+      listFacturas(undefined, c.id_contraparte),
+      listComplementosPago(undefined, c.id_contraparte),
+      listNotasCredito(undefined, c.id_contraparte),
+    ])
+      .then(([facturas, complementos, notas]) => {
+        setDocFacturas(facturas);
+        setDocComplementos(complementos);
+        setDocNotasCredito(notas);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoadingDocumentos(false));
   }
 
   function abrirRelaciones(c: TesoreriaContraparte) {
@@ -304,66 +337,129 @@ export default function TesoreriaContrapartesPage() {
             </Button>
           )}
         </Stack>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>ID</TableCell>
-                <TableCell>Razón social</TableCell>
-                <TableCell>RFC</TableCell>
-                <TableCell>Tipo</TableCell>
-                <TableCell>Contacto</TableCell>
-                <TableCell>Cliente / Proveedor</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - una tabla de 6+ columnas no cabe en
+        un telefono sin scroll horizontal incomodo. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
+                  <TableCell>ID</TableCell>
+                  <TableCell>Razón social</TableCell>
+                  <TableCell>RFC</TableCell>
+                  <TableCell>Tipo</TableCell>
+                  <TableCell>Contacto</TableCell>
+                  <TableCell>Cliente / Proveedor</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : contrapartes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin contrapartes registradas.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                contrapartes.map((c) => (
-                  <TableRow key={c.id_contraparte} hover>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contraparte}</TableCell>
-                    <TableCell>{c.razon_social}</TableCell>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.rfc || "—"}</TableCell>
-                    <TableCell>{c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}</TableCell>
-                    <TableCell>{c.contacto || c.email || "—"}</TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={0.5}>
-                        {c.cliente && <Chip size="small" label="Cliente" color="success" variant="outlined" />}
-                        {c.proveedor && <Chip size="small" label="Proveedor" color="info" variant="outlined" />}
-                        {!c.cliente && !c.proveedor && "—"}
-                      </Stack>
-                    </TableCell>
-                    <TableCell align="right">
-                      <IconButton size="small" aria-label="Relaciones (PLD)" onClick={() => abrirRelaciones(c)}>
-                        <Shield size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(c)} disabled={!puedeEditar}>
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </IconButton>
+              </TableHead>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                      <CircularProgress size={20} />
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ) : contrapartes.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin contrapartes registradas.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  contrapartes.map((c) => (
+                    <TableRow key={c.id_contraparte} hover>
+                      <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contraparte}</TableCell>
+                      <TableCell>{c.razon_social}</TableCell>
+                      <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.rfc || "—"}</TableCell>
+                      <TableCell>{c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}</TableCell>
+                      <TableCell>{c.contacto || c.email || "—"}</TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.5}>
+                          {c.cliente && <Chip size="small" label="Cliente" color="success" variant="outlined" />}
+                          {c.proveedor && <Chip size="small" label="Proveedor" color="info" variant="outlined" />}
+                          {!c.cliente && !c.proveedor && "—"}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton size="small" aria-label="Documentos (facturas/pagos)" onClick={() => abrirDocumentos(c)}>
+                          <FileText size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Relaciones (PLD)" onClick={() => abrirRelaciones(c)}>
+                          <Shield size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(c)} disabled={!puedeEditar}>
+                          <Trash2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : contrapartes.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin contrapartes registradas.
+            </Typography>
+          ) : (
+            contrapartes.map((c) => (
+              <Paper key={c.id_contraparte} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2">{c.razon_social}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {c.id_contraparte}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <IconButton size="small" aria-label="Documentos (facturas/pagos)" onClick={() => abrirDocumentos(c)}>
+                      <FileText size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Relaciones (PLD)" onClick={() => abrirRelaciones(c)}>
+                      <Shield size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(c)} disabled={!puedeEditar}>
+                      <Trash2 size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>RFC:</strong> {c.rfc || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Tipo:</strong> {c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Contacto:</strong> {c.contacto || c.email || "—"}
+                  </Typography>
+                  <Stack direction="row" spacing={0.5}>
+                    {c.cliente && <Chip size="small" label="Cliente" color="success" variant="outlined" />}
+                    {c.proveedor && <Chip size="small" label="Proveedor" color="info" variant="outlined" />}
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
@@ -383,7 +479,7 @@ export default function TesoreriaContrapartesPage() {
             {/* Campos de solo lectura - generados por el sistema, se
             muestran siempre (incluso al crear) para que se vea que existen
             aunque todavia no tengan valor. */}
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="ID contraparte"
@@ -396,7 +492,7 @@ export default function TesoreriaContrapartesPage() {
               )}
             </Stack>
             {editing && (
-              <Stack direction="row" spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
                   size="small"
                   label="Creado el"
@@ -427,7 +523,7 @@ export default function TesoreriaContrapartesPage() {
               onChange={(e) => setForm({ ...form, rfc: e.target.value })}
               fullWidth
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
                 label="Apellido paterno"
@@ -443,7 +539,7 @@ export default function TesoreriaContrapartesPage() {
                 fullWidth
               />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <FormControl size="small" fullWidth>
                 <InputLabel id="tipo-persona-label">Tipo de persona</InputLabel>
                 <Select
@@ -647,6 +743,131 @@ export default function TesoreriaContrapartesPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setRelacionesContraparte(null)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Documentos (vista por proveedor) - facturas/complementos/notas de
+      credito ligados via el FK contraparte (auto por RFC). Solo lectura -
+      cada una se sigue editando desde su propia pantalla. */}
+      <Dialog open={!!documentosContraparte} onClose={() => setDocumentosContraparte(null)} fullWidth maxWidth="md">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Documentos — {documentosContraparte?.razon_social}
+          <IconButton onClick={() => setDocumentosContraparte(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {loadingDocumentos ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : (
+            <Stack spacing={3}>
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Facturas ({docFacturas.length})</Typography>
+                {docFacturas.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Sin facturas ligadas a esta contraparte.
+                  </Typography>
+                ) : (
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Folio</TableCell>
+                          <TableCell>Fecha</TableCell>
+                          <TableCell align="right">Total</TableCell>
+                          <TableCell>Estado</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {docFacturas.map((f) => (
+                          <TableRow key={f.id} hover>
+                            <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                              {f.comprobante_serie || ""}
+                              {f.comprobante_folio || f.timbre_uuid}
+                            </TableCell>
+                            <TableCell>{f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "—"}</TableCell>
+                            <TableCell align="right">{f.comprobante_total || "—"}</TableCell>
+                            <TableCell>{f.estado || "—"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Stack>
+
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Complementos de pago ({docComplementos.length})</Typography>
+                {docComplementos.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Sin complementos de pago ligados a esta contraparte.
+                  </Typography>
+                ) : (
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Folio</TableCell>
+                          <TableCell>Fecha de pago</TableCell>
+                          <TableCell align="right">Monto pagado</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {docComplementos.map((c) => (
+                          <TableRow key={c.id} hover>
+                            <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                              {c.serie || ""}
+                              {c.folio || c.timbre_uuid}
+                            </TableCell>
+                            <TableCell>{c.fecha_de_pago || "—"}</TableCell>
+                            <TableCell align="right">{c.monto_pagado || "—"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Stack>
+
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Notas de crédito ({docNotasCredito.length})</Typography>
+                {docNotasCredito.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Sin notas de crédito ligadas a esta contraparte.
+                  </Typography>
+                ) : (
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Folio</TableCell>
+                          <TableCell>Factura relacionada</TableCell>
+                          <TableCell align="right">Total</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {docNotasCredito.map((n) => (
+                          <TableRow key={n.id} hover>
+                            <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                              {n.comprobante_serie || ""}
+                              {n.comprobante_folio || n.timbre_uuid}
+                            </TableCell>
+                            <TableCell>{n.factura_folio || "—"}</TableCell>
+                            <TableCell align="right">{n.comprobante_total || "—"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Stack>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDocumentosContraparte(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
     </AppShell>
