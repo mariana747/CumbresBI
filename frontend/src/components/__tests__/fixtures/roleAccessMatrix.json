@@ -1,6 +1,6 @@
 {
   "generatedFrom": "services/iam-service/iam/permission_matrix.py",
-  "generatedAt": "2026-08-11",
+  "generatedAt": "2026-08-26",
   "servicios": [
     "iam",
     "contrapartes",
@@ -133,8 +133,6 @@
       "contrapartes.crear",
       "contrapartes.editar",
       "contrapartes.leer",
-      "facturacion-cfdi.crear",
-      "facturacion-cfdi.editar",
       "facturacion-cfdi.leer",
       "iam.leer",
       "materiales.leer",
@@ -149,7 +147,6 @@
     ],
     "TESORERIA_ANALISTA": [
       "contrapartes.leer",
-      "facturacion-cfdi.crear",
       "facturacion-cfdi.leer",
       "iam.leer",
       "tesoreria.crear",

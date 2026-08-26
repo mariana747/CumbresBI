@@ -13,10 +13,10 @@ CONTRATO_DEMO_ID = "DEMO-DEMOCP01-001"
 
 FLUJOS_DEMO = [
     {
-        # Reembolso a un empleado, sin contrato (caso valido segun el
-        # modelo - contrato es nullable), todavia sin autorizar.
+        # Reembolso a un empleado - contrato es obligatorio incluso para
+        # reembolsos (decision 26/Ago/2026), asi que usa el contrato demo
+        # normal en vez de quedar sin contrato.
         "id_flujo": "demo0002",
-        "contrato_id": None,
         "fecha_efectiva": "2026-08-20",
         "concepto": "Reembolso de gastos de viaje",
         "reembolso": True,

@@ -5,6 +5,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -16,6 +17,8 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  List,
+  ListItem,
   MenuItem,
   Paper,
   Select,
@@ -34,6 +37,7 @@ import {
   ExternalLink,
   FileSearch,
   FileText,
+  Mail,
   Pencil,
   Plus,
   Search,
@@ -45,6 +49,7 @@ import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
+  EnvioMasivoResultado,
   FacturaConcepto,
   FacturaTraslado,
   TESORERIA_CAMPOS_CONFIRMABLES,
@@ -57,6 +62,7 @@ import {
   createFacturaTraslado,
   deleteFacturaConcepto,
   deleteFacturaTraslado,
+  enviarMasivoFacturas,
   listFacturaConceptos,
   listFacturaTraslados,
   listFacturas,
@@ -486,6 +492,17 @@ export default function TesoreriaFacturasPage() {
   const [cambiandoEstado, setCambiandoEstado] = useState(false);
   const [estadoError, setEstadoError] = useState<string | null>(null);
 
+  // Envio masivo por correo (26/Ago/2026, finanzas.md: "Multiple invoices
+  // can be selected to send massively (separately)") - seleccion en la
+  // tabla, un correo INDIVIDUAL por factura al confirmar (ver
+  // TesoreriaFacturaViewSet.enviar_masivo).
+  const [seleccionadas, setSeleccionadas] = useState<Set<number>>(new Set());
+  const [envioDialogOpen, setEnvioDialogOpen] = useState(false);
+  const [destinatarios, setDestinatarios] = useState<Record<number, string>>({});
+  const [enviando, setEnviando] = useState(false);
+  const [envioError, setEnvioError] = useState<string | null>(null);
+  const [envioResultados, setEnvioResultados] = useState<EnvioMasivoResultado[] | null>(null);
+
   useEffect(() => {
     getSession().then(setSession);
   }, []);
@@ -636,6 +653,53 @@ export default function TesoreriaFacturasPage() {
     }
   }
 
+  function toggleSeleccionada(id: number) {
+    setSeleccionadas((prev) => {
+      const siguiente = new Set(prev);
+      if (siguiente.has(id)) {
+        siguiente.delete(id);
+      } else {
+        siguiente.add(id);
+      }
+      return siguiente;
+    });
+  }
+
+  function abrirEnvioMasivo() {
+    const iniciales: Record<number, string> = {};
+    for (const f of facturas) {
+      if (seleccionadas.has(f.id)) {
+        iniciales[f.id] = f.contraparte_email || "";
+      }
+    }
+    setDestinatarios(iniciales);
+    setEnvioError(null);
+    setEnvioResultados(null);
+    setEnvioDialogOpen(true);
+  }
+
+  async function handleConfirmarEnvioMasivo() {
+    const envios = Array.from(seleccionadas).map((id) => ({ factura: id, destinatario: (destinatarios[id] || "").trim() }));
+    if (envios.some((e) => !e.destinatario)) {
+      setEnvioError("Todas las facturas seleccionadas necesitan un destinatario.");
+      return;
+    }
+    setEnviando(true);
+    setEnvioError(null);
+    try {
+      const resultados = await enviarMasivoFacturas(envios);
+      setEnvioResultados(resultados);
+      if (resultados.every((r) => r.enviado)) {
+        setSeleccionadas(new Set());
+        setEnvioDialogOpen(false);
+      }
+    } catch (err) {
+      setEnvioError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
@@ -669,13 +733,24 @@ export default function TesoreriaFacturasPage() {
               ),
             }}
           />
+          {puedeEditar && seleccionadas.size > 0 && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Mail size={14} strokeWidth={2} />}
+              onClick={abrirEnvioMasivo}
+              sx={{ ml: { sm: "auto" } }}
+            >
+              Enviar por correo ({seleccionadas.size})
+            </Button>
+          )}
           {puedeCrear && (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
+              sx={{ ml: { sm: seleccionadas.size > 0 ? 0 : "auto" } }}
             >
               Nueva factura
             </Button>
@@ -689,6 +764,7 @@ export default function TesoreriaFacturasPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
+                {puedeEditar && <TableCell padding="checkbox" />}
                 <TableCell>UUID</TableCell>
                 <TableCell>Folio</TableCell>
                 <TableCell>Emisor</TableCell>
@@ -702,13 +778,13 @@ export default function TesoreriaFacturasPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : facturas.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin facturas registradas.
                     </Typography>
@@ -716,7 +792,12 @@ export default function TesoreriaFacturasPage() {
                 </TableRow>
               ) : (
                 facturas.map((f) => (
-                  <TableRow key={f.id} hover>
+                  <TableRow key={f.id} hover selected={seleccionadas.has(f.id)}>
+                    {puedeEditar && (
+                      <TableCell padding="checkbox">
+                        <Checkbox size="small" checked={seleccionadas.has(f.id)} onChange={() => toggleSeleccionada(f.id)} />
+                      </TableCell>
+                    )}
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.timbre_uuid}</TableCell>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {f.comprobante_serie || ""}
@@ -772,6 +853,15 @@ export default function TesoreriaFacturasPage() {
             facturas.map((f) => (
               <Paper key={f.id} variant="outlined" sx={{ p: 2 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack direction="row" spacing={1} sx={{ minWidth: 0 }}>
+                    {puedeEditar && (
+                      <Checkbox
+                        size="small"
+                        checked={seleccionadas.has(f.id)}
+                        onChange={() => toggleSeleccionada(f.id)}
+                        sx={{ mt: -0.5, ml: -1 }}
+                      />
+                    )}
                   <Stack spacing={0.25} sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {f.comprobante_serie || ""}
@@ -784,6 +874,7 @@ export default function TesoreriaFacturasPage() {
                     >
                       {f.timbre_uuid}
                     </Typography>
+                  </Stack>
                   </Stack>
                   <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
                     {f.link_pdf && (
@@ -1235,6 +1326,61 @@ export default function TesoreriaFacturasPage() {
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
           <Button variant="contained" onClick={handleGuardar} disabled={saving}>
             {saving ? <CircularProgress size={16} /> : "Guardar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={envioDialogOpen} onClose={() => setEnvioDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Enviar por correo ({seleccionadas.size})
+          <IconButton onClick={() => setEnvioDialogOpen(false)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {envioError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {envioError}
+            </Alert>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Se manda un correo individual por factura, cada uno con su propio destinatario. Prellenado con el
+            correo de la contraparte cuando existe — puedes cambiarlo.
+          </Typography>
+          <List disablePadding>
+            {facturas
+              .filter((f) => seleccionadas.has(f.id))
+              .map((f) => {
+                const resultado = envioResultados?.find((r) => r.factura === f.id);
+                return (
+                  <ListItem key={f.id} disableGutters sx={{ display: "block", py: 1 }}>
+                    <Stack spacing={0.5}>
+                      <Typography variant="body2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                        {f.comprobante_serie || ""}
+                        {f.comprobante_folio || f.timbre_uuid} — {f.contraparte_nombre || f.emisor_nombre || "—"}
+                      </Typography>
+                      <TextField
+                        size="small"
+                        placeholder="correo@dominio.com"
+                        value={destinatarios[f.id] || ""}
+                        onChange={(e) => setDestinatarios({ ...destinatarios, [f.id]: e.target.value })}
+                        fullWidth
+                      />
+                      {resultado && (
+                        <Typography variant="caption" color={resultado.enviado ? "success.main" : "error.main"}>
+                          {resultado.enviado ? "Enviado." : resultado.detail || "No se pudo enviar."}
+                        </Typography>
+                      )}
+                    </Stack>
+                  </ListItem>
+                );
+              })}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEnvioDialogOpen(false)}>Cerrar</Button>
+          <Button variant="contained" onClick={handleConfirmarEnvioMasivo} disabled={enviando}>
+            {enviando ? <CircularProgress size={16} /> : "Enviar"}
           </Button>
         </DialogActions>
       </Dialog>
