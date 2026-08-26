@@ -49,8 +49,8 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Asesor de Ventas | L | L | — | LCE *(solo su PROYECTO)* | L | — | — | — | — | — | — | — |
 | Gerente de Ventas | L | L | — | LCEA *(sus PROYECTOs)* | LE | — | L | — | — | — | — | — |
 | Coordinador de Obra | L | — | — | LE | LCE | — | — | — | — | — | — | — |
-| Finance Manager | L | LCE | — | L | L | LCE | LCEA | LCE | LCEA | — | — | — |
-| Analista de Tesorería | L | L | — | — | — | — | LCE | LC | — | — | — | — |
+| Finance Manager | L | LCE | — | L | L | LCE | LCEA | L | LCEA | — | — | — |
+| Analista de Tesorería | L | L | — | — | — | — | LCE | L | — | — | — | — |
 | Comprador | L | L | — | — | LCE | — | L | — | LCEA | — | — | — |
 | Contralor/CFO | L | L | — | L | L | L | L *(lista de sociedades)* | L | L | — | — | L |
 | Supervisor de Centro | L | — | — | — | — | — | — | — | — | LE *(su CENTRO)* | — | — |
@@ -58,6 +58,11 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Empleado (MiCumbres) | — | — | — | — | — | — | — | — | — | L *(solo su registro)* | L *(solo asignados a mí)* | — |
 | Responsable de Proyecto (Tickets) | L | — | — | — | — | — | — | — | — | — | LCEA *(su PROYECTO)* | — |
 | Participante de Ticket | — | — | — | — | — | — | — | — | — | — | L *(solo asignados a mí)*, C *(comentarios)* | — |
+
+`facturacion-cfdi` solo tiene `L` para todos los roles salvo Super Admin
+(decisión 26/Ago/2026, `finanzas.md` sec. "General Notes": *"The user
+cannot create, delete or modify invoices, just see, export and link them
+to transactions"*). Super Admin conserva `LCEA` como excepción operativa.
 
 ## 4. Reglas de RLS por rol (cómo `ScopedManager` aplica el filtro)
 
