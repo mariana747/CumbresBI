@@ -272,6 +272,49 @@ def logout(request):
     return response
 
 
+# csrf_exempt: mismo criterio que me() - solo depende de la cookie de
+# sesion, no hay formulario de por medio.
+@csrf_exempt
+@require_GET
+def refresh(request):
+    """Reemite la cookie de sesion con los roles/permisos ACTUALES de BD,
+    sin pedirle al usuario que vuelva a hacer login (Opcion A: el frontend
+    la llama con un poll periodico corto - AppShell.tsx - en vez de
+    esperar a que el JWT expire por si solo, SESSION_JWT_TTL_MINUTES).
+
+    Requiere que el JWT viejo todavia sea valido (no expirado) - a
+    diferencia de google_callback, esto no es un login nuevo, es renovar
+    una sesion que ya existia."""
+    token = request.COOKIES.get(settings.SESSION_COOKIE_NAME_JWT)
+    if not token:
+        return JsonResponse({"detail": "No autenticado."}, status=401)
+
+    claims = decode_session_jwt(token)
+    if not claims:
+        return JsonResponse({"detail": "Sesion invalida o expirada."}, status=401)
+
+    try:
+        user = IamUser.objects.get(user_id=claims["sub"])
+    except IamUser.DoesNotExist:
+        return JsonResponse({"detail": "Sesion invalida."}, status=401)
+
+    if user.status != IamUser.STATUS_ACTIVE:
+        response = JsonResponse({"detail": "Cuenta suspendida."}, status=401)
+        response.delete_cookie(settings.SESSION_COOKIE_NAME_JWT)
+        return response
+
+    session_jwt = issue_session_jwt(user)
+    response = JsonResponse({"detail": "Sesion renovada."})
+    response.set_cookie(
+        settings.SESSION_COOKIE_NAME_JWT,
+        session_jwt,
+        max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
+        httponly=True,
+        samesite="Lax",
+    )
+    return response
+
+
 # csrf_exempt: esta vista solo LEE la cookie de sesion, no depende del
 # CSRF token de Django (no hay formulario ni cambio de estado aqui).
 @csrf_exempt
