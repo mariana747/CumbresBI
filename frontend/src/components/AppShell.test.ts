@@ -172,7 +172,7 @@ describe("buildNavItems - Obra (incluye Materiales)", () => {
 // desarrollo". El permiso "contrapartes" tambien lo activa (varios roles de
 // PLD solo tienen contrapartes.leer, ver AppShell.tsx).
 describe("buildNavItems - Tesorería", () => {
-  it("algun perm de contrapartes/tesoreria/facturacion-cfdi muestra el apartado con sus 4 pantallas", () => {
+  it("algun perm de contrapartes/tesoreria/facturacion-cfdi muestra el apartado con sus pantallas", () => {
     for (const roleKey of Object.keys(ROLES)) {
       const tieneAlguno = ROLES[roleKey].some(
         (p) =>
@@ -184,9 +184,21 @@ describe("buildNavItems - Tesorería", () => {
       expect(tesoreria, `${roleKey} deberia ver Tesorería`).toBeDefined();
       expect(tesoreria?.enabled).toBe(true);
       const labels = hijos(tesoreria).map((c) => c.label);
-      // "Flujos" (24/Ago/2026) se agrego junto con el CRUD real de
-      // tesoreria_flujos - ver AppShell.tsx.
-      expect(labels).toEqual(["Contrapartes", "Cuentas bancarias", "Contratos", "Flujos"]);
+      // Orden real de AppShell.tsx (26/Ago/2026): Flujos/Contratos/Saldos/
+      // Reporte diario/Notas de credito se agregaron junto con el reporte
+      // diario de saldos y el CRUD real de tesoreria_flujos.
+      expect(labels).toEqual([
+        "Flujos",
+        "Contratos",
+        "Saldos",
+        "Reporte diario",
+        "Notas de crédito",
+        "Contrapartes",
+        "Cuentas bancarias",
+        "Facturas",
+        "Complementos de pago",
+        "Recibos de nómina",
+      ]);
     }
   });
 

@@ -30,7 +30,9 @@ from .models import (
     TesoreriaFlujo,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
+    TesoreriaSaldo,
 )
+from .reportes import calcular_reporte_diario
 from .views import (
     FacturaConceptoViewSet,
     FacturaDoctoRelacionadoViewSet,
@@ -610,6 +612,137 @@ class TesoreriaSaldoTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["id"], "saldo-2026-08-24-cta1")
+
+
+class ReporteDiarioSaldosTests(TestCase):
+    """Reporte diario de saldos (26/Ago/2026, ver documentos/finanzas.md) -
+    calculo real probado directo (sin DRF, ver reportes.py) mas los 3
+    endpoints nuevos de TesoreriaSaldoViewSet (reporte_diario/arrastrar/
+    enviar_reporte)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex", alias="BMX")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco,
+            clabe="002180000000000001",
+            alias="Cuenta operativa",
+            apertura="2026-01-01",
+            activa=True,
+            sociedad=RFC_TIZARA,
+            tipo=TesoreriaCuenta.TIPO_CHEQUES,
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-demo-001",
+            sociedad=RFC_TIZARA,
+            contraparte=TesoreriaContraparte.objects.create(
+                razon_social="Contraparte demo", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="d@d.com"
+            ),
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+
+    def test_calculo_cuadra_cuando_cambio_coincide_con_transacciones(self):
+        TesoreriaSaldo.objects.create(id="s1", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        TesoreriaSaldo.objects.create(id="s2", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10500.00")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000001", contrato=self.contrato, cuenta=self.cuenta,
+            fecha_efectiva="2026-08-25", total_mxp="500.00",
+        )
+        reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
+        fila = reporte["sociedades"][0]["cuentas"][0]
+        self.assertEqual(fila["cambio"], 500)
+        self.assertEqual(fila["suma_transacciones"], 500)
+        self.assertEqual(fila["diferencia"], 0)
+        self.assertTrue(fila["cuadra"])
+
+    def test_calculo_no_cuadra_reporta_diferencia(self):
+        TesoreriaSaldo.objects.create(id="s3", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        TesoreriaSaldo.objects.create(id="s4", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10800.00")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000002", contrato=self.contrato, cuenta=self.cuenta,
+            fecha_efectiva="2026-08-25", total_mxp="500.00",
+        )
+        reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
+        fila = reporte["sociedades"][0]["cuentas"][0]
+        self.assertEqual(fila["diferencia"], 300)
+        self.assertFalse(fila["cuadra"])
+
+    def test_calculo_sin_saldo_hoy_no_reporta_diferencia(self):
+        TesoreriaSaldo.objects.create(id="s5", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
+        fila = reporte["sociedades"][0]["cuentas"][0]
+        self.assertIsNone(fila["saldo_hoy"])
+        self.assertIsNone(fila["diferencia"])
+        self.assertIsNone(reporte["consolidado"]["saldo_hoy_total"])
+
+    def test_filtra_solo_cuentas_activas_de_la_sociedad_elegida(self):
+        TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000002", alias="Otra sociedad", apertura="2026-01-01",
+            activa=True, sociedad=RFC_CAPITAL,
+        )
+        TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000003", alias="Inactiva", apertura="2026-01-01",
+            activa=False, sociedad=RFC_TIZARA,
+        )
+        reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
+        alias_en_reporte = [f["alias"] for e in reporte["sociedades"] for f in e["cuentas"]]
+        self.assertEqual(alias_en_reporte, ["Cuenta operativa"])
+
+    def test_endpoint_reporte_diario_no_requiere_permiso_especial(self):
+        request = self.factory.get("/api/saldos/reporte_diario/", {"sociedades": RFC_TIZARA, "fecha": "2026-08-25"})
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaSaldoViewSet.as_view({"get": "reporte_diario"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+
+    def test_arrastrar_sin_permiso_da_403(self):
+        TesoreriaSaldo.objects.create(id="s6", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        request = self.factory.post(
+            "/api/saldos/arrastrar/", {"cuenta": self.cuenta.id_cuenta_bancaria, "fecha": "2026-08-25"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = TesoreriaSaldoViewSet.as_view({"post": "arrastrar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_arrastrar_copia_el_saldo_anterior(self):
+        TesoreriaSaldo.objects.create(id="s7", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        request = self.factory.post(
+            "/api/saldos/arrastrar/", {"cuenta": self.cuenta.id_cuenta_bancaria, "fecha": "2026-08-25"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaSaldoViewSet.as_view({"post": "arrastrar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["saldo"], "10000.00")
+        self.assertEqual(response.data["fecha"], "2026-08-25")
+
+    def test_arrastrar_sin_saldo_previo_da_400(self):
+        request = self.factory.post(
+            "/api/saldos/arrastrar/", {"cuenta": self.cuenta.id_cuenta_bancaria, "fecha": "2026-08-25"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaSaldoViewSet.as_view({"post": "arrastrar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_arrastrar_no_pisa_saldo_ya_capturado(self):
+        TesoreriaSaldo.objects.create(id="s8", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        TesoreriaSaldo.objects.create(id="s9", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10800.00")
+        request = self.factory.post(
+            "/api/saldos/arrastrar/", {"cuenta": self.cuenta.id_cuenta_bancaria, "fecha": "2026-08-25"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaSaldoViewSet.as_view({"post": "arrastrar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_enviar_reporte_sin_destinatarios_da_400(self):
+        request = self.factory.post("/api/saldos/enviar_reporte/", {"sociedades": [RFC_TIZARA]}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaSaldoViewSet.as_view({"post": "enviar_reporte"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
 
 
 class TesoreriaContraparteVistaPorProveedorTests(TestCase):

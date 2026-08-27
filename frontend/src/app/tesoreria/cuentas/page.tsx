@@ -32,12 +32,14 @@ import {
 import { FileText, Landmark, Pencil, Plus, Trash2, Wallet, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   TesoreriaBanco,
   TesoreriaCorteEdc,
   TesoreriaCorteEdcFormato,
   TesoreriaCorteEdcTipo,
   TesoreriaCuenta,
+  TesoreriaCuentaTipo,
   createBanco,
   createCorteEdc,
   createCuenta,
@@ -54,6 +56,8 @@ import {
 
 const CUENTA_FORM_VACIO = {
   rfcRazonSocial: "",
+  sociedad: "",
+  tipo: "CHEQUES" as TesoreriaCuentaTipo,
   banco: "",
   cuenta: "",
   clabe: "",
@@ -62,6 +66,13 @@ const CUENTA_FORM_VACIO = {
   activa: true,
   apertura: new Date().toISOString().slice(0, 10),
   cierre: "",
+};
+
+const TIPO_CUENTA_LABELS: Record<TesoreriaCuentaTipo, string> = {
+  CHEQUES: "Cheques",
+  INVERSION: "Inversión",
+  NOMINA: "Nómina",
+  OTRA: "Otra",
 };
 
 // Cuentas bancarias + catalogo de Bancos (arranque formal de Fase 4,
@@ -81,6 +92,7 @@ export default function TesoreriaCuentasPage() {
   const [cuentaFormError, setCuentaFormError] = useState<string | null>(null);
   // ID mostrado en el dialogo de alta - generado al abrirlo, ver abrirAltaCuenta().
   const [idCuentaNueva, setIdCuentaNueva] = useState("");
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
 
   const [bancos, setBancos] = useState<TesoreriaBanco[]>([]);
   const [loadingBancos, setLoadingBancos] = useState(true);
@@ -133,6 +145,7 @@ export default function TesoreriaCuentasPage() {
   useEffect(() => {
     refreshCuentas();
     refreshBancos();
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
 
   function abrirAltaCuenta() {
@@ -147,6 +160,8 @@ export default function TesoreriaCuentasPage() {
     setEditingCuenta(c);
     setCuentaForm({
       rfcRazonSocial: c.rfc_razon_social || "",
+      sociedad: c.sociedad || "",
+      tipo: c.tipo || "CHEQUES",
       banco: c.banco || "",
       cuenta: c.cuenta || "",
       clabe: c.clabe || "",
@@ -174,11 +189,15 @@ export default function TesoreriaCuentasPage() {
           label: cuentaForm.label,
           activa: cuentaForm.activa,
           cierre: cuentaForm.cierre || null,
+          sociedad: cuentaForm.sociedad || null,
+          tipo: cuentaForm.tipo,
         });
       } else {
         await createCuenta({
           idCuentaBancaria: idCuentaNueva,
           rfcRazonSocial: cuentaForm.rfcRazonSocial,
+          sociedad: cuentaForm.sociedad,
+          tipo: cuentaForm.tipo,
           banco: cuentaForm.banco,
           cuenta: cuentaForm.cuenta,
           clabe: cuentaForm.clabe,
@@ -606,6 +625,41 @@ export default function TesoreriaCuentasPage() {
               disabled
               fullWidth
             />
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="sociedad-cuenta-label">Empresa / sociedad</InputLabel>
+                <Select
+                  labelId="sociedad-cuenta-label"
+                  label="Empresa / sociedad"
+                  value={cuentaForm.sociedad}
+                  onChange={(e) => setCuentaForm({ ...cuentaForm, sociedad: e.target.value })}
+                >
+                  <MenuItem value="">
+                    <em>Sin asignar</em>
+                  </MenuItem>
+                  {sociedades.map((s) => (
+                    <MenuItem key={s.rfc} value={s.rfc}>
+                      {s.alias_sociedad || s.razon_social || s.rfc}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="tipo-cuenta-label">Tipo de cuenta</InputLabel>
+                <Select
+                  labelId="tipo-cuenta-label"
+                  label="Tipo de cuenta"
+                  value={cuentaForm.tipo}
+                  onChange={(e) => setCuentaForm({ ...cuentaForm, tipo: e.target.value as TesoreriaCuentaTipo })}
+                >
+                  {Object.entries(TIPO_CUENTA_LABELS).map(([value, label]) => (
+                    <MenuItem key={value} value={value}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
             {!editingCuenta && (
               <>
                 <FormControl size="small" fullWidth>

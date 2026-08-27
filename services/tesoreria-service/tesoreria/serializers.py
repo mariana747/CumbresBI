@@ -93,6 +93,8 @@ class TesoreriaCuentaSerializer(serializers.ModelSerializer):
         fields = [
             "id_cuenta_bancaria",
             "rfc_razon_social",
+            "sociedad",
+            "tipo",
             "banco",
             "banco_nombre",
             "cuenta",
@@ -224,6 +226,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "fecha_pago_original",
             "descripcion_pago",
             "link_comprobante_banco",
+            "drive_file_id_comprobante",
             "factura",
             "complemento",
             "nomina",
@@ -253,6 +256,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "complemento",
             "nomina",
             "validacion_estado",
+            "drive_file_id_comprobante",
             "created_at",
             "updated_at",
         ]
@@ -308,6 +312,11 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
 
     conceptos = serializers.SerializerMethodField()
     contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
+    # Correo por defecto para envio masivo (26/Ago/2026, ver
+    # TesoreriaFacturaViewSet.enviar_masivo) - el frontend lo usa para
+    # prellenar el destinatario editable, no se manda automatico sin que el
+    # usuario lo confirme en pantalla.
+    contraparte_email = serializers.CharField(source="contraparte.email", read_only=True)
 
     class Meta:
         model = TesoreriaFactura
@@ -319,6 +328,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             # no se captura a mano.
             "contraparte",
             "contraparte_nombre",
+            "contraparte_email",
             "comprobante_version",
             "comprobante_serie",
             "comprobante_folio",

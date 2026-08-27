@@ -1,12 +1,21 @@
+import logging
+
+import requests
+from cumbresbi_scope import forward_auth_headers
+from django.conf import settings
 from django.utils import timezone
 from cumbresbi_scope.permissions import require_permission
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from .audit_utils import emitir_evento_auditoria
+from .mail_utils import enviar_factura, enviar_reporte_diario
+from .reportes import calcular_reporte_diario
 from .models import (
+    _short_id,
     FacturaConcepto,
     FacturaDoctoRelacionado,
     FacturaNotaCredito,
@@ -42,6 +51,8 @@ from .serializers import (
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class _PermisosCatalogoTesoreriaMixin:
@@ -173,7 +184,9 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [require_permission("tesoreria.crear")()]
-        if self.action in ("update", "partial_update", "destroy", "registrar_pago", "vincular_factura"):
+        if self.action in (
+            "update", "partial_update", "destroy", "registrar_pago", "vincular_factura", "subir_comprobante",
+        ):
             return [require_permission("tesoreria.editar")()]
         if self.action in ("aprobar", "rechazar"):
             return [require_permission("tesoreria.aprobar")()]
@@ -274,6 +287,62 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 "fecha_pago": str(flujo.fecha_pago) if flujo.fecha_pago else None,
                 "link_comprobante_banco": flujo.link_comprobante_banco,
             },
+        )
+        return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_comprobante(self, request, pk=None):
+        """Sube el comprobante/referencia de pago real a Drive (via
+        drive-service), finanzas.md sec. "General Notes": "Allow the user
+        to upload receipts/references from their computer. They are stored
+        in the correct Google Drive folder and the URL is recorded in the
+        database" (decision 26/Ago/2026). Mismo patron que
+        PldContraparteDocViewSet.subir (services/pld-service/pld/views.py) -
+        separado de registrar_pago() porque el comprobante puede subirse
+        antes, junto o despues de marcar el flujo como pagado.
+
+        Sin Unidad compartida propia de Tesoreria todavia (ver
+        DRIVE_SERVICE_URL en config/settings.py) - drive-service cae al
+        fallback de la Unidad compartida CumbresBI con la subcarpeta
+        "Tesoreria/Flujos/<id_flujo>"."""
+        flujo = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Tesoreria/Flujos/{flujo.id_flujo}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "tesoreria.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir comprobante de %s", flujo.id_flujo, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        flujo.link_comprobante_banco = resultado["web_view_link"]
+        flujo.drive_file_id_comprobante = resultado["file_id"]
+        flujo.save(update_fields=["link_comprobante_banco", "drive_file_id_comprobante"])
+
+        emitir_evento_auditoria(
+            "tesoreria_flujos.subir_comprobante",
+            "tesoreria_flujos",
+            flujo.id_flujo,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
         )
         return Response(self.get_serializer(flujo).data)
 
@@ -431,9 +500,46 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     }
 
     def get_permissions(self):
-        if self.action in ("confirmar_extraccion", "marcar_estado"):
+        if self.action in ("confirmar_extraccion", "marcar_estado", "enviar_masivo"):
             return [require_permission("facturacion-cfdi.editar")()]
         return super().get_permissions()
+
+    @action(detail=False, methods=["post"])
+    def enviar_masivo(self, request):
+        """Envio masivo de facturas por correo (finanzas.md: "Multiple
+        invoices can be selected to send massively (separately)") - un
+        correo INDIVIDUAL por factura seleccionada, no un digest. Body:
+        {"envios": [{"factura": <id>, "destinatario": "<email>"}, ...]} - el
+        destinatario lo edita el usuario en pantalla, prellenado con
+        contraparte.email por defecto (ver TesoreriaFacturaSerializer.
+        contraparte_email), nunca se infiere aqui en el backend."""
+        envios = request.data.get("envios")
+        if not isinstance(envios, list) or not envios:
+            return Response({"detail": "Se requiere 'envios' (lista no vacía)."}, status=400)
+
+        resultados = []
+        for envio in envios:
+            factura_id = envio.get("factura")
+            destinatario = (envio.get("destinatario") or "").strip()
+            if not factura_id or not destinatario:
+                resultados.append({"factura": factura_id, "enviado": False, "detail": "Falta factura o destinatario."})
+                continue
+            try:
+                factura = self.get_queryset().get(pk=factura_id)
+            except TesoreriaFactura.DoesNotExist:
+                resultados.append({"factura": factura_id, "enviado": False, "detail": "Factura no encontrada."})
+                continue
+            enviado = enviar_factura(request, destinatario, factura)
+            resultados.append({"factura": factura_id, "enviado": enviado})
+            if enviado:
+                emitir_evento_auditoria(
+                    "tesoreria_facturas.enviar_masivo",
+                    "tesoreria_factura",
+                    factura.id,
+                    actor_user_id=request.data.get("actor_user_id"),
+                    valores_nuevos={"destinatario": destinatario},
+                )
+        return Response({"resultados": resultados})
 
     @action(detail=True, methods=["post"])
     def marcar_estado(self, request, pk=None):
@@ -588,12 +694,77 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     filter_backends = [SearchFilter]
     search_fields = ["cuenta"]
 
+    def get_permissions(self):
+        # reporte_diario es lectura (mismo criterio abierto que list/
+        # retrieve, ver _PermisosCatalogoTesoreriaMixin) - arrastrar y
+        # enviar_reporte SI escriben/tienen efecto de lado (crean un
+        # TesoreriaSaldo o mandan un correo real), gatean igual que crear.
+        if self.action in ("arrastrar", "enviar_reporte"):
+            return [require_permission("tesoreria.crear")()]
+        return super().get_permissions()
+
     def get_queryset(self):
         queryset = TesoreriaSaldo.objects.all().order_by("-fecha")
         cuenta = self.request.query_params.get("cuenta")
         if cuenta:
             queryset = queryset.filter(cuenta=cuenta)
         return queryset
+
+    @action(detail=False, methods=["get"])
+    def reporte_diario(self, request):
+        """Reporte diario de saldos (26/Ago/2026, ver documentos/finanzas.md)
+        - por empresa (seleccion multiple via ?sociedades=rfc1,rfc2),
+        trae todas las cuentas activas de esas sociedades, compara
+        transacciones del dia (Flujo) contra el cambio de saldo. Calculo
+        real en reportes.py (probado aparte, sin pasar por DRF)."""
+        sociedades_param = request.query_params.get("sociedades", "")
+        sociedades = [s for s in sociedades_param.split(",") if s]
+        fecha = request.query_params.get("fecha") or timezone.localdate().isoformat()
+        reporte = calcular_reporte_diario(sociedades, fecha)
+        return Response(reporte)
+
+    @action(detail=False, methods=["post"])
+    def arrastrar(self, request):
+        """"Arrastrar" el saldo del dia anterior (finanzas.md: "There must
+        be an option to carry the same balance from the previous day") -
+        copia el saldo mas reciente antes de `fecha` como saldo de `fecha`
+        para esa cuenta, sin pedirle a nadie que lo vuelva a capturar a
+        mano. Si ya existe un saldo para esa cuenta+fecha, no lo pisa (400
+        explicito, en vez de sobreescribir en silencio un dato ya
+        capturado)."""
+        cuenta = request.data.get("cuenta")
+        fecha = request.data.get("fecha")
+        if not cuenta or not fecha:
+            return Response({"detail": "Se requiere 'cuenta' y 'fecha'."}, status=400)
+
+        if TesoreriaSaldo.objects.filter(cuenta=cuenta, fecha=fecha).exists():
+            return Response({"detail": "Ya existe un saldo capturado para esa cuenta y fecha."}, status=400)
+
+        anterior = TesoreriaSaldo.objects.filter(cuenta=cuenta, fecha__lt=fecha).order_by("-fecha").first()
+        if not anterior:
+            return Response({"detail": "No hay un saldo previo que arrastrar para esa cuenta."}, status=400)
+
+        nuevo = TesoreriaSaldo.objects.create(
+            id=_short_id(), fecha=fecha, cuenta=cuenta, saldo=anterior.saldo, cambio_dinero=0, cambio_porcentual=0
+        )
+        return Response(self.get_serializer(nuevo).data, status=201)
+
+    @action(detail=False, methods=["post"])
+    def enviar_reporte(self, request):
+        """Envia el reporte diario ya calculado por correo (finanzas.md:
+        "The report can be sent by email") - recalcula con los mismos
+        filtros en vez de confiar en un reporte armado del lado del
+        cliente, para que el correo siempre refleje datos frescos de la
+        BD."""
+        sociedades = request.data.get("sociedades") or []
+        fecha = request.data.get("fecha") or timezone.localdate().isoformat()
+        destinatarios = request.data.get("destinatarios") or []
+        if not destinatarios:
+            return Response({"detail": "Se requiere al menos un destinatario."}, status=400)
+
+        reporte = calcular_reporte_diario(sociedades, fecha)
+        enviado = enviar_reporte_diario(request, destinatarios, reporte)
+        return Response({"enviado": enviado})
 
 
 class FacturaTrasladoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):

@@ -1,21 +1,4 @@
-"""Catalogo de servicios/roles/permisos confirmado por el cliente
-(docs/architecture/roles-y-permisos.md sec. 3). Extraido de
-iam/migrations/0004_seed_permisos_matriz.py (11/Ago/2026) a un modulo
-normal en vez de vivir solo dentro de la migracion, para que el frontend
-(fixture de pruebas, ver frontend/src/components/__tests__/fixtures/
-roleAccessMatrix.json) y cualquier otro consumidor futuro tengan una sola
-fuente de verdad en vez de copiar el dict a mano - antes solo la migracion
-lo conocia.
-
-Nota: una migracion que importa codigo de la app "vivo" (no congelado en
-el momento de la migracion) es la excepcion, no la regla en Django - se
-acepta aqui a proposito porque este dict es un catalogo de negocio
-estable (roles/permisos confirmados por el cliente), no un modelo que
-vaya a mutar de forma incompatible; si algun dia cambia retroactivamente
-el comportamiento historico de esta migracion seria aceptable (mismo
-riesgo que ya existia teniendo el dict inline, solo que ahora tambien lo
-lee alguien mas).
-
+"""
 L=leer, C=crear, E=editar, A=aprobar/autorizar. Simplificaciones
 documentadas caso por caso:
 - TICKETS_PARTICIPANTE: el doc distingue "L solo lo asignado a mi" de
@@ -94,13 +77,18 @@ ROLE_ACCESS = {
     # aprueba/cierra el corte del viernes (obra.aprobar), a diferencia de
     # OBRA_COORDINADOR que no tiene la "A". Alcance PROYECTO.
     "SUPERVISOR_OBRA": {"iam": "L", "obra": "LCEA"},
+    # facturacion-cfdi solo "L" para todo mundo salvo SUPER_ADMIN
+    # (finanzas.md sec. "General Notes": "The user cannot create, delete
+    # or modify invoices, just see, export and link them to transactions",
+    # decision 26/Ago/2026: SUPER_ADMIN conserva LCEA como excepcion
+    # operativa - el resto de los roles pierde C/E aqui).
     "FINANZAS_MANAGER": {
         "iam": "L", "contrapartes": "LCE", "ventas-vivienda": "L", "materiales": "L",
-        "rentas": "LCE", "tesoreria": "LCEA", "facturacion-cfdi": "LCE", "compras": "LCEA",
+        "rentas": "LCE", "tesoreria": "LCEA", "facturacion-cfdi": "L", "compras": "LCEA",
         "docint": "LC",
     },
     "TESORERIA_ANALISTA": {
-        "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "LC",
+        "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "L",
         "docint": "LC",
     },
     "COMPRAS_ANALISTA": {

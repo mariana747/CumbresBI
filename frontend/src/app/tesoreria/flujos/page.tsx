@@ -14,6 +14,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormHelperText,
   IconButton,
   InputAdornment,
   InputLabel,
@@ -39,6 +40,7 @@ import {
 import {
   Banknote,
   Check,
+  Copy,
   FileCheck2,
   Link2,
   MoreVertical,
@@ -47,6 +49,7 @@ import {
   Search,
   ThumbsUp,
   Undo2,
+  Upload,
   X,
   X as CloseIcon,
 } from "lucide-react";
@@ -69,6 +72,7 @@ import {
   listFlujos,
   rechazarFlujo,
   registrarPagoFlujo,
+  subirComprobanteFlujo,
   updateFlujo,
   vincularFactura,
 } from "@/lib/tesoreria";
@@ -166,6 +170,18 @@ export default function TesoreriaFlujosPage() {
   // amontonar hasta 5 iconos por fila.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuFlujo, setMenuFlujo] = useState<TesoreriaFlujo | null>(null);
+
+  // Dialogo de "Registrar pago" / "Subir comprobante" (26/Ago/2026,
+  // finanzas.md: "upload receipts/references from their computer" - antes
+  // registrar_pago se disparaba directo sin poder adjuntar nada). Mismo
+  // dialogo sirve para los dos casos: si el flujo aun no esta pagado,
+  // tambien llama a registrarPagoFlujo; si ya esta pagado, solo sube/
+  // reemplaza el comprobante.
+  const [pagoDialogFlujo, setPagoDialogFlujo] = useState<TesoreriaFlujo | null>(null);
+  const [pagoDescripcion, setPagoDescripcion] = useState("");
+  const [pagoArchivo, setPagoArchivo] = useState<File | null>(null);
+  const [pagoError, setPagoError] = useState<string | null>(null);
+  const [pagoEnviando, setPagoEnviando] = useState(false);
 
   // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
   // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
@@ -324,7 +340,49 @@ export default function TesoreriaFlujosPage() {
     setDialogOpen(true);
   }
 
+  // Duplicar (26/Ago/2026, finanzas.md: "Transactions can have the option
+  // to copy and edit the copy for faster registration") - mismo criterio
+  // que abrirDuplicado() en saldos/page.tsx: prellena el alta con los
+  // mismos datos del flujo elegido, pero sin id/fecha/estado de pago (se
+  // crea uno nuevo, no se edita el original).
+  function abrirDuplicado(f: TesoreriaFlujo) {
+    setEditing(null);
+    setForm({
+      contrato: f.contrato || "",
+      cuenta: f.cuenta,
+      totalMxp: f.total_mxp || "",
+      fechaEfectiva: new Date().toISOString().slice(0, 10),
+      concepto: f.concepto || "",
+      reembolso: f.reembolso ?? false,
+      idEmpleado: f.id_empleado || "",
+      idEmpleadoReembolso: f.id_empleado_reembolso || "",
+      idRequisicion: f.id_requisicion || "",
+      comentarios: f.comentarios || "",
+      linkReferencia: f.link_referencia || "",
+      comprobacionAsignadaA: f.comprobacion_asignada_a || "",
+      estadoCfdi: f.estado_cfdi || "",
+      requiereComplemento: f.requiere_complemento ?? false,
+      aprobacionLista: false,
+      permisoEnviarPago: f.permiso_enviar_pago || "",
+      permiso: f.permiso || "",
+      informacionEnvio: "",
+      fechaPagoOriginal: "",
+      linkComprobanteBanco: "",
+    });
+    setTab("Detalles");
+    setFormError(null);
+    setIdFlujoPrevio("");
+    listFlujos()
+      .then((todos) => setIdFlujoPrevio(`FLJ-${(todos.length + 1).toString().padStart(6, "0")}`))
+      .catch(() => setIdFlujoPrevio(""));
+    setDialogOpen(true);
+  }
+
   async function handleGuardar() {
+    if (!editing && !form.contrato) {
+      setFormError("Selecciona el contrato (obligatorio, incluso para reembolsos).");
+      return;
+    }
     if (!editing && !form.cuenta) {
       setFormError("Selecciona la cuenta bancaria.");
       return;
@@ -343,7 +401,7 @@ export default function TesoreriaFlujosPage() {
         });
       } else {
         await createFlujo({
-          contrato: form.contrato || undefined,
+          contrato: form.contrato,
           cuenta: form.cuenta,
           totalMxp: form.totalMxp || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
@@ -399,15 +457,32 @@ export default function TesoreriaFlujosPage() {
     }
   }
 
-  async function handleRegistrarPago(f: TesoreriaFlujo) {
-    setAccionando(f.id_flujo);
+  function abrirDialogoPago(f: TesoreriaFlujo) {
+    setPagoDialogFlujo(f);
+    setPagoDescripcion("");
+    setPagoArchivo(null);
+    setPagoError(null);
+  }
+
+  async function handleConfirmarPago() {
+    if (!pagoDialogFlujo) return;
+    setPagoEnviando(true);
+    setPagoError(null);
     try {
-      await registrarPagoFlujo(f.id_flujo);
+      if (pagoArchivo) {
+        await subirComprobanteFlujo(pagoDialogFlujo.id_flujo, pagoArchivo, session?.user_id);
+      }
+      if (!pagoDialogFlujo.pagado) {
+        await registrarPagoFlujo(pagoDialogFlujo.id_flujo, {
+          descripcionPago: pagoDescripcion || undefined,
+        });
+      }
+      setPagoDialogFlujo(null);
       refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error desconocido");
+      setPagoError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
-      setAccionando(null);
+      setPagoEnviando(false);
     }
   }
 
@@ -735,23 +810,25 @@ export default function TesoreriaFlujosPage() {
                 disabled
                 fullWidth
               />
-              <FormControl size="small" fullWidth disabled={!!editing}>
-                <InputLabel id="contrato-label">Contrato (opcional)</InputLabel>
+              <FormControl size="small" fullWidth required disabled={!!editing}>
+                <InputLabel id="contrato-label">Contrato</InputLabel>
                 <Select
                   labelId="contrato-label"
-                  label="Contrato (opcional)"
+                  label="Contrato"
                   value={form.contrato}
                   onChange={(e) => setForm({ ...form, contrato: e.target.value })}
                 >
-                  <MenuItem value="">
-                    <em>Sin contrato (ej. reembolso suelto)</em>
-                  </MenuItem>
                   {contratos.map((c) => (
                     <MenuItem key={c.id_contrato} value={c.id_contrato}>
                       {c.id_contrato} — {c.contraparte_nombre}
                     </MenuItem>
                   ))}
                 </Select>
+                {form.reembolso && (
+                  <FormHelperText>
+                    Para reembolsos sin contrato de obra, usa el contrato genérico (GEN-REEMBOLSOS-001).
+                  </FormHelperText>
+                )}
               </FormControl>
               {editing && editing.descripcion_pago && (
                 <TextField size="small" label="Descripción de pago" value={editing.descripcion_pago} disabled fullWidth />
@@ -1126,6 +1203,19 @@ export default function TesoreriaFlujosPage() {
       >
         {menuFlujo && [
           <MenuItem
+            key="duplicar"
+            disabled={!puedeCrear}
+            onClick={() => {
+              abrirDuplicado(menuFlujo);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Copy size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Duplicar</ListItemText>
+          </MenuItem>,
+          <MenuItem
             key="vincular"
             disabled={!puedeEditar}
             onClick={() => {
@@ -1171,9 +1261,9 @@ export default function TesoreriaFlujosPage() {
           puedeEditar && !menuFlujo.pagado && (
             <MenuItem
               key="registrar-pago"
-              disabled={!menuFlujo.autorizacion || accionando === menuFlujo.id_flujo}
+              disabled={!menuFlujo.autorizacion}
               onClick={() => {
-                handleRegistrarPago(menuFlujo);
+                abrirDialogoPago(menuFlujo);
                 setMenuAnchor(null);
               }}
             >
@@ -1185,8 +1275,73 @@ export default function TesoreriaFlujosPage() {
               </ListItemText>
             </MenuItem>
           ),
+          puedeEditar && menuFlujo.pagado && (
+            <MenuItem
+              key="subir-comprobante"
+              onClick={() => {
+                abrirDialogoPago(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <Upload size={16} strokeWidth={1.5} />
+              </ListItemIcon>
+              <ListItemText>
+                {menuFlujo.link_comprobante_banco ? "Reemplazar comprobante" : "Subir comprobante"}
+              </ListItemText>
+            </MenuItem>
+          ),
         ]}
       </Menu>
+
+      <Dialog open={!!pagoDialogFlujo} onClose={() => setPagoDialogFlujo(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {pagoDialogFlujo?.pagado ? "Subir comprobante" : "Registrar pago"} — {pagoDialogFlujo?.id_flujo}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {pagoError && (
+              <Alert severity="error" onClose={() => setPagoError(null)}>
+                {pagoError}
+              </Alert>
+            )}
+            {!pagoDialogFlujo?.pagado && (
+              <TextField
+                size="small"
+                label="Descripción de pago"
+                value={pagoDescripcion}
+                onChange={(e) => setPagoDescripcion(e.target.value)}
+                fullWidth
+              />
+            )}
+            <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />}>
+              {pagoArchivo ? pagoArchivo.name : "Elegir comprobante desde mi computadora"}
+              <input
+                type="file"
+                hidden
+                onChange={(e) => setPagoArchivo(e.target.files?.[0] ?? null)}
+              />
+            </Button>
+            {pagoDialogFlujo?.link_comprobante_banco && !pagoArchivo && (
+              <FormHelperText>
+                Ya hay un comprobante subido. Elige un archivo para reemplazarlo.
+              </FormHelperText>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPagoDialogFlujo(null)} disabled={pagoEnviando}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleConfirmarPago}
+            disabled={pagoEnviando || (!!pagoDialogFlujo?.pagado && !pagoArchivo)}
+          >
+            {pagoEnviando ? <CircularProgress size={20} /> : "Confirmar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AppShell>
   );
 }
