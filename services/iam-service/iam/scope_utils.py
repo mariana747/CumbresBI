@@ -59,7 +59,15 @@ def compute_effective_scope_claims(user) -> dict:
         "proyecto_ids": sorted(proyecto_ids),
         "centro_ids": sorted(centro_ids),
         "contrato_ids": sorted(contrato_ids),
-        "identity_user_id": None,  # TODO: alcance IDENTIDAD (ej. EMPLEADO_SELF)
+        # Alcance IDENTIDAD (self-service, ej. EMPLEADO_SELF/MiCumbres) - es
+        # simplemente "quien esta autenticado", no depende de que tenga
+        # ningun rol asignado (a diferencia de is_global/sociedad_rfcs/etc,
+        # que si vienen de iam_user_roles). Antes quedaba en None a fuerza
+        # (TODO sin resolver) - eso tumbaba cualquier gate de self-service
+        # real para TODOS los usuarios, con o sin roles (hallazgo 27/Ago/2026
+        # al construir TesoreriaTicketReembolsoViewSet._EsEmpleadoAutenticado,
+        # el primer consumidor real de este campo).
+        "identity_user_id": user.user_id,
         "role_keys": sorted(role_keys),
         "perm_keys": sorted(perm_keys),
     }
