@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 import requests
 from cumbresbi_scope.scope import EffectiveScope
+from django.conf import settings
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
@@ -21,6 +22,7 @@ from rest_framework.test import APIRequestFactory
 from .audit_utils import emitir_evento_auditoria
 from .auth_views import LoginRechazadoSinInvitacion, _upsert_identity
 from .models import GeneralSociedad, IamInvitation, IamRole, IamUser, IamUserRole
+from .session_utils import decode_session_jwt, issue_session_jwt
 from .views import GeneralSociedadViewSet, IamInvitationViewSet, IamUserRoleViewSet, IamUserViewSet
 
 
@@ -315,3 +317,57 @@ class EmitirEventoAuditoriaTests(TestCase):
         with patch("iam.audit_utils.requests.post", return_value=respuesta):
             with self.assertNoLogs("iam.audit_utils", level="WARNING"):
                 emitir_evento_auditoria("iam_users.suspend", "iam_users", "usr00001")
+
+
+class SessionRefreshTests(TestCase):
+    """/auth/refresh (Opcion A, ver memoria de sesion): reemite la cookie
+    de sesion con los roles/permisos ACTUALES de BD sin pedir login de
+    nuevo. self.client (Django test client) en vez de APIRequestFactory
+    porque aqui si importa el manejo real de cookies (set_cookie/
+    delete_cookie), a diferencia del resto de este archivo que ataca los
+    ViewSets con effective_scope inyectado a mano."""
+
+    def setUp(self):
+        self.user = IamUser.objects.create(user_id="usr07001", primary_email="refresh@cypcumbres.mx")
+        self.role, _ = IamRole.objects.get_or_create(
+            role_key="TEST_ROLE_REFRESH",
+            defaults={"role_name": "Rol de prueba (refresh tests)", "created_by": self.user, "updated_by": self.user},
+        )
+
+    def _set_session_cookie(self):
+        self.client.cookies[settings.SESSION_COOKIE_NAME_JWT] = issue_session_jwt(self.user)
+
+    def test_sin_cookie_da_401(self):
+        response = self.client.get("/auth/refresh")
+        self.assertEqual(response.status_code, 401)
+
+    def test_cookie_invalida_da_401(self):
+        self.client.cookies[settings.SESSION_COOKIE_NAME_JWT] = "token-basura"
+        response = self.client.get("/auth/refresh")
+        self.assertEqual(response.status_code, 401)
+
+    def test_usuario_suspendido_da_401_y_borra_la_cookie(self):
+        self._set_session_cookie()
+        self.user.status = IamUser.STATUS_SUSPENDED
+        self.user.save(update_fields=["status"])
+        response = self.client.get("/auth/refresh")
+        self.assertEqual(response.status_code, 401)
+        # delete_cookie() manda Set-Cookie con valor vacio + Max-Age=0, no
+        # omite el header - se verifica el valor, no la presencia del nombre.
+        self.assertEqual(response.cookies[settings.SESSION_COOKIE_NAME_JWT].value, "")
+
+    def test_refresca_con_los_roles_actuales_de_bd(self):
+        """El caso real que motivo /auth/refresh: un admin otorga un rol
+        DESPUES de que el usuario ya tenia su JWT viejo (sin ese rol) - el
+        refresh debe traer el rol nuevo sin que el usuario cierre sesion."""
+        self._set_session_cookie()
+        old_claims = decode_session_jwt(self.client.cookies[settings.SESSION_COOKIE_NAME_JWT].value)
+        self.assertNotIn("TEST_ROLE_REFRESH", old_claims["role_keys"])
+
+        IamUserRole.objects.create(user=self.user, role=self.role, scope_type=IamUserRole.SCOPE_GLOBAL)
+
+        response = self.client.get("/auth/refresh")
+        self.assertEqual(response.status_code, 200)
+        new_token = self.client.cookies[settings.SESSION_COOKIE_NAME_JWT].value
+        new_claims = decode_session_jwt(new_token)
+        self.assertIn("TEST_ROLE_REFRESH", new_claims["role_keys"])

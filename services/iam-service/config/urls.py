@@ -4,7 +4,7 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
-from iam.auth_views import canjear_acceso_externo, google_callback, google_start, logout, me
+from iam.auth_views import canjear_acceso_externo, google_callback, google_start, logout, me, refresh
 from iam.views import (
     GeneralSociedadViewSet,
     IamExternalCollaboratorViewSet,
@@ -43,6 +43,7 @@ urlpatterns = [
     path("auth/google/start", google_start, name="oidc-start"),
     path("auth/google/callback", google_callback, name="oidc-callback"),
     path("auth/logout", logout, name="oidc-logout"),
+    path("auth/refresh", refresh, name="session-refresh"),
     path("auth/acceso-externo/<str:token>", canjear_acceso_externo, name="canjear-acceso-externo"),
 ]
 
