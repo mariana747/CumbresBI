@@ -83,8 +83,8 @@ def enviar_correo_ticket_cliente(request, email: str, token: str) -> bool:
         titulo="Tienes documentos pendientes de subir",
         cuerpo_html=(
             "<p style='margin:0;'>CumbresBI te pide subir uno o más documentos para tu "
-            "expediente de KYC. Usa el siguiente enlace para hacerlo — es de uso limitado, "
-            "así que solo compártelo si tú lo vas a usar.</p>"
+            "expediente de KYC. Usa el siguiente enlace para hacerlo — cuentas con un tiempo "
+            "limitado para usarlo antes de que expire.</p>"
         ),
         cta_texto="Subir mis documentos",
         cta_url=url_completa,
