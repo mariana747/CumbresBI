@@ -500,8 +500,15 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     }
 
     def get_permissions(self):
+        # confirmar_extraccion/marcar_estado/enviar_masivo son el flujo de
+        # revision (IA propone -> humano confirma, o cambia el estado del
+        # proceso), no edicion manual del CFDI - se gatean con
+        # facturacion-cfdi.aprobar para que TESORERIA_ANALISTA/
+        # FINANZAS_MANAGER las conserven aunque perdieron crear/editar
+        # (finanzas.md: "the user cannot create, delete or modify
+        # invoices", 26/Ago/2026 - ver permission_matrix.py).
         if self.action in ("confirmar_extraccion", "marcar_estado", "enviar_masivo"):
-            return [require_permission("facturacion-cfdi.editar")()]
+            return [require_permission("facturacion-cfdi.aprobar")()]
         return super().get_permissions()
 
     @action(detail=False, methods=["post"])

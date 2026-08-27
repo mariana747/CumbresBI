@@ -509,6 +509,14 @@ export default function TesoreriaFacturasPage() {
 
   const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
+  // Estado del proceso (marcar_estado) y confirmar_extraccion del Motor
+  // Documental usan un permiso separado de "editar" a proposito (26/Ago/
+  // 2026, ver views.py TesoreriaFacturaViewSet.get_permissions) - son
+  // acciones del flujo de revision, no edicion manual del CFDI, asi que
+  // TESORERIA_ANALISTA/FINANZAS_MANAGER las conservan aunque perdieron
+  // crear/editar en el corte de "facturas solo-lectura".
+  const puedeAprobar = session?.perm_keys.includes("facturacion-cfdi.aprobar") ?? false;
+  const puedeAbrirDetalle = puedeEditar || puedeAprobar;
 
   function refresh() {
     setLoading(true);
@@ -531,10 +539,7 @@ export default function TesoreriaFacturasPage() {
     setDialogOpen(true);
   }
 
-  // Extraido de abrirEdicion (24/Ago/2026) para reusarlo tambien despues de
-  // confirmar una extraccion del Motor Documental - mismo mapeo, sin
-  // duplicarlo entre los dos flujos que necesitan refrescar `form` desde
-  // una TesoreriaFactura ya guardada.
+
   function formDesdeFactura(f: TesoreriaFactura): typeof FORM_VACIO {
     return {
       timbreUuid: f.timbre_uuid || "",
@@ -707,8 +712,8 @@ export default function TesoreriaFacturasPage() {
         <Typography variant="h5">Facturas CFDI</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Facturas recibidas de proveedores (CFDI de ingreso/egreso), alta manual mientras no exista el motor
-        automático de lectura de PDF/XML.
+        Facturas recibidas de proveedores (CFDI de ingreso/egreso). Esta vista es de solo consulta: las
+        facturas se dan de alta automáticamente desde el Motor Documental.
       </Typography>
 
       {error && (
@@ -826,7 +831,12 @@ export default function TesoreriaFacturasPage() {
                             <ExternalLink size={14} strokeWidth={1.5} />
                           </IconButton>
                         )}
-                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
+                        <IconButton
+                          size="small"
+                          aria-label={puedeEditar ? "Editar" : "Ver"}
+                          onClick={() => abrirEdicion(f)}
+                          disabled={!puedeAbrirDetalle}
+                        >
                           <Pencil size={14} strokeWidth={1.5} />
                         </IconButton>
                       </Stack>
@@ -944,6 +954,16 @@ export default function TesoreriaFacturasPage() {
                 Motor Documental
               </Button>
             )}
+            {/* Campos del CFDI (finanzas.md: "the user cannot create, delete
+                or modify invoices" - 26/Ago/2026, SUPER_ADMIN conserva
+                excepcion operativa por si el Motor Documental o la captura
+                inicial fallan). El fieldset deshabilita en bloque todo el
+                grupo de inputs para quien solo tiene facturacion-cfdi.leer/
+                .aprobar, sin tocar los 40+ TextField uno por uno. */}
+            <fieldset
+              disabled={!(editing ? puedeEditar : puedeCrear)}
+              style={{ border: 0, margin: 0, padding: 0, display: "contents" }}
+            >
             <TextField
               size="small"
               label="UUID de timbrado"
@@ -1258,6 +1278,7 @@ export default function TesoreriaFacturasPage() {
                 }}
               />
             </Stack>
+            </fieldset>
             {editing && (
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
@@ -1278,12 +1299,12 @@ export default function TesoreriaFacturasPage() {
                     label={editing.estado ? ESTADO_LABEL[editing.estado] : "—"}
                     color={editing.estado ? ESTADO_COLOR[editing.estado] : "default"}
                   />
-                  {puedeEditar && editing.estado !== "EN_PROCESO" && (
+                  {puedeAprobar && editing.estado !== "EN_PROCESO" && (
                     <Button size="small" onClick={() => handleCambiarEstado("EN_PROCESO")} disabled={cambiandoEstado}>
                       Marcar en proceso
                     </Button>
                   )}
-                  {puedeEditar && editing.estado !== "ACEPTADA" && (
+                  {puedeAprobar && editing.estado !== "ACEPTADA" && (
                     <Button
                       size="small"
                       color="success"
@@ -1294,7 +1315,7 @@ export default function TesoreriaFacturasPage() {
                       Aceptar
                     </Button>
                   )}
-                  {puedeEditar && editing.estado !== "RECHAZADA" && (
+                  {puedeAprobar && editing.estado !== "RECHAZADA" && (
                     <Button
                       size="small"
                       color="error"
