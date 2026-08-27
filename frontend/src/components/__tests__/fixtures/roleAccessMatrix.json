@@ -133,6 +133,7 @@
       "contrapartes.crear",
       "contrapartes.editar",
       "contrapartes.leer",
+      "facturacion-cfdi.aprobar",
       "facturacion-cfdi.leer",
       "iam.leer",
       "materiales.leer",
@@ -147,6 +148,7 @@
     ],
     "TESORERIA_ANALISTA": [
       "contrapartes.leer",
+      "facturacion-cfdi.aprobar",
       "facturacion-cfdi.leer",
       "iam.leer",
       "tesoreria.crear",
