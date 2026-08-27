@@ -19,6 +19,8 @@ from tesoreria.views import (
     TesoreriaNotaCreditoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
+    TesoreriaTicketProveedorViewSet,
+    TesoreriaTicketReembolsoViewSet,
 )
 
 router = DefaultRouter()
@@ -38,6 +40,8 @@ router.register("nota-credito-conceptos", FacturaNotaCreditoViewSet, basename="f
 router.register("rec-nominas", TesoreriaRecNominaViewSet, basename="tesoreriarecnomina")
 router.register("cortes-edc", TesoreriaCorteEdcViewSet, basename="tesoreriacorteedc")
 router.register("saldos", TesoreriaSaldoViewSet, basename="tesoreriasaldo")
+router.register("tickets-reembolso", TesoreriaTicketReembolsoViewSet, basename="tesoreriaticketreembolso")
+router.register("tickets-proveedor", TesoreriaTicketProveedorViewSet, basename="tesoreriaticketproveedor")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

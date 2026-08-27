@@ -910,6 +910,86 @@ class TesoreriaFlujo(models.Model):
         return self.id_flujo
 
 
+class TesoreriaTicketReembolso(models.Model):
+    """Ticket de reembolso subido por el empleado (pantalla PROVISIONAL
+    "MiCumbres" /mi-cumbres/tickets, 27/Ago/2026) - puente minimo mientras
+    no existe el portal MiCumbres real ni rrhh-service tiene API (Fase 5,
+    sin arrancar, ver memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente").
+    El empleado solo puede CREAR (subir su ticket); una vez creado, solo
+    Tesoreria (tesoreria.editar) puede editarlo.
+
+    Flujo real (27/Ago/2026, pedido explicito de Mariana): PENDIENTE ->
+    Tesoreria revisa -> APROBADO o RECHAZADO. Solo si se aprueba se
+    procede a facturar - subir el/los archivos (PDF, corren por el Motor
+    Documental como staging antes de dar de alta la factura formal, mismo
+    patron que la "bandeja de entrada" de Facturas) y LIGAR el ticket a un
+    TesoreriaFactura real ya creado (`factura`, no un blob suelto) -> el
+    ticket pasa a VINCULADO. `link_factura_pdf`/`drive_file_id_factura`
+    siguen existiendo como staging previo a esa formalizacion (el PDF que
+    se analiza con el Motor antes de llenar el alta de factura), no
+    reemplazan el vinculo real.
+    id_empleado es el identity_user_id del EffectiveScope (self-service),
+    no una FK real a rrhh_empleados (no existe todavia)."""
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_APROBADO = "APROBADO"
+    ESTADO_VINCULADO = "VINCULADO"
+    ESTADO_RECHAZADO = "RECHAZADO"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_APROBADO, "Aprobado — pendiente de facturar"),
+        (ESTADO_VINCULADO, "Facturado y vinculado"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+    ]
+
+    id_ticket = models.CharField(max_length=255, primary_key=True)
+    id_empleado = models.CharField(max_length=255)
+    descripcion = models.TextField()
+    monto = models.DecimalField(max_digits=14, decimal_places=2)
+    fecha_gasto = models.DateField()
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    # Foto/comprobante del ticket - sube el empleado al crear.
+    link_ticket = models.TextField(blank=True, null=True)
+    drive_file_id_ticket = models.TextField(blank=True, null=True)
+    # Staging del PDF de la factura real, antes de darla de alta formal -
+    # lo sube Tesoreria (no el empleado) para poder analizarlo con el
+    # Motor Documental y prellenar el alta de TesoreriaFactura.
+    link_factura_pdf = models.TextField(blank=True, null=True)
+    drive_file_id_factura = models.TextField(blank=True, null=True)
+    # Vinculo real a la factura formal ya dada de alta (Facturas > Nueva
+    # factura) - se llena en vincular_factura(), solo si estado=APROBADO.
+    factura = models.ForeignKey(
+        TesoreriaFactura,
+        db_column="factura_uuid",
+        to_field="timbre_uuid",
+        on_delete=models.SET_NULL,
+        related_name="tickets_reembolso",
+        blank=True,
+        null=True,
+    )
+    # Se liga cuando Tesoreria procesa el pago real (tesoreria_flujos.reembolso).
+    flujo = models.ForeignKey(
+        TesoreriaFlujo,
+        db_column="id_flujo",
+        on_delete=models.SET_NULL,
+        related_name="tickets_reembolso",
+        blank=True,
+        null=True,
+    )
+    comentarios = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=255, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_tickets_reembolso"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.id_ticket
+
+
 class TesoreriaSaldo(models.Model):
     """cuenta es varchar(50) sin FK declarada en el ERD (fk_relationships.csv
     no la lista) - se respeta tal cual, sin inventar una relacion que no
@@ -1049,3 +1129,44 @@ class FacturaTraslado(models.Model):
 
     class Meta:
         db_table = "factura_traslados"
+
+
+class TesoreriaTicketProveedor(models.Model):
+    """Ticket publico de un solo uso para que un PROVEEDOR externo suba su
+    factura sin necesitar cuenta ni login (27/Ago/2026, pedido de Mariana:
+    "el proveedor sube su factura" - mismo patron de codigo que
+    PldTicketCliente en pld-service, independiente - cada servicio
+    mantiene su propio modelo, ver memoria de sesion
+    "micumbres-tickets-reembolso-provisional"). Al canjearse NO emite
+    sesion (a diferencia de IamMagicLink) - "validar" regresa el ticket
+    directamente, protegido por reCAPTCHA en la subida real.
+
+    token_hash: SHA-256 del token, nunca el token en claro (ver
+    ticket_utils.py)."""
+
+    id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    contraparte = models.ForeignKey(
+        TesoreriaContraparte,
+        on_delete=models.CASCADE,
+        db_column="id_contraparte",
+        related_name="tickets_proveedor",
+    )
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    # FK laxa a iam_users.user_id (iam-service), mismo criterio que
+    # PldTicketCliente.issued_by.
+    issued_by = models.CharField(max_length=8)
+    expires_at = models.DateTimeField()
+    max_uses = models.IntegerField()
+    uses_count = models.IntegerField(default=0)
+    first_used_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_ticket_proveedor"
+        ordering = ["-issued_at"]
+
+    def __str__(self):
+        return self.id_ticket

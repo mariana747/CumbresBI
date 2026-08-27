@@ -17,6 +17,8 @@ from .models import (
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    TesoreriaTicketProveedor,
+    TesoreriaTicketReembolso,
 )
 
 
@@ -700,3 +702,85 @@ class TesoreriaRecNominaSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
+    """Ticket de reembolso de MiCumbres (pantalla provisional, ver
+    docstring de TesoreriaTicketReembolso en models.py). id_empleado/
+    estado/link_factura_pdf/drive_file_id_factura/factura/flujo son de
+    solo lectura en el update normal - el empleado los fija al crear (o no
+    los toca, en el caso de estado/factura/flujo) y solo cambian via las
+    acciones dedicadas del ViewSet (aprobar/rechazar, subir_factura,
+    vincular_factura, vincular_flujo), nunca via un PATCH libre."""
+
+    flujo_id = serializers.CharField(source="flujo.id_flujo", read_only=True, default=None)
+    factura_folio = serializers.CharField(source="factura.comprobante_folio", read_only=True, default=None)
+
+    class Meta:
+        model = TesoreriaTicketReembolso
+        fields = [
+            "id_ticket",
+            "id_empleado",
+            "descripcion",
+            "monto",
+            "fecha_gasto",
+            "estado",
+            "link_ticket",
+            "drive_file_id_ticket",
+            "link_factura_pdf",
+            "drive_file_id_factura",
+            "factura",
+            "factura_folio",
+            "flujo",
+            "flujo_id",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = [
+            "id_ticket",
+            "id_empleado",
+            "estado",
+            "link_factura_pdf",
+            "drive_file_id_factura",
+            "factura",
+            "flujo",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class TesoreriaTicketProveedorSerializer(serializers.ModelSerializer):
+    """Ticket publico de proveedor (27/Ago/2026, ver docstring del modelo).
+    token_hash nunca se expone via API - se genera y regresa una unica vez,
+    en claro, al crear el ticket (ver
+    TesoreriaTicketProveedorViewSet.perform_create)."""
+
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
+
+    class Meta:
+        model = TesoreriaTicketProveedor
+        fields = [
+            "id_ticket",
+            "contraparte",
+            "contraparte_nombre",
+            "email",
+            "issued_at",
+            "issued_by",
+            "expires_at",
+            "max_uses",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]
+        read_only_fields = [
+            "id_ticket",
+            "issued_at",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]

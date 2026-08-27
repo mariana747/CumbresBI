@@ -8,12 +8,16 @@ from cumbresbi_scope.permissions import require_permission
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet
 
+from . import recaptcha
 from .audit_utils import emitir_evento_auditoria
-from .mail_utils import enviar_factura, enviar_reporte_diario
+from .mail_utils import enviar_correo_ticket_proveedor, enviar_factura, enviar_reporte_diario
 from .reportes import calcular_reporte_diario
+from .ticket_utils import generate_token, hash_token
 from .models import (
     _short_id,
     FacturaConcepto,
@@ -32,6 +36,8 @@ from .models import (
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    TesoreriaTicketProveedor,
+    TesoreriaTicketReembolso,
 )
 from .serializers import (
     FacturaConceptoSerializer,
@@ -50,9 +56,25 @@ from .serializers import (
     TesoreriaNotaCreditoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
+    TesoreriaTicketProveedorSerializer,
+    TesoreriaTicketReembolsoSerializer,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _EsEmpleadoAutenticado(BasePermission):
+    """Cualquier usuario con sesion real (identity_user_id presente en su
+    EffectiveScope, ver cumbresbi_scope/scope.py) - no requiere ningun
+    perm_key de tesoreria.*. Es el gate de "MiCumbres" (self-service): un
+    empleado sin ningun rol de Tesoreria/IAM asignado igual puede subir su
+    propio ticket. Anonimo (JWT ausente/invalido) queda fuera."""
+
+    message = "Se requiere una sesión activa para subir un ticket."
+
+    def has_permission(self, request, view):
+        scope = getattr(request, "effective_scope", None)
+        return bool(scope and scope.identity_user_id)
 
 
 class _PermisosCatalogoTesoreriaMixin:
@@ -364,14 +386,14 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             try:
                 flujo.factura = TesoreriaFactura.objects.get(timbre_uuid=timbre_uuid_factura)
             except TesoreriaFactura.DoesNotExist:
-                return Response({"factura": "No existe una factura con ese UUID."}, status=400)
+                return Response({"factura": ["No existe una factura con ese UUID."]}, status=400)
             update_fields.append("factura")
 
         if timbre_uuid_complemento:
             try:
                 flujo.complemento = TesoreriaComplementoPago.objects.get(timbre_uuid=timbre_uuid_complemento)
             except TesoreriaComplementoPago.DoesNotExist:
-                return Response({"complemento": "No existe un complemento de pago con ese UUID."}, status=400)
+                return Response({"complemento": ["No existe un complemento de pago con ese UUID."]}, status=400)
             update_fields.append("complemento")
 
         if not update_fields:
@@ -379,6 +401,400 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
         flujo.save(update_fields=update_fields)
         return Response(self.get_serializer(flujo).data)
+
+
+class TesoreriaTicketReembolsoViewSet(ModelViewSet):
+    """Tickets de reembolso de MiCumbres (pantalla PROVISIONAL
+    /mi-cumbres/tickets, 27/Ago/2026 - ver docstring del modelo en
+    models.py). Regla de permisos pedida por Mariana: el empleado sube su
+    propio ticket (crear + subir_ticket), Tesoreria es quien despues
+    adjunta la factura real y liga el pago - el empleado NUNCA puede
+    editar/borrar un ticket una vez creado.
+
+    Lectura: un empleado sin tesoreria.editar solo ve SUS PROPIOS tickets
+    (filtro por identity_user_id); quien tiene tesoreria.editar (Tesoreria/
+    Admin) ve todos, para poder darles seguimiento."""
+
+    serializer_class = TesoreriaTicketReembolsoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["id_ticket", "descripcion"]
+
+    def get_permissions(self):
+        if self.action in ("create", "subir_ticket"):
+            return [_EsEmpleadoAutenticado()]
+        if self.action in (
+            "update", "partial_update", "destroy", "aprobar", "rechazar",
+            "subir_factura", "vincular_factura", "vincular_flujo",
+        ):
+            return [require_permission("tesoreria.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = TesoreriaTicketReembolso.objects.select_related("flujo").order_by("-created_at")
+        scope = self.request.effective_scope
+        if scope and not scope.has_permission("tesoreria.editar"):
+            queryset = queryset.filter(id_empleado=scope.identity_user_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        # id_ticket = "TKT-{consecutivo global de 6 digitos}", mismo
+        # criterio que TesoreriaFlujo.id_flujo (ver perform_create de
+        # TesoreriaFlujoViewSet).
+        consecutivo = TesoreriaTicketReembolso.objects.count() + 1
+        serializer.save(
+            id_ticket=f"TKT-{consecutivo:06d}",
+            id_empleado=self.request.effective_scope.identity_user_id,
+            created_by=self.request.effective_scope.identity_user_id,
+        )
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_ticket(self, request, pk=None):
+        """Sube la foto/comprobante del ticket a Drive (mismo patron que
+        TesoreriaFlujoViewSet.subir_comprobante) - solo el empleado dueño
+        del ticket puede llamarla (get_object ya filtra por
+        get_queryset, que a su vez ya lo restringe a sus propios tickets
+        si no tiene tesoreria.editar)."""
+        ticket = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        resultado, error = _subir_a_drive(request, archivo, f"Tesoreria/Facturas/TicketsReembolso/{ticket.id_ticket}")
+        if error:
+            return error
+
+        ticket.link_ticket = resultado["web_view_link"]
+        ticket.drive_file_id_ticket = resultado["file_id"]
+        ticket.save(update_fields=["link_ticket", "drive_file_id_ticket"])
+        emitir_evento_auditoria(
+            "tesoreria_tickets_reembolso.subir_ticket",
+            "tesoreria_tickets_reembolso",
+            ticket.id_ticket,
+            actor_user_id=ticket.id_empleado,
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"])
+    def aprobar(self, request, pk=None):
+        """Primer paso de la revision (27/Ago/2026, flujo pedido por
+        Mariana, orden final: "verificar con Gemini, muestra los datos, se
+        aprueba, luego se sube factura"): Tesoreria verifica con el Motor
+        Documental el comprobante/foto que subio el empleado
+        (`tesoreria.ticket_gasto`, sobre link_ticket/drive_file_id_ticket,
+        ver TicketsReembolsoAdminPanel.tsx) y, viendo los datos extraidos,
+        decide si el gasto procede - todavia NO hay factura ni pago, solo
+        la decision de que el ticket es valido. Solo se puede aprobar desde
+        PENDIENTE. La obligacion de pasar por el Motor Documental antes de
+        aprobar se enforce en el frontend (unico boton que llama a este
+        endpoint es el "Confirmar" del dialogo, no hay boton manual de
+        Aprobar) - no hay un campo propio en el modelo para verificar esto
+        del lado del backend, igual que el resto de "confirmar extraccion"
+        del Motor Documental en otros modulos (PLD, Facturas). Requiere
+        tesoreria.editar."""
+        ticket = self.get_object()
+        if ticket.estado != TesoreriaTicketReembolso.ESTADO_PENDIENTE:
+            return Response({"estado": ["Solo se puede aprobar un ticket Pendiente."]}, status=400)
+        ticket.estado = TesoreriaTicketReembolso.ESTADO_APROBADO
+        ticket.comentarios = request.data.get("comentarios", ticket.comentarios)
+        ticket.save(update_fields=["estado", "comentarios"])
+        emitir_evento_auditoria(
+            "tesoreria_tickets_reembolso.aprobar",
+            "tesoreria_tickets_reembolso",
+            ticket.id_ticket,
+            actor_user_id=request.data.get("actor_user_id"),
+        )
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        """Contraparte de aprobar() - solo desde PENDIENTE (un ticket ya
+        aprobado/vinculado no se rechaza aqui, se maneja aparte).
+        Requiere tesoreria.editar."""
+        ticket = self.get_object()
+        if ticket.estado != TesoreriaTicketReembolso.ESTADO_PENDIENTE:
+            return Response({"estado": ["Solo se puede rechazar un ticket Pendiente."]}, status=400)
+        ticket.estado = TesoreriaTicketReembolso.ESTADO_RECHAZADO
+        ticket.comentarios = request.data.get("comentarios", ticket.comentarios)
+        ticket.save(update_fields=["estado", "comentarios"])
+        emitir_evento_auditoria(
+            "tesoreria_tickets_reembolso.rechazar",
+            "tesoreria_tickets_reembolso",
+            ticket.id_ticket,
+            actor_user_id=request.data.get("actor_user_id"),
+        )
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_factura(self, request, pk=None):
+        """Staging del PDF de la factura real, SOLO sobre un ticket ya
+        APROBADO (27/Ago/2026, orden final: primero se verifica el ticket
+        con el Motor Documental y se aprueba, despues se sube y factura) -
+        el Motor Documental corre desde el frontend sobre este mismo
+        archivo (mismo MotorDocumentalDialog que PLD/Materiales) para
+        prellenar el alta formal de TesoreriaFactura (Facturas > Nueva
+        factura); esta accion solo sube el PDF a Drive, no crea la factura
+        por si sola. Requiere tesoreria.editar (ver get_permissions)."""
+        ticket = self.get_object()
+        if ticket.estado != TesoreriaTicketReembolso.ESTADO_APROBADO:
+            return Response({"estado": ["El ticket debe estar Aprobado antes de facturar."]}, status=400)
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        resultado, error = _subir_a_drive(request, archivo, f"Tesoreria/Facturas/TicketsReembolso/{ticket.id_ticket}")
+        if error:
+            return error
+
+        ticket.link_factura_pdf = resultado["web_view_link"]
+        ticket.drive_file_id_factura = resultado["file_id"]
+        ticket.save(update_fields=["link_factura_pdf", "drive_file_id_factura"])
+        emitir_evento_auditoria(
+            "tesoreria_tickets_reembolso.subir_factura",
+            "tesoreria_tickets_reembolso",
+            ticket.id_ticket,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"])
+    def vincular_factura(self, request, pk=None):
+        """Liga el ticket a la factura formal YA dada de alta en Facturas
+        (mismo criterio que TesoreriaFlujoViewSet.vincular_factura: recibe
+        timbre_uuid, valida que exista de verdad) - solo desde APROBADO.
+        Marca el ticket como VINCULADO (facturado). Requiere
+        tesoreria.editar."""
+        ticket = self.get_object()
+        if ticket.estado != TesoreriaTicketReembolso.ESTADO_APROBADO:
+            return Response({"estado": ["El ticket debe estar Aprobado antes de vincular la factura."]}, status=400)
+        timbre_uuid = request.data.get("factura")
+        if not timbre_uuid:
+            return Response({"factura": ["Este campo es requerido."]}, status=400)
+        try:
+            ticket.factura = TesoreriaFactura.objects.get(timbre_uuid=timbre_uuid)
+        except TesoreriaFactura.DoesNotExist:
+            return Response({"factura": ["No existe una factura con ese UUID."]}, status=400)
+        ticket.estado = TesoreriaTicketReembolso.ESTADO_VINCULADO
+        ticket.save(update_fields=["factura", "estado"])
+        emitir_evento_auditoria(
+            "tesoreria_tickets_reembolso.vincular_factura",
+            "tesoreria_tickets_reembolso",
+            ticket.id_ticket,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"factura": timbre_uuid},
+        )
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"])
+    def vincular_flujo(self, request, pk=None):
+        """Liga el ticket al TesoreriaFlujo real del pago (el reembolso ya
+        procesado en Flujos, tesoreria_flujos.reembolso=True) - paso final
+        una vez facturado. Requiere tesoreria.editar."""
+        ticket = self.get_object()
+        id_flujo = request.data.get("flujo")
+        if not id_flujo:
+            return Response({"flujo": ["Este campo es requerido."]}, status=400)
+        try:
+            ticket.flujo = TesoreriaFlujo.objects.get(id_flujo=id_flujo)
+        except TesoreriaFlujo.DoesNotExist:
+            return Response({"flujo": ["No existe un flujo con ese ID."]}, status=400)
+        ticket.save(update_fields=["flujo"])
+        emitir_evento_auditoria(
+            "tesoreria_tickets_reembolso.vincular_flujo",
+            "tesoreria_tickets_reembolso",
+            ticket.id_ticket,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"flujo": id_flujo},
+        )
+        return Response(self.get_serializer(ticket).data)
+
+
+def _subir_a_drive(request, archivo, carpeta):
+    """Helper compartido: sube un archivo a drive-service bajo `carpeta`.
+    Regresa (resultado_dict, None) si funciono, o (None, Response) con el
+    error listo para regresar tal cual desde la vista que lo llamo. Mismo
+    codigo que ya vivia inline en TesoreriaFlujoViewSet.subir_comprobante,
+    factorizado para reusarlo aqui sin copiar/pegar la llamada a
+    requests.post."""
+    headers, cookies = forward_auth_headers(request)
+    # El empleado que sube su propio ticket (subir_ticket) no tiene ningun
+    # perm_key de tesoreria.* - se autoriza via el secreto interno
+    # servicio-a-servicio en vez del ?perm= normal (ver drive-service/
+    # drive/views.py::_autorizado y settings.DRIVE_INTERNAL_SECRET arriba).
+    # Tesoreria (subir_factura) ya paso por require_permission("tesoreria.editar")
+    # en la vista antes de llegar aqui, asi que mandar el mismo header no
+    # relaja nada para ese caso.
+    if settings.DRIVE_INTERNAL_SECRET:
+        headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
+    try:
+        upstream = requests.post(
+            f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+            params={"perm": "tesoreria.editar"},
+            files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+            data={"carpeta": carpeta},
+            headers=headers,
+            cookies=cookies,
+            timeout=30,
+        )
+    except requests.RequestException:
+        logger.warning("drive-service no respondio al subir archivo a %s", carpeta, exc_info=True)
+        return None, Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+    if upstream.status_code != 201:
+        return None, Response(
+            upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+            status=upstream.status_code,
+        )
+    return upstream.json(), None
+
+
+class TesoreriaTicketProveedorViewSet(ModelViewSet):
+    """Ticket publico de un solo uso para que un PROVEEDOR externo suba su
+    factura sin login (27/Ago/2026, mismo patron que
+    PldTicketClienteViewSet en pld-service, independiente - ver docstring
+    del modelo). "validar"/"subir_factura" son publicos (sin sesion);
+    crear/revocar son acciones internas de Tesoreria.
+
+    El archivo sube a Tesoreria/Facturas/FacturasProveedores (27/Ago/2026,
+    pedido de Mariana: nombre propio, no mezclado con el alta manual) - el
+    analista abre "Nueva factura" > Motor Documental apuntando a esa misma
+    carpeta, sin necesitar una pantalla de revision aparte para estos
+    tickets.
+
+    DELETE no esta permitido conceptualmente: un ticket no se borra, se
+    revoca - usa POST /api/tickets-proveedor/{id}/revocar/."""
+
+    queryset = TesoreriaTicketProveedor.objects.select_related("contraparte").all()
+    serializer_class = TesoreriaTicketProveedorSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["id_ticket", "email", "contraparte__razon_social"]
+
+    def get_permissions(self):
+        if self.action in ("validar", "subir_factura"):
+            return []
+        if self.action == "create":
+            return [require_permission("tesoreria.crear")()]
+        if self.action == "revocar":
+            return [require_permission("tesoreria.editar")()]
+        return super().get_permissions()
+
+    def get_throttles(self):
+        # Mismo criterio que PldTicketClienteViewSet: rate limiting solo en
+        # la accion cara (recaptcha + subida a Drive), publica sin sesion.
+        if self.action == "subir_factura":
+            self.throttle_scope = "tesoreria-ticket-subir"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
+    def perform_create(self, serializer):
+        """Genera el token en claro + su hash - el token en claro solo se
+        expone una vez, en la respuesta de este create (ver create() abajo),
+        nunca se guarda ni se puede recuperar despues."""
+        token, token_hash = generate_token()
+        self._token_en_claro = token
+        serializer.save(token_hash=token_hash)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        response.data["token"] = self._token_en_claro
+        response.data["correo_enviado"] = enviar_correo_ticket_proveedor(
+            request, response.data["email"], self._token_en_claro
+        )
+        return response
+
+    @action(detail=True, methods=["post"])
+    def revocar(self, request, pk=None):
+        ticket = self.get_object()
+        ticket.revoked_at = timezone.now()
+        ticket.save(update_fields=["revoked_at"])
+        emitir_evento_auditoria(
+            "tesoreria_ticket_proveedor.revocar",
+            "tesoreria_ticket_proveedor",
+            ticket.id_ticket,
+            actor_user_id=request.data.get("actor_user_id"),
+        )
+        return Response(self.get_serializer(ticket).data)
+
+    @staticmethod
+    def _resolver_ticket(token):
+        """Busca el ticket por su token en claro y valida que siga vigente
+        (no revocado, no expirado, no agotado) - compartido entre validar()
+        y subir_factura() para no repetir las 3 validaciones en cada
+        endpoint publico. Regresa (ticket, None) o (None, Response-de-error)."""
+        if not token:
+            return None, Response({"token": ["Este campo es requerido."]}, status=400)
+
+        try:
+            ticket = TesoreriaTicketProveedor.objects.select_related("contraparte").get(token_hash=hash_token(token))
+        except TesoreriaTicketProveedor.DoesNotExist:
+            return None, Response({"detail": "Token inválido."}, status=404)
+
+        now = timezone.now()
+        if ticket.revoked_at is not None:
+            return None, Response({"detail": "Este link fue revocado."}, status=403)
+        if ticket.expires_at < now:
+            return None, Response({"detail": "Este link expiró."}, status=403)
+        if ticket.uses_count >= ticket.max_uses:
+            return None, Response({"detail": "Este link ya alcanzó su límite de usos."}, status=403)
+
+        return ticket, None
+
+    @action(detail=False, methods=["post"])
+    def validar(self, request):
+        """Valida un token en claro (recibido en el link) - NO marca uso
+        todavia (eso lo hace subir_factura, para no gastar el uso solo por
+        abrir la pagina). Regresa el ticket junto con el nombre de la
+        contraparte, para que el formulario publico salude al proveedor
+        por su nombre."""
+        ticket, error = self._resolver_ticket(request.data.get("token"))
+        if error:
+            return error
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_factura(self, request):
+        """Formulario publico del proveedor: sube su factura (PDF) sin
+        sesion, canjeando el token del link. Un solo archivo por llamada
+        (a diferencia de PldTicketCliente.subir_documento, que acepta
+        varios) - una factura es un solo PDF. Protegido por reCAPTCHA."""
+        ticket, error = self._resolver_ticket(request.data.get("token"))
+        if error:
+            return error
+
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
+            return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
+
+        # Subcarpeta por proveedor (27/Ago/2026, pedido de Mariana: "igual
+        # proveedores se dividen dentro por su id") - id_contraparte, no
+        # razon_social, mismo criterio que el resto del proyecto (ej.
+        # PLD/Nuevos Clientes/<id_contraparte>) - un nombre puede repetirse
+        # o traer caracteres raros para una ruta de Drive, el id nunca.
+        resultado, drive_error = _subir_a_drive(
+            request, archivo, f"Tesoreria/Facturas/FacturasProveedores/{ticket.contraparte_id}"
+        )
+        if drive_error:
+            return drive_error
+
+        now = timezone.now()
+        ticket.uses_count += 1
+        ticket.last_used_at = now
+        if ticket.first_used_at is None:
+            ticket.first_used_at = now
+        ticket.save(update_fields=["uses_count", "last_used_at", "first_used_at"])
+
+        emitir_evento_auditoria(
+            "tesoreria_ticket_proveedor.subir_factura",
+            "tesoreria_ticket_proveedor",
+            ticket.id_ticket,
+            actor_user_id="externo",
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response({"detail": "Factura subida correctamente. Tesorería la va a procesar en breve.", **resultado})
 
 
 class FacturaConceptoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -554,7 +970,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         TesoreriaFlujo, aqui no se segrega captura de aprobacion."""
         nuevo_estado = request.data.get("estado")
         if nuevo_estado not in dict(TesoreriaFactura.ESTADO_CHOICES):
-            return Response({"estado": "Estado inválido."}, status=400)
+            return Response({"estado": ["Estado inválido."]}, status=400)
 
         factura = self.get_object()
         if nuevo_estado == TesoreriaFactura.ESTADO_ACEPTADA and not (factura.link_pdf and factura.link_xml):
