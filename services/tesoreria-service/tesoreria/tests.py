@@ -583,7 +583,6 @@ class TesoreriaContraparteRelacionTests(TestCase):
         self.assertEqual(response2.data["contraparte_relacion_nombre"], "Juan Perez")
 
     def test_filtro_por_contraparte(self):
-        from .models import TesoreriaContraparteRelacion
 
         TesoreriaContraparteRelacion.objects.create(
             contraparte=self.empresa, contraparte_relacion=self.representante, tipo_relacion="REP LEGAL"
