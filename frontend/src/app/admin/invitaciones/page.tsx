@@ -45,6 +45,13 @@ import {
   revokeMagicLink,
 } from "@/lib/iam";
 import { listKyc } from "@/lib/pld";
+import {
+  createTicketProveedor,
+  listContrapartes,
+  listTicketsProveedor,
+  revocarTicketProveedor,
+  TesoreriaTicketProveedor,
+} from "@/lib/tesoreria";
 
 // "Invitaciones" (unifica lo que antes eran dos pantallas separadas,
 // Magic Links + IamInvitation - decision de producto 10/Ago/2026): dos
@@ -69,7 +76,6 @@ export default function InvitacionesPage() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
         <Tab icon={<Link2 size={16} strokeWidth={1.5} />} iconPosition="start" label="Temporales" />
         <Tab icon={<UserPlus size={16} strokeWidth={1.5} />} iconPosition="start" label="Colaboradores" />
-        
       </Tabs>
 
       <Box role="tabpanel" hidden={tab !== 0}>
@@ -89,7 +95,18 @@ export default function InvitacionesPage() {
 // input libre en pantalla invita a valores inconsistentes/feos, ej.
 // "PLD_KYC" vs "pld-kyc" vs "kyc"). Agregar un tipo nuevo aqui cuando otro
 // modulo empiece a usar Magic Links (ver iam/models.py, IamMagicLink).
-const RECURSO_TIPO_OPTIONS = [{ value: "pld_kyc", label: "Expediente KYC (PLD)" }] as const;
+// "tesoreria_proveedor" (27/Ago/2026, pedido de Mariana: "las invitaciones
+// en admin tambien debe poder [generar] invitacion para subir facturas de
+// proveedores, igual que pld va a mandar a una pantalla publica") - a
+// diferencia de "pld_kyc" (que hoy solo etiqueta un IamMagicLink real, ver
+// docstring de esta pantalla), este SI dispara un mecanismo distinto por
+// dentro: un TesoreriaTicketProveedor anonimo (sin sesion, con reCAPTCHA -
+// ver handleGenerar), no un Magic Link. Mismo formulario, mismo boton
+// "Generar", el usuario no necesita saber la diferencia.
+const RECURSO_TIPO_OPTIONS = [
+  { value: "pld_kyc", label: "Expediente KYC (PLD)" },
+  { value: "tesoreria_proveedor", label: "Factura de proveedor (Tesorería)" },
+] as const;
 
 const ESTADO_LLENADO_LABELS: Record<string, string> = {
   PENDIENTE: "Pendiente",
@@ -114,6 +131,11 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ultimoGenerado, setUltimoGenerado] = useState<IamMagicLink | null>(null);
+  // El ticket de proveedor no expone un link mostrable en pantalla (se
+  // manda por correo real, ver TesoreriaTicketProveedorViewSet.create) -
+  // solo se confirma que se genero, distinto del Magic Link de arriba
+  // (que si muestra el link en modo dev).
+  const [ultimoProveedorOk, setUltimoProveedorOk] = useState(false);
 
   // Apodos de recurso_id por tipo, para no mostrar el id crudo (ej. "063dc27e")
   // ni en el selector ni en la tabla de abajo - ver recursoNombre(). Se
@@ -124,6 +146,11 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
   const recursoOpciones = catalogoRecursos[recursoTipo] ?? [];
 
   const [links, setLinks] = useState<IamMagicLink[]>([]);
+  // Tickets de proveedor (27/Ago/2026) - mecanismo distinto (anonimo, sin
+  // sesion) pero se muestran en la MISMA tabla que los Magic Links, ver
+  // `filas` mas abajo - una sola lista para el analista, aunque por dentro
+  // sean 2 backends distintos.
+  const [ticketsProveedor, setTicketsProveedor] = useState<TesoreriaTicketProveedor[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Carga masiva por CSV (invitacion masiva, checklist Fase 1) - un correo
@@ -141,8 +168,11 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
 
   function refrescarLista() {
     setLoading(true);
-    listMagicLinks()
-      .then(setLinks)
+    Promise.all([listMagicLinks(), listTicketsProveedor()])
+      .then(([magicLinks, proveedores]) => {
+        setLinks(magicLinks);
+        setTicketsProveedor(proveedores);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -189,15 +219,48 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
         .catch((err) => setError(err instanceof Error ? err.message : "Error al cargar expedientes KYC"))
         .finally(() => setCargandoRecursos(false));
     }
-  }, [recursoTipo, catalogoRecursos.pld_kyc]);
+    // Catalogo de proveedores (27/Ago/2026) - mismo criterio que pld_kyc
+    // arriba, solo que la etiqueta viene de TesoreriaContraparte.razon_social.
+    if (recursoTipo === "tesoreria_proveedor" && !catalogoRecursos.tesoreria_proveedor) {
+      setCargandoRecursos(true);
+      listContrapartes(undefined, "proveedor")
+        .then((proveedores) =>
+          setCatalogoRecursos((prev) => ({
+            ...prev,
+            tesoreria_proveedor: proveedores.map((p) => ({ value: p.id_contraparte, label: p.razon_social })),
+          }))
+        )
+        .catch((err) => setError(err instanceof Error ? err.message : "Error al cargar proveedores"))
+        .finally(() => setCargandoRecursos(false));
+    }
+  }, [recursoTipo, catalogoRecursos.pld_kyc, catalogoRecursos.tesoreria_proveedor]);
+
+  // Etiqueta del 3er selector - "Expediente" para PLD, "Proveedor" para
+  // Tesoreria, generico mientras no se ha elegido nada.
+  const recursoLabelActual = recursoTipo === "tesoreria_proveedor" ? "Proveedor" : "Expediente";
 
   async function handleGenerar(e: React.FormEvent) {
     e.preventDefault();
     setCreando(true);
     setError(null);
     try {
-      const nuevo = await createMagicLink({ email, recursoTipo, recursoId, actorUserId: session?.user_id });
-      setUltimoGenerado(nuevo);
+      if (recursoTipo === "tesoreria_proveedor") {
+        // Ticket anonimo de proveedor (sin sesion) - mecanismo distinto al
+        // Magic Link de abajo, ver docstring de RECURSO_TIPO_OPTIONS.
+        await createTicketProveedor({
+          contraparte: recursoId,
+          email,
+          expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+          maxUses: 1,
+          issuedBy: session?.user_id ?? "",
+        });
+        setUltimoGenerado(null);
+        setUltimoProveedorOk(true);
+      } else {
+        const nuevo = await createMagicLink({ email, recursoTipo, recursoId, actorUserId: session?.user_id });
+        setUltimoGenerado(nuevo);
+        setUltimoProveedorOk(false);
+      }
       setEmail("");
       setRecursoTipo("");
       setRecursoId("");
@@ -261,6 +324,24 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al revocar");
     }
+  }
+
+  async function handleRevocarProveedor(idTicket: string) {
+    try {
+      await revocarTicketProveedor(idTicket, session?.user_id);
+      refrescarLista();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al revocar");
+    }
+  }
+
+  // Mismo vocabulario/criterio que estadoDe (arriba) - TesoreriaTicketProveedor
+  // trae los mismos 4 campos (revoked_at/expires_at/uses_count/max_uses).
+  function estadoTicketProveedor(t: TesoreriaTicketProveedor): { label: string; color: "success" | "default" | "error" | "warning" } {
+    if (t.revoked_at) return { label: "Revocado", color: "error" };
+    if (new Date(t.expires_at) < new Date()) return { label: "Expirado", color: "warning" };
+    if (t.uses_count >= t.max_uses) return { label: "Aceptado", color: "success" };
+    return { label: "Pendiente", color: "default" };
   }
 
   // Mismo vocabulario que los otros 3 tipos (pedido explicito 14/Ago/2026:
@@ -349,10 +430,10 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ flex: 1, minWidth: 200 }} disabled={!recursoTipo || cargandoRecursos}>
-            <InputLabel id="recurso-id-label">Expediente</InputLabel>
+            <InputLabel id="recurso-id-label">{recursoLabelActual}</InputLabel>
             <Select
               labelId="recurso-id-label"
-              label="Expediente"
+              label={recursoLabelActual}
               value={recursoId}
               onChange={(e) => setRecursoId(e.target.value)}
             >
@@ -362,7 +443,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
                 </MenuItem>
               ) : recursoOpciones.length === 0 ? (
                 <MenuItem value="" disabled>
-                  Sin expedientes disponibles
+                  Sin {recursoLabelActual.toLowerCase()}s disponibles
                 </MenuItem>
               ) : (
                 recursoOpciones.map((o) => (
@@ -396,6 +477,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
             </Typography>
           </Alert>
         )}
+        {ultimoProveedorOk && <Alert severity="success" sx={{ mt: 2 }}>Enlace generado y enviado por correo.</Alert>}
       </Paper>
       )}
 
@@ -523,16 +605,17 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
                     <CircularProgress size={24} />
                   </TableCell>
                 </TableRow>
-              ) : links.length === 0 ? (
+              ) : links.length === 0 && ticketsProveedor.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
-                      Sin Magic Links generados todavía.
+                      Sin enlaces generados todavía.
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                links.map((link) => {
+                <>
+                {links.map((link) => {
                   const estado = estadoDe(link);
                   return (
                     <TableRow key={link.magic_link_id} hover>
@@ -568,7 +651,45 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
                       </TableCell>
                     </TableRow>
                   );
-                })
+                })}
+                {ticketsProveedor.map((t) => {
+                  const estado = estadoTicketProveedor(t);
+                  return (
+                    <TableRow key={`prov-${t.id_ticket}`} hover>
+                      <TableCell>{t.email}</TableCell>
+                      <TableCell>Factura de proveedor (Tesorería) — {t.contraparte_nombre}</TableCell>
+                      <TableCell>{new Date(t.issued_at).toLocaleString("es-MX")}</TableCell>
+                      <TableCell>{new Date(t.expires_at).toLocaleString("es-MX")}</TableCell>
+                      <TableCell>
+                        {t.uses_count}/{t.max_uses}
+                      </TableCell>
+                      <TableCell>
+                        <Stack spacing={0.25}>
+                          <Chip size="small" label={estado.label} color={estado.color} sx={{ width: "fit-content" }} />
+                          {estado.label === "Pendiente" && (
+                            <Typography variant="caption" color="text.secondary">
+                              Queda {tiempoRestante(t.expires_at)}
+                            </Typography>
+                          )}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">
+                        {estado.label === "Pendiente" && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            onClick={() => handleRevocarProveedor(t.id_ticket)}
+                            disabled={!puedeEditar}
+                          >
+                            Revocar
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                </>
               )}
             </TableBody>
           </Table>
@@ -944,3 +1065,4 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
     </>
   );
 }
+

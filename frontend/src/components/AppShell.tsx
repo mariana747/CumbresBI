@@ -314,7 +314,18 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // modulos, revivir este bloque (ver git blame) en vez de reinventarlo -
   // el hallazgo original que lo agrego sigue documentado en
   // docs/CumbresBI_estado.md.
-  items.push({ label: "MiCumbres (portal empleado)", href: "/micumbres", icon: UserRound, enabled: true });
+  // "Tickets de reembolso" (27/Ago/2026, pantalla PROVISIONAL - ver
+  // memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente") - visible para
+  // cualquier sesion real (self-service, sin exigir perm_key alguno,
+  // mismo criterio que el resto de MiCumbres) mientras no exista el
+  // portal MiCumbres/RRHH real (Fase 5, sin arrancar).
+  items.push({
+    label: "MiCumbres (portal empleado)",
+    href: "/micumbres",
+    icon: UserRound,
+    enabled: true,
+    children: [{ label: "Tickets de reembolso", href: "/micumbres/tickets", icon: Receipt }],
+  });
   return items;
 }
 

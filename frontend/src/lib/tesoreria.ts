@@ -2123,3 +2123,109 @@ export async function enviarReporteDiario(
   }
   return response.json();
 }
+
+// Ticket publico de proveedor (27/Ago/2026) - mismo patron que
+// lib/pld.ts (PldTicketCliente), independiente. El proveedor sube su
+// factura sin login (formulario /tesoreria-ticket/[token], reCAPTCHA v2).
+// Contrato: services/tesoreria-service/tesoreria/views.py::TesoreriaTicketProveedorViewSet.
+export interface TesoreriaTicketProveedor {
+  id_ticket: string;
+  contraparte: string;
+  contraparte_nombre: string;
+  email: string;
+  issued_at: string;
+  issued_by: string;
+  expires_at: string;
+  max_uses: number;
+  uses_count: number;
+  first_used_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export async function listTicketsProveedor(search?: string): Promise<TesoreriaTicketProveedor[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/?${params.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Regresa el token en claro UNA sola vez (nunca se puede recuperar
+// despues) - mismo criterio que createTicketCliente en lib/pld.ts.
+export async function createTicketProveedor(params: {
+  contraparte: string;
+  email: string;
+  expiresAt: string;
+  maxUses: number;
+  issuedBy: string;
+}): Promise<TesoreriaTicketProveedor & { token: string; correo_enviado: boolean }> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contraparte: params.contraparte,
+      email: params.email,
+      expires_at: params.expiresAt,
+      max_uses: params.maxUses,
+      issued_by: params.issuedBy,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function revocarTicketProveedor(idTicket: string, actorUserId?: string): Promise<TesoreriaTicketProveedor> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/${idTicket}/revocar/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor_user_id: actorUserId }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Publicos (sin sesion) - los llama /tesoreria-ticket/[token]/page.tsx.
+export async function validarTicketProveedor(token: string): Promise<TesoreriaTicketProveedor> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/validar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function subirFacturaTicketProveedor(params: {
+  token: string;
+  recaptchaToken: string;
+  file: File;
+}): Promise<{ detail: string }> {
+  const formData = new FormData();
+  formData.append("token", params.token);
+  formData.append("recaptcha_token", params.recaptchaToken);
+  formData.append("file", params.file);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/subir_factura/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}

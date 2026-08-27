@@ -19,11 +19,11 @@ const SESSION_COOKIE_NAME = "cumbresbi_session";
 
 // Rutas que NO requieren sesion - /login existe solo como fallback para el
 // caso de error (?error=oidc) o una cookie invalida detectada del lado del
-// cliente (ver AppShell.tsx); /magic-link y /pld-ticket son flujos de
-// acceso externo (proveedores/clientes de KYC), no pasan por Google en
-// absoluto - un cliente externo canjeando su ticket nunca tiene cuenta de
-// Workspace.
-const PUBLIC_PATH_PREFIXES = ["/login", "/magic-link", "/pld-ticket"];
+// cliente (ver AppShell.tsx); /magic-link, /pld-ticket y /tesoreria-ticket
+// son flujos de acceso externo (proveedores/clientes de KYC), no pasan por
+// Google en absoluto - un cliente externo canjeando su ticket nunca tiene
+// cuenta de Workspace.
+const PUBLIC_PATH_PREFIXES = ["/login", "/magic-link", "/pld-ticket", "/tesoreria-ticket"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

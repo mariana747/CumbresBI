@@ -60,6 +60,7 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   "compras.cotizacion": "Cotización",
   "compras.factura_proveedor": "Factura / CFDI de proveedor",
   "materiales.presupuesto": "Presupuesto",
+  "tesoreria.ticket_gasto": "Ticket / comprobante de gasto",
   generic: "Genérico (sin tipo esperado)",
 };
 
