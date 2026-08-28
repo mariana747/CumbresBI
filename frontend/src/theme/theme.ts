@@ -83,6 +83,21 @@ export const theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
     },
+    // Dialog mas ancho en TODA la app (28/Ago/2026, pedido explicito de
+    // Mariana - probamos primero solo celular, luego pantalla completa
+    // tambien en escritorio, y terminamos aqui: "no toda la pantalla como
+    // el dialog de antes pero mas ancho") - un solo lugar en vez de tocar
+    // cada uno de los ~25 <Dialog> del proyecto. Gana sobre el maxWidth
+    // ("sm"/"md"/etc.) que cada pantalla ya pasa por prop, sin tocar alto
+    // ni bordes - sigue centrado y flotante como antes, solo mas ancho.
+    MuiDialog: {
+      styleOverrides: {
+        paper: {
+          width: "100%",
+          maxWidth: "900px",
+        },
+      },
+    },
   },
 });
 

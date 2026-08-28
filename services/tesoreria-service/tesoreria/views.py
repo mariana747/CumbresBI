@@ -205,11 +205,20 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         return super().get_permissions()
 
     def get_queryset(self):
-        return (
+        # Filtro ?contraparte=<id> (28/Ago/2026) - misma relacion 1:N que ya
+        # existe en el modelo (una contraparte tiene varios contratos), usado
+        # ahora desde la pantalla de Contrapartes para listar/crear los
+        # contratos de una contraparte en particular. Mismo patron que
+        # TesoreriaFacturaViewSet.get_queryset.
+        queryset = (
             TesoreriaContrato.objects.for_scope(self.request.effective_scope)
             .select_related("contraparte")
             .order_by("-created_at")
         )
+        contraparte_id = self.request.query_params.get("contraparte")
+        if contraparte_id:
+            queryset = queryset.filter(contraparte_id=contraparte_id)
+        return queryset
 
     def perform_create(self, serializer):
         # id_contrato = "{sociedad}-{id_contraparte}-{consecutivo 3 digitos}"

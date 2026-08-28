@@ -34,13 +34,13 @@ import {
   TableRow,
   Tabs,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import {
   Banknote,
   Check,
   Copy,
+  Eye,
   FileCheck2,
   Link2,
   MoreVertical,
@@ -141,6 +141,11 @@ export default function TesoreriaFlujosPage() {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFlujo | null>(null);
+  // Ver vs. Editar (28/Ago/2026, pedido explicito de Mariana: mismo
+  // criterio que Contrapartes/Contratos - "Ver" visible siempre, "Editar"
+  // se mueve al menu de tres puntos) - mismo dialogo/formulario, con todo
+  // deshabilitado y sin boton de Guardar cuando soloLectura es true.
+  const [soloLectura, setSoloLectura] = useState(false);
   const [form, setForm] = useState(FORM_VACIO);
   const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -164,10 +169,10 @@ export default function TesoreriaFlujosPage() {
   // coincidir con el mostrado aqui (mismo riesgo ya documentado y aceptado
   // en TesoreriaContratoViewSet.perform_create).
   const [idFlujoPrevio, setIdFlujoPrevio] = useState("");
-  // Menu compacto de acciones por fila (25/Ago/2026, "se ven muy llenas") -
-  // solo Editar queda como icono suelto, el resto (Vincular/Aprobar/
-  // Rechazar/Registrar pago) vive detras de un solo boton "⋮" para no
-  // amontonar hasta 5 iconos por fila.
+  // Menu compacto de acciones por fila (25/Ago/2026, "se ven muy llenas";
+  // actualizado 28/Ago/2026 - "Ver" queda como icono suelto en vez de
+  // Editar, que se movio adentro del menu junto con Vincular/Aprobar/
+  // Rechazar/Registrar pago) para no amontonar hasta 5 iconos por fila.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuFlujo, setMenuFlujo] = useState<TesoreriaFlujo | null>(null);
 
@@ -301,6 +306,7 @@ export default function TesoreriaFlujosPage() {
 
   function abrirAlta() {
     setEditing(null);
+    setSoloLectura(false);
     setForm(FORM_VACIO);
     setTab("Detalles");
     setFormError(null);
@@ -311,8 +317,9 @@ export default function TesoreriaFlujosPage() {
     setDialogOpen(true);
   }
 
-  function abrirEdicion(f: TesoreriaFlujo) {
+  function abrirEdicion(f: TesoreriaFlujo, verSolo = false) {
     setEditing(f);
+    setSoloLectura(verSolo);
     setForm({
       contrato: f.contrato || "",
       cuenta: f.cuenta,
@@ -347,6 +354,7 @@ export default function TesoreriaFlujosPage() {
   // crea uno nuevo, no se edita el original).
   function abrirDuplicado(f: TesoreriaFlujo) {
     setEditing(null);
+    setSoloLectura(false);
     setForm({
       contrato: f.contrato || "",
       cuenta: f.cuenta,
@@ -653,18 +661,9 @@ export default function TesoreriaFlujosPage() {
                     </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                        <Tooltip title="Editar">
-                          <span>
-                            <IconButton
-                              size="small"
-                              aria-label="Editar"
-                              onClick={() => abrirEdicion(f)}
-                              disabled={!puedeEditar}
-                            >
-                              <Pencil size={14} strokeWidth={1.5} />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
+                        <IconButton size="small" aria-label="Ver" onClick={() => abrirEdicion(f, true)}>
+                          <Eye size={14} strokeWidth={1.5} />
+                        </IconButton>
                         <IconButton
                           size="small"
                           aria-label="Más acciones"
@@ -708,13 +707,9 @@ export default function TesoreriaFlujosPage() {
                     </Typography>
                   </Stack>
                   <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                    <Tooltip title="Editar">
-                      <span>
-                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
-                          <Pencil size={14} strokeWidth={1.5} />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
+                    <IconButton size="small" aria-label="Ver" onClick={() => abrirEdicion(f, true)}>
+                      <Eye size={14} strokeWidth={1.5} />
+                    </IconButton>
                     <IconButton
                       size="small"
                       aria-label="Más acciones"
@@ -779,7 +774,7 @@ export default function TesoreriaFlujosPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.id_flujo}` : "Nuevo flujo"}
+          {soloLectura ? `Ver ${editing?.id_flujo}` : editing ? `Editar ${editing.id_flujo}` : "Nuevo flujo"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -802,7 +797,7 @@ export default function TesoreriaFlujosPage() {
           )}
 
           {tab === "Detalles" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
                 label="ID de flujo"
@@ -955,7 +950,7 @@ export default function TesoreriaFlujosPage() {
           )}
 
           {tab === "Referencias" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
                 label="ID de empleado"
@@ -981,7 +976,7 @@ export default function TesoreriaFlujosPage() {
           )}
 
           {tab === "CFDI" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <Typography variant="caption" color="text.secondary">
                 Factura, complemento de pago y recibo de nómina se vinculan {editing ? "" : "después de crear el flujo, "}
                 con «Vincular CFDI» en la tabla (Facturación CFDI todavía no tiene catálogo de
@@ -993,6 +988,7 @@ export default function TesoreriaFlujosPage() {
                 description="El proveedor debe timbrar un complemento (REP) además de la factura"
                 checked={form.requiereComplemento}
                 onChange={(checked) => setForm({ ...form, requiereComplemento: checked })}
+                disabled={soloLectura}
               />
               <TextField
                 size="small"
@@ -1005,7 +1001,7 @@ export default function TesoreriaFlujosPage() {
           )}
 
           {tab === "Control" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
                 label="Comprobación asignada a"
@@ -1019,6 +1015,7 @@ export default function TesoreriaFlujosPage() {
                 description="Marca que ya se revisó y puede pasar a Aprobar / Rechazar"
                 checked={form.aprobacionLista}
                 onChange={(checked) => setForm({ ...form, aprobacionLista: checked })}
+                disabled={soloLectura}
               />
               <TextField
                 size="small"
@@ -1102,10 +1099,12 @@ export default function TesoreriaFlujosPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={handleGuardar} disabled={saving}>
-            {saving ? <CircularProgress size={16} /> : "Guardar"}
-          </Button>
+          <Button onClick={() => setDialogOpen(false)}>{soloLectura ? "Cerrar" : "Cancelar"}</Button>
+          {!soloLectura && (
+            <Button variant="contained" onClick={handleGuardar} disabled={saving}>
+              {saving ? <CircularProgress size={16} /> : "Guardar"}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -1202,6 +1201,19 @@ export default function TesoreriaFlujosPage() {
         }}
       >
         {menuFlujo && [
+          <MenuItem
+            key="editar"
+            disabled={!puedeEditar}
+            onClick={() => {
+              abrirEdicion(menuFlujo);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Pencil size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Editar</ListItemText>
+          </MenuItem>,
           <MenuItem
             key="duplicar"
             disabled={!puedeCrear}

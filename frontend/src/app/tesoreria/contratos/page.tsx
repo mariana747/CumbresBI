@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Alert,
   Box,
@@ -17,6 +18,9 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -32,7 +36,18 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CreditCard, FilePenLine, Pencil, Plus, Search, ShieldCheck, Trash2, X as CloseIcon } from "lucide-react";
+import {
+  CreditCard,
+  Eye,
+  FilePenLine,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Search,
+  ShieldCheck,
+  Trash2,
+  X as CloseIcon,
+} from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -113,19 +128,45 @@ type TabContrato = (typeof TABS_CONTRATO)[number];
 // genera flujos -> facturas ligadas" (notas originales de Tesoreria). Es
 // el primer recurso con alcance real por sociedad (el backend ya filtra
 // por sociedad_rfcs del usuario, ver tesoreria/models.py).
+// useSearchParams() obliga a envolver en Suspense para el build de
+// produccion (mismo motivo ya documentado en admin/usuarios/page.tsx) - lo
+// necesitamos para el deep link "ir a este contrato" (28/Ago/2026, pedido
+// explicito de Mariana) desde el dialogo de Contratos en Contrapartes.
 export default function TesoreriaContratosPage() {
+  return (
+    <Suspense fallback={null}>
+      <TesoreriaContratosPageContent />
+    </Suspense>
+  );
+}
+
+function TesoreriaContratosPageContent() {
+  const searchParams = useSearchParams();
+  const idContratoDeepLink = searchParams.get("id_contrato");
   const [session, setSession] = useState<SessionUser | null>(null);
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [contrapartes, setContrapartes] = useState<TesoreriaContraparte[]>([]);
   const [search, setSearch] = useState("");
   const [filtroSociedad, setFiltroSociedad] = useState("");
+  // Precargado desde ?contraparte=<id> (28/Ago/2026, pedido explicito de
+  // Mariana: "se te redirige a los contratos solo pertenecientes a esa
+  // contraparte, no se mostraran lo de otra contraparte, recuerda va ser
+  // por empresa y por proyecto") - mismo criterio que filtroSociedad,
+  // filtro del lado del cliente sobre la lista completa.
+  const [filtroContraparte, setFiltroContraparte] = useState(searchParams.get("contraparte") || "");
+  const [filtroProyecto, setFiltroProyecto] = useState("");
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaContrato | null>(null);
+  // Ver vs. Editar (28/Ago/2026, pedido explicito de Mariana: mismo
+  // criterio que Contrapartes/Flujos - "Ver" visible siempre, "Editar" vive
+  // en el menu de tres puntos) - mismo dialogo/formulario, con todo
+  // deshabilitado y sin boton de Guardar cuando soloLectura es true.
+  const [soloLectura, setSoloLectura] = useState(false);
   const [form, setForm] = useState(FORM_VACIO);
   const [tab, setTab] = useState<TabContrato>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -153,6 +194,11 @@ export default function TesoreriaContratosPage() {
   const [documentosSeleccionados, setDocumentosSeleccionados] = useState<number[]>([]);
   const [recordatorioMensaje, setRecordatorioMensaje] = useState<string | null>(null);
 
+  // Menu compacto de acciones por fila (28/Ago/2026, mismo patron que
+  // Flujos/Contrapartes).
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [menuContrato, setMenuContrato] = useState<TesoreriaContrato | null>(null);
+
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
@@ -176,6 +222,26 @@ export default function TesoreriaContratosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
+  // Deep link "ir a este contrato" (?id_contrato=..., 28/Ago/2026, pedido
+  // explicito de Mariana desde el dialogo de Contratos en Contrapartes) -
+  // abre la edicion de ese contrato en cuanto llega en la URL. yaAbierto
+  // evita reabrirlo solo si el usuario lo cierra a mano (sin esto,
+  // cualquier refresh() posterior a cerrar el dialogo lo volveria a abrir
+  // porque el query param sigue en la URL).
+  const deepLinkYaAbierto = useRef(false);
+  useEffect(() => {
+    if (deepLinkYaAbierto.current || !idContratoDeepLink || contratos.length === 0) return;
+    const contrato = contratos.find((c) => c.id_contrato === idContratoDeepLink);
+    if (contrato) {
+      deepLinkYaAbierto.current = true;
+      // Abre en modo "Ver" (28/Ago/2026) - el deep link viene de un boton
+      // de solo lectura ("Ir a este contrato" en Contrapartes); si quiere
+      // editar, usa el menu de tres puntos desde aqui.
+      abrirEdicion(contrato, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contratos, idContratoDeepLink]);
+
   // Filtros de sociedad y fecha de generacion (25/Ago/2026) - del lado
   // del cliente: listContratos solo soporta ?search= en el backend (ver
   // TesoreriaContratoViewSet.search_fields), no hay parametro de sociedad
@@ -183,14 +249,17 @@ export default function TesoreriaContratosPage() {
   const contratosFiltrados = useMemo(() => {
     return contratos.filter((c) => {
       if (filtroSociedad && c.sociedad !== filtroSociedad) return false;
+      if (filtroContraparte && c.contraparte !== filtroContraparte) return false;
+      if (filtroProyecto && !(c.proyecto || "").toLowerCase().includes(filtroProyecto.toLowerCase())) return false;
       if (filtroFechaDesde && (!c.fecha_generacion || c.fecha_generacion < filtroFechaDesde)) return false;
       if (filtroFechaHasta && (!c.fecha_generacion || c.fecha_generacion > filtroFechaHasta)) return false;
       return true;
     });
-  }, [contratos, filtroSociedad, filtroFechaDesde, filtroFechaHasta]);
+  }, [contratos, filtroSociedad, filtroContraparte, filtroProyecto, filtroFechaDesde, filtroFechaHasta]);
 
   function abrirAlta() {
     setEditing(null);
+    setSoloLectura(false);
     setForm(FORM_VACIO);
     setTab("Detalles");
     setFormError(null);
@@ -278,8 +347,9 @@ export default function TesoreriaContratosPage() {
     }
   }
 
-  function abrirEdicion(c: TesoreriaContrato) {
+  function abrirEdicion(c: TesoreriaContrato, verSolo = false) {
     setEditing(c);
+    setSoloLectura(verSolo);
     setTab("Detalles");
     setDocumentos([]);
     setRecordatorioMensaje(null);
@@ -439,6 +509,31 @@ export default function TesoreriaContratosPage() {
                 ))}
               </Select>
             </FormControl>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="filtro-contraparte-label">Filtrar por contraparte</InputLabel>
+              <Select
+                labelId="filtro-contraparte-label"
+                label="Filtrar por contraparte"
+                value={filtroContraparte}
+                onChange={(e) => setFiltroContraparte(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Todas las contrapartes</em>
+                </MenuItem>
+                {contrapartes.map((c) => (
+                  <MenuItem key={c.id_contraparte} value={c.id_contraparte}>
+                    {c.razon_social}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              label="Filtrar por proyecto"
+              value={filtroProyecto}
+              onChange={(e) => setFiltroProyecto(e.target.value)}
+              sx={{ minWidth: 160 }}
+            />
             <TextField
               size="small"
               type="date"
@@ -516,9 +611,21 @@ export default function TesoreriaContratosPage() {
                       )}
                     </TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
+                      <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                        <IconButton size="small" aria-label="Ver" onClick={() => abrirEdicion(c, true)}>
+                          <Eye size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          aria-label="Más acciones"
+                          onClick={(e) => {
+                            setMenuAnchor(e.currentTarget);
+                            setMenuContrato(c);
+                          }}
+                        >
+                          <MoreVertical size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </Stack>
                     </TableCell>
                   </TableRow>
                 ))
@@ -551,8 +658,18 @@ export default function TesoreriaContratosPage() {
                     </Typography>
                   </Stack>
                   <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
-                      <Pencil size={14} strokeWidth={1.5} />
+                    <IconButton size="small" aria-label="Ver" onClick={() => abrirEdicion(c, true)}>
+                      <Eye size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      aria-label="Más acciones"
+                      onClick={(e) => {
+                        setMenuAnchor(e.currentTarget);
+                        setMenuContrato(c);
+                      }}
+                    >
+                      <MoreVertical size={14} strokeWidth={1.5} />
                     </IconButton>
                   </Stack>
                 </Stack>
@@ -581,9 +698,36 @@ export default function TesoreriaContratosPage() {
         </Stack>
       </Paper>
 
+      {/* Menu compacto de acciones por fila - un solo lugar para tabla y
+      tarjetas (ver setMenuAnchor/setMenuContrato arriba). */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor}
+        onClose={() => {
+          setMenuAnchor(null);
+          setMenuContrato(null);
+        }}
+      >
+        {menuContrato && [
+          <MenuItem
+            key="editar"
+            disabled={!puedeEditar}
+            onClick={() => {
+              abrirEdicion(menuContrato);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Pencil size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Editar</ListItemText>
+          </MenuItem>,
+        ]}
+      </Menu>
+
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.id_contrato}` : "Nuevo contrato"}
+          {soloLectura ? `Ver ${editing?.id_contrato}` : editing ? `Editar ${editing.id_contrato}` : "Nuevo contrato"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -606,7 +750,7 @@ export default function TesoreriaContratosPage() {
           )}
 
           {tab === "Detalles" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
                 label="ID de contrato"
@@ -645,6 +789,7 @@ export default function TesoreriaContratosPage() {
                   label="Tipo"
                   value={form.tipo}
                   onChange={(e) => setForm({ ...form, tipo: e.target.value as TesoreriaContratoTipo })}
+                  disabled={soloLectura}
                 >
                   <MenuItem value="INTERNO">Interno</MenuItem>
                   <MenuItem value="EXTERNO">Externo</MenuItem>
@@ -709,7 +854,7 @@ export default function TesoreriaContratosPage() {
           )}
 
           {tab === "Pago" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <FormControl size="small" fullWidth>
                 <InputLabel id="tipo-pago-label">Tipo de pago (opcional)</InputLabel>
                 <Select
@@ -717,6 +862,7 @@ export default function TesoreriaContratosPage() {
                   label="Tipo de pago (opcional)"
                   value={form.tipoPago}
                   onChange={(e) => setForm({ ...form, tipoPago: e.target.value as TesoreriaTipoPago })}
+                  disabled={soloLectura}
                 >
                   <MenuItem value="">
                     <em>Sin especificar</em>
@@ -733,6 +879,7 @@ export default function TesoreriaContratosPage() {
                   label="Periodicidad"
                   value={form.frecuencia}
                   onChange={(e) => setForm({ ...form, frecuencia: e.target.value as TesoreriaFrecuencia })}
+                  disabled={soloLectura}
                 >
                   <MenuItem value="">
                     <em>Sin especificar</em>
@@ -776,6 +923,7 @@ export default function TesoreriaContratosPage() {
                   label="Moneda"
                   value={form.moneda}
                   onChange={(e) => setForm({ ...form, moneda: e.target.value as TesoreriaMoneda })}
+                  disabled={soloLectura}
                 >
                   <MenuItem value="MXP">MXP</MenuItem>
                   <MenuItem value="USD">USD</MenuItem>
@@ -817,12 +965,13 @@ export default function TesoreriaContratosPage() {
                 description="La contraparte debe emitir CFDI por este contrato"
                 checked={form.requiereFactura}
                 onChange={(checked) => setForm({ ...form, requiereFactura: checked })}
+                disabled={soloLectura}
               />
             </Stack>
           )}
 
           {tab === "Enlaces" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
                 label="Link carpeta"
@@ -850,7 +999,7 @@ export default function TesoreriaContratosPage() {
           )}
 
           {tab === "Control" && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <FormControl size="small" fullWidth>
                 <InputLabel id="status-label">Estado</InputLabel>
                 <Select
@@ -858,6 +1007,7 @@ export default function TesoreriaContratosPage() {
                   label="Estado"
                   value={form.status}
                   onChange={(e) => setForm({ ...form, status: e.target.value as TesoreriaContratoStatus })}
+                  disabled={soloLectura}
                 >
                   <MenuItem value="ACTIVO">Activo</MenuItem>
                   <MenuItem value="INACTIVO">Inactivo</MenuItem>
@@ -876,6 +1026,7 @@ export default function TesoreriaContratosPage() {
                 description="El contrato ya fue autorizado internamente"
                 checked={form.autorizacion}
                 onChange={(checked) => setForm({ ...form, autorizacion: checked })}
+                disabled={soloLectura}
               />
               {editing && (
                 <>
@@ -909,7 +1060,7 @@ export default function TesoreriaContratosPage() {
           )}
 
           {tab === "Documentos" && editing && (
-            <Stack spacing={2}>
+            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <Typography variant="body2" color="text.secondary">
                 Checklist de documentos que este contrato requiere para poder operarse (ej. póliza,
                 identificación del fiador). El cliente sube el archivo real por su cuenta, vía el enlace
@@ -918,13 +1069,14 @@ export default function TesoreriaContratosPage() {
               {documentosError && <Alert severity="error">{documentosError}</Alert>}
               {recordatorioMensaje && <Alert severity="success">{recordatorioMensaje}</Alert>}
               <Stack direction="row" spacing={1}>
-                <FormControl size="small" fullWidth disabled={!puedeCrear}>
+                <FormControl size="small" fullWidth disabled={!puedeCrear || soloLectura}>
                   <InputLabel id="nuevo-documento-label">Documento a agregar</InputLabel>
                   <Select
                     labelId="nuevo-documento-label"
                     label="Documento a agregar"
                     value={nuevoDocumentoNombre}
                     onChange={(e) => setNuevoDocumentoNombre(e.target.value as TesoreriaContratoDocumentoNombre)}
+                    disabled={!puedeCrear || soloLectura}
                   >
                     {CONTRATO_DOCUMENTO_NOMBRE_OPCIONES.map((opcion) => (
                       <MenuItem key={opcion.value} value={opcion.value}>
@@ -937,7 +1089,7 @@ export default function TesoreriaContratosPage() {
                   size="small"
                   variant="outlined"
                   onClick={handleAgregarDocumento}
-                  disabled={!puedeCrear || !nuevoDocumentoNombre}
+                  disabled={!puedeCrear || !nuevoDocumentoNombre || soloLectura}
                   sx={{ flexShrink: 0 }}
                 >
                   Agregar
@@ -948,7 +1100,7 @@ export default function TesoreriaContratosPage() {
                 variant="outlined"
                 color="warning"
                 onClick={handleEnviarRecordatorio}
-                disabled={!puedeEditar || enviandoRecordatorio || documentosSeleccionados.length === 0}
+                disabled={!puedeEditar || enviandoRecordatorio || documentosSeleccionados.length === 0 || soloLectura}
                 sx={{ alignSelf: "flex-start" }}
               >
                 {enviandoRecordatorio ? (
@@ -1026,7 +1178,7 @@ export default function TesoreriaContratosPage() {
                             size="small"
                             aria-label="Quitar del checklist"
                             onClick={() => handleBorrarDocumento(doc.id)}
-                            disabled={!puedeEditar}
+                            disabled={!puedeEditar || soloLectura}
                           >
                             <Trash2 size={14} strokeWidth={1.5} />
                           </IconButton>
@@ -1040,10 +1192,12 @@ export default function TesoreriaContratosPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={handleGuardar} disabled={saving}>
-            {saving ? <CircularProgress size={16} /> : "Guardar"}
-          </Button>
+          <Button onClick={() => setDialogOpen(false)}>{soloLectura ? "Cerrar" : "Cancelar"}</Button>
+          {!soloLectura && (
+            <Button variant="contained" onClick={handleGuardar} disabled={saving}>
+              {saving ? <CircularProgress size={16} /> : "Guardar"}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </AppShell>
