@@ -270,8 +270,8 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       enabled: true,
       children: [
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
-        { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine },
+        { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
         { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
         { label: "Reporte diario", href: "/tesoreria/reportes", icon: FileBarChart },
         { label: "Notas de crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
