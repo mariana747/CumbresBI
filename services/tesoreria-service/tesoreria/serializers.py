@@ -10,6 +10,7 @@ from .models import (
     TesoreriaContraparte,
     TesoreriaContraparteRelacion,
     TesoreriaContrato,
+    TesoreriaContratoDocumento,
     TesoreriaCorteEdc,
     TesoreriaCuenta,
     TesoreriaFactura,
@@ -35,6 +36,17 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
     valor que en el futuro debe referenciar pld_contrapartes_kyc.id_contraparte
     en vez de generar el suyo propio (ver pld/models.py, comentario de
     "dueno real: contrapartes-service")."""
+
+    # Declarado explicito (28/Ago/2026, bug encontrado en vivo) - el modelo
+    # tiene editable=False en este campo (para que Django no lo muestre en
+    # el admin/formularios automaticos), pero eso hace que ModelSerializer
+    # lo marque read_only SIN IMPORTAR lo que diga Meta.read_only_fields -
+    # el comentario de abajo (25/Ago/2026) decia que ya no era read_only,
+    # pero solo se habia quitado de esa lista, nunca se corrigio la causa
+    # real. Sin este override, el id que el frontend genera y muestra antes
+    # de guardar (ver docstring de abajo) se descartaba en silencio y el
+    # backend guardaba uno distinto (el default=_short_id del modelo).
+    id_contraparte = serializers.CharField(max_length=8, required=False)
 
     class Meta:
         model = TesoreriaContraparte
@@ -176,6 +188,35 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         read_only_fields = ["id_contrato", "created_at", "updated_at"]
+
+
+class TesoreriaContratoDocumentoSerializer(serializers.ModelSerializer):
+    """Un renglon del checklist de documentos requeridos de un contrato. 
+    `link_archivo`/`drive_file_id`
+    son de solo lectura - se llenan via la accion `subir_archivo`
+    (TesoreriaContratoDocumentoViewSet), mismo criterio que
+    TesoreriaFlujoSerializer con link_comprobante_banco."""
+
+    nombre_display = serializers.CharField(source="get_nombre_display", read_only=True)
+
+    class Meta:
+        model = TesoreriaContratoDocumento
+        fields = [
+            "id",
+            "contrato",
+            "nombre",
+            "nombre_display",
+            "obligatorio",
+            "recibido",
+            "link_archivo",
+            "drive_file_id",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "link_archivo", "drive_file_id", "created_at", "updated_at"]
 
 
 class TesoreriaFlujoSerializer(serializers.ModelSerializer):

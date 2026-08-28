@@ -1,8 +1,10 @@
+import datetime
 import logging
 
 import requests
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
+from django.db.models import ProtectedError
 from django.utils import timezone
 from cumbresbi_scope.permissions import require_permission
 from rest_framework.decorators import action
@@ -11,11 +13,16 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from . import recaptcha
 from .audit_utils import emitir_evento_auditoria
-from .mail_utils import enviar_correo_ticket_proveedor, enviar_factura, enviar_reporte_diario
+from .mail_utils import (
+    enviar_correo_documento_faltante,
+    enviar_correo_ticket_proveedor,
+    enviar_factura,
+    enviar_reporte_diario,
+)
 from .reportes import calcular_reporte_diario
 from .ticket_utils import generate_token, hash_token
 from .models import (
@@ -29,8 +36,10 @@ from .models import (
     TesoreriaContraparte,
     TesoreriaContraparteRelacion,
     TesoreriaContrato,
+    TesoreriaContratoDocumento,
     TesoreriaCorteEdc,
     TesoreriaCuenta,
+    TesoreriaDocumentoTicket,
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaNotaCredito,
@@ -48,6 +57,7 @@ from .serializers import (
     TesoreriaComplementoPagoSerializer,
     TesoreriaContraparteRelacionSerializer,
     TesoreriaContraparteSerializer,
+    TesoreriaContratoDocumentoSerializer,
     TesoreriaContratoSerializer,
     TesoreriaCorteEdcSerializer,
     TesoreriaCuentaSerializer,
@@ -120,6 +130,40 @@ class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet)
             queryset = queryset.filter(proveedor=True)
         return queryset
 
+    def perform_create(self, serializer):
+        # created_by/updated_by no se llenaban solos (encontrado en vivo
+        # 28/Ago/2026: "no aparece que yo cree esa contraparte") - el
+        # frontend nunca los mandaba y no habia perform_create que los
+        # completara. identity_user_id es "quien esta autenticado" para
+        # CUALQUIER usuario (no solo self-service, ver scope_utils.py en
+        # iam-service) - es el mismo dato que ya usa
+        # TesoreriaTicketReembolsoViewSet.perform_create para su created_by.
+        actor = self.request.effective_scope.identity_user_id
+        serializer.save(created_by=actor, updated_by=actor)
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.effective_scope.identity_user_id)
+
+    def destroy(self, request, *args, **kwargs):
+        """Una contraparte referenciada por Contratos/Facturas/Complementos/
+        Notas de credito (todos con on_delete=PROTECT hacia aca, ver
+        models.py) no se puede borrar - antes esto tronaba como 500 crudo
+        (ProtectedError sin capturar, encontrado en vivo 28/Ago/2026), ahora
+        regresa un 400 explicando que esta en uso."""
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError as exc:
+            nombres_modelos = sorted({obj.__class__.__name__ for obj in exc.protected_objects})
+            return Response(
+                {
+                    "detail": (
+                        "Esta contraparte no se puede borrar: está en uso en "
+                        f"{', '.join(nombres_modelos)}."
+                    )
+                },
+                status=400,
+            )
+
 
 class TesoreriaBancoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     """Catalogo de bancos (Banxico) - alimenta el selector de banco al
@@ -155,6 +199,11 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     filter_backends = [SearchFilter]
     search_fields = ["id_contrato", "sociedad"]
 
+    def get_permissions(self):
+        if self.action == "enviar_recordatorio_documentos":
+            return [require_permission("tesoreria.editar")()]
+        return super().get_permissions()
+
     def get_queryset(self):
         return (
             TesoreriaContrato.objects.for_scope(self.request.effective_scope)
@@ -181,9 +230,229 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         consecutivo = TesoreriaContrato.objects.filter(sociedad=sociedad, contraparte=contraparte).count() + 1
         serializer.save(id_contrato=f"{sociedad}-{contraparte.id_contraparte}-{consecutivo:03d}")
 
+    @action(detail=True, methods=["post"])
+    def enviar_recordatorio_documentos(self, request, pk=None):
+        """Avisa a la contraparte de los documentos que el analista
+        SELECCIONO del checklist (28/Ago/2026, pedido explicito de Mariana:
+        "se puede...seleccionar para picar en avisar a la contraparte de
+        los documentos pendientes" - no se manda automatico por todos los
+        pendientes, el analista elige cuales). UN correo por cada documento
+        seleccionado, nunca un solo correo agrupando varios (ver
+        enviar_correo_documento_faltante).
+
+        Recibe `documento_ids` (lista de ids de TesoreriaContratoDocumento)
+        en el body - 400 si viene vacia, si la contraparte no tiene email
+        capturado, o si algun id seleccionado ya no esta pendiente
+        (recibido=True) o no pertenece a este contrato."""
+        contrato = self.get_object()
+        email = contrato.contraparte.email
+        if not email:
+            return Response(
+                {"detail": "La contraparte de este contrato no tiene email registrado."}, status=400
+            )
+
+        documento_ids = request.data.get("documento_ids") or []
+        if not documento_ids:
+            return Response(
+                {"detail": "Selecciona al menos un documento pendiente para avisar."}, status=400
+            )
+
+        faltantes = list(contrato.documentos_requeridos.filter(recibido=False, id__in=documento_ids))
+        if len(faltantes) != len(set(documento_ids)):
+            return Response(
+                {"detail": "Alguno de los documentos seleccionados ya no está pendiente o no existe."},
+                status=400,
+            )
+
+        # Un TesoreriaDocumentoTicket nuevo por documento (28/Ago/2026,
+        # pedido explicito de Mariana: "un correo por documento que falte" +
+        # "esos [archivos] los subira el cliente...mediante una magic link
+        # por doc faltante") - nunca se reusa el token de un documento para
+        # otro, mismo criterio que TesoreriaTicketProveedor (token en claro
+        # solo se expone en el correo, jamas se guarda).
+        enviados = []
+        for documento in faltantes:
+            token, token_hash = generate_token()
+            TesoreriaDocumentoTicket.objects.create(
+                documento=documento,
+                email=email,
+                token_hash=token_hash,
+                issued_by=request.data.get("actor_user_id"),
+                expires_at=timezone.now() + datetime.timedelta(days=7),
+                max_uses=1,
+            )
+            ok = enviar_correo_documento_faltante(
+                request, email, contrato.id_contrato, documento.get_nombre_display(), token
+            )
+            if ok:
+                enviados.append(documento.nombre)
+
+        emitir_evento_auditoria(
+            "tesoreria_contratos.enviar_recordatorio_documentos",
+            "tesoreria_contratos",
+            contrato.id_contrato,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"destinatario": email, "documentos": enviados},
+        )
+        return Response({"enviados": enviados, "total_pendientes": len(faltantes)})
+
+
+class TesoreriaContratoDocumentoViewSet(ModelViewSet):
+    """Checklist de documentos requeridos de un contrato.
+    crear=tesoreria.crear, borrar=tesoreria.editar - el analista arma y
+    depura el checklist. NO existe ninguna accion para que el analista
+    suba/reemplace el archivo (28/Ago/2026, pedido explicito de Mariana:
+    "no puede subir o reemplazar un archivo esos los subira el cliente...
+    mediante una magic link", y despues confirmado sin excepcion manual:
+    "no olvides quitar el boton de subir") - el UNICO camino para llenar
+    `link_archivo`/`recibido` es que el cliente lo suba via
+    TesoreriaDocumentoTicketViewSet.subir, sin sesion.
+
+    No tiene ScopedManager propio (no hay columna de sociedad en este
+    modelo), el alcance real llega filtrando por ?contrato=<id>, cuyo
+    TesoreriaContrato si aplica RLS. Filtro obligatorio ?contrato=<id>
+    (misma idea que TesoreriaFlujoViewSet con ?contrato=): sin el, no tiene
+    sentido listar todo el checklist de todos los contratos junto."""
+
+    serializer_class = TesoreriaContratoDocumentoSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("tesoreria.crear")()]
+        if self.action == "destroy":
+            return [require_permission("tesoreria.editar")()]
+        if self.action in ("update", "partial_update"):
+            return [require_permission("tesoreria.aprobar")()]
+        return super().get_permissions()
+
+    def destroy(self, request, *args, **kwargs):
+        """Un documento ya recibido (el cliente lo subió) deja de poder
+        borrarse (28/Ago/2026, pedido explicito de Mariana: "si ya hay
+        documentos subido por contraparte, el analista podra verlo y ya no
+        podra borrar") - solo se puede depurar el checklist mientras sigue
+        pendiente."""
+        documento = self.get_object()
+        if documento.recibido:
+            return Response(
+                {"detail": "Este documento ya fue recibido, no se puede borrar del checklist."}, status=400
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    def get_queryset(self):
+        queryset = TesoreriaContratoDocumento.objects.select_related("contrato").all()
+        contrato_id = self.request.query_params.get("contrato")
+        if contrato_id:
+            queryset = queryset.filter(contrato_id=contrato_id)
+        return queryset
+
+class TesoreriaDocumentoTicketViewSet(ViewSet):
+    """Ticket publico de UN documento del checklist (28/Ago/2026, pedido
+    explicito de Mariana - ver TesoreriaDocumentoTicket). Solo expone
+    "validar"/"subir", ambos publicos (sin sesion, sin ningun perm_key) -
+    los tickets en si solo se generan desde
+    TesoreriaContratoViewSet.enviar_recordatorio_documentos, no hay
+    list/create/update/destroy manual expuesto para este recurso."""
+
+    def get_permissions(self):
+        return []
+
+    def get_throttles(self):
+        # Mismo criterio que TesoreriaTicketProveedorViewSet: rate limiting
+        # solo en la accion cara (recaptcha + subida a Drive), publica sin
+        # sesion.
+        if self.action == "subir":
+            self.throttle_scope = "tesoreria-ticket-subir"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
+    @staticmethod
+    def _resolver_ticket(token):
+        """Mismo criterio que TesoreriaTicketProveedorViewSet._resolver_ticket
+        - compartido entre validar() y subir() para no repetir las 3
+        validaciones (revocado/expirado/agotado) en cada endpoint publico."""
+        if not token:
+            return None, Response({"token": ["Este campo es requerido."]}, status=400)
+
+        try:
+            ticket = TesoreriaDocumentoTicket.objects.select_related(
+                "documento", "documento__contrato"
+            ).get(token_hash=hash_token(token))
+        except TesoreriaDocumentoTicket.DoesNotExist:
+            return None, Response({"detail": "Token inválido."}, status=404)
+
+        now = timezone.now()
+        if ticket.revoked_at is not None:
+            return None, Response({"detail": "Este link fue revocado."}, status=403)
+        if ticket.expires_at < now:
+            return None, Response({"detail": "Este link expiró."}, status=403)
+        if ticket.uses_count >= ticket.max_uses:
+            return None, Response({"detail": "Este link ya alcanzó su límite de usos."}, status=403)
+
+        return ticket, None
+
+    @action(detail=False, methods=["post"])
+    def validar(self, request):
+        """Valida el token en claro del link (NO marca uso todavia, eso lo
+        hace subir() - para no gastar el uso solo por abrir la pagina).
+        Regresa el nombre del documento y del contrato, para que la
+        pagina publica salude al cliente con contexto."""
+        ticket, error = self._resolver_ticket(request.data.get("token"))
+        if error:
+            return error
+        return Response(
+            {
+                "nombre_documento": ticket.documento.get_nombre_display(),
+                "id_contrato": ticket.documento.contrato_id,
+            }
+        )
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def subir(self, request):
+        """Formulario publico del cliente: sube el documento que falta,
+        sin sesion, canjeando el token del link. Protegido por reCAPTCHA,
+        mismo patron que TesoreriaTicketProveedorViewSet.subir_factura."""
+        ticket, error = self._resolver_ticket(request.data.get("token"))
+        if error:
+            return error
+
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
+            return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
+
+        documento = ticket.documento
+        resultado, drive_error = _subir_a_drive(
+            request, archivo, f"Tesoreria/Contratos/{documento.contrato_id}/Documentos"
+        )
+        if drive_error:
+            return drive_error
+
+        documento.link_archivo = resultado["web_view_link"]
+        documento.drive_file_id = resultado["file_id"]
+        documento.recibido = True
+        documento.save(update_fields=["link_archivo", "drive_file_id", "recibido"])
+
+        now = timezone.now()
+        ticket.uses_count += 1
+        ticket.last_used_at = now
+        if ticket.first_used_at is None:
+            ticket.first_used_at = now
+        ticket.save(update_fields=["uses_count", "last_used_at", "first_used_at"])
+
+        emitir_evento_auditoria(
+            "tesoreria_documento_tickets.subir",
+            "tesoreria_documento_tickets",
+            ticket.id_ticket,
+            actor_user_id="externo",
+            valores_nuevos={"nombre_archivo": archivo.name, "contrato": documento.contrato_id},
+        )
+        return Response({"detail": "Documento subido correctamente. Tesorería lo va a procesar en breve."})
+
 
 class TesoreriaFlujoViewSet(ModelViewSet):
-    """Flujo de caja (Fase 4, Sem 21 del cronograma) - un movimiento real de
+    """Flujo de caja - un movimiento real de
     dinero (pago a proveedor, reembolso, nomina) ligado a un contrato.
     Alcance real por sociedad via el contrato (ver models.py,
     SCOPE_FIELD_SOCIEDAD = "contrato__sociedad").
@@ -281,9 +550,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def registrar_pago(self, request, pk=None):
-        """Marca el flujo como pagado - exige autorizacion=True primero
-        (no se puede pagar lo que no se aprobo, ver reunion de Tesoreria
-        13/Ago/2026: "generar permiso por pago"). Permiso tesoreria.editar
+        """Marca el flujo como pagado - exige autorizacion=True primero. 
+        Permiso tesoreria.editar
         (no .aprobar) porque el analista es quien de verdad hace/registra
         la transferencia, la decision de autorizar ya la tomo aprobar()."""
         flujo = self.get_object()
@@ -318,7 +586,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         drive-service), finanzas.md sec. "General Notes": "Allow the user
         to upload receipts/references from their computer. They are stored
         in the correct Google Drive folder and the URL is recorded in the
-        database" (decision 26/Ago/2026). Mismo patron que
+        database". Mismo patron que
         PldContraparteDocViewSet.subir (services/pld-service/pld/views.py) -
         separado de registrar_pago() porque el comprobante puede subirse
         antes, junto o despues de marcar el flujo como pagado.
@@ -370,8 +638,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def vincular_factura(self, request, pk=None):
-        """Liga el flujo a una factura/complemento ya emitidos (Fase 4,
-        Sem 20 del cronograma) - `factura`/`complemento` son de solo
+        """Liga el flujo a una factura/complemento ya emitidos
+         - `factura`/`complemento` son de solo
         lectura en el serializer (ver TesoreriaFlujoSerializer) porque no
         tiene sentido escribirlos a mano en un POST/PATCH normal: la
         factura debe existir de antemano en tesoreria-service, esta accion

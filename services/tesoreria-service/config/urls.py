@@ -11,9 +11,11 @@ from tesoreria.views import (
     TesoreriaComplementoPagoViewSet,
     TesoreriaContraparteRelacionViewSet,
     TesoreriaContraparteViewSet,
+    TesoreriaContratoDocumentoViewSet,
     TesoreriaContratoViewSet,
     TesoreriaCorteEdcViewSet,
     TesoreriaCuentaViewSet,
+    TesoreriaDocumentoTicketViewSet,
     TesoreriaFacturaViewSet,
     TesoreriaFlujoViewSet,
     TesoreriaNotaCreditoViewSet,
@@ -29,6 +31,8 @@ router.register("contrapartes-relacion", TesoreriaContraparteRelacionViewSet, ba
 router.register("bancos", TesoreriaBancoViewSet, basename="tesoreriabanco")
 router.register("cuentas", TesoreriaCuentaViewSet, basename="tesoreriacuenta")
 router.register("contratos", TesoreriaContratoViewSet, basename="tesoreriacontrato")
+router.register("contrato-documentos", TesoreriaContratoDocumentoViewSet, basename="tesoreriacontratodocumento")
+router.register("documento-tickets", TesoreriaDocumentoTicketViewSet, basename="tesoreriadocumentoticket")
 router.register("flujos", TesoreriaFlujoViewSet, basename="tesoreriaflujo")
 router.register("facturas", TesoreriaFacturaViewSet, basename="tesoreriafactura")
 router.register("factura-conceptos", FacturaConceptoViewSet, basename="facturaconcepto")

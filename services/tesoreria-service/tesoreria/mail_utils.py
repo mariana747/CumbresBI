@@ -235,6 +235,64 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
     return ok_total
 
 
+def enviar_correo_documento_faltante(
+    request, email: str, id_contrato: str, nombre_documento: str, token: str
+) -> bool:
+    """Avisa que falta UN documento del checklist de un contrato, con un
+    magic link para que el CLIENTE lo suba el mismo, sin login (diseño
+    Tesoreria2.pdf, 28/Ago/2026: "deben marcar el checklist para enviar un
+    correo avisando que faltan esos documentos, un correo por documento que
+    falte" + "esos los subira el cliente...mediante una magic link por doc
+    faltante" - pedido explicito de Mariana). Se llama una vez POR
+    documento pendiente, con un token distinto cada vez (ver
+    TesoreriaDocumentoTicket) - mismo criterio de "envio por separado" que
+    enviar_factura, nunca se agrupan varios documentos en un solo correo ni
+    se reusa un token para dos documentos.
+
+    No propaga la excepcion si mail-service no responde - mismo criterio
+    que el resto de este archivo."""
+    headers, cookies = forward_auth_headers(request)
+    url_completa = f"{settings.FRONTEND_BASE_URL}/tesoreria-documento/{token}"
+    html_body = _renderizar_correo(
+        kicker_texto="Documento pendiente",
+        kicker_bg="#FBF1DE",
+        kicker_color="#9A6400",
+        titulo=f"Falta un documento del contrato {id_contrato}",
+        cuerpo_html=(
+            f"<p style='margin:0;'>Para continuar operando el contrato <strong>{escape(id_contrato)}</strong> "
+            f"todavía necesitamos que nos hagas llegar: <strong>{escape(nombre_documento)}</strong>. "
+            "Usa el siguiente enlace para subirlo directamente, sin necesidad de cuenta ni contraseña.</p>"
+        ),
+        cta_texto="Subir mi documento",
+        cta_url=url_completa,
+        fineprint_texto="Este enlace expira pronto y tiene un límite de usos. Si no esperabas este correo, ignóralo.",
+    )
+    try:
+        respuesta = requests.post(
+            f"{settings.MAIL_SERVICE_URL}/api/send/",
+            params={"perm": "tesoreria.editar"},
+            json={
+                "to": email,
+                "subject": f"Documento pendiente — {nombre_documento} ({id_contrato})",
+                "html_body": html_body,
+            },
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_SEGUNDOS,
+        )
+    except requests.RequestException:
+        logger.warning(
+            "mail-service no respondio al avisar documento faltante de %s a %s", id_contrato, email, exc_info=True
+        )
+        return False
+    if respuesta.status_code != 201:
+        logger.warning(
+            "mail-service rechazo el aviso de documento faltante de %s para %s: %s", id_contrato, email, respuesta.text
+        )
+        return False
+    return True
+
+
 def enviar_correo_ticket_proveedor(request, email: str, token: str) -> bool:
     """Envia el link del ticket publico de proveedor por correo via
     mail-service (Gmail API) - mismo patron y diseño que

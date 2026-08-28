@@ -1131,6 +1131,114 @@ class FacturaTraslado(models.Model):
         db_table = "factura_traslados"
 
 
+class TesoreriaContratoDocumento(models.Model):
+    """Checklist de documentos/info requeridos por contrato (diseño
+    manuscrito Tesoreria2.pdf, 28/Ago/2026: "Liga archivo - todavia no esta
+    implementado en BD. Pedir checklist de documentos/info"). Cada renglon
+    es UN documento que ese contrato en particular necesita (ej. "Poliza de
+    arrendamiento", "Identificacion oficial del fiador") - se define al
+    dar de alta el contrato (o despues) y se marca `recibido` conforme se
+    va juntando, con el link real al archivo en Drive una vez subido.
+
+    No reemplaza `link_carpeta`/`link_contrato` de TesoreriaContrato (esos
+    siguen siendo el contrato firmado en si) - esto es la lista de soporte
+    adicional que el contrato exige antes de poder operarlo (ej. antes de
+    aprobar su primer Flujo).
+
+    `nombre` es un catalogo fijo (28/Ago/2026, pedido explicito de Mariana:
+    "que sea una lista desplegable de las opciones") - no texto libre, para
+    que el checklist sea consistente entre contratos. NOMBRE_OTRO existe
+    como valvula de escape para el documento que no encaja en el catalogo
+    (se especifica en `comentarios`)."""
+
+    NOMBRE_CONTRATO_FIRMADO = "CONTRATO_FIRMADO"
+    NOMBRE_IDENTIFICACION_OFICIAL = "IDENTIFICACION_OFICIAL"
+    NOMBRE_COMPROBANTE_DOMICILIO = "COMPROBANTE_DOMICILIO"
+    NOMBRE_CONSTANCIA_SITUACION_FISCAL = "CONSTANCIA_SITUACION_FISCAL"
+    NOMBRE_ACTA_CONSTITUTIVA = "ACTA_CONSTITUTIVA"
+    NOMBRE_PODER_NOTARIAL = "PODER_NOTARIAL"
+    NOMBRE_POLIZA_SEGURO = "POLIZA_SEGURO"
+    NOMBRE_REFERENCIAS_BANCARIAS = "REFERENCIAS_BANCARIAS"
+    NOMBRE_OTRO = "OTRO"
+    NOMBRE_CHOICES = [
+        (NOMBRE_CONTRATO_FIRMADO, "Contrato firmado (PDF)"),
+        (NOMBRE_IDENTIFICACION_OFICIAL, "Identificación oficial del representante legal"),
+        (NOMBRE_COMPROBANTE_DOMICILIO, "Comprobante de domicilio"),
+        (NOMBRE_CONSTANCIA_SITUACION_FISCAL, "Constancia de situación fiscal (RFC)"),
+        (NOMBRE_ACTA_CONSTITUTIVA, "Acta constitutiva"),
+        (NOMBRE_PODER_NOTARIAL, "Poder notarial del representante legal"),
+        (NOMBRE_POLIZA_SEGURO, "Póliza de seguro"),
+        (NOMBRE_REFERENCIAS_BANCARIAS, "Referencias bancarias"),
+        (NOMBRE_OTRO, "Otro (especificar en comentarios)"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    contrato = models.ForeignKey(
+        TesoreriaContrato,
+        db_column="id_contrato",
+        on_delete=models.CASCADE,
+        related_name="documentos_requeridos",
+    )
+    nombre = models.CharField(max_length=50, choices=NOMBRE_CHOICES)
+    obligatorio = models.BooleanField(default=True)
+    recibido = models.BooleanField(default=False)
+    # Mismo patron que link_comprobante_banco en TesoreriaFlujo - se llena
+    # con el web_view_link real que regresa drive-service al subir el
+    # archivo, no una URL pegada a mano.
+    link_archivo = models.TextField(blank=True, null=True)
+    drive_file_id = models.TextField(blank=True, null=True)
+    comentarios = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=100, blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_contrato_documentos"
+        ordering = ["contrato", "id"]
+
+    def __str__(self):
+        return f"{self.contrato_id} - {self.nombre}"
+
+
+class TesoreriaDocumentoTicket(models.Model):
+    """Ticket publico de un solo documento del checklist, sin login (28/Ago/2026,
+    pedido explicito de Mariana: "esos [archivos] los subira el cliente...
+    mediante una magic link por doc faltante" - el analista de Tesoreria ya
+    NO sube el archivo el mismo, ver TesoreriaContratoDocumentoViewSet.
+    subir_archivo, ahora gateado a tesoreria.aprobar como excepcion manual).
+    Mismo patron que TesoreriaTicketProveedor (token en claro solo una vez,
+    token_hash SHA-256 en BD, sin emitir sesion) pero ligado a UN renglon
+    especifico del checklist en vez de a la contraparte en general - un
+    ticket = un documento, generado uno por cada documento faltante al
+    llamar TesoreriaContratoViewSet.enviar_recordatorio_documentos (nunca se
+    reusa el mismo ticket para varios documentos)."""
+
+    id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    documento = models.ForeignKey(
+        TesoreriaContratoDocumento,
+        on_delete=models.CASCADE,
+        related_name="tickets",
+    )
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    issued_by = models.CharField(max_length=8, blank=True, null=True)
+    expires_at = models.DateTimeField()
+    max_uses = models.IntegerField(default=1)
+    uses_count = models.IntegerField(default=0)
+    first_used_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_documento_tickets"
+        ordering = ["-issued_at"]
+
+    def __str__(self):
+        return self.id_ticket
+
+
 class TesoreriaTicketProveedor(models.Model):
     """Ticket publico de un solo uso para que un PROVEEDOR externo suba su
     factura sin necesitar cuenta ni login (27/Ago/2026, pedido de Mariana:
