@@ -269,12 +269,12 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       icon: Landmark,
       enabled: true,
       children: [
+        { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine },
         { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
         { label: "Reporte diario", href: "/tesoreria/reportes", icon: FileBarChart },
         { label: "Notas de crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
-        { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
         { label: "Facturas", href: "/tesoreria/facturas", icon: FileText },
         { label: "Complementos de pago", href: "/tesoreria/complementos-pago", icon: Receipt },
@@ -322,7 +322,18 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // modulos, revivir este bloque (ver git blame) en vez de reinventarlo -
   // el hallazgo original que lo agrego sigue documentado en
   // docs/CumbresBI_estado.md.
-  items.push({ label: "MiCumbres (portal empleado)", href: "/micumbres", icon: UserRound, enabled: true });
+  // "Tickets de reembolso" (27/Ago/2026, pantalla PROVISIONAL - ver
+  // memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente") - visible para
+  // cualquier sesion real (self-service, sin exigir perm_key alguno,
+  // mismo criterio que el resto de MiCumbres) mientras no exista el
+  // portal MiCumbres/RRHH real (Fase 5, sin arrancar).
+  items.push({
+    label: "MiCumbres (portal empleado)",
+    href: "/micumbres",
+    icon: UserRound,
+    enabled: true,
+    children: [{ label: "Tickets de reembolso", href: "/micumbres/tickets", icon: Receipt }],
+  });
   return items;
 }
 

@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -29,17 +32,21 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
 import {
   CheckCircle2,
+  ChevronDown,
   ExternalLink,
   FileSearch,
   FileText,
   Mail,
   Pencil,
   Plus,
+  Receipt,
   Search,
   Trash2,
   X as CloseIcon,
@@ -47,6 +54,7 @@ import {
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
+import TicketsReembolsoAdminPanel from "@/components/TicketsReembolsoAdminPanel";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   EnvioMasivoResultado,
@@ -68,6 +76,10 @@ import {
   listFacturas,
   marcarEstadoFactura,
   updateFactura,
+  listContrapartes,
+  listTicketsProveedor,
+  TesoreriaContraparte,
+  TesoreriaTicketProveedor,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -486,6 +498,27 @@ export default function TesoreriaFacturasPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFactura | null>(null);
   const [form, setForm] = useState(FORM_VACIO);
+  // Proveedor a revisar en "Nueva factura" > Motor Documental (27/Ago/2026,
+  // pedido de Mariana: "proveedores se dividen dentro por su id") - los
+  // PDF que sube el proveedor via ticket publico quedan en su propia
+  // subcarpeta (Tesoreria/Facturas/FacturasProveedores/<id_contraparte>),
+  // hace falta elegir cual proveedor se va a listar.
+  const [proveedores, setProveedores] = useState<TesoreriaContraparte[]>([]);
+  const [proveedorBandeja, setProveedorBandeja] = useState("");
+  // Tickets de proveedor (27/Ago/2026, pedido de Mariana: "cuando se manda
+  // la invitación se debe de poner ya en la tabla sin poner nueva
+  // factura") - se muestran mezclados en la MISMA tabla que las facturas
+  // reales, como filas "pendientes" hasta que se confirme la factura de
+  // verdad (que entonces aparece como fila normal, con su propio UUID).
+  const [ticketsProveedor, setTicketsProveedor] = useState<TesoreriaTicketProveedor[]>([]);
+  // El ticket no tiene (todavia) un vinculo real a la factura ya creada
+  // (a diferencia de TesoreriaTicketReembolso.factura) - se oculta del lado
+  // del cliente en cuanto el analista captura su factura, para no dejar la
+  // fila diciendo "falta capturar" cuando ya se capturo. Se pierde al
+  // recargar la pagina - limitacion conocida, documentada en memoria de
+  // sesion, arreglo real pendiente: agregar el mismo FK que ya tiene
+  // TesoreriaTicketReembolso.
+  const [ticketsOcultos, setTicketsOcultos] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [motorAbierto, setMotorAbierto] = useState(false);
@@ -503,9 +536,27 @@ export default function TesoreriaFacturasPage() {
   const [envioError, setEnvioError] = useState<string | null>(null);
   const [envioResultados, setEnvioResultados] = useState<EnvioMasivoResultado[] | null>(null);
 
+  // Pestaña "Tickets de reembolso" (27/Ago/2026, pedido de Mariana: la
+  // revision de tickets de MiCumbres debe vivir donde Tesoreria ya
+  // trabaja, no en un panel aparte) - ver TicketsReembolsoAdminPanel.
+  const [tab, setTab] = useState(0);
+
   useEffect(() => {
     getSession().then(setSession);
   }, []);
+
+  useEffect(() => {
+    listContrapartes(undefined, "proveedor")
+      .then(setProveedores)
+      .catch(() => undefined);
+  }, []);
+
+  function refrescarTicketsProveedor() {
+    listTicketsProveedor()
+      .then(setTicketsProveedor)
+      .catch(() => undefined);
+  }
+  useEffect(refrescarTicketsProveedor, []);
 
   const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
@@ -536,10 +587,44 @@ export default function TesoreriaFacturasPage() {
     setEditing(null);
     setForm(FORM_VACIO);
     setFormError(null);
+    setProveedorBandeja("");
     setDialogOpen(true);
   }
 
+  // Fila de ticket ya usada por el proveedor (subio su PDF) - abre
+  // directo "Nueva factura" con el proveedor ya preseleccionado y el
+  // Motor Documental abierto, sin que el analista tenga que elegir nada
+  // (pedido de Mariana 27/Ago/2026: "cuando se manda la invitacion se
+  // debe de poner ya en la tabla sin poner nueva factura" - la fila ya
+  // esta en la tabla, "Revisar" solo evita repetir los 2 clics extra).
+  function abrirRevisionTicket(ticket: TesoreriaTicketProveedor) {
+    abrirAlta();
+    setProveedorBandeja(ticket.contraparte);
+    setMotorAbierto(true);
+  }
 
+  // Clasificacion de un ticket de proveedor (27/Ago/2026) - separa los que
+  // siguen accionables (esperando al proveedor / ya recibido, falta
+  // capturar) de los vencidos (expirado/revocado), que Mariana pidio ver
+  // en una sub-tabla aparte en vez de mezclados con los activos.
+  function estadoTicketFactura(t: TesoreriaTicketProveedor) {
+    const recibida = t.uses_count >= t.max_uses;
+    const revocado = !!t.revoked_at;
+    const expirado = !revocado && new Date(t.expires_at) < new Date();
+    const vencido = revocado || expirado;
+    const label = revocado ? "Revocado" : recibida ? "Recibida, falta capturar" : expirado ? "Expirado" : "Esperando al proveedor";
+    const color: "default" | "error" | "warning" = vencido ? "error" : recibida ? "warning" : "default";
+    return { recibida, vencido, label, color };
+  }
+
+  const ticketsVisibles = ticketsProveedor.filter((t) => !ticketsOcultos.has(t.id_ticket));
+  const ticketsActivos = ticketsVisibles.filter((t) => !estadoTicketFactura(t).vencido);
+  const ticketsVencidos = ticketsVisibles.filter((t) => estadoTicketFactura(t).vencido);
+
+  // Extraido de abrirEdicion (24/Ago/2026) para reusarlo tambien despues de
+  // confirmar una extraccion del Motor Documental - mismo mapeo, sin
+  // duplicarlo entre los dos flujos que necesitan refrescar `form` desde
+  // una TesoreriaFactura ya guardada.
   function formDesdeFactura(f: TesoreriaFactura): typeof FORM_VACIO {
     return {
       timbreUuid: f.timbre_uuid || "",
@@ -648,6 +733,11 @@ export default function TesoreriaFacturasPage() {
         await updateFactura(editing.id, form);
       } else {
         await createFactura(form);
+        if (proveedorBandeja) {
+          const ticket = ticketsProveedor.find((t) => t.contraparte === proveedorBandeja);
+          if (ticket) setTicketsOcultos((prev) => new Set(prev).add(ticket.id_ticket));
+          setProveedorBandeja("");
+        }
       }
       setDialogOpen(false);
       refresh();
@@ -716,6 +806,15 @@ export default function TesoreriaFacturasPage() {
         facturas se dan de alta automáticamente desde el Motor Documental.
       </Typography>
 
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+        <Tab label="Facturas CFDI" icon={<FileText size={16} strokeWidth={1.5} />} iconPosition="start" />
+        <Tab label="Tickets de reembolso" icon={<Receipt size={16} strokeWidth={1.5} />} iconPosition="start" />
+      </Tabs>
+
+      {tab === 1 && <TicketsReembolsoAdminPanel session={session} />}
+
+      {tab === 0 && (
+        <>
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
@@ -749,17 +848,6 @@ export default function TesoreriaFacturasPage() {
               Enviar por correo ({seleccionadas.size})
             </Button>
           )}
-          {puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
-              sx={{ ml: { sm: seleccionadas.size > 0 ? 0 : "auto" } }}
-            >
-              Nueva factura
-            </Button>
-          )}
         </Stack>
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 8 columnas no cabe en un
@@ -787,7 +875,7 @@ export default function TesoreriaFacturasPage() {
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : facturas.length === 0 ? (
+              ) : facturas.length === 0 && ticketsActivos.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -796,7 +884,31 @@ export default function TesoreriaFacturasPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                facturas.map((f) => (
+                <>
+                {ticketsActivos.map((t) => {
+                  const estado = estadoTicketFactura(t);
+                  return (
+                    <TableRow key={`ticket-${t.id_ticket}`} hover>
+                      {puedeEditar && <TableCell padding="checkbox" />}
+                      <TableCell colSpan={3} sx={{ color: "text.secondary" }}>
+                        Ticket de proveedor — {t.contraparte_nombre} ({t.email})
+                      </TableCell>
+                      <TableCell>{new Date(t.issued_at).toLocaleDateString("es-MX")}</TableCell>
+                      <TableCell align="right">—</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={estado.label} color={estado.color} variant="outlined" />
+                      </TableCell>
+                      <TableCell align="right">
+                        {estado.recibida && puedeCrear && (
+                          <Button size="small" onClick={() => abrirRevisionTicket(t)}>
+                            Revisar
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {facturas.map((f) => (
                   <TableRow key={f.id} hover selected={seleccionadas.has(f.id)}>
                     {puedeEditar && (
                       <TableCell padding="checkbox">
@@ -842,12 +954,56 @@ export default function TesoreriaFacturasPage() {
                       </Stack>
                     </TableCell>
                   </TableRow>
-                ))
+                ))}
+                </>
               )}
             </TableBody>
           </Table>
         </TableContainer>
         </Box>
+
+        {/* Tickets vencidos/revocados (27/Ago/2026, pedido de Mariana: "dejar
+        visible pero que se vaya a una sub tabla de expirado") - separados
+        de los activos para no ensuciar la tabla principal con tickets que
+        ya no van a ninguna parte, sin perder el registro de que se pidieron. */}
+        {ticketsVencidos.length > 0 && (
+          <Accordion disableGutters sx={{ mt: 1 }}>
+            <AccordionSummary expandIcon={<ChevronDown size={16} strokeWidth={1.5} />}>
+              <Typography variant="body2" color="text.secondary">
+                Tickets vencidos/revocados ({ticketsVencidos.length})
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ p: 0 }}>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Proveedor</TableCell>
+                      <TableCell>Correo</TableCell>
+                      <TableCell>Generado</TableCell>
+                      <TableCell>Estado</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {ticketsVencidos.map((t) => {
+                      const estado = estadoTicketFactura(t);
+                      return (
+                        <TableRow key={`ticket-vencido-${t.id_ticket}`} hover>
+                          <TableCell>{t.contraparte_nombre}</TableCell>
+                          <TableCell>{t.email}</TableCell>
+                          <TableCell>{new Date(t.issued_at).toLocaleDateString("es-MX")}</TableCell>
+                          <TableCell>
+                            <Chip size="small" label={estado.label} color={estado.color} variant="outlined" />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </AccordionDetails>
+          </Accordion>
+        )}
 
         {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
         <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
@@ -944,15 +1100,38 @@ export default function TesoreriaFacturasPage() {
           )}
           <Stack spacing={2}>
             {(editing ? puedeEditar : puedeCrear) && (
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<FileSearch size={16} strokeWidth={1.5} />}
-                onClick={() => setMotorAbierto(true)}
-                sx={{ alignSelf: "flex-start" }}
-              >
-                Motor Documental
-              </Button>
+              <>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  {!editing && (
+                    <FormControl size="small" sx={{ minWidth: 280 }}>
+                      <InputLabel id="proveedor-bandeja-label">Proveedor (factura subida por ticket)</InputLabel>
+                      <Select
+                        labelId="proveedor-bandeja-label"
+                        label="Proveedor (factura subida por ticket)"
+                        value={proveedorBandeja}
+                        onChange={(e) => setProveedorBandeja(e.target.value)}
+                      >
+                        <MenuItem value="">
+                          <em>Ninguno (bandeja general)</em>
+                        </MenuItem>
+                        {proveedores.map((p) => (
+                          <MenuItem key={p.id_contraparte} value={p.id_contraparte}>
+                            {p.razon_social}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<FileSearch size={16} strokeWidth={1.5} />}
+                    onClick={() => setMotorAbierto(true)}
+                  >
+                    Motor Documental
+                  </Button>
+                </Stack>
+              </>
             )}
             {/* Campos del CFDI (finanzas.md: "the user cannot create, delete
                 or modify invoices" - 26/Ago/2026, SUPER_ADMIN conserva
@@ -1424,18 +1603,23 @@ export default function TesoreriaFacturasPage() {
                 onConfirmar: handleConfirmarExtraccionFactura,
               }
             : {
-                // Caso de uso real (24/Ago/2026): la factura todavia no
-                // existe - hoy el analista sube el escaneo directo a esta
-                // carpeta "bandeja" antes de darla de alta; a futuro,
-                // MiCumbres subira ahi mismo lo que capture un empleado
-                // (ver memoria de sesion "rrhh-mi-cumbres-y-modulo-
-                // pendiente" - ese portal todavia no existe). No hay id de
-                // factura que mandar a confirmar_extraccion, por eso
-                // onConfirmar solo prellena `form` en vez de llamar al
-                // backend.
+                // Caso de uso real (24/Ago/2026, renombrada y subdividida
+                // por proveedor 27/Ago/2026): la factura todavia no existe -
+                // el analista sube el escaneo directo a esta carpeta antes
+                // de darla de alta; el mismo lugar donde el ticket público
+                // de proveedores (TesoreriaTicketProveedorViewSet.
+                // subir_factura) deja el PDF real que sube el proveedor,
+                // ya subdividido por proveedorBandeja (id_contraparte) -
+                // sin elegir proveedor, cae a la bandeja general (raiz de
+                // FacturasProveedores, solo staging manual del analista).
+                // No hay id de factura que mandar a confirmar_extraccion,
+                // por eso onConfirmar solo prellena `form` en vez de llamar
+                // al backend.
                 etiqueta: "una factura nueva",
                 servicioSolicitante: "tesoreria-service",
-                carpeta: "Tesoreria/Facturas/Bandeja de entrada",
+                carpeta: proveedorBandeja
+                  ? `Tesoreria/Facturas/FacturasProveedores/${proveedorBandeja}`
+                  : "Tesoreria/Facturas/FacturasProveedores",
                 permKey: "facturacion-cfdi.crear",
                 expectedDocumentType: "tesoreria.cfdi_factura",
                 camposConfirmables: TESORERIA_CAMPOS_CONFIRMABLES_NUEVA,
@@ -1443,6 +1627,8 @@ export default function TesoreriaFacturasPage() {
               }
         }
       />
+        </>
+      )}
     </AppShell>
   );
 }

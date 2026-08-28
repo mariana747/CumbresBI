@@ -63,15 +63,11 @@ class TesoreriaContraparte(models.Model):
     razon_social = models.CharField(max_length=100)
     contacto = models.CharField(max_length=100, blank=True, null=True)
     telefono_sms = models.CharField(max_length=10, blank=True, null=True)
-    # blank/null=True (19/Ago/2026, "contraparte maestra unica") - antes
-    # eran obligatorios, lo que impedia dar de alta un cliente/proveedor
-    # solo con el nombre. Ahora este es el UNICO lugar de alta real de
-    # contrapartes de toda la empresa (PLD/Ventas/Compras ya no generan la
-    # suya propia, ver docs/architecture/README.md sec. 11.2 #7) - el resto
-    # de los datos se completa despues, mismo criterio "alta minima" que ya
-    # usaba PLD por su cuenta (Opcion B, 17/Ago/2026) antes de que esta
-    # pantalla existiera.
-    email = models.CharField(max_length=100, blank=True, null=True)
+    # Obligatorio de nuevo (28/Ago/2026, pedido explicito de Mariana, vuelve
+    # al ERD original) - habia sido blank/null=True desde el 19/Ago/2026
+    # ("contraparte maestra unica", alta minima con solo razon_social). Se
+    # revierte esa relajacion: email es obligatorio otra vez.
+    email = models.CharField(max_length=100)
     comentarios = models.TextField(blank=True, null=True)
     permiso = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -81,9 +77,9 @@ class TesoreriaContraparte(models.Model):
     autorizado_por = models.CharField(max_length=100, blank=True, null=True)
     apellido_paterno = models.CharField(max_length=100, blank=True, null=True)
     apellido_materno = models.CharField(max_length=100, blank=True, null=True)
-    # blank/null=True (19/Ago/2026) - ver docstring de "email" arriba, mismo
-    # criterio.
-    tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES, blank=True, null=True)
+    # Obligatorio de nuevo (28/Ago/2026) - ver comentario de "email" arriba,
+    # mismo criterio y misma fecha de reversion.
+    tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES)
     genero = models.CharField(max_length=20, choices=GENERO_CHOICES, blank=True, null=True)
     cliente = models.BooleanField(default=False)
     proveedor = models.BooleanField(default=False)
@@ -910,6 +906,86 @@ class TesoreriaFlujo(models.Model):
         return self.id_flujo
 
 
+class TesoreriaTicketReembolso(models.Model):
+    """Ticket de reembolso subido por el empleado (pantalla PROVISIONAL
+    "MiCumbres" /mi-cumbres/tickets, 27/Ago/2026) - puente minimo mientras
+    no existe el portal MiCumbres real ni rrhh-service tiene API (Fase 5,
+    sin arrancar, ver memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente").
+    El empleado solo puede CREAR (subir su ticket); una vez creado, solo
+    Tesoreria (tesoreria.editar) puede editarlo.
+
+    Flujo real (27/Ago/2026, pedido explicito de Mariana): PENDIENTE ->
+    Tesoreria revisa -> APROBADO o RECHAZADO. Solo si se aprueba se
+    procede a facturar - subir el/los archivos (PDF, corren por el Motor
+    Documental como staging antes de dar de alta la factura formal, mismo
+    patron que la "bandeja de entrada" de Facturas) y LIGAR el ticket a un
+    TesoreriaFactura real ya creado (`factura`, no un blob suelto) -> el
+    ticket pasa a VINCULADO. `link_factura_pdf`/`drive_file_id_factura`
+    siguen existiendo como staging previo a esa formalizacion (el PDF que
+    se analiza con el Motor antes de llenar el alta de factura), no
+    reemplazan el vinculo real.
+    id_empleado es el identity_user_id del EffectiveScope (self-service),
+    no una FK real a rrhh_empleados (no existe todavia)."""
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_APROBADO = "APROBADO"
+    ESTADO_VINCULADO = "VINCULADO"
+    ESTADO_RECHAZADO = "RECHAZADO"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_APROBADO, "Aprobado — pendiente de facturar"),
+        (ESTADO_VINCULADO, "Facturado y vinculado"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+    ]
+
+    id_ticket = models.CharField(max_length=255, primary_key=True)
+    id_empleado = models.CharField(max_length=255)
+    descripcion = models.TextField()
+    monto = models.DecimalField(max_digits=14, decimal_places=2)
+    fecha_gasto = models.DateField()
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    # Foto/comprobante del ticket - sube el empleado al crear.
+    link_ticket = models.TextField(blank=True, null=True)
+    drive_file_id_ticket = models.TextField(blank=True, null=True)
+    # Staging del PDF de la factura real, antes de darla de alta formal -
+    # lo sube Tesoreria (no el empleado) para poder analizarlo con el
+    # Motor Documental y prellenar el alta de TesoreriaFactura.
+    link_factura_pdf = models.TextField(blank=True, null=True)
+    drive_file_id_factura = models.TextField(blank=True, null=True)
+    # Vinculo real a la factura formal ya dada de alta (Facturas > Nueva
+    # factura) - se llena en vincular_factura(), solo si estado=APROBADO.
+    factura = models.ForeignKey(
+        TesoreriaFactura,
+        db_column="factura_uuid",
+        to_field="timbre_uuid",
+        on_delete=models.SET_NULL,
+        related_name="tickets_reembolso",
+        blank=True,
+        null=True,
+    )
+    # Se liga cuando Tesoreria procesa el pago real (tesoreria_flujos.reembolso).
+    flujo = models.ForeignKey(
+        TesoreriaFlujo,
+        db_column="id_flujo",
+        on_delete=models.SET_NULL,
+        related_name="tickets_reembolso",
+        blank=True,
+        null=True,
+    )
+    comentarios = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=255, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_tickets_reembolso"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.id_ticket
+
+
 class TesoreriaSaldo(models.Model):
     """cuenta es varchar(50) sin FK declarada en el ERD (fk_relationships.csv
     no la lista) - se respeta tal cual, sin inventar una relacion que no
@@ -1049,3 +1125,152 @@ class FacturaTraslado(models.Model):
 
     class Meta:
         db_table = "factura_traslados"
+
+
+class TesoreriaContratoDocumento(models.Model):
+    """Checklist de documentos/info requeridos por contrato (diseño
+    manuscrito Tesoreria2.pdf, 28/Ago/2026: "Liga archivo - todavia no esta
+    implementado en BD. Pedir checklist de documentos/info"). Cada renglon
+    es UN documento que ese contrato en particular necesita (ej. "Poliza de
+    arrendamiento", "Identificacion oficial del fiador") - se define al
+    dar de alta el contrato (o despues) y se marca `recibido` conforme se
+    va juntando, con el link real al archivo en Drive una vez subido.
+
+    No reemplaza `link_carpeta`/`link_contrato` de TesoreriaContrato (esos
+    siguen siendo el contrato firmado en si) - esto es la lista de soporte
+    adicional que el contrato exige antes de poder operarlo (ej. antes de
+    aprobar su primer Flujo).
+
+    `nombre` es un catalogo fijo (28/Ago/2026, pedido explicito de Mariana:
+    "que sea una lista desplegable de las opciones") - no texto libre, para
+    que el checklist sea consistente entre contratos. NOMBRE_OTRO existe
+    como valvula de escape para el documento que no encaja en el catalogo
+    (se especifica en `comentarios`)."""
+
+    NOMBRE_CONTRATO_FIRMADO = "CONTRATO_FIRMADO"
+    NOMBRE_IDENTIFICACION_OFICIAL = "IDENTIFICACION_OFICIAL"
+    NOMBRE_COMPROBANTE_DOMICILIO = "COMPROBANTE_DOMICILIO"
+    NOMBRE_CONSTANCIA_SITUACION_FISCAL = "CONSTANCIA_SITUACION_FISCAL"
+    NOMBRE_ACTA_CONSTITUTIVA = "ACTA_CONSTITUTIVA"
+    NOMBRE_PODER_NOTARIAL = "PODER_NOTARIAL"
+    NOMBRE_POLIZA_SEGURO = "POLIZA_SEGURO"
+    NOMBRE_REFERENCIAS_BANCARIAS = "REFERENCIAS_BANCARIAS"
+    NOMBRE_OTRO = "OTRO"
+    NOMBRE_CHOICES = [
+        (NOMBRE_CONTRATO_FIRMADO, "Contrato firmado (PDF)"),
+        (NOMBRE_IDENTIFICACION_OFICIAL, "Identificación oficial del representante legal"),
+        (NOMBRE_COMPROBANTE_DOMICILIO, "Comprobante de domicilio"),
+        (NOMBRE_CONSTANCIA_SITUACION_FISCAL, "Constancia de situación fiscal (RFC)"),
+        (NOMBRE_ACTA_CONSTITUTIVA, "Acta constitutiva"),
+        (NOMBRE_PODER_NOTARIAL, "Poder notarial del representante legal"),
+        (NOMBRE_POLIZA_SEGURO, "Póliza de seguro"),
+        (NOMBRE_REFERENCIAS_BANCARIAS, "Referencias bancarias"),
+        (NOMBRE_OTRO, "Otro (especificar en comentarios)"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    contrato = models.ForeignKey(
+        TesoreriaContrato,
+        db_column="id_contrato",
+        on_delete=models.CASCADE,
+        related_name="documentos_requeridos",
+    )
+    nombre = models.CharField(max_length=50, choices=NOMBRE_CHOICES)
+    obligatorio = models.BooleanField(default=True)
+    recibido = models.BooleanField(default=False)
+    # Mismo patron que link_comprobante_banco en TesoreriaFlujo - se llena
+    # con el web_view_link real que regresa drive-service al subir el
+    # archivo, no una URL pegada a mano.
+    link_archivo = models.TextField(blank=True, null=True)
+    drive_file_id = models.TextField(blank=True, null=True)
+    comentarios = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=100, blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_contrato_documentos"
+        ordering = ["contrato", "id"]
+
+    def __str__(self):
+        return f"{self.contrato_id} - {self.nombre}"
+
+
+class TesoreriaDocumentoTicket(models.Model):
+    """Ticket publico de un solo documento del checklist, sin login (28/Ago/2026,
+    pedido explicito de Mariana: "esos [archivos] los subira el cliente...
+    mediante una magic link por doc faltante" - el analista de Tesoreria ya
+    NO sube el archivo el mismo, ver TesoreriaContratoDocumentoViewSet.
+    subir_archivo, ahora gateado a tesoreria.aprobar como excepcion manual).
+    Mismo patron que TesoreriaTicketProveedor (token en claro solo una vez,
+    token_hash SHA-256 en BD, sin emitir sesion) pero ligado a UN renglon
+    especifico del checklist en vez de a la contraparte en general - un
+    ticket = un documento, generado uno por cada documento faltante al
+    llamar TesoreriaContratoViewSet.enviar_recordatorio_documentos (nunca se
+    reusa el mismo ticket para varios documentos)."""
+
+    id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    documento = models.ForeignKey(
+        TesoreriaContratoDocumento,
+        on_delete=models.CASCADE,
+        related_name="tickets",
+    )
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    issued_by = models.CharField(max_length=8, blank=True, null=True)
+    expires_at = models.DateTimeField()
+    max_uses = models.IntegerField(default=1)
+    uses_count = models.IntegerField(default=0)
+    first_used_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_documento_tickets"
+        ordering = ["-issued_at"]
+
+    def __str__(self):
+        return self.id_ticket
+
+
+class TesoreriaTicketProveedor(models.Model):
+    """Ticket publico de un solo uso para que un PROVEEDOR externo suba su
+    factura sin necesitar cuenta ni login (27/Ago/2026, pedido de Mariana:
+    "el proveedor sube su factura" - mismo patron de codigo que
+    PldTicketCliente en pld-service, independiente - cada servicio
+    mantiene su propio modelo, ver memoria de sesion
+    "micumbres-tickets-reembolso-provisional"). Al canjearse NO emite
+    sesion (a diferencia de IamMagicLink) - "validar" regresa el ticket
+    directamente, protegido por reCAPTCHA en la subida real.
+
+    token_hash: SHA-256 del token, nunca el token en claro (ver
+    ticket_utils.py)."""
+
+    id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    contraparte = models.ForeignKey(
+        TesoreriaContraparte,
+        on_delete=models.CASCADE,
+        db_column="id_contraparte",
+        related_name="tickets_proveedor",
+    )
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    # FK laxa a iam_users.user_id (iam-service), mismo criterio que
+    # PldTicketCliente.issued_by.
+    issued_by = models.CharField(max_length=8)
+    expires_at = models.DateTimeField()
+    max_uses = models.IntegerField()
+    uses_count = models.IntegerField(default=0)
+    first_used_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_ticket_proveedor"
+        ordering = ["-issued_at"]
+
+    def __str__(self):
+        return self.id_ticket

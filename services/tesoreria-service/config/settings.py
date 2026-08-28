@@ -85,6 +85,29 @@ MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
 # subcarpeta convencional "Tesoreria/...".
 DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
 
+# Secreto servicio-a-servicio para subir a Drive sin exigirle al empleado
+# un perm_key de tesoreria.* que no tiene (ver drive-service/drive/views.py
+# ::_autorizado y su espejo en pld-service/config/settings.py) - lo usa
+# TesoreriaTicketReembolsoViewSet.subir_ticket (MiCumbres, self-service,
+# 27/Ago/2026). Vacio en dev por default (nadie puede usar este bypass
+# hasta configurarlo explicitamente en ambos lados).
+DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
+
+# Ticket publico de proveedores (27/Ago/2026, mismo patron que
+# PldTicketCliente/pld-service - ver tesoreria/ticket_utils.py,
+# tesoreria/recaptcha.py, TesoreriaTicketProveedorViewSet). Mismos
+# defaults de desarrollo que pld-service/config/settings.py.
+FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
+RECAPTCHA_SECRET_KEY = env("RECAPTCHA_SECRET_KEY", default="")
+
+# Rate limiting del formulario publico de subida de factura (mismo scope
+# dedicado que pld-ticket-subir, ver TesoreriaTicketProveedorViewSet.get_throttles).
+REST_FRAMEWORK = {
+    "DEFAULT_THROTTLE_RATES": {
+        "tesoreria-ticket-subir": "10/hour",
+    },
+}
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

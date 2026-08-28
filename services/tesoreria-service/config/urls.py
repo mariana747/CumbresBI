@@ -11,14 +11,18 @@ from tesoreria.views import (
     TesoreriaComplementoPagoViewSet,
     TesoreriaContraparteRelacionViewSet,
     TesoreriaContraparteViewSet,
+    TesoreriaContratoDocumentoViewSet,
     TesoreriaContratoViewSet,
     TesoreriaCorteEdcViewSet,
     TesoreriaCuentaViewSet,
+    TesoreriaDocumentoTicketViewSet,
     TesoreriaFacturaViewSet,
     TesoreriaFlujoViewSet,
     TesoreriaNotaCreditoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
+    TesoreriaTicketProveedorViewSet,
+    TesoreriaTicketReembolsoViewSet,
 )
 
 router = DefaultRouter()
@@ -27,6 +31,8 @@ router.register("contrapartes-relacion", TesoreriaContraparteRelacionViewSet, ba
 router.register("bancos", TesoreriaBancoViewSet, basename="tesoreriabanco")
 router.register("cuentas", TesoreriaCuentaViewSet, basename="tesoreriacuenta")
 router.register("contratos", TesoreriaContratoViewSet, basename="tesoreriacontrato")
+router.register("contrato-documentos", TesoreriaContratoDocumentoViewSet, basename="tesoreriacontratodocumento")
+router.register("documento-tickets", TesoreriaDocumentoTicketViewSet, basename="tesoreriadocumentoticket")
 router.register("flujos", TesoreriaFlujoViewSet, basename="tesoreriaflujo")
 router.register("facturas", TesoreriaFacturaViewSet, basename="tesoreriafactura")
 router.register("factura-conceptos", FacturaConceptoViewSet, basename="facturaconcepto")
@@ -38,6 +44,8 @@ router.register("nota-credito-conceptos", FacturaNotaCreditoViewSet, basename="f
 router.register("rec-nominas", TesoreriaRecNominaViewSet, basename="tesoreriarecnomina")
 router.register("cortes-edc", TesoreriaCorteEdcViewSet, basename="tesoreriacorteedc")
 router.register("saldos", TesoreriaSaldoViewSet, basename="tesoreriasaldo")
+router.register("tickets-reembolso", TesoreriaTicketReembolsoViewSet, basename="tesoreriaticketreembolso")
+router.register("tickets-proveedor", TesoreriaTicketProveedorViewSet, basename="tesoreriaticketproveedor")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

@@ -1,0 +1,334 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  IconButton,
+  Link as MuiLink,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+  useMediaQuery,
+  useTheme,
+} from "@mui/material";
+import { Camera, Upload, X as CloseIcon } from "lucide-react";
+import AppShell from "@/components/AppShell";
+import { getSession, SessionUser } from "@/lib/auth";
+import {
+  crearTicketReembolso,
+  listTicketsReembolso,
+  subirFotoTicket,
+  TesoreriaTicketEstado,
+  TesoreriaTicketReembolso,
+} from "@/lib/miCumbres";
+
+// Pantalla PROVISIONAL de "MiCumbres" (27/Ago/2026, pedido de Mariana) -
+// el empleado sube su ticket de gasto. La revision (adjuntar factura,
+// Motor Documental, vincular pago) se movio a Tesorería > Facturas > tab
+// "Tickets de reembolso" (27/Ago/2026, mismo día - pedido de Mariana: la
+// revision debe vivir donde Tesoreria ya trabaja, ver
+// TicketsReembolsoAdminPanel) - esta pantalla YA NO tiene ninguna accion
+// de administracion, solo crear + ver el estado de los tickets propios.
+// NO es el portal MiCumbres final (Fase 5, RRHH, sin arrancar) - ver
+// memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente".
+//
+// Regla de permisos: el empleado SOLO puede crear/subir su propio ticket,
+// nunca editarlo despues (el backend lo bloquea, ver
+// TesoreriaTicketReembolsoViewSet.get_permissions) - por eso esta pantalla
+// no tiene ningun boton de "editar" sobre un ticket ya creado.
+
+const ESTADO_COLOR: Record<TesoreriaTicketEstado, "default" | "warning" | "success" | "error"> = {
+  PENDIENTE: "default",
+  APROBADO: "warning",
+  VINCULADO: "success",
+  RECHAZADO: "error",
+};
+
+const ESTADO_LABEL: Record<TesoreriaTicketEstado, string> = {
+  PENDIENTE: "Pendiente",
+  APROBADO: "Aprobado — Tesorería está facturando",
+  VINCULADO: "Facturado",
+  RECHAZADO: "Rechazado",
+};
+
+export default function MiCumbresTicketsPage() {
+  const theme = useTheme();
+  // En celular la tabla no cabe (demasiadas columnas) - se muestra como
+  // lista de fichas (Card), una por ticket.
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
+
+  const [session, setSession] = useState<SessionUser | null>(null);
+  useEffect(() => {
+    getSession().then(setSession);
+  }, []);
+
+  const [tickets, setTickets] = useState<TesoreriaTicketReembolso[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function cargar() {
+    setLoading(true);
+    setError(null);
+    try {
+      setTickets(await listTicketsReembolso());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar tickets");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    cargar();
+  }, []);
+
+  // --- Alta (empleado) ---
+  const [openNuevo, setOpenNuevo] = useState(false);
+  const [descripcion, setDescripcion] = useState("");
+  const [monto, setMonto] = useState("");
+  const [fechaGasto, setFechaGasto] = useState("");
+  const [archivoTicket, setArchivoTicket] = useState<File | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [errorAlta, setErrorAlta] = useState<string | null>(null);
+
+  function cerrarNuevo() {
+    setOpenNuevo(false);
+    setDescripcion("");
+    setMonto("");
+    setFechaGasto("");
+    setArchivoTicket(null);
+    setErrorAlta(null);
+  }
+
+  async function handleCrearTicket() {
+    if (!descripcion || !monto || !fechaGasto) {
+      setErrorAlta("Descripción, monto y fecha del gasto son obligatorios.");
+      return;
+    }
+    setGuardando(true);
+    setErrorAlta(null);
+    try {
+      const nuevo = await crearTicketReembolso({ descripcion, monto, fechaGasto });
+      if (archivoTicket) {
+        await subirFotoTicket(nuevo.id_ticket, archivoTicket);
+      }
+      cerrarNuevo();
+      await cargar();
+    } catch (err) {
+      setErrorAlta(err instanceof Error ? err.message : "Error al subir el ticket");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <AppShell>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Box>
+          <Typography variant="h5">Tickets de reembolso</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Pantalla provisional de MiCumbres — sube tu ticket de gasto para que Tesorería lo procese.
+          </Typography>
+        </Box>
+        <Button variant="contained" startIcon={<Upload size={18} strokeWidth={1.5} />} onClick={() => setOpenNuevo(true)}>
+          Subir ticket
+        </Button>
+      </Stack>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      {loading ? (
+        <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+          <CircularProgress size={24} />
+        </Box>
+      ) : tickets.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
+          Sin tickets todavía.
+        </Typography>
+      ) : esMovil ? (
+        <Stack spacing={1.5}>
+          {tickets.map((t) => (
+            <Card key={t.id_ticket} variant="outlined">
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
+                      {t.id_ticket}
+                    </Typography>
+                    <Typography variant="body2">{t.descripcion}</Typography>
+                  </Box>
+                  <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
+                </Stack>
+                <Divider sx={{ my: 1 }} />
+                <Stack spacing={0.5}>
+                  <Typography variant="body2">
+                    <strong>Monto:</strong> ${t.monto}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Fecha del gasto:</strong> {t.fecha_gasto}
+                  </Typography>
+                  <Stack direction="row" spacing={2}>
+                    {t.link_ticket && (
+                      <MuiLink href={t.link_ticket} target="_blank" rel="noopener" variant="body2">
+                        Ver ticket
+                      </MuiLink>
+                    )}
+                    {t.link_factura_pdf && (
+                      <MuiLink href={t.link_factura_pdf} target="_blank" rel="noopener" variant="body2">
+                        Ver factura
+                      </MuiLink>
+                    )}
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          ))}
+        </Stack>
+      ) : (
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>ID</TableCell>
+                <TableCell>Descripción</TableCell>
+                <TableCell>Monto</TableCell>
+                <TableCell>Fecha del gasto</TableCell>
+                <TableCell>Estado</TableCell>
+                <TableCell>Ticket</TableCell>
+                <TableCell>Factura</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {tickets.map((t) => (
+                <TableRow key={t.id_ticket} hover>
+                  <TableCell>{t.id_ticket}</TableCell>
+                  <TableCell sx={{ maxWidth: 240 }}>{t.descripcion}</TableCell>
+                  <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>${t.monto}</TableCell>
+                  <TableCell>{t.fecha_gasto}</TableCell>
+                  <TableCell>
+                    <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
+                  </TableCell>
+                  <TableCell>
+                    {t.link_ticket ? (
+                      <MuiLink href={t.link_ticket} target="_blank" rel="noopener">
+                        Ver
+                      </MuiLink>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {t.link_factura_pdf ? (
+                      <MuiLink href={t.link_factura_pdf} target="_blank" rel="noopener">
+                        Ver
+                      </MuiLink>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+
+      {/* Alta del empleado - solo crear, nunca editar despues */}
+      <Dialog open={openNuevo} onClose={cerrarNuevo} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          Subir ticket de reembolso
+          <IconButton size="small" onClick={cerrarNuevo} aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {errorAlta && <Alert severity="error">{errorAlta}</Alert>}
+            <TextField
+              label="Descripción del gasto"
+              value={descripcion}
+              onChange={(e) => setDescripcion(e.target.value)}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+            <TextField
+              label="Monto"
+              type="number"
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Fecha del gasto"
+              type="date"
+              value={fechaGasto}
+              onChange={(e) => setFechaGasto(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+            {/* Dos botones a proposito (27/Ago/2026, pedido de Mariana:
+                "escaneo con celular"): `capture` solo abre la camara
+                directo cuando accept es estrictamente imagen - mezclado
+                con application/pdf el navegador lo ignora y cae siempre
+                al selector normal. "Tomar foto" es la via rapida en
+                celular; "Elegir archivo" cubre PDF/galeria/escritorio. */}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <Button component="label" variant="outlined" startIcon={<Camera size={16} strokeWidth={1.5} />}>
+                Tomar foto
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => setArchivoTicket(e.target.files?.[0] ?? null)}
+                />
+              </Button>
+              <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />}>
+                Elegir archivo
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setArchivoTicket(e.target.files?.[0] ?? null)}
+                />
+              </Button>
+            </Stack>
+            {archivoTicket && (
+              <Typography variant="caption" color="text.secondary">
+                Adjunto: {archivoTicket.name}
+              </Typography>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cerrarNuevo}>Cancelar</Button>
+          <Button variant="contained" onClick={handleCrearTicket} disabled={guardando}>
+            {guardando ? <CircularProgress size={20} color="inherit" /> : "Subir"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </AppShell>
+  );
+}

@@ -10,6 +10,7 @@ from .models import (
     TesoreriaContraparte,
     TesoreriaContraparteRelacion,
     TesoreriaContrato,
+    TesoreriaContratoDocumento,
     TesoreriaCorteEdc,
     TesoreriaCuenta,
     TesoreriaFactura,
@@ -17,6 +18,8 @@ from .models import (
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    TesoreriaTicketProveedor,
+    TesoreriaTicketReembolso,
 )
 
 
@@ -33,6 +36,17 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
     valor que en el futuro debe referenciar pld_contrapartes_kyc.id_contraparte
     en vez de generar el suyo propio (ver pld/models.py, comentario de
     "dueno real: contrapartes-service")."""
+
+    # Declarado explicito (28/Ago/2026, bug encontrado en vivo) - el modelo
+    # tiene editable=False en este campo (para que Django no lo muestre en
+    # el admin/formularios automaticos), pero eso hace que ModelSerializer
+    # lo marque read_only SIN IMPORTAR lo que diga Meta.read_only_fields -
+    # el comentario de abajo (25/Ago/2026) decia que ya no era read_only,
+    # pero solo se habia quitado de esa lista, nunca se corrigio la causa
+    # real. Sin este override, el id que el frontend genera y muestra antes
+    # de guardar (ver docstring de abajo) se descartaba en silencio y el
+    # backend guardaba uno distinto (el default=_short_id del modelo).
+    id_contraparte = serializers.CharField(max_length=8, required=False)
 
     class Meta:
         model = TesoreriaContraparte
@@ -174,6 +188,35 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         read_only_fields = ["id_contrato", "created_at", "updated_at"]
+
+
+class TesoreriaContratoDocumentoSerializer(serializers.ModelSerializer):
+    """Un renglon del checklist de documentos requeridos de un contrato. 
+    `link_archivo`/`drive_file_id`
+    son de solo lectura - se llenan via la accion `subir_archivo`
+    (TesoreriaContratoDocumentoViewSet), mismo criterio que
+    TesoreriaFlujoSerializer con link_comprobante_banco."""
+
+    nombre_display = serializers.CharField(source="get_nombre_display", read_only=True)
+
+    class Meta:
+        model = TesoreriaContratoDocumento
+        fields = [
+            "id",
+            "contrato",
+            "nombre",
+            "nombre_display",
+            "obligatorio",
+            "recibido",
+            "link_archivo",
+            "drive_file_id",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id", "link_archivo", "drive_file_id", "created_at", "updated_at"]
 
 
 class TesoreriaFlujoSerializer(serializers.ModelSerializer):
@@ -700,3 +743,85 @@ class TesoreriaRecNominaSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
+    """Ticket de reembolso de MiCumbres (pantalla provisional, ver
+    docstring de TesoreriaTicketReembolso en models.py). id_empleado/
+    estado/link_factura_pdf/drive_file_id_factura/factura/flujo son de
+    solo lectura en el update normal - el empleado los fija al crear (o no
+    los toca, en el caso de estado/factura/flujo) y solo cambian via las
+    acciones dedicadas del ViewSet (aprobar/rechazar, subir_factura,
+    vincular_factura, vincular_flujo), nunca via un PATCH libre."""
+
+    flujo_id = serializers.CharField(source="flujo.id_flujo", read_only=True, default=None)
+    factura_folio = serializers.CharField(source="factura.comprobante_folio", read_only=True, default=None)
+
+    class Meta:
+        model = TesoreriaTicketReembolso
+        fields = [
+            "id_ticket",
+            "id_empleado",
+            "descripcion",
+            "monto",
+            "fecha_gasto",
+            "estado",
+            "link_ticket",
+            "drive_file_id_ticket",
+            "link_factura_pdf",
+            "drive_file_id_factura",
+            "factura",
+            "factura_folio",
+            "flujo",
+            "flujo_id",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = [
+            "id_ticket",
+            "id_empleado",
+            "estado",
+            "link_factura_pdf",
+            "drive_file_id_factura",
+            "factura",
+            "flujo",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class TesoreriaTicketProveedorSerializer(serializers.ModelSerializer):
+    """Ticket publico de proveedor (27/Ago/2026, ver docstring del modelo).
+    token_hash nunca se expone via API - se genera y regresa una unica vez,
+    en claro, al crear el ticket (ver
+    TesoreriaTicketProveedorViewSet.perform_create)."""
+
+    contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
+
+    class Meta:
+        model = TesoreriaTicketProveedor
+        fields = [
+            "id_ticket",
+            "contraparte",
+            "contraparte_nombre",
+            "email",
+            "issued_at",
+            "issued_by",
+            "expires_at",
+            "max_uses",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]
+        read_only_fields = [
+            "id_ticket",
+            "issued_at",
+            "uses_count",
+            "first_used_at",
+            "last_used_at",
+            "revoked_at",
+        ]

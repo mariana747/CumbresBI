@@ -97,6 +97,8 @@ export async function createContraparte(params: {
   cliente?: boolean;
   proveedor?: boolean;
   comentarios?: string | null;
+  permiso?: string | null;
+  autorizadoPor?: string | null;
 }): Promise<TesoreriaContraparte> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrapartes/`, {
     method: "POST",
@@ -115,6 +117,8 @@ export async function createContraparte(params: {
       cliente: params.cliente ?? false,
       proveedor: params.proveedor ?? false,
       comentarios: params.comentarios || null,
+      permiso: params.permiso || null,
+      autorizado_por: params.autorizadoPor || null,
     }),
   });
   if (!response.ok) {
@@ -138,6 +142,8 @@ export async function updateContraparte(
     cliente: boolean;
     proveedor: boolean;
     comentarios: string | null;
+    permiso: string | null;
+    autorizadoPor: string | null;
   }>
 ): Promise<TesoreriaContraparte> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrapartes/${idContraparte}/`, {
@@ -156,6 +162,8 @@ export async function updateContraparte(
       cliente: params.cliente,
       proveedor: params.proveedor,
       comentarios: params.comentarios,
+      permiso: params.permiso,
+      autorizado_por: params.autorizadoPor,
     }),
   });
   if (!response.ok) {
@@ -516,9 +524,10 @@ export interface TesoreriaContrato {
   updated_by: string | null;
 }
 
-export async function listContratos(search?: string): Promise<TesoreriaContrato[]> {
+export async function listContratos(search?: string, contraparteId?: string): Promise<TesoreriaContrato[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (contraparteId) params.set("contraparte", contraparteId);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -580,6 +589,131 @@ export async function createContrato(params: {
       autorizacion: params.autorizacion ?? null,
     }),
   });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Checklist de documentos requeridos de un contrato (diseño manuscrito
+// Tesoreria2.pdf, 28/Ago/2026: "Liga archivo - todavia no esta
+// implementado en BD. Pedir checklist de documentos/info") - un renglon
+// por documento que ese contrato en particular necesita. link_archivo/
+// drive_file_id son de solo lectura, se llenan cuando el CLIENTE sube el
+// archivo via el magic link de TesoreriaDocumentoTicketViewSet.subir - el
+// analista no tiene ninguna accion para subirlo directamente (28/Ago/2026,
+// pedido explicito de Mariana).
+// Catalogo fijo (28/Ago/2026, pedido explicito de Mariana: "que sea una
+// lista desplegable de las opciones") - mismo orden/codigos que
+// TesoreriaContratoDocumento.NOMBRE_CHOICES en el backend.
+export type TesoreriaContratoDocumentoNombre =
+  | "CONTRATO_FIRMADO"
+  | "IDENTIFICACION_OFICIAL"
+  | "COMPROBANTE_DOMICILIO"
+  | "CONSTANCIA_SITUACION_FISCAL"
+  | "ACTA_CONSTITUTIVA"
+  | "PODER_NOTARIAL"
+  | "POLIZA_SEGURO"
+  | "REFERENCIAS_BANCARIAS"
+  | "OTRO";
+
+export const CONTRATO_DOCUMENTO_NOMBRE_OPCIONES: { value: TesoreriaContratoDocumentoNombre; label: string }[] = [
+  { value: "CONTRATO_FIRMADO", label: "Contrato firmado (PDF)" },
+  { value: "IDENTIFICACION_OFICIAL", label: "Identificación oficial del representante legal" },
+  { value: "COMPROBANTE_DOMICILIO", label: "Comprobante de domicilio" },
+  { value: "CONSTANCIA_SITUACION_FISCAL", label: "Constancia de situación fiscal (RFC)" },
+  { value: "ACTA_CONSTITUTIVA", label: "Acta constitutiva" },
+  { value: "PODER_NOTARIAL", label: "Poder notarial del representante legal" },
+  { value: "POLIZA_SEGURO", label: "Póliza de seguro" },
+  { value: "REFERENCIAS_BANCARIAS", label: "Referencias bancarias" },
+  { value: "OTRO", label: "Otro (especificar en comentarios)" },
+];
+
+export interface TesoreriaContratoDocumento {
+  id: number;
+  contrato: string;
+  nombre: TesoreriaContratoDocumentoNombre;
+  nombre_display: string;
+  obligatorio: boolean;
+  recibido: boolean;
+  link_archivo: string | null;
+  drive_file_id: string | null;
+  comentarios: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listContratoDocumentos(idContrato: string): Promise<TesoreriaContratoDocumento[]> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/contrato-documentos/?contrato=${encodeURIComponent(idContrato)}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function createContratoDocumento(params: {
+  contrato: string;
+  nombre: TesoreriaContratoDocumentoNombre;
+  obligatorio?: boolean;
+  comentarios?: string;
+}): Promise<TesoreriaContratoDocumento> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrato-documentos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contrato: params.contrato,
+      nombre: params.nombre,
+      obligatorio: params.obligatorio ?? true,
+      comentarios: params.comentarios || null,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function deleteContratoDocumento(id: number): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrato-documentos/${id}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+// Avisa a la contraparte de los documentos que el analista SELECCIONO del
+// checklist (28/Ago/2026, pedido explicito de Mariana: "se puede...
+// seleccionar para picar en avisar a la contraparte de los documentos
+// pendientes" - no se manda automatico por todos los pendientes) - el
+// backend manda UN correo por cada documento en `documentoIds`
+// (ver TesoreriaContratoViewSet.enviar_recordatorio_documentos).
+export async function enviarRecordatorioDocumentos(
+  idContrato: string,
+  documentoIds: number[],
+  actorUserId?: string
+): Promise<{ enviados: string[]; total_pendientes: number }> {
+  const response = await apiFetch(
+    "TESORERIA",
+    // encodeURIComponent es necesario aqui (28/Ago/2026) - id_contrato
+    // incluye la sociedad tal cual (ver perform_create en views.py), y en
+    // datos de prueba/seed algunos RFC placeholder traen "#", que el
+    // navegador interpreta como inicio de fragmento y rompe la ruta real
+    // (la peticion terminaba pegandole a /api/contratos/ sin ID). Sin este
+    // encode, el sintoma es un 400 "Este campo es requerido" del endpoint
+    // de creacion, no del endpoint esperado.
+    `${TESORERIA_API_BASE_URL}/api/contratos/${encodeURIComponent(idContrato)}/enviar_recordatorio_documentos/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ documento_ids: documentoIds, actor_user_id: actorUserId }),
+    }
+  );
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
@@ -862,7 +996,9 @@ export async function updateContrato(
     autorizacion: boolean;
   }>
 ): Promise<TesoreriaContrato> {
-  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/${idContrato}/`, {
+  // Ver comentario equivalente en enviarRecordatorioDocumentos - mismo
+  // motivo para el encodeURIComponent.
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/${encodeURIComponent(idContrato)}/`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -2117,6 +2253,153 @@ export async function enviarReporteDiario(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sociedades, fecha, destinatarios }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Ticket publico de proveedor (27/Ago/2026) - mismo patron que
+// lib/pld.ts (PldTicketCliente), independiente. El proveedor sube su
+// factura sin login (formulario /tesoreria-ticket/[token], reCAPTCHA v2).
+// Contrato: services/tesoreria-service/tesoreria/views.py::TesoreriaTicketProveedorViewSet.
+export interface TesoreriaTicketProveedor {
+  id_ticket: string;
+  contraparte: string;
+  contraparte_nombre: string;
+  email: string;
+  issued_at: string;
+  issued_by: string;
+  expires_at: string;
+  max_uses: number;
+  uses_count: number;
+  first_used_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export async function listTicketsProveedor(search?: string): Promise<TesoreriaTicketProveedor[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/?${params.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Regresa el token en claro UNA sola vez (nunca se puede recuperar
+// despues) - mismo criterio que createTicketCliente en lib/pld.ts.
+export async function createTicketProveedor(params: {
+  contraparte: string;
+  email: string;
+  expiresAt: string;
+  maxUses: number;
+  issuedBy: string;
+}): Promise<TesoreriaTicketProveedor & { token: string; correo_enviado: boolean }> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contraparte: params.contraparte,
+      email: params.email,
+      expires_at: params.expiresAt,
+      max_uses: params.maxUses,
+      issued_by: params.issuedBy,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function revocarTicketProveedor(idTicket: string, actorUserId?: string): Promise<TesoreriaTicketProveedor> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/${idTicket}/revocar/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor_user_id: actorUserId }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Publicos (sin sesion) - los llama /tesoreria-ticket/[token]/page.tsx.
+export async function validarTicketProveedor(token: string): Promise<TesoreriaTicketProveedor> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/validar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function subirFacturaTicketProveedor(params: {
+  token: string;
+  recaptchaToken: string;
+  file: File;
+}): Promise<{ detail: string }> {
+  const formData = new FormData();
+  formData.append("token", params.token);
+  formData.append("recaptcha_token", params.recaptchaToken);
+  formData.append("file", params.file);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/subir_factura/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Ticket publico de UN documento del checklist (28/Ago/2026, pedido
+// explicito de Mariana: "esos [archivos] los subira el cliente...mediante
+// una magic link por doc faltante") - mismo patron que validarTicketProveedor/
+// subirFacturaTicketProveedor arriba, pero ligado a un documento especifico
+// en vez de a la contraparte en general (ver TesoreriaDocumentoTicketViewSet).
+export interface TesoreriaDocumentoTicketValidado {
+  nombre_documento: string;
+  id_contrato: string;
+}
+
+export async function validarTicketDocumento(token: string): Promise<TesoreriaDocumentoTicketValidado> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/documento-tickets/validar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function subirDocumentoTicket(params: {
+  token: string;
+  recaptchaToken: string;
+  file: File;
+}): Promise<{ detail: string }> {
+  const formData = new FormData();
+  formData.append("token", params.token);
+  formData.append("recaptcha_token", params.recaptchaToken);
+  formData.append("file", params.file);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/documento-tickets/subir/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
