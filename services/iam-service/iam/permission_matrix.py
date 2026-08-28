@@ -57,7 +57,7 @@ ROLE_ACCESS = {
         "rrhh": "LCEA", "tickets": "LCEA", "audit": "L", "docint": "LC", "obra": "LCEA",
         "pld-documentos": "LCEA",
     },
-    "IAM_ADMIN": {"iam": "LCEA", "audit": "L"},
+    "IAM_ADMIN": {"iam": "LCEA", "audit": "L", "facturacion-cfdi": "LCEA"},
     "AUDITOR": {s: "L" for s in SERVICIOS},
     "PLD_ANALISTA": {
         "iam": "L", "contrapartes": "L", "pld-compliance": "LCE", "docint": "LC",
@@ -77,18 +77,24 @@ ROLE_ACCESS = {
     # aprueba/cierra el corte del viernes (obra.aprobar), a diferencia de
     # OBRA_COORDINADOR que no tiene la "A". Alcance PROYECTO.
     "SUPERVISOR_OBRA": {"iam": "L", "obra": "LCEA"},
-    # facturacion-cfdi solo "L" para todo mundo salvo SUPER_ADMIN
+    # facturacion-cfdi solo "L" (+ "A") para todo mundo salvo SUPER_ADMIN
     # (finanzas.md sec. "General Notes": "The user cannot create, delete
     # or modify invoices, just see, export and link them to transactions",
     # decision 26/Ago/2026: SUPER_ADMIN conserva LCEA como excepcion
-    # operativa - el resto de los roles pierde C/E aqui).
+    # operativa - el resto de los roles pierde C/E aqui). La "A" (aprobar)
+    # SI se conserva para FINANZAS_MANAGER/TESORERIA_ANALISTA (decision
+    # 27/Ago/2026, confirmado con Mariana) porque marcar_estado y
+    # confirmar_extraccion son el flujo de revision (cambiar el estado del
+    # proceso, o confirmar lo que propuso el Motor Documental), no
+    # "modificar la factura" en el sentido de editar los campos del CFDI a
+    # mano - ver TesoreriaFacturaViewSet.get_permissions en views.py.
     "FINANZAS_MANAGER": {
         "iam": "L", "contrapartes": "LCE", "ventas-vivienda": "L", "materiales": "L",
-        "rentas": "LCE", "tesoreria": "LCEA", "facturacion-cfdi": "L", "compras": "LCEA",
+        "rentas": "LCE", "tesoreria": "LCEA", "facturacion-cfdi": "LA", "compras": "LCEA",
         "docint": "LC",
     },
     "TESORERIA_ANALISTA": {
-        "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "L",
+        "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "LA",
         "docint": "LC",
     },
     "COMPRAS_ANALISTA": {

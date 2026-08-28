@@ -45,6 +45,24 @@ export async function logout(): Promise<void> {
   await apiFetch("IAM", `${IAM_API_BASE_URL}/auth/logout`, { credentials: "include" });
 }
 
+// Opcion A (ver memoria de sesion): reemite la cookie de sesion con los
+// roles/permisos ACTUALES de BD, sin pedirle al usuario que vuelva a hacer
+// login. AppShell.tsx la llama en un poll periodico para que un cambio de
+// rol hecho por un admin se refleje solo, con el desfase del intervalo de
+// poll (no instantaneo). true = se renovo, false = sesion invalida/
+// expirada (igual que getSession(), nunca lanza).
+export async function refreshSession(): Promise<boolean> {
+  try {
+    const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/auth/refresh`, {
+      method: "GET",
+      credentials: "include",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Helpers de "que puede hacer esta sesion" - un solo lugar para que el
 // sidebar (AppShell.tsx) y cualquier pantalla que arme su propia vista
 // por rol (ej. app/page.tsx) usen exactamente el mismo criterio, en vez

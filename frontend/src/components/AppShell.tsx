@@ -58,7 +58,15 @@ import {
   Menu as MenuIcon,
   type LucideIcon,
 } from "lucide-react";
-import { SessionUser, getSession, puedeAdministrarIam, tieneAccesoIam, tieneAccesoPld, tieneAlgunPermiso } from "@/lib/auth";
+import {
+  SessionUser,
+  getSession,
+  puedeAdministrarIam,
+  refreshSession,
+  tieneAccesoIam,
+  tieneAccesoPld,
+  tieneAlgunPermiso,
+} from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
 import { PldSolicitudEliminacionDoc, listSolicitudesEliminacion } from "@/lib/pld";
 import { Footer } from "@/components/Footer";
@@ -661,6 +669,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     });
   }, [router]);
+
+  // Roles/permisos en tiempo (casi) real (Opcion A, ver memoria de sesion):
+  // un admin puede otorgar/revocar un rol de OTRO usuario mientras ese
+  // usuario ya tiene su sesion abierta - sin este poll, el cambio no se
+  // veia hasta que el JWT viejo expirara (SESSION_JWT_TTL_MINUTES=15) y
+  // volviera a hacer login. refreshSession() reemite la cookie con los
+  // datos actuales de BD; si sigue siendo valida, se vuelve a pedir
+  // getSession() para que role_keys/perm_keys en memoria (este estado)
+  // tambien se actualicen, no solo la cookie.
+  useEffect(() => {
+    if (!checked) return;
+    const interval = setInterval(() => {
+      refreshSession().then((ok) => {
+        if (!ok) {
+          router.replace("/login");
+          return;
+        }
+        getSession().then((session) => session && setSession(session));
+      });
+    }, 3 * 60_000);
+    return () => clearInterval(interval);
+  }, [checked, router]);
 
   // Aviso de "usuarios sin rol asignado" (ver Header arriba) - se consulta
   // al cargar el shell y cada vez que se dispare SIN_ROL_CHANGED_EVENT

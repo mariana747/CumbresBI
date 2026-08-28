@@ -86,6 +86,9 @@ const AREA_LABELS: Record<string, string> = {
   rrhh: "RRHH",
   tickets: "Tickets",
   audit: "Auditoría",
+  docint: "Motor Documental",
+  "pld-documentos": "PLD / Archivos",
+  obra: "Obra",
 };
 
 function friendlyAreaName(area: string): string {

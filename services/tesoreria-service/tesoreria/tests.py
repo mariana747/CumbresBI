@@ -413,27 +413,28 @@ class TesoreriaFacturaTests(TestCase):
 class TesoreriaFacturaMarcarEstadoTests(TestCase):
     """marcar_estado() - ciclo de vida propio (24/Ago/2026, pedido explicito
     de Mariana): PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA. Aceptar exige
-    link_pdf + link_xml ya cargados."""
+    link_pdf + link_xml ya cargados. Gate propio facturacion-cfdi.aprobar
+    (27/Ago/2026), no .editar - ver TesoreriaFacturaViewSet.get_permissions."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
-        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.editar",))
+        self.scope_aprobar = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.aprobar",))
         self.factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-estado", comprobante_folio="F-1")
 
     def test_sin_permiso_da_403(self):
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "EN_PROCESO"}, format="json"
         )
-        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.crear",))
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.editar",))
         view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
         response = view(request, pk=self.factura.pk)
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 403)  # sin aprobar
 
     def test_estado_invalido_da_400(self):
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "NO_EXISTE"}, format="json"
         )
-        request.effective_scope = self.scope_editar
+        request.effective_scope = self.scope_aprobar
         view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
         response = view(request, pk=self.factura.pk)
         self.assertEqual(response.status_code, 400)
@@ -442,7 +443,7 @@ class TesoreriaFacturaMarcarEstadoTests(TestCase):
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "EN_PROCESO"}, format="json"
         )
-        request.effective_scope = self.scope_editar
+        request.effective_scope = self.scope_aprobar
         view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
         response = view(request, pk=self.factura.pk)
         self.assertEqual(response.status_code, 200)
@@ -452,7 +453,7 @@ class TesoreriaFacturaMarcarEstadoTests(TestCase):
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "ACEPTADA"}, format="json"
         )
-        request.effective_scope = self.scope_editar
+        request.effective_scope = self.scope_aprobar
         view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
         response = view(request, pk=self.factura.pk)
         self.assertEqual(response.status_code, 400)
@@ -466,7 +467,7 @@ class TesoreriaFacturaMarcarEstadoTests(TestCase):
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "ACEPTADA"}, format="json"
         )
-        request.effective_scope = self.scope_editar
+        request.effective_scope = self.scope_aprobar
         view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
         response = view(request, pk=self.factura.pk)
         self.assertEqual(response.status_code, 200)
@@ -476,7 +477,7 @@ class TesoreriaFacturaMarcarEstadoTests(TestCase):
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "RECHAZADA"}, format="json"
         )
-        request.effective_scope = self.scope_editar
+        request.effective_scope = self.scope_aprobar
         view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
         response = view(request, pk=self.factura.pk)
         self.assertEqual(response.status_code, 200)
@@ -761,6 +762,7 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         )
         self.scope_crear = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.crear",))
         self.scope_editar = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.editar",))
+        self.scope_aprobar = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.aprobar",))
 
     def test_crear_factura_con_rfc_conocido_vincula_contraparte(self):
         request = self.factory.post(
@@ -812,7 +814,7 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
             {"campos": {"emisor_rfc": "PVI900101ABC"}},
             format="json",
         )
-        request.effective_scope = self.scope_editar
+        request.effective_scope = self.scope_aprobar
         view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
         response = view(request, pk=factura.pk)
         self.assertEqual(response.status_code, 200)
