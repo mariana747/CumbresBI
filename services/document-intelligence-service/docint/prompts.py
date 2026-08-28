@@ -135,4 +135,34 @@ PROMPTS = {
         "fecha_gasto (YYYY-MM-DD), monto_total, moneda, concepto (una "
         "descripcion breve de que fue el gasto). " + _REGLA_COMUN
     ),
+    # 28/Ago/2026, plan de conciliacion bancaria de Tesoreria (ver memoria
+    # "tesoreria-flujos-registro-y-conciliacion-ia-plan"): el analista sube
+    # el comprobante bancario (PDF/imagen descargado de la banca en linea)
+    # al dar de alta un TesoreriaFlujo. Esta extraccion cataloga el
+    # movimiento y propone la contraparte para que el analista solo
+    # revise/confirme en vez de capturar todo a mano.
+    "tesoreria.comprobante_bancario": (
+        "El documento es un comprobante de una transferencia o movimiento "
+        "bancario (SPEI, transferencia interbancaria, deposito, retiro). "
+        "Extrae en extracted_data, usando estos nombres exactos donde "
+        "aplique (columnas reales de tesoreria_flujos, ver "
+        "services/tesoreria-service/tesoreria/models.py::TesoreriaFlujo): "
+        "fecha_efectiva (YYYY-MM-DD, la fecha en que se hizo la operacion), "
+        "total_mxp (el monto de la operacion, en pesos), concepto (el "
+        "texto libre que declara el banco sobre el motivo del movimiento, "
+        "o la referencia/clave de rastreo si no hay otro texto). Ademas, "
+        "campos que NO corresponden a ninguna columna (solo sirven para "
+        "que el analista compare y para ubicar la contraparte, igual "
+        "criterio que tesoreria.ticket_gasto): hora_operacion (HH:MM:SS si "
+        "aparece, si no null), tipo_movimiento ('cargo' si sale dinero de "
+        "la cuenta propia, 'abono' si entra), moneda, clave_rastreo "
+        "(referencia SPEI si aparece, si no null), cuenta_origen_banco, "
+        "cuenta_origen_clabe_o_numero, cuenta_origen_titular, "
+        "cuenta_destino_banco, cuenta_destino_clabe_o_numero, "
+        "cuenta_destino_titular. De cuenta_origen_titular o "
+        "cuenta_destino_titular (el que NO sea la cuenta propia de la "
+        "empresa, es decir la contraparte del movimiento) deriva ademas "
+        "contraparte_nombre (el nombre/razon social tal como aparece, para "
+        "buscarla o crearla en el catalogo de contrapartes). " + _REGLA_COMUN
+    ),
 }
