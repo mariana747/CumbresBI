@@ -5,6 +5,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -31,21 +32,28 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CreditCard, FilePenLine, Pencil, Plus, Search, ShieldCheck, X as CloseIcon } from "lucide-react";
+import { CreditCard, FilePenLine, Pencil, Plus, Search, ShieldCheck, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
+  CONTRATO_DOCUMENTO_NOMBRE_OPCIONES,
   TesoreriaContraparte,
   TesoreriaContrato,
+  TesoreriaContratoDocumento,
+  TesoreriaContratoDocumentoNombre,
   TesoreriaContratoStatus,
   TesoreriaContratoTipo,
   TesoreriaFrecuencia,
   TesoreriaMoneda,
   TesoreriaTipoPago,
   createContrato,
+  createContratoDocumento,
+  deleteContratoDocumento,
+  enviarRecordatorioDocumentos,
   listContrapartes,
+  listContratoDocumentos,
   listContratos,
   updateContrato,
 } from "@/lib/tesoreria";
@@ -76,6 +84,17 @@ const FORM_VACIO = {
   autorizacion: false,
 };
 
+// Calcula monto total = monto por periodo x duracion (numero de periodos) -
+// si no hay duracion capturada, asume un solo periodo (contrato de pago
+// unico). Regresa "" si el monto por periodo no es un numero valido (no
+// hay nada que calcular todavia).
+function calcularMontoTotal(montoPeriodo: string, duracion: string): string {
+  const periodo = parseFloat(montoPeriodo);
+  if (Number.isNaN(periodo)) return "";
+  const periodos = parseFloat(duracion) || 1;
+  return (periodo * periodos).toFixed(2);
+}
+
 const STATUS_COLOR: Record<TesoreriaContratoStatus, "success" | "default"> = {
   ACTIVO: "success",
   INACTIVO: "default",
@@ -86,7 +105,7 @@ const STATUS_COLOR: Record<TesoreriaContratoStatus, "success" | "default"> = {
 // poco amigable (feedback directo), se agrupan segun a que le sirven.
 // Detalles = quien/que/cuando; Pago = condiciones de cobro/pago; Enlaces =
 // documentos y comentarios; Control = estado interno.
-const TABS_CONTRATO = ["Detalles", "Pago", "Enlaces", "Control"] as const;
+const TABS_CONTRATO = ["Detalles", "Pago", "Enlaces", "Control", "Documentos"] as const;
 type TabContrato = (typeof TABS_CONTRATO)[number];
 
 // Contratos (arranque formal de Fase 4, 18/Ago/2026, tercer corte tras
@@ -118,6 +137,21 @@ export default function TesoreriaContratosPage() {
   // servidor al guardar, mismo riesgo de condicion de carrera ya
   // documentado y aceptado en TesoreriaContratoViewSet.perform_create.
   const [idContratoPrevio, setIdContratoPrevio] = useState("");
+
+  // Checklist de documentos requeridos (diseño Tesoreria2.pdf, 28/Ago/2026)
+  // - solo tiene sentido con un id_contrato ya existente (al editar), por
+  // eso la pestaña "Documentos" no aparece en el alta de un contrato nuevo.
+  const [documentos, setDocumentos] = useState<TesoreriaContratoDocumento[]>([]);
+  const [documentosLoading, setDocumentosLoading] = useState(false);
+  const [nuevoDocumentoNombre, setNuevoDocumentoNombre] = useState<TesoreriaContratoDocumentoNombre | "">("");
+  const [documentosError, setDocumentosError] = useState<string | null>(null);
+  const [enviandoRecordatorio, setEnviandoRecordatorio] = useState(false);
+  // Selección manual de a quién avisar (28/Ago/2026, pedido explicito de
+  // Mariana: "se puede...seleccionar para picar en avisar a la
+  // contraparte de los documentos pendientes" - no se manda automatico
+  // por todos los pendientes).
+  const [documentosSeleccionados, setDocumentosSeleccionados] = useState<number[]>([]);
+  const [recordatorioMensaje, setRecordatorioMensaje] = useState<string | null>(null);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -161,6 +195,11 @@ export default function TesoreriaContratosPage() {
     setTab("Detalles");
     setFormError(null);
     setIdContratoPrevio("");
+    setDocumentos([]);
+    setDocumentosError(null);
+    setNuevoDocumentoNombre("");
+    setRecordatorioMensaje(null);
+    setDocumentosSeleccionados([]);
     setDialogOpen(true);
   }
 
@@ -178,9 +217,74 @@ export default function TesoreriaContratosPage() {
       .catch(() => setIdContratoPrevio(""));
   }, [dialogOpen, editing, form.sociedad, form.contraparte]);
 
+  function refreshDocumentos(idContrato: string) {
+    setDocumentosLoading(true);
+    setDocumentosError(null);
+    listContratoDocumentos(idContrato)
+      .then(setDocumentos)
+      .catch((err) => setDocumentosError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setDocumentosLoading(false));
+  }
+
+  async function handleAgregarDocumento() {
+    if (!editing || !nuevoDocumentoNombre) return;
+    setDocumentosError(null);
+    try {
+      await createContratoDocumento({ contrato: editing.id_contrato, nombre: nuevoDocumentoNombre });
+      setNuevoDocumentoNombre("");
+      refreshDocumentos(editing.id_contrato);
+    } catch (err) {
+      setDocumentosError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
+  function toggleDocumentoSeleccionado(id: number) {
+    setDocumentosSeleccionados((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  async function handleEnviarRecordatorio() {
+    if (!editing || documentosSeleccionados.length === 0) return;
+    setEnviandoRecordatorio(true);
+    setDocumentosError(null);
+    setRecordatorioMensaje(null);
+    try {
+      const resultado = await enviarRecordatorioDocumentos(
+        editing.id_contrato,
+        documentosSeleccionados,
+        session?.user_id
+      );
+      setRecordatorioMensaje(
+        `Se enviaron ${resultado.enviados.length} de ${resultado.total_pendientes} correos (uno por documento seleccionado).`
+      );
+      setDocumentosSeleccionados([]);
+    } catch (err) {
+      setDocumentosError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setEnviandoRecordatorio(false);
+    }
+  }
+
+  async function handleBorrarDocumento(id: number) {
+    if (!editing) return;
+    setDocumentosError(null);
+    try {
+      await deleteContratoDocumento(id);
+      setDocumentosSeleccionados((prev) => prev.filter((x) => x !== id));
+      refreshDocumentos(editing.id_contrato);
+    } catch (err) {
+      setDocumentosError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
   function abrirEdicion(c: TesoreriaContrato) {
     setEditing(c);
     setTab("Detalles");
+    setDocumentos([]);
+    setRecordatorioMensaje(null);
+    setDocumentosSeleccionados([]);
+    refreshDocumentos(c.id_contrato);
     setForm({
       sociedad: c.sociedad,
       contraparte: c.contraparte,
@@ -490,7 +594,7 @@ export default function TesoreriaContratosPage() {
           variant="fullWidth"
           sx={{ borderBottom: 1, borderColor: "divider" }}
         >
-          {TABS_CONTRATO.map((t) => (
+          {TABS_CONTRATO.filter((t) => t !== "Documentos" || editing).map((t) => (
             <Tab key={t} label={t} value={t} />
           ))}
         </Tabs>
@@ -645,7 +749,14 @@ export default function TesoreriaContratosPage() {
                   size="small"
                   label="Duración (periodos)"
                   value={form.duracion}
-                  onChange={(e) => setForm({ ...form, duracion: e.target.value })}
+                  onChange={(e) => {
+                    const duracion = e.target.value;
+                    setForm({
+                      ...form,
+                      duracion,
+                      montoTotalIvaMxp: calcularMontoTotal(form.montoPeriodoIvaMxp, duracion),
+                    });
+                  }}
                   fullWidth
                 />
                 <TextField
@@ -675,12 +786,20 @@ export default function TesoreriaContratosPage() {
                 size="small"
                 label="Monto por periodo (IVA incluido, MXP)"
                 value={form.montoPeriodoIvaMxp}
-                onChange={(e) => setForm({ ...form, montoPeriodoIvaMxp: e.target.value })}
+                onChange={(e) => {
+                  const montoPeriodoIvaMxp = e.target.value;
+                  setForm({
+                    ...form,
+                    montoPeriodoIvaMxp,
+                    montoTotalIvaMxp: calcularMontoTotal(montoPeriodoIvaMxp, form.duracion),
+                  });
+                }}
                 fullWidth
               />
               <TextField
                 size="small"
                 label="Monto total (IVA incluido, MXP)"
+                helperText="Se calcula solo (monto por periodo × duración) - puedes ajustarlo a mano si el contrato es irregular."
                 value={form.montoTotalIvaMxp}
                 onChange={(e) => setForm({ ...form, montoTotalIvaMxp: e.target.value })}
                 fullWidth
@@ -785,6 +904,137 @@ export default function TesoreriaContratosPage() {
                     <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
                   </Stack>
                 </>
+              )}
+            </Stack>
+          )}
+
+          {tab === "Documentos" && editing && (
+            <Stack spacing={2}>
+              <Typography variant="body2" color="text.secondary">
+                Checklist de documentos que este contrato requiere para poder operarse (ej. póliza,
+                identificación del fiador). El cliente sube el archivo real por su cuenta, vía el enlace
+                que le llega por correo al avisarle que le falta un documento.
+              </Typography>
+              {documentosError && <Alert severity="error">{documentosError}</Alert>}
+              {recordatorioMensaje && <Alert severity="success">{recordatorioMensaje}</Alert>}
+              <Stack direction="row" spacing={1}>
+                <FormControl size="small" fullWidth disabled={!puedeCrear}>
+                  <InputLabel id="nuevo-documento-label">Documento a agregar</InputLabel>
+                  <Select
+                    labelId="nuevo-documento-label"
+                    label="Documento a agregar"
+                    value={nuevoDocumentoNombre}
+                    onChange={(e) => setNuevoDocumentoNombre(e.target.value as TesoreriaContratoDocumentoNombre)}
+                  >
+                    {CONTRATO_DOCUMENTO_NOMBRE_OPCIONES.map((opcion) => (
+                      <MenuItem key={opcion.value} value={opcion.value}>
+                        {opcion.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={handleAgregarDocumento}
+                  disabled={!puedeCrear || !nuevoDocumentoNombre}
+                  sx={{ flexShrink: 0 }}
+                >
+                  Agregar
+                </Button>
+              </Stack>
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                onClick={handleEnviarRecordatorio}
+                disabled={!puedeEditar || enviandoRecordatorio || documentosSeleccionados.length === 0}
+                sx={{ alignSelf: "flex-start" }}
+              >
+                {enviandoRecordatorio ? (
+                  <CircularProgress size={14} />
+                ) : documentosSeleccionados.length > 0 ? (
+                  `Avisar a la contraparte (${documentosSeleccionados.length} seleccionado${documentosSeleccionados.length > 1 ? "s" : ""})`
+                ) : (
+                  "Selecciona documentos pendientes para avisar"
+                )}
+              </Button>
+              {documentosLoading ? (
+                <Stack alignItems="center" sx={{ py: 2 }}>
+                  <CircularProgress size={20} />
+                </Stack>
+              ) : documentos.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center", py: 2 }}>
+                  Sin documentos en el checklist todavía.
+                </Typography>
+              ) : (
+                <Stack spacing={1}>
+                  {documentos.map((doc) => (
+                    <Paper key={doc.id} variant="outlined" sx={{ p: 1.5 }}>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        {doc.recibido ? (
+                          <Checkbox checked disabled size="small" title="Recibido" />
+                        ) : (
+                          <Checkbox
+                            checked={documentosSeleccionados.includes(doc.id)}
+                            onChange={() => toggleDocumentoSeleccionado(doc.id)}
+                            size="small"
+                            title="Seleccionar para avisar a la contraparte"
+                          />
+                        )}
+                        <Stack sx={{ flexGrow: 1, minWidth: 0 }}>
+                          <Typography variant="body2">
+                            {doc.nombre_display}
+                            {doc.obligatorio && (
+                              <Chip
+                                size="small"
+                                label="Obligatorio"
+                                variant="outlined"
+                                sx={{ ml: 1, height: 18 }}
+                              />
+                            )}
+                          </Typography>
+                          {doc.link_archivo && (
+                            <Typography
+                              variant="caption"
+                              component="a"
+                              href={doc.link_archivo}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              color="primary"
+                            >
+                              Ver archivo
+                            </Typography>
+                          )}
+                        </Stack>
+                        {/* El cliente sube su archivo via magic link (correo de
+                        "Avisar a la contraparte..."), el analista nunca sube
+                        directamente desde aquí (28/Ago/2026, pedido explicito de
+                        Mariana: "no puede subir o reemplazar un archivo esos los
+                        subira el cliente") - solo un chip de estado, sin acción. */}
+                        <Chip
+                          size="small"
+                          label={doc.recibido ? "Recibido" : "Pendiente del cliente"}
+                          color={doc.recibido ? "success" : "default"}
+                          variant="outlined"
+                        />
+                        {/* Un documento ya recibido (el cliente lo subió) ya no se
+                        puede quitar del checklist - solo mientras sigue pendiente
+                        (28/Ago/2026, pedido explicito de Mariana). */}
+                        {!doc.recibido && (
+                          <IconButton
+                            size="small"
+                            aria-label="Quitar del checklist"
+                            onClick={() => handleBorrarDocumento(doc.id)}
+                            disabled={!puedeEditar}
+                          >
+                            <Trash2 size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        )}
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Stack>
               )}
             </Stack>
           )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -33,6 +33,7 @@ import {
 import { FileText, Pencil, Plus, Search, Shield, Trash2, Users, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
+import { IamUser, listUsers } from "@/lib/iam";
 import {
   TesoreriaComplementoPago,
   TesoreriaContraparte,
@@ -82,6 +83,8 @@ const FORM_VACIO = {
   cliente: false,
   proveedor: false,
   comentarios: "",
+  permiso: "",
+  autorizadoPor: "",
 };
 
 // Catalogo maestro de contrapartes (arranque formal de Fase 4, 18/Ago/2026)
@@ -92,6 +95,23 @@ const FORM_VACIO = {
 export default function TesoreriaContrapartesPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [contrapartes, setContrapartes] = useState<TesoreriaContraparte[]>([]);
+  // "Autorizado por" se llena de colaboradores internos (28/Ago/2026,
+  // pedido explicito de Mariana), no texto libre - filtro access_mode=
+  // STANDARD (interno/Workspace) para no mezclar proveedores/externos que
+  // tambien viven en iam-service (ver docstring de IamUser.access_mode).
+  const [colaboradores, setColaboradores] = useState<IamUser[]>([]);
+  // created_by/updated_by guardan el user_id crudo (ver perform_create en
+  // views.py) - este mapa lo resuelve al correo para mostrarlo legible
+  // (28/Ago/2026, pedido explicito de Mariana: "no el id, sino el correo
+  // electronico"). Cae de vuelta al ID crudo si el usuario ya no esta en
+  // el directorio STANDARD activo (ej. fue borrado o es externo).
+  const emailPorUserId = useMemo(() => {
+    const mapa: Record<string, string> = {};
+    colaboradores.forEach((u) => {
+      mapa[u.user_id] = u.primary_email;
+    });
+    return mapa;
+  }, [colaboradores]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +122,10 @@ export default function TesoreriaContrapartesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   // ID mostrado en el dialogo de alta - generado al abrirlo, ver abrirAlta().
   const [idNuevo, setIdNuevo] = useState("");
+  // Apellidos y genero solo aplican a personas fisicas (28/Ago/2026, pedido
+  // explicito de Mariana: "no puede pedir apellidos si es moral") - una
+  // razon social (Moral/Fideicomiso) no tiene apellidos ni genero.
+  const esPersonaFisica = form.tipoPersona === "fisica" || form.tipoPersona === "fisica_act_emp";
 
   // Relaciones (rep. legal / benef. controlador, dato pedido por PLD/AML) -
   // dialogo por contraparte, ver TesoreriaContraparteRelacionViewSet
@@ -127,6 +151,7 @@ export default function TesoreriaContrapartesPage() {
 
   useEffect(() => {
     getSession().then(setSession);
+    listUsers({ accessMode: "STANDARD" }).then(setColaboradores).catch(() => setColaboradores([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
@@ -169,6 +194,8 @@ export default function TesoreriaContrapartesPage() {
       cliente: c.cliente,
       proveedor: c.proveedor,
       comentarios: c.comentarios || "",
+      permiso: c.permiso || "",
+      autorizadoPor: c.autorizado_por || "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -195,6 +222,8 @@ export default function TesoreriaContrapartesPage() {
         cliente: form.cliente,
         proveedor: form.proveedor,
         comentarios: form.comentarios || null,
+        permiso: form.permiso || null,
+        autorizadoPor: form.autorizadoPor || null,
       };
       if (editing) {
         await updateContraparte(editing.id_contraparte, params);
@@ -349,7 +378,7 @@ export default function TesoreriaContrapartesPage() {
                   <TableCell>Razón social</TableCell>
                   <TableCell>RFC</TableCell>
                   <TableCell>Tipo</TableCell>
-                  <TableCell>Contacto</TableCell>
+                  <TableCell>Nombre del contacto</TableCell>
                   <TableCell>Cliente / Proveedor</TableCell>
                   <TableCell align="right">Acciones</TableCell>
                 </TableRow>
@@ -449,7 +478,7 @@ export default function TesoreriaContrapartesPage() {
                     <strong>Tipo:</strong> {c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}
                   </Typography>
                   <Typography variant="body2">
-                    <strong>Contacto:</strong> {c.contacto || c.email || "—"}
+                    <strong>Nombre del contacto:</strong> {c.contacto || c.email || "—"}
                   </Typography>
                   <Stack direction="row" spacing={0.5}>
                     {c.cliente && <Chip size="small" label="Cliente" color="success" variant="outlined" />}
@@ -488,9 +517,43 @@ export default function TesoreriaContrapartesPage() {
                 fullWidth
               />
               {editing && (
-                <TextField size="small" label="Creado por" value={editing.created_by || "—"} disabled fullWidth />
+                <TextField
+                  size="small"
+                  label="Creado por"
+                  value={(editing.created_by && emailPorUserId[editing.created_by]) || editing.created_by || "—"}
+                  disabled
+                  fullWidth
+                />
               )}
             </Stack>
+            {/* autorizado_por (28/Ago/2026, campo del ERD sin UI hasta
+            ahora, pedido explicito de Mariana: va justo debajo del ID
+            contraparte) - se elige de los colaboradores internos ("se
+            usara de los colaboradores internos") - guarda el user_id, no
+            un nombre libre, para que quede ligado a un usuario real de
+            iam-service. `permiso` se quito del formulario (28/Ago/2026,
+            confirmado con Mariana) - campo heredado del AppSheet original
+            sin ninguna funcion real en el sistema hoy, generaba confusion
+            sin proposito claro. Sigue existiendo en el modelo/API por si
+            en el futuro se le da un uso real. */}
+            <FormControl size="small" fullWidth>
+              <InputLabel id="autorizado-por-label">Autorizado por</InputLabel>
+              <Select
+                labelId="autorizado-por-label"
+                label="Autorizado por"
+                value={form.autorizadoPor}
+                onChange={(e) => setForm({ ...form, autorizadoPor: e.target.value })}
+              >
+                <MenuItem value="">
+                  <em>Sin especificar</em>
+                </MenuItem>
+                {colaboradores.map((u) => (
+                  <MenuItem key={u.user_id} value={u.user_id}>
+                    {u.primary_email}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             {editing && (
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
@@ -523,51 +586,64 @@ export default function TesoreriaContrapartesPage() {
               onChange={(e) => setForm({ ...form, rfc: e.target.value })}
               fullWidth
             />
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-              <TextField
-                size="small"
-                label="Apellido paterno"
-                value={form.apellidoPaterno}
-                onChange={(e) => setForm({ ...form, apellidoPaterno: e.target.value })}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label="Apellido materno"
-                value={form.apellidoMaterno}
-                onChange={(e) => setForm({ ...form, apellidoMaterno: e.target.value })}
-                fullWidth
-              />
-            </Stack>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="tipo-persona-label">Tipo de persona</InputLabel>
-                <Select
-                  labelId="tipo-persona-label"
-                  label="Tipo de persona"
-                  value={form.tipoPersona}
-                  onChange={(e) => setForm({ ...form, tipoPersona: e.target.value as TesoreriaTipoPersona | "" })}
-                >
-                  {Object.entries(TIPO_PERSONA_LABELS).map(([value, label]) => (
-                    <MenuItem key={value} value={value}>
-                      {label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="genero-label">Género</InputLabel>
-                <Select
-                  labelId="genero-label"
-                  label="Género"
-                  value={form.genero}
-                  onChange={(e) => setForm({ ...form, genero: e.target.value as "MUJER" | "HOMBRE" | "" })}
-                >
-                  <MenuItem value="MUJER">Mujer</MenuItem>
-                  <MenuItem value="HOMBRE">Hombre</MenuItem>
-                </Select>
-              </FormControl>
-            </Stack>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="tipo-persona-label">Tipo de persona</InputLabel>
+              <Select
+                labelId="tipo-persona-label"
+                label="Tipo de persona"
+                value={form.tipoPersona}
+                onChange={(e) => {
+                  const tipoPersona = e.target.value as TesoreriaTipoPersona | "";
+                  const esFisica = tipoPersona === "fisica" || tipoPersona === "fisica_act_emp";
+                  setForm({
+                    ...form,
+                    tipoPersona,
+                    // Limpia apellidos/genero al cambiar a Moral/Fideicomiso -
+                    // no tiene sentido guardar datos de persona fisica para
+                    // una razon social.
+                    ...(esFisica ? {} : { apellidoPaterno: "", apellidoMaterno: "", genero: "" }),
+                  });
+                }}
+              >
+                {Object.entries(TIPO_PERSONA_LABELS).map(([value, label]) => (
+                  <MenuItem key={value} value={value}>
+                    {label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {esPersonaFisica && (
+              <>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  <TextField
+                    size="small"
+                    label="Apellido paterno"
+                    value={form.apellidoPaterno}
+                    onChange={(e) => setForm({ ...form, apellidoPaterno: e.target.value })}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Apellido materno"
+                    value={form.apellidoMaterno}
+                    onChange={(e) => setForm({ ...form, apellidoMaterno: e.target.value })}
+                    fullWidth
+                  />
+                </Stack>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="genero-label">Género</InputLabel>
+                  <Select
+                    labelId="genero-label"
+                    label="Género"
+                    value={form.genero}
+                    onChange={(e) => setForm({ ...form, genero: e.target.value as "MUJER" | "HOMBRE" | "" })}
+                  >
+                    <MenuItem value="MUJER">Mujer</MenuItem>
+                    <MenuItem value="HOMBRE">Hombre</MenuItem>
+                  </Select>
+                </FormControl>
+              </>
+            )}
             <TextField
               size="small"
               label="Correo"
@@ -577,7 +653,7 @@ export default function TesoreriaContrapartesPage() {
             />
             <TextField
               size="small"
-              label="Contacto"
+              label="Nombre del contacto"
               value={form.contacto}
               onChange={(e) => setForm({ ...form, contacto: e.target.value })}
               fullWidth
