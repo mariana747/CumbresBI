@@ -541,6 +541,101 @@ class TesoreriaFlujoVincularFacturaTests(TestCase):
         self.assertEqual(response.data["complemento"], "uuid-comp")
 
 
+class TesoreriaFlujoConfirmarConciliacionTests(TestCase):
+    """confirmar_conciliacion() - paso 4 del plan de conciliacion bancaria
+    por IA (ver memoria "tesoreria-flujos-registro-y-conciliacion-ia-plan"):
+    guarda los campos que confirmo el analista y, si la IA detecto una
+    contraparte en el comprobante, la busca o la crea con origen=ia (sin
+    exigir email/tipo_persona, unica excepcion a la regla de 28/Ago/2026)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Constructora de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        banco = TesoreriaBanco.objects.create(id_banxico="00003", banco="Banamex", alias="BMX")
+        cuenta = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000000002", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        self.flujo = TesoreriaFlujo.objects.create(id_flujo="FLJ-000950", contrato=self.contrato, cuenta=cuenta)
+        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+
+    def _post(self, body):
+        request = self.factory.post(
+            f"/api/flujos/{self.flujo.id_flujo}/confirmar_conciliacion/", body, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "confirmar_conciliacion"})
+        return view(request, pk=self.flujo.id_flujo)
+
+    def test_guarda_solo_campos_de_la_whitelist(self):
+        cuenta_original = self.flujo.cuenta_id
+        response = self._post(
+            {"campos": {"total_mxp": "1500.50", "concepto": "Pago de prueba", "cuenta": "otra-cuenta"}}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.flujo.refresh_from_db()
+        self.assertEqual(str(self.flujo.total_mxp), "1500.50")
+        self.assertEqual(self.flujo.concepto, "Pago de prueba")
+        self.assertEqual(self.flujo.cuenta_id, cuenta_original)  # "cuenta" no esta en la whitelist, no se toco
+
+    def test_contraparte_nueva_se_crea_con_origen_ia_sin_email(self):
+        response = self._post({"contraparte_nombre": "Proveedor Detectado SA"})
+        self.assertEqual(response.status_code, 200)
+        nueva = TesoreriaContraparte.objects.get(razon_social="Proveedor Detectado SA")
+        self.assertEqual(nueva.origen, TesoreriaContraparte.ORIGEN_IA)
+        self.assertIsNone(nueva.email)
+        self.assertEqual(response.data["contraparte_detectada"]["id_contraparte"], nueva.id_contraparte)
+
+    def test_contraparte_existente_se_reutiliza_sin_duplicar(self):
+        response = self._post({"contraparte_nombre": "constructora de prueba"})  # distinto case, mismo nombre
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            TesoreriaContraparte.objects.filter(razon_social__iexact="constructora de prueba").count(), 1
+        )
+        self.assertEqual(response.data["contraparte_detectada"]["id_contraparte"], self.contraparte.id_contraparte)
+
+    def test_vincula_factura_al_confirmar(self):
+        TesoreriaFactura.objects.create(timbre_uuid="uuid-conciliacion", comprobante_folio="F-9")
+        response = self._post({"factura": "uuid-conciliacion"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["factura"], "uuid-conciliacion")
+
+    def test_factura_inexistente_da_400(self):
+        response = self._post({"factura": "no-existe"})
+        self.assertEqual(response.status_code, 400)
+
+
+class TesoreriaContraparteOrigenTests(TestCase):
+    """Excepcion de origen=ia a la obligatoriedad de email/tipo_persona
+    (28/Ago/2026) - ver TesoreriaContraparteSerializer.validate."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+
+    def _post(self, body):
+        request = self.factory.post("/api/contrapartes/", body, format="json")
+        request.effective_scope = self.scope_crear
+        view = TesoreriaContraparteViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_alta_manual_sin_email_falla(self):
+        response = self._post({"razon_social": "Sin correo SA", "tipo_persona": "moral"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+
+    def test_alta_ia_sin_email_ni_tipo_persona_pasa(self):
+        response = self._post({"razon_social": "Detectada por IA SA", "origen": TesoreriaContraparte.ORIGEN_IA})
+        self.assertEqual(response.status_code, 201)
+
+
 class TesoreriaContraparteRelacionTests(TestCase):
     """Representante legal/beneficiario controlador - ambos extremos son
     FK reales a TesoreriaContraparte (misma tabla), dato que pide PLD/AML."""

@@ -58,6 +58,13 @@ class TesoreriaContraparte(models.Model):
         (GENERO_HOMBRE, "Hombre"),
     ]
 
+    ORIGEN_MANUAL = "manual"
+    ORIGEN_IA = "ia"
+    ORIGEN_CHOICES = [
+        (ORIGEN_MANUAL, "Alta manual"),
+        (ORIGEN_IA, "Alta automatica por IA"),
+    ]
+
     id_contraparte = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     rfc = models.CharField(max_length=13, unique=True, blank=True, null=True)
     razon_social = models.CharField(max_length=100)
@@ -66,8 +73,19 @@ class TesoreriaContraparte(models.Model):
     # Obligatorio de nuevo (28/Ago/2026, pedido explicito de Mariana, vuelve
     # al ERD original) - habia sido blank/null=True desde el 19/Ago/2026
     # ("contraparte maestra unica", alta minima con solo razon_social). Se
-    # revierte esa relajacion: email es obligatorio otra vez.
-    email = models.CharField(max_length=100)
+    # revierte esa relajacion: email es obligatorio otra vez. EXCEPCION:
+    # cuando origen=ia (ver campo abajo), el serializer permite dejarlo
+    # vacio - la IA de conciliacion bancaria no tiene forma de inventar un
+    # correo real (ver memoria "tesoreria-flujos-registro-y-conciliacion-
+    # ia-plan"). La constraint de BD se relaja a blank/null; quien impone
+    # "obligatorio salvo IA" es el serializer, no el modelo.
+    email = models.CharField(max_length=100, blank=True, null=True)
+    # Marca si esta contraparte se dio de alta a mano (pantalla de
+    # Contrapartes, exige email/tipo_persona) o automaticamente por la IA de
+    # conciliacion de comprobantes bancarios (los permite vacios). Default
+    # manual: toda alta existente y toda alta futura por la pantalla normal
+    # queda con la validacion completa de siempre.
+    origen = models.CharField(max_length=10, choices=ORIGEN_CHOICES, default=ORIGEN_MANUAL)
     comentarios = models.TextField(blank=True, null=True)
     permiso = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -78,8 +96,8 @@ class TesoreriaContraparte(models.Model):
     apellido_paterno = models.CharField(max_length=100, blank=True, null=True)
     apellido_materno = models.CharField(max_length=100, blank=True, null=True)
     # Obligatorio de nuevo (28/Ago/2026) - ver comentario de "email" arriba,
-    # mismo criterio y misma fecha de reversion.
-    tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES)
+    # mismo criterio y misma fecha de reversion. Misma excepcion origen=ia.
+    tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES, blank=True, null=True)
     genero = models.CharField(max_length=20, choices=GENERO_CHOICES, blank=True, null=True)
     cliente = models.BooleanField(default=False)
     proveedor = models.BooleanField(default=False)
