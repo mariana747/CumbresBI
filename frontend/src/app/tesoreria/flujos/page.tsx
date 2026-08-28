@@ -47,6 +47,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Sparkles,
   ThumbsUp,
   Undo2,
   Upload,
@@ -54,9 +55,11 @@ import {
   X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
+  TESORERIA_FLUJO_CAMPOS_CONFIRMABLES,
   TesoreriaComplementoPago,
   TesoreriaContrato,
   TesoreriaCuenta,
@@ -64,6 +67,7 @@ import {
   TesoreriaFlujo,
   TesoreriaValidacionEstado,
   aprobarFlujo,
+  confirmarConciliacionFlujo,
   createFlujo,
   listComplementosPago,
   listContratos,
@@ -187,6 +191,12 @@ export default function TesoreriaFlujosPage() {
   const [pagoArchivo, setPagoArchivo] = useState<File | null>(null);
   const [pagoError, setPagoError] = useState<string | null>(null);
   const [pagoEnviando, setPagoEnviando] = useState(false);
+  // Conciliacion bancaria por IA (28/Ago/2026, ver memoria
+  // "tesoreria-flujos-registro-y-conciliacion-ia-plan") - el analista ya
+  // subio el comprobante (subir_comprobante) y ahora lo analiza con el
+  // Motor Documental para catalogar el movimiento y proponer la
+  // contraparte, en vez de capturar todo a mano.
+  const [motorFlujo, setMotorFlujo] = useState<TesoreriaFlujo | null>(null);
 
   // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
   // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
@@ -277,6 +287,23 @@ export default function TesoreriaFlujosPage() {
     } finally {
       setGuardandoVinculo(false);
     }
+  }
+
+  // onConfirmar del MotorDocumentalDialog para conciliacion bancaria - separa
+  // lo que vino en extracted_data (filtrado ya por
+  // TESORERIA_FLUJO_CAMPOS_CONFIRMABLES) entre "campos" reales del modelo
+  // y los tres datos aparte que espera confirmar_conciliacion
+  // (contraparte_nombre/factura/complemento, ver views.py).
+  async function handleConfirmarConciliacionFlujo(datos: Record<string, unknown>) {
+    if (!motorFlujo) return;
+    const { contraparte_nombre, factura, complemento, ...campos } = datos;
+    await confirmarConciliacionFlujo(motorFlujo.id_flujo, {
+      campos: Object.keys(campos).length > 0 ? campos : undefined,
+      contraparte_nombre: typeof contraparte_nombre === "string" ? contraparte_nombre : undefined,
+      factura: typeof factura === "string" ? factura : undefined,
+      complemento: typeof complemento === "string" ? complemento : undefined,
+    });
+    refresh();
   }
 
   function refresh() {
@@ -1240,6 +1267,20 @@ export default function TesoreriaFlujosPage() {
             </ListItemIcon>
             <ListItemText>Vincular factura/complemento</ListItemText>
           </MenuItem>,
+          puedeEditar && menuFlujo.link_comprobante_banco && (
+            <MenuItem
+              key="conciliar-ia"
+              onClick={() => {
+                setMotorFlujo(menuFlujo);
+                setMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <Sparkles size={16} strokeWidth={1.5} />
+              </ListItemIcon>
+              <ListItemText>Conciliar con IA</ListItemText>
+            </MenuItem>
+          ),
           puedeAprobar && menuFlujo.validacion_estado !== "APROBADA" && (
             <MenuItem
               key="aprobar"
@@ -1354,6 +1395,28 @@ export default function TesoreriaFlujosPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <MotorDocumentalDialog
+        open={!!motorFlujo}
+        onClose={() => setMotorFlujo(null)}
+        contexto={
+          motorFlujo
+            ? {
+                etiqueta: `comprobante del flujo ${motorFlujo.id_flujo}`,
+                servicioSolicitante: "tesoreria-service",
+                // Misma carpeta donde subir_comprobante() ya dejo el
+                // archivo (ver TesoreriaFlujoViewSet.subir_comprobante,
+                // views.py) - el analista lo analiza ahi mismo, no hace
+                // falta subirlo de nuevo.
+                carpeta: `Tesoreria/Flujos/${motorFlujo.id_flujo}`,
+                permKey: "tesoreria.editar",
+                expectedDocumentType: "tesoreria.comprobante_bancario",
+                camposConfirmables: TESORERIA_FLUJO_CAMPOS_CONFIRMABLES,
+                onConfirmar: handleConfirmarConciliacionFlujo,
+              }
+            : undefined
+        }
+      />
     </AppShell>
   );
 }
