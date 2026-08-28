@@ -31,6 +31,7 @@ import {
 } from "@mui/material";
 import { Camera, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import EscanerDocumento from "@/components/EscanerDocumento";
 import { getSession, SessionUser } from "@/lib/auth";
 import {
   crearTicketReembolso,
@@ -105,6 +106,9 @@ export default function MiCumbresTicketsPage() {
   const [monto, setMonto] = useState("");
   const [fechaGasto, setFechaGasto] = useState("");
   const [archivoTicket, setArchivoTicket] = useState<File | null>(null);
+  // Piloto de escaneo (28/Ago/2026, pedido de Mariana): foto tomada con
+  // "Tomar foto" pasa por EscanerDocumento antes de quedar como adjunto.
+  const [fotoParaEscanear, setFotoParaEscanear] = useState<File | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [errorAlta, setErrorAlta] = useState<string | null>(null);
 
@@ -302,7 +306,11 @@ export default function MiCumbresTicketsPage() {
                   hidden
                   accept="image/*"
                   capture="environment"
-                  onChange={(e) => setArchivoTicket(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFotoParaEscanear(f);
+                    e.target.value = "";
+                  }}
                 />
               </Button>
               <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />}>
@@ -329,6 +337,16 @@ export default function MiCumbresTicketsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <EscanerDocumento
+        open={!!fotoParaEscanear}
+        archivo={fotoParaEscanear}
+        onCancelar={() => setFotoParaEscanear(null)}
+        onConfirmar={(archivo) => {
+          setArchivoTicket(archivo);
+          setFotoParaEscanear(null);
+        }}
+      />
     </AppShell>
   );
 }
