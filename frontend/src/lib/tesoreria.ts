@@ -524,9 +524,10 @@ export interface TesoreriaContrato {
   updated_by: string | null;
 }
 
-export async function listContratos(search?: string): Promise<TesoreriaContrato[]> {
+export async function listContratos(search?: string, contraparteId?: string): Promise<TesoreriaContrato[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (contraparteId) params.set("contraparte", contraparteId);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

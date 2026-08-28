@@ -17,6 +17,9 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -30,7 +33,20 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileText, Pencil, Plus, Search, Shield, Trash2, Users, X as CloseIcon } from "lucide-react";
+import {
+  Eye,
+  ExternalLink,
+  FilePenLine,
+  FileText,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Search,
+  Shield,
+  Trash2,
+  Users,
+  X as CloseIcon,
+} from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
@@ -38,6 +54,7 @@ import {
   TesoreriaComplementoPago,
   TesoreriaContraparte,
   TesoreriaContraparteRelacion,
+  TesoreriaContrato,
   TesoreriaFactura,
   TesoreriaNotaCredito,
   TesoreriaTipoPersona,
@@ -50,6 +67,7 @@ import {
   listComplementosPago,
   listContraparteRelaciones,
   listContrapartes,
+  listContratos,
   listFacturas,
   listNotasCredito,
   updateContraparte,
@@ -117,6 +135,12 @@ export default function TesoreriaContrapartesPage() {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaContraparte | null>(null);
+  // Ver vs. Editar (28/Ago/2026, pedido explicito de Mariana: "en los tres
+  // puntos lo de editar y en su lugar agrega un boton de ver") - mismo
+  // dialogo, mismo formulario, pero con todo deshabilitado y sin boton de
+  // Guardar cuando soloLectura es true. "Ver" queda visible siempre;
+  // "Editar" se mueve al menu de tres puntos (gateado por puedeEditar).
+  const [soloLectura, setSoloLectura] = useState(false);
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -149,6 +173,24 @@ export default function TesoreriaContrapartesPage() {
   const [docNotasCredito, setDocNotasCredito] = useState<TesoreriaNotaCredito[]>([]);
   const [loadingDocumentos, setLoadingDocumentos] = useState(false);
 
+  // Contratos de una contraparte (28/Ago/2026, "para la contraparte que
+  // cree, creale varios contratos ya que es una relacion de 1:N") -
+  // dialogo de solo lectura por contraparte, mismo patron que Relaciones.
+  // El alta de contratos se quito de aqui (28/Ago/2026, pedido explicito de
+  // Mariana: "quita lo de contrapartes, nuevo contrato") - se crea
+  // exclusivamente desde /tesoreria/contratos; aqui solo se listan los de
+  // esta contraparte y cada uno linkea alla.
+  const [contratosContraparte, setContratosContraparte] = useState<TesoreriaContraparte | null>(null);
+  const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
+  const [loadingContratos, setLoadingContratos] = useState(false);
+
+  // Menu compacto de acciones por fila (28/Ago/2026, "muy peques" - mismo
+  // patron ya usado en Flujos, ver flujos/page.tsx) - Editar se queda como
+  // icono visible, el resto (Contratos/Documentos/Relaciones/Borrar) vive
+  // detras del kebab para no apretar 5 iconos en la misma celda.
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [menuContraparte, setMenuContraparte] = useState<TesoreriaContraparte | null>(null);
+
   useEffect(() => {
     getSession().then(setSession);
     listUsers({ accessMode: "STANDARD" }).then(setColaboradores).catch(() => setColaboradores([]));
@@ -173,14 +215,16 @@ export default function TesoreriaContrapartesPage() {
 
   function abrirAlta() {
     setEditing(null);
+    setSoloLectura(false);
     setForm(FORM_VACIO);
     setIdNuevo(generarIdCorto());
     setFormError(null);
     setDialogOpen(true);
   }
 
-  function abrirEdicion(c: TesoreriaContraparte) {
+  function abrirEdicion(c: TesoreriaContraparte, verSolo = false) {
     setEditing(c);
+    setSoloLectura(verSolo);
     setForm({
       razonSocial: c.razon_social,
       rfc: c.rfc || "",
@@ -204,6 +248,17 @@ export default function TesoreriaContrapartesPage() {
   async function handleGuardar() {
     if (!form.razonSocial.trim()) {
       setFormError("La razón social es requerida.");
+      return;
+    }
+    // email y tipo_persona vuelven a ser obligatorios (28/Ago/2026, pedido
+    // explicito de Mariana, revierte la alta minima del 19/Ago/2026 - ver
+    // TesoreriaContraparte.email/tipo_persona en models.py).
+    if (!form.email.trim()) {
+      setFormError("El correo es requerido.");
+      return;
+    }
+    if (!form.tipoPersona) {
+      setFormError("El tipo de persona es requerido.");
       return;
     }
     setSaving(true);
@@ -321,6 +376,19 @@ export default function TesoreriaContrapartesPage() {
     }
   }
 
+  function abrirContratos(c: TesoreriaContraparte) {
+    setContratosContraparte(c);
+    refreshContratos(c.id_contraparte);
+  }
+
+  function refreshContratos(idContraparte: string) {
+    setLoadingContratos(true);
+    listContratos(undefined, idContraparte)
+      .then(setContratos)
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoadingContratos(false));
+  }
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
@@ -414,18 +482,21 @@ export default function TesoreriaContrapartesPage() {
                         </Stack>
                       </TableCell>
                       <TableCell align="right">
-                        <IconButton size="small" aria-label="Documentos (facturas/pagos)" onClick={() => abrirDocumentos(c)}>
-                          <FileText size={14} strokeWidth={1.5} />
-                        </IconButton>
-                        <IconButton size="small" aria-label="Relaciones (PLD)" onClick={() => abrirRelaciones(c)}>
-                          <Shield size={14} strokeWidth={1.5} />
-                        </IconButton>
-                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
-                          <Pencil size={14} strokeWidth={1.5} />
-                        </IconButton>
-                        <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(c)} disabled={!puedeEditar}>
-                          <Trash2 size={14} strokeWidth={1.5} />
-                        </IconButton>
+                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                          <IconButton size="small" aria-label="Ver" onClick={() => abrirEdicion(c, true)}>
+                            <Eye size={14} strokeWidth={1.5} />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            aria-label="Más acciones"
+                            onClick={(e) => {
+                              setMenuAnchor(e.currentTarget);
+                              setMenuContraparte(c);
+                            }}
+                          >
+                            <MoreVertical size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   ))
@@ -456,17 +527,18 @@ export default function TesoreriaContrapartesPage() {
                     </Typography>
                   </Stack>
                   <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                    <IconButton size="small" aria-label="Documentos (facturas/pagos)" onClick={() => abrirDocumentos(c)}>
-                      <FileText size={14} strokeWidth={1.5} />
+                    <IconButton size="small" aria-label="Ver" onClick={() => abrirEdicion(c, true)}>
+                      <Eye size={14} strokeWidth={1.5} />
                     </IconButton>
-                    <IconButton size="small" aria-label="Relaciones (PLD)" onClick={() => abrirRelaciones(c)}>
-                      <Shield size={14} strokeWidth={1.5} />
-                    </IconButton>
-                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(c)} disabled={!puedeEditar}>
-                      <Pencil size={14} strokeWidth={1.5} />
-                    </IconButton>
-                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(c)} disabled={!puedeEditar}>
-                      <Trash2 size={14} strokeWidth={1.5} />
+                    <IconButton
+                      size="small"
+                      aria-label="Más acciones"
+                      onClick={(e) => {
+                        setMenuAnchor(e.currentTarget);
+                        setMenuContraparte(c);
+                      }}
+                    >
+                      <MoreVertical size={14} strokeWidth={1.5} />
                     </IconButton>
                   </Stack>
                 </Stack>
@@ -491,9 +563,85 @@ export default function TesoreriaContrapartesPage() {
         </Stack>
       </Paper>
 
+      {/* Menu compacto de acciones por fila - un solo lugar para tabla y
+      tarjetas (ver setMenuAnchor/setMenuContraparte arriba). */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor}
+        onClose={() => {
+          setMenuAnchor(null);
+          setMenuContraparte(null);
+        }}
+      >
+        {menuContraparte && [
+          <MenuItem
+            key="editar"
+            disabled={!puedeEditar}
+            onClick={() => {
+              abrirEdicion(menuContraparte);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Pencil size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Editar</ListItemText>
+          </MenuItem>,
+          <MenuItem
+            key="contratos"
+            onClick={() => {
+              abrirContratos(menuContraparte);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <FilePenLine size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Contratos</ListItemText>
+          </MenuItem>,
+          <MenuItem
+            key="documentos"
+            onClick={() => {
+              abrirDocumentos(menuContraparte);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <FileText size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Documentos (facturas/pagos)</ListItemText>
+          </MenuItem>,
+          <MenuItem
+            key="relaciones"
+            onClick={() => {
+              abrirRelaciones(menuContraparte);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Shield size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Relaciones (PLD)</ListItemText>
+          </MenuItem>,
+          <MenuItem
+            key="borrar"
+            disabled={!puedeEditar}
+            onClick={() => {
+              handleBorrar(menuContraparte);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Trash2 size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Borrar</ListItemText>
+          </MenuItem>,
+        ]}
+      </Menu>
+
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.razon_social}` : "Nueva contraparte"}
+          {soloLectura ? `Ver ${editing?.razon_social}` : editing ? `Editar ${editing.razon_social}` : "Nueva contraparte"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -504,7 +652,16 @@ export default function TesoreriaContrapartesPage() {
               {formError}
             </Alert>
           )}
-          <Stack spacing={2}>
+          {/* fieldset disabled deshabilita en cascada los <input>/<textarea>
+          reales de TextField y Checkbox (28/Ago/2026, modo "Ver") - los
+          Select de MUI no son elementos de formulario nativos, asi que esos
+          3 llevan su propio disabled={soloLectura} explicito mas abajo. */}
+          <Stack
+            component="fieldset"
+            disabled={soloLectura}
+            spacing={2}
+            sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
+          >
             {/* Campos de solo lectura - generados por el sistema, se
             muestran siempre (incluso al crear) para que se vea que existen
             aunque todavia no tengan valor. */}
@@ -543,6 +700,7 @@ export default function TesoreriaContrapartesPage() {
                 label="Autorizado por"
                 value={form.autorizadoPor}
                 onChange={(e) => setForm({ ...form, autorizadoPor: e.target.value })}
+                disabled={soloLectura}
               >
                 <MenuItem value="">
                   <em>Sin especificar</em>
@@ -586,7 +744,7 @@ export default function TesoreriaContrapartesPage() {
               onChange={(e) => setForm({ ...form, rfc: e.target.value })}
               fullWidth
             />
-            <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth required>
               <InputLabel id="tipo-persona-label">Tipo de persona</InputLabel>
               <Select
                 labelId="tipo-persona-label"
@@ -604,6 +762,7 @@ export default function TesoreriaContrapartesPage() {
                     ...(esFisica ? {} : { apellidoPaterno: "", apellidoMaterno: "", genero: "" }),
                   });
                 }}
+                disabled={soloLectura}
               >
                 {Object.entries(TIPO_PERSONA_LABELS).map(([value, label]) => (
                   <MenuItem key={value} value={value}>
@@ -637,6 +796,7 @@ export default function TesoreriaContrapartesPage() {
                     label="Género"
                     value={form.genero}
                     onChange={(e) => setForm({ ...form, genero: e.target.value as "MUJER" | "HOMBRE" | "" })}
+                    disabled={soloLectura}
                   >
                     <MenuItem value="MUJER">Mujer</MenuItem>
                     <MenuItem value="HOMBRE">Hombre</MenuItem>
@@ -647,6 +807,7 @@ export default function TesoreriaContrapartesPage() {
             <TextField
               size="small"
               label="Correo"
+              required
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               fullWidth
@@ -697,10 +858,12 @@ export default function TesoreriaContrapartesPage() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={handleGuardar} disabled={saving}>
-            {saving ? <CircularProgress size={16} /> : "Guardar"}
-          </Button>
+          <Button onClick={() => setDialogOpen(false)}>{soloLectura ? "Cerrar" : "Cancelar"}</Button>
+          {!soloLectura && (
+            <Button variant="contained" onClick={handleGuardar} disabled={saving}>
+              {saving ? <CircularProgress size={16} /> : "Guardar"}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -819,6 +982,82 @@ export default function TesoreriaContrapartesPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setRelacionesContraparte(null)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Contratos de una contraparte (1:N, 28/Ago/2026) - solo lectura, el
+      alta/edicion vive exclusivamente en /tesoreria/contratos (pedido
+      explicito de Mariana: "quita lo de contrapartes, nuevo contrato").
+      Cada renglon linkea a su contrato; el boton del pie linkea a la lista
+      completa ya filtrada por esta contraparte. */}
+      <Dialog open={!!contratosContraparte} onClose={() => setContratosContraparte(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Contratos — {contratosContraparte?.razon_social}
+          <IconButton onClick={() => setContratosContraparte(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>ID de contrato</TableCell>
+                  <TableCell>Sociedad</TableCell>
+                  <TableCell>Tipo</TableCell>
+                  <TableCell>Estado</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {loadingContratos ? (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                      <CircularProgress size={20} />
+                    </TableCell>
+                  </TableRow>
+                ) : contratos.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin contratos registrados para esta contraparte.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  contratos.map((c) => (
+                    <TableRow key={c.id_contrato} hover>
+                      <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contrato}</TableCell>
+                      <TableCell>{c.sociedad}</TableCell>
+                      <TableCell>{c.tipo || "—"}</TableCell>
+                      <TableCell>{c.status || "—"}</TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          aria-label="Ir a este contrato"
+                          href={`/tesoreria/contratos?id_contrato=${encodeURIComponent(c.id_contrato)}`}
+                        >
+                          <ExternalLink size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          {/* Filtrado por esta contraparte, no la lista completa (28/Ago/2026,
+          pedido explicito de Mariana: "se te redirige a los contratos solo
+          pertenecientes a esa contraparte, no se mostraran lo de otra
+          contraparte") - ver soporte de ?contraparte= en contratos/page.tsx. */}
+          <Button
+            href={`/tesoreria/contratos?contraparte=${encodeURIComponent(contratosContraparte?.id_contraparte ?? "")}`}
+          >
+            Ir a Contratos
+          </Button>
+          <Button onClick={() => setContratosContraparte(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
 
