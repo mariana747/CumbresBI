@@ -535,12 +535,14 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
         """Autoriza el pago (autorizacion/autorizado_por/fecha_autorizacion)
-        - requerido antes de poder registrar_pago(). autorizado_por viene en
-        el body porque, igual que PldContraparteKycViewSet.aprobar, todavia
-        no hay resolucion real de JWT->actor en este punto del proyecto."""
-        autorizado_por = request.data.get("autorizado_por")
+        - requerido antes de poder registrar_pago(). autorizado_por se
+        resuelve del JWT (identity_user_id, ver EffectiveScope) - antes venia
+        del body y cualquiera podia poner el nombre que quisiera; el gate de
+        permiso ya obliga a que sea alguien con tesoreria.aprobar, pero el
+        campo no reflejaba quien de verdad hizo la accion."""
+        autorizado_por = request.effective_scope.identity_user_id
         if not autorizado_por:
-            return Response({"autorizado_por": ["Este campo es requerido."]}, status=400)
+            return Response({"autorizado_por": ["No se pudo identificar al usuario autenticado."]}, status=400)
 
         flujo = self.get_object()
         flujo.autorizacion = True

@@ -267,7 +267,11 @@ class TesoreriaFlujoTests(TestCase):
         )
         self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
         self.scope_editar = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
-        self.scope_aprobar = EffectiveScope(is_global=True, perm_keys=("tesoreria.aprobar",))
+        # identity_user_id necesario (31/Ago/2026): aprobar() ya no lee
+        # autorizado_por del body, lo resuelve del JWT via este campo.
+        self.scope_aprobar = EffectiveScope(
+            is_global=True, perm_keys=("tesoreria.aprobar",), identity_user_id="u001"
+        )
 
     def _crear_flujo(self, scope=None):
         request = self.factory.post(
@@ -319,26 +323,27 @@ class TesoreriaFlujoTests(TestCase):
         creado = self._crear_flujo()
         flujo_id = creado.data["id_flujo"]
 
-        request = self.factory.post(f"/api/flujos/{flujo_id}/aprobar/", {"autorizado_por": "u001"}, format="json")
+        request = self.factory.post(f"/api/flujos/{flujo_id}/aprobar/", {}, format="json")
         request.effective_scope = self.scope_editar
         view = TesoreriaFlujoViewSet.as_view({"post": "aprobar"})
         response = view(request, pk=flujo_id)
         self.assertEqual(response.status_code, 403)
 
-        request2 = self.factory.post(f"/api/flujos/{flujo_id}/aprobar/", {"autorizado_por": "u001"}, format="json")
+        request2 = self.factory.post(f"/api/flujos/{flujo_id}/aprobar/", {}, format="json")
         request2.effective_scope = self.scope_aprobar
         response2 = view(request2, pk=flujo_id)
         self.assertEqual(response2.status_code, 200)
         self.assertTrue(response2.data["autorizacion"])
         self.assertEqual(response2.data["validacion_estado"], TesoreriaFlujo.VALIDACION_APROBADA)
+        # autorizado_por sale del JWT (identity_user_id), no de lo que
+        # mande el body - aqui no se manda nada y aun asi queda "u001".
+        self.assertEqual(response2.data["autorizado_por"], "u001")
 
     def test_ciclo_completo_aprobar_y_registrar_pago(self):
         creado = self._crear_flujo()
         flujo_id = creado.data["id_flujo"]
 
-        aprobar_request = self.factory.post(
-            f"/api/flujos/{flujo_id}/aprobar/", {"autorizado_por": "u001"}, format="json"
-        )
+        aprobar_request = self.factory.post(f"/api/flujos/{flujo_id}/aprobar/", {}, format="json")
         aprobar_request.effective_scope = self.scope_aprobar
         aprobar_view = TesoreriaFlujoViewSet.as_view({"post": "aprobar"})
         aprobar_view(aprobar_request, pk=flujo_id)
