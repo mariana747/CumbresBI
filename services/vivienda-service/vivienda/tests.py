@@ -3,12 +3,15 @@ Fase 3: docs/CumbresBI_estado.md, Fase 3). Los 6 modelos ya existian
 completos desde antes (heredados via inspectdb, sin capa de negocio) -
 esta suite prueba la capa nueva (serializers/views/urls), no los modelos.
 
-Sin ScopedManager a proposito - ninguno de estos modelos tiene columna de
-proyecto/sociedad declarada como scope todavia (queda pendiente declarar
-SCOPE_FIELD_PROYECTO, ver docs/CumbresBI_estado.md linea 168); el filtro
-real es por permiso (ventas-vivienda.crear/.editar), no por alcance de
-fila. Mismo criterio que tesoreria-service/tests.py para sus 3 catalogos
-compartidos."""
+31/Ago/2026 (auditoria de scope): SCOPE_FIELD_PROYECTO/SOCIEDAD ya se
+declararon (ver models.py) - antes este servicio era lectura abierta sin
+RLS. Los tests que probaban "lectura no requiere permiso especial" usaban
+EffectiveScope.anonymous() para representar "sin perm_keys", pero
+anonymous() tambien significa "sin alcance, no ve nada" (ver su docstring
+en cumbresbi_scope/scope.py) - con RLS real esos tests dejaron de tener
+sentido tal cual estaban. Se corrigieron a EffectiveScope(is_global=True)
+(usuario autenticado, sin perm_keys especiales) para seguir probando lo
+mismo que antes sin depender del hueco de RLS que ya no existe."""
 
 from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
@@ -112,7 +115,7 @@ class ViviendaProyectoCrudTests(TestCase):
 
     def test_lectura_sigue_sin_permiso_especial(self):
         request = self.factory.get("/api/proyectos/")
-        request.effective_scope = EffectiveScope.anonymous()
+        request.effective_scope = EffectiveScope(is_global=True)
         view = ViviendaProyectoViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
@@ -133,11 +136,68 @@ class ViviendaProyectoCrudTests(TestCase):
             updated_by="u001",
         )
         request = self.factory.get("/api/proyectos/", {"search": "Prueba"})
-        request.effective_scope = EffectiveScope.anonymous()
+        request.effective_scope = EffectiveScope(is_global=True)
         view = ViviendaProyectoViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["denominacion"], "Residencial Prueba")
+
+
+class ViviendaScopeTests(TestCase):
+    """31/Ago/2026 (auditoria de scope): confirma que un usuario acotado a
+    un proyecto no ve el de otro, mismo criterio que ObraLoteScopeTests en
+    obra-service."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.proyecto_a = ViviendaProyecto.objects.create(
+            denominacion="Proyecto A",
+            dom_calle="Calle 1", dom_numero_ext="1", dom_numero_int="S/N", dom_colonia="Centro",
+            dom_municipio_alcaldia="Monterrey", dom_estado="Nuevo Leon", dom_cp="64000", dom_pais="Mexico",
+            created_by="u001", updated_by="u001",
+        )
+        self.proyecto_b = ViviendaProyecto.objects.create(
+            denominacion="Proyecto B",
+            dom_calle="Calle 2", dom_numero_ext="2", dom_numero_int="S/N", dom_colonia="Centro",
+            dom_municipio_alcaldia="Monterrey", dom_estado="Nuevo Leon", dom_cp="64000", dom_pais="Mexico",
+            created_by="u001", updated_by="u001",
+        )
+
+    def test_usuario_de_un_proyecto_no_ve_el_proyecto_de_otro(self):
+        request = self.factory.get("/api/proyectos/")
+        request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=(self.proyecto_a.id_proyecto,))
+        view = ViviendaProyectoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_proyecto"], self.proyecto_a.id_proyecto)
+
+    def test_usuario_de_un_proyecto_no_ve_viviendas_de_otro(self):
+        ViviendaListado.objects.create(
+            proyecto=self.proyecto_a, denominacion="Casa A", created_by="u001", updated_by="u001"
+        )
+        ViviendaListado.objects.create(
+            proyecto=self.proyecto_b, denominacion="Casa B", created_by="u001", updated_by="u001"
+        )
+        request = self.factory.get("/api/viviendas/")
+        request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=(self.proyecto_a.id_proyecto,))
+        view = ViviendaListadoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["denominacion"], "Casa A")
+
+    def test_anonimo_no_ve_nada(self):
+        request = self.factory.get("/api/proyectos/")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = ViviendaProyectoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 0)
+
+    def test_global_ve_ambos_proyectos(self):
+        request = self.factory.get("/api/proyectos/")
+        request.effective_scope = EffectiveScope(is_global=True)
+        view = ViviendaProyectoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 2)
 
 
 class ViviendaListadoTests(TestCase):
@@ -202,7 +262,7 @@ class ViviendaListadoTests(TestCase):
             proyecto=self.otro_proyecto, denominacion="Casa B", created_by="u001", updated_by="u001"
         )
         request = self.factory.get("/api/viviendas/", {"proyecto": self.proyecto.id_proyecto})
-        request.effective_scope = EffectiveScope.anonymous()
+        request.effective_scope = EffectiveScope(is_global=True)
         view = ViviendaListadoViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(len(response.data), 1)
@@ -300,7 +360,7 @@ class ViviendaExpedienteYRelacionesTests(TestCase):
             vivienda=otra_vivienda, asesor=self.asesor, id_contrato="c2", created_by="u001", updated_by="u001"
         )
         request = self.factory.get("/api/expedientes/", {"vivienda": self.vivienda.id_vivienda})
-        request.effective_scope = EffectiveScope.anonymous()
+        request.effective_scope = EffectiveScope(is_global=True)
         view = ViviendaVentasExpedienteViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(len(response.data), 1)
@@ -357,7 +417,7 @@ class ViviendaExpedienteYRelacionesTests(TestCase):
             updated_by="u001",
         )
         request = self.factory.get("/api/expedientes-items/", {"expediente": expediente.id_expediente})
-        request.effective_scope = EffectiveScope.anonymous()
+        request.effective_scope = EffectiveScope(is_global=True)
         view = ViviendaVentasExpedienteItemViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(len(response.data), 1)

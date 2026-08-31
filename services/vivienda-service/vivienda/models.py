@@ -1,5 +1,6 @@
 import uuid
 
+from cumbresbi_scope.managers import ScopedManager
 from django.db import models
 
 
@@ -32,6 +33,15 @@ class ViviendaProyecto(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    # 31/Ago/2026 (auditoria de scope): este servicio nunca declaro
+    # ScopedManager pese a que roles-y-permisos.md sec. 4 lo cita como
+    # ejemplo explicito de alcance PROYECTO ("WHERE proyecto IN (...) via
+    # join a vivienda_proyectos"). id_proyecto es autoreferencia (mismo
+    # criterio que TesoreriaContrato.SCOPE_FIELD_CONTRATO = "id_contrato").
+    SCOPE_FIELD_PROYECTO = "id_proyecto"
+    SCOPE_FIELD_SOCIEDAD = "propietario"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "vivienda_proyectos"
@@ -75,6 +85,10 @@ class ViviendaListado(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_PROYECTO = "proyecto_id"
+    SCOPE_FIELD_SOCIEDAD = "proyecto__propietario"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "vivienda_listado"
@@ -141,6 +155,10 @@ class ViviendaVentasExpediente(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
 
+    SCOPE_FIELD_PROYECTO = "vivienda__proyecto_id"
+    SCOPE_FIELD_SOCIEDAD = "vivienda__proyecto__propietario"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "vivienda_ventas_expedientes"
 
@@ -202,6 +220,9 @@ class ViviendaRelExpedienteCliente(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
 
+    SCOPE_FIELD_PROYECTO = "expediente__vivienda__proyecto_id"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "vivienda_rel_expediente_clientes"
 
@@ -238,6 +259,9 @@ class ViviendaVentasExpedienteItem(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_PROYECTO = "expediente__vivienda__proyecto_id"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "vivienda_ventas_expedientes_items"
