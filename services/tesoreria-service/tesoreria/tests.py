@@ -32,8 +32,6 @@ from .models import (
     TesoreriaContratoDocumento,
     TesoreriaRecNomina,
     TesoreriaSaldo,
-    TesoreriaTicketProveedor,
-    TesoreriaTicketReembolso,
 )
 from .reportes import calcular_reporte_diario
 from .views import (
