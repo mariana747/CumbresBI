@@ -126,6 +126,13 @@ class ObraEstimacion(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8, blank=True, null=True)
 
+    # 31/Ago/2026 (auditoria de scope): tenia el lote (que si tiene
+    # proyecto) pero nunca heredaba el filtro - get_queryset() usaba
+    # `.all()` sin RLS, mismo patron ya resuelto en TesoreriaFlujo via
+    # "contrato__sociedad".
+    SCOPE_FIELD_PROYECTO = "lote__proyecto"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "obra_estimaciones"
         ordering = ["concepto", "lote", "numero_estimacion"]
@@ -239,6 +246,11 @@ class ObraEvidencia(models.Model):
     created_by = models.CharField(max_length=8, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8, blank=True, null=True)
+
+    # 31/Ago/2026 (auditoria de scope), mismo criterio que ObraEstimacion
+    # arriba - via lote__proyecto.
+    SCOPE_FIELD_PROYECTO = "lote__proyecto"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "obra_evidencias"
