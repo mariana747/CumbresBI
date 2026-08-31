@@ -16,11 +16,47 @@ const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ??
 // facturar (subir_factura + vincular_factura) -> VINCULADO.
 export type TesoreriaTicketEstado = "PENDIENTE" | "APROBADO" | "VINCULADO" | "RECHAZADO";
 
+// Espejo de TesoreriaTicketReembolso.CATEGORIA_CHOICES (models.py,
+// 31/Ago/2026 - hallazgo de la comparacion contra Tesoreria2.pdf).
+export type TesoreriaCategoriaGasto =
+  | "VIATICOS"
+  | "PAPELERIA"
+  | "TRANSPORTE"
+  | "ALIMENTOS"
+  | "HOSPEDAJE"
+  | "OTRO";
+
+export const CATEGORIA_GASTO_LABELS: Record<TesoreriaCategoriaGasto, string> = {
+  VIATICOS: "Viáticos",
+  PAPELERIA: "Papelería",
+  TRANSPORTE: "Transporte",
+  ALIMENTOS: "Alimentos",
+  HOSPEDAJE: "Hospedaje",
+  OTRO: "Otro",
+};
+
+// Espejo de TesoreriaTicketReembolso.CENTRO_CHOICES - lista cerrada (pedido
+// de Mariana 31/Ago/2026), no un catalogo real de Centro todavia.
+export type TesoreriaCentroCosto = "ADMINISTRACION" | "OBRA" | "VENTAS" | "TESORERIA" | "RRHH" | "OTRO";
+
+export const CENTRO_COSTO_LABELS: Record<TesoreriaCentroCosto, string> = {
+  ADMINISTRACION: "Administración",
+  OBRA: "Obra",
+  VENTAS: "Ventas",
+  TESORERIA: "Tesorería",
+  RRHH: "RRHH",
+  OTRO: "Otro",
+};
+
 export interface TesoreriaTicketReembolso {
   id_ticket: string;
   id_empleado: string;
   descripcion: string;
   monto: string;
+  moneda: string;
+  sociedad: string | null;
+  centro: TesoreriaCentroCosto | null;
+  categoria_gasto: TesoreriaCategoriaGasto | null;
   fecha_gasto: string;
   estado: TesoreriaTicketEstado;
   link_ticket: string | null;
@@ -60,7 +96,11 @@ export async function listTicketsReembolso(search?: string): Promise<TesoreriaTi
 export async function crearTicketReembolso(params: {
   descripcion: string;
   monto: string;
+  moneda?: string;
   fechaGasto: string;
+  sociedad?: string;
+  centro?: TesoreriaCentroCosto;
+  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaTicketReembolso> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/`, {
     method: "POST",
@@ -68,7 +108,11 @@ export async function crearTicketReembolso(params: {
     body: JSON.stringify({
       descripcion: params.descripcion,
       monto: params.monto,
+      moneda: params.moneda || "MXP",
       fecha_gasto: params.fechaGasto,
+      sociedad: params.sociedad || null,
+      centro: params.centro || null,
+      categoria_gasto: params.categoriaGasto || null,
     }),
   });
   if (!response.ok) {

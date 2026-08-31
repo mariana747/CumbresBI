@@ -14,9 +14,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   IconButton,
+  InputLabel,
   Link as MuiLink,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -33,10 +37,15 @@ import { Camera, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import EscanerDocumento from "@/components/EscanerDocumento";
 import { getSession, SessionUser } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   crearTicketReembolso,
+  CATEGORIA_GASTO_LABELS,
+  CENTRO_COSTO_LABELS,
   listTicketsReembolso,
   subirFotoTicket,
+  TesoreriaCategoriaGasto,
+  TesoreriaCentroCosto,
   TesoreriaTicketEstado,
   TesoreriaTicketReembolso,
 } from "@/lib/miCumbres";
@@ -104,7 +113,19 @@ export default function MiCumbresTicketsPage() {
   const [openNuevo, setOpenNuevo] = useState(false);
   const [descripcion, setDescripcion] = useState("");
   const [monto, setMonto] = useState("");
+  const [moneda, setMoneda] = useState("MXP");
   const [fechaGasto, setFechaGasto] = useState("");
+  const [sociedad, setSociedad] = useState("");
+  const [centro, setCentro] = useState<TesoreriaCentroCosto | "">("");
+  const [categoriaGasto, setCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
+
+  // Sociedades a las que el empleado tiene acceso (mismo criterio que
+  // filtroSociedad en /tesoreria/contratos) - is_global ve todas, el resto
+  // solo las suyas (sociedad_rfcs del EffectiveScope).
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  useEffect(() => {
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
+  }, []);
   const [archivoTicket, setArchivoTicket] = useState<File | null>(null);
   // Piloto de escaneo (28/Ago/2026, pedido de Mariana): foto tomada con
   // "Tomar foto" pasa por EscanerDocumento antes de quedar como adjunto.
@@ -121,7 +142,11 @@ export default function MiCumbresTicketsPage() {
     setOpenNuevo(false);
     setDescripcion("");
     setMonto("");
+    setMoneda("MXP");
     setFechaGasto("");
+    setSociedad("");
+    setCentro("");
+    setCategoriaGasto("");
     setArchivoTicket(null);
     setErrorAlta(null);
   }
@@ -134,7 +159,15 @@ export default function MiCumbresTicketsPage() {
     setGuardando(true);
     setErrorAlta(null);
     try {
-      const nuevo = await crearTicketReembolso({ descripcion, monto, fechaGasto });
+      const nuevo = await crearTicketReembolso({
+        descripcion,
+        monto,
+        moneda,
+        fechaGasto,
+        sociedad: sociedad || undefined,
+        centro: centro || undefined,
+        categoriaGasto: categoriaGasto || undefined,
+      });
       if (archivoTicket) {
         await subirFotoTicket(nuevo.id_ticket, archivoTicket);
       }
@@ -301,13 +334,28 @@ export default function MiCumbresTicketsPage() {
               minRows={2}
               fullWidth
             />
-            <TextField
-              label="Monto"
-              type="number"
-              value={monto}
-              onChange={(e) => setMonto(e.target.value)}
-              fullWidth
-            />
+            <Stack direction="row" spacing={2}>
+              <TextField
+                label="Monto"
+                type="number"
+                value={monto}
+                onChange={(e) => setMonto(e.target.value)}
+                fullWidth
+              />
+              <FormControl sx={{ minWidth: 100 }}>
+                <InputLabel id="moneda-label">Moneda</InputLabel>
+                <Select
+                  labelId="moneda-label"
+                  label="Moneda"
+                  value={moneda}
+                  onChange={(e) => setMoneda(e.target.value)}
+                >
+                  <MenuItem value="MXP">MXP</MenuItem>
+                  <MenuItem value="USD">USD</MenuItem>
+                  <MenuItem value="EUR">EUR</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
             <TextField
               label="Fecha del gasto"
               type="date"
@@ -316,6 +364,60 @@ export default function MiCumbresTicketsPage() {
               InputLabelProps={{ shrink: true }}
               fullWidth
             />
+            <FormControl fullWidth>
+              <InputLabel id="sociedad-ticket-label">Sociedad (empresa a la que se carga el gasto)</InputLabel>
+              <Select
+                labelId="sociedad-ticket-label"
+                label="Sociedad (empresa a la que se carga el gasto)"
+                value={sociedad}
+                onChange={(e) => setSociedad(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Sin especificar</em>
+                </MenuItem>
+                {sociedades.map((s) => (
+                  <MenuItem key={s.rfc} value={s.rfc}>
+                    {s.razon_social || s.rfc}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel id="categoria-gasto-label">Categoría de gasto</InputLabel>
+              <Select
+                labelId="categoria-gasto-label"
+                label="Categoría de gasto"
+                value={categoriaGasto}
+                onChange={(e) => setCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
+              >
+                <MenuItem value="">
+                  <em>Sin especificar</em>
+                </MenuItem>
+                {Object.entries(CATEGORIA_GASTO_LABELS).map(([valor, label]) => (
+                  <MenuItem key={valor} value={valor}>
+                    {label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel id="centro-costo-label">Centro de costo</InputLabel>
+              <Select
+                labelId="centro-costo-label"
+                label="Centro de costo"
+                value={centro}
+                onChange={(e) => setCentro(e.target.value as TesoreriaCentroCosto | "")}
+              >
+                <MenuItem value="">
+                  <em>Sin especificar</em>
+                </MenuItem>
+                {Object.entries(CENTRO_COSTO_LABELS).map(([valor, label]) => (
+                  <MenuItem key={valor} value={valor}>
+                    {label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             {/* "Tomar foto" con `capture` solo abre la camara directo en
                 celular (pedido de Mariana 27/Ago/2026) - en escritorio no
                 hay camara que abrir, asi que el boton quedaba ahi como un
