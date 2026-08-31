@@ -471,7 +471,7 @@ export default function TesoreriaFlujosPage() {
     if (!session) return;
     setAccionando(f.id_flujo);
     try {
-      await aprobarFlujo(f.id_flujo, session.user_id);
+      await aprobarFlujo(f.id_flujo);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");

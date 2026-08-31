@@ -26,6 +26,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import { CheckCircle2, ChevronDown, FolderSearch, X as CloseIcon } from "lucide-react";
@@ -113,7 +114,43 @@ const LABELS_CAMPOS: Record<string, string> = {
   estado_civil: "Estado civil",
   ident_fideicomiso: "Identificación de fideicomiso",
   comentarios: "Comentarios",
+  // Tesorería - Flujos (conciliación bancaria, prompt tesoreria.comprobante_bancario)
+  // y Facturas/Tickets, ver TESORERIA_FLUJO_CAMPOS_CONFIRMABLES en lib/tesoreria.ts.
+  fecha_efectiva: "Fecha",
+  concepto: "Concepto",
+  total_mxp: "Monto (MXP)",
+  link_referencia: "Referencia",
+  contraparte_nombre: "Contraparte",
+  factura: "Factura vinculada",
+  complemento: "Complemento de pago vinculado",
 };
+
+// Lógica pura de la edición manual (30/Ago/2026) - separada del componente
+// para poder probarla sin renderizar el diálogo ni llamar a la IA/Drive
+// (esa parte, docint/analyze + polling, sí necesita Gemini real - ver
+// MotorDocumentalDialog.test.ts, que solo cubre estas dos funciones).
+
+// A partir del resultado crudo de la IA, arma la copia editable: solo los
+// campos que el destino puede guardar (camposConfirmables), como texto (el
+// analista edita en un <TextField>, no importa si el valor original era
+// numero/fecha) y descartando null (la IA no encontro ese dato).
+export function camposEditadosDesdeExtraccion(
+  extractedData: Record<string, unknown>,
+  camposConfirmables: readonly string[]
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(extractedData)
+      .filter(([key, value]) => value !== null && camposConfirmables.includes(key))
+      .map(([key, value]) => [key, String(value)])
+  );
+}
+
+// Del formulario ya editado, arma lo que se manda a confirmar - descarta
+// valores vacios (un campo que el analista borro a proposito no debe
+// mandarse como cadena vacia, sobrescribiendo lo que ya hubiera).
+export function camposParaConfirmar(camposEditados: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(camposEditados).filter(([, value]) => value.trim() !== ""));
+}
 
 interface FilaComparacion {
   campo: string;
@@ -174,6 +211,12 @@ interface DocumentResult {
   analysisId?: string;
   extraccionConfirmadaEn?: string;
   extraccionError?: string;
+  // Copia editable de los campos confirmables de extracted_data (30/Ago/2026,
+  // "el analista revisa y ajusta lo que propuso la IA" - antes solo se podia
+  // ver el JSON crudo y confirmar tal cual). Se inicializa al llegar el
+  // resultado final del analisis; lo que se manda a confirmar sale de aqui,
+  // no directo de doc.result.extracted_data.
+  camposEditados?: Record<string, string>;
 }
 
 // Motor Inteligente de Procesamiento Documental (docint) - ver
@@ -335,6 +378,12 @@ export default function MotorDocumentalDialog({
       });
   }
 
+  function handleEditarCampo(index: number, campo: string, valor: string) {
+    setDocuments((prev) =>
+      prev.map((d, i) => (i === index ? { ...d, camposEditados: { ...d.camposEditados, [campo]: valor } } : d))
+    );
+  }
+
   function handleBorrarTodo() {
     setDocuments([]);
     setDriveFiles([]);
@@ -352,12 +401,11 @@ export default function MotorDocumentalDialog({
     if (!doc.result) return;
     if (!contexto && !kycSeleccionado) return;
 
-    const camposConfirmables = contexto ? contexto.camposConfirmables : PLD_CAMPOS_CONFIRMABLES;
-    const campos = Object.fromEntries(
-      Object.entries(doc.result.extracted_data).filter(
-        ([key, value]) => value !== null && (camposConfirmables as readonly string[]).includes(key)
-      )
-    );
+    // Se manda lo que quedó en camposEditados (lo que propuso la IA, ya
+    // ajustado a mano por el analista si hizo falta) - no el extracted_data
+    // crudo. Se descartan valores vacíos: un campo que el analista borró a
+    // propósito no debe mandarse como cadena vacía.
+    const campos = camposParaConfirmar(doc.camposEditados ?? {});
     if (Object.keys(campos).length === 0) {
       setDocuments((prev) =>
         prev.map((d, i) =>
@@ -426,6 +474,10 @@ export default function MotorDocumentalDialog({
             );
 
             const final = await pollAnalysis(analysisId);
+            const camposConfirmables = contexto ? contexto.camposConfirmables : PLD_CAMPOS_CONFIRMABLES;
+            const camposEditados = final.result
+              ? camposEditadosDesdeExtraccion(final.result.extracted_data, camposConfirmables)
+              : undefined;
             setDocuments((prev) =>
               prev.map((d, i) =>
                 i === index
@@ -434,6 +486,7 @@ export default function MotorDocumentalDialog({
                       estadoAnalisis: final.status,
                       result: final.result ?? undefined,
                       error: final.error ?? undefined,
+                      camposEditados,
                     }
                   : d
               )
@@ -671,6 +724,24 @@ export default function MotorDocumentalDialog({
                       )}
 
                       <Typography variant="subtitle2">Datos extraídos</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Revisa y corrige lo que haga falta antes de confirmar — estos son los
+                        valores que se van a guardar, no el resultado crudo de la IA.
+                      </Typography>
+                      {doc.camposEditados && !doc.extraccionConfirmadaEn && (
+                        <Stack spacing={1.5}>
+                          {Object.entries(doc.camposEditados).map(([campo, valor]) => (
+                            <TextField
+                              key={campo}
+                              size="small"
+                              fullWidth
+                              label={LABELS_CAMPOS[campo] ?? campo}
+                              value={valor}
+                              onChange={(e) => handleEditarCampo(index, campo, e.target.value)}
+                            />
+                          ))}
+                        </Stack>
+                      )}
                       {(() => {
                         const comparacion = compararConExpediente(doc.result.extracted_data);
                         const discrepancias = comparacion.filter((fila) => !fila.coincide);
@@ -712,19 +783,28 @@ export default function MotorDocumentalDialog({
                           )
                         );
                       })()}
-                      <Box
-                        component="pre"
-                        sx={{
-                          fontFamily: "var(--font-dm-mono, monospace)",
-                          fontSize: 12,
-                          bgcolor: "background.default",
-                          p: 1.5,
-                          borderRadius: 1,
-                          overflow: "auto",
-                        }}
-                      >
-                        {JSON.stringify(doc.result.extracted_data, null, 2)}
-                      </Box>
+                      <Accordion variant="outlined" disableGutters>
+                        <AccordionSummary expandIcon={<ChevronDown size={16} strokeWidth={1.5} />}>
+                          <Typography variant="caption" color="text.secondary">
+                            Ver resultado crudo de la IA (referencia, no editable)
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Box
+                            component="pre"
+                            sx={{
+                              fontFamily: "var(--font-dm-mono, monospace)",
+                              fontSize: 12,
+                              bgcolor: "background.default",
+                              p: 1.5,
+                              borderRadius: 1,
+                              overflow: "auto",
+                            }}
+                          >
+                            {JSON.stringify(doc.result.extracted_data, null, 2)}
+                          </Box>
+                        </AccordionDetails>
+                      </Accordion>
 
                       {doc.extraccionConfirmadaEn ? (
                         <Alert severity="success">
