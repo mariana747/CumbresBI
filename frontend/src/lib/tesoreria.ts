@@ -878,14 +878,12 @@ export async function updateFlujo(
 
 // Ciclo de vida propio del flujo (segregacion de funciones: aprobar/
 // rechazar requieren tesoreria.aprobar, distinto de crear/editar - ver
-// docstring de TesoreriaFlujoViewSet). autorizadoPor viaja en el body
-// porque el backend todavia no resuelve el actor desde el JWT en este
-// punto del proyecto (mismo criterio que PldContraparteKycViewSet.aprobar).
-export async function aprobarFlujo(idFlujo: string, autorizadoPor: string): Promise<TesoreriaFlujo> {
+// docstring de TesoreriaFlujoViewSet). El backend resuelve "quien aprueba"
+// del JWT (identity_user_id) - ya no hace falta mandarlo en el body (31/Ago/2026,
+// antes viajaba como parametro y cualquiera podia mandar cualquier nombre).
+export async function aprobarFlujo(idFlujo: string): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/aprobar/`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ autorizado_por: autorizadoPor }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1658,6 +1656,51 @@ export async function confirmarExtraccionFactura(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ campos }),
   });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Motor Documental para conciliacion bancaria de Flujos (28/Ago/2026) -
+// espejo en cliente de TesoreriaFlujoViewSet.CAMPOS_CONFIRMABLES (views.py).
+// Incluye ademas "contraparte_nombre"/"factura"/"complemento", que NO son
+// columnas de TesoreriaFlujo (van aparte en el body de
+// confirmarConciliacionFlujo) pero si vienen en extracted_data del prompt
+// "tesoreria.comprobante_bancario" - se listan aqui solo para que
+// MotorDocumentalDialog no los descarte antes de llegar a onConfirmar.
+export const TESORERIA_FLUJO_CAMPOS_CONFIRMABLES = [
+  "fecha_efectiva",
+  "concepto",
+  "total_mxp",
+  "link_referencia",
+  "contraparte_nombre",
+  "factura",
+  "complemento",
+] as const;
+
+// Resultado de confirmar_conciliacion: el flujo actualizado, mas la
+// contraparte que la IA detecto/creo (null si no se mando contraparte_nombre).
+export interface ConfirmarConciliacionResultado extends TesoreriaFlujo {
+  contraparte_detectada: TesoreriaContraparte | null;
+}
+
+// Guarda en el flujo los datos ya revisados por el analista (Motor
+// Documental -> docint/analyze -> correccion en pantalla -> este endpoint).
+// Ver services/tesoreria-service/tesoreria/views.py::TesoreriaFlujoViewSet.confirmar_conciliacion.
+export async function confirmarConciliacionFlujo(
+  idFlujo: string,
+  body: { campos?: Record<string, unknown>; contraparte_nombre?: string; factura?: string; complemento?: string }
+): Promise<ConfirmarConciliacionResultado> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/confirmar_conciliacion/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }

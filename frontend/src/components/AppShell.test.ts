@@ -184,16 +184,16 @@ describe("buildNavItems - Tesorería", () => {
       expect(tesoreria, `${roleKey} deberia ver Tesorería`).toBeDefined();
       expect(tesoreria?.enabled).toBe(true);
       const labels = hijos(tesoreria).map((c) => c.label);
-      // Orden real de AppShell.tsx (26/Ago/2026): Flujos/Contratos/Saldos/
-      // Reporte diario/Notas de credito se agregaron junto con el reporte
-      // diario de saldos y el CRUD real de tesoreria_flujos.
+      // Orden real de AppShell.tsx (31/Ago/2026): Contrapartes ahora va
+      // primero (antes de Flujos/Contratos/Saldos/Reporte diario/Notas de
+      // credito), el resto sigue igual desde el 26/Ago/2026.
       expect(labels).toEqual([
+        "Contrapartes",
         "Flujos",
         "Contratos",
         "Saldos",
         "Reporte diario",
         "Notas de crédito",
-        "Contrapartes",
         "Cuentas bancarias",
         "Facturas",
         "Complementos de pago",

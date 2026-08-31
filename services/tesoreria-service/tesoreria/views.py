@@ -481,11 +481,31 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     filter_backends = [SearchFilter]
     search_fields = ["id_flujo", "concepto"]
 
+    # Whitelist de columnas que confirmar_conciliacion puede escribir - mismo
+    # criterio que TesoreriaFacturaViewSet.CAMPOS_CONFIRMABLES: la IA
+    # (docint, prompt "tesoreria.comprobante_bancario") propone, el analista
+    # ya reviso/corrigio en pantalla antes de este POST. Deliberadamente
+    # acotado a los campos que de verdad puede leer un comprobante bancario -
+    # nada de contrato/cuenta/autorizacion/pagado (eso lo deciden
+    # aprobar()/registrar_pago(), no una extraccion).
+    CAMPOS_CONFIRMABLES = {
+        "fecha_efectiva",
+        "concepto",
+        "total_mxp",
+        "link_referencia",
+    }
+
     def get_permissions(self):
         if self.action == "create":
             return [require_permission("tesoreria.crear")()]
         if self.action in (
-            "update", "partial_update", "destroy", "registrar_pago", "vincular_factura", "subir_comprobante",
+            "update",
+            "partial_update",
+            "destroy",
+            "registrar_pago",
+            "vincular_factura",
+            "subir_comprobante",
+            "confirmar_conciliacion",
         ):
             return [require_permission("tesoreria.editar")()]
         if self.action in ("aprobar", "rechazar"):
@@ -515,12 +535,14 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
         """Autoriza el pago (autorizacion/autorizado_por/fecha_autorizacion)
-        - requerido antes de poder registrar_pago(). autorizado_por viene en
-        el body porque, igual que PldContraparteKycViewSet.aprobar, todavia
-        no hay resolucion real de JWT->actor en este punto del proyecto."""
-        autorizado_por = request.data.get("autorizado_por")
+        - requerido antes de poder registrar_pago(). autorizado_por se
+        resuelve del JWT (identity_user_id, ver EffectiveScope) - antes venia
+        del body y cualquiera podia poner el nombre que quisiera; el gate de
+        permiso ya obliga a que sea alguien con tesoreria.aprobar, pero el
+        campo no reflejaba quien de verdad hizo la accion."""
+        autorizado_por = request.effective_scope.identity_user_id
         if not autorizado_por:
-            return Response({"autorizado_por": ["Este campo es requerido."]}, status=400)
+            return Response({"autorizado_por": ["No se pudo identificar al usuario autenticado."]}, status=400)
 
         flujo = self.get_object()
         flujo.autorizacion = True
@@ -678,6 +700,88 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
         flujo.save(update_fields=update_fields)
         return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["post"])
+    def confirmar_conciliacion(self, request, pk=None):
+        """Guarda en el flujo los datos que salieron del Motor Documental
+        (docint AnalyzeView, prompt "tesoreria.comprobante_bancario")
+        DESPUES de que el analista los reviso en pantalla - mismo criterio
+        de "la IA propone, un humano confirma" que
+        TesoreriaFacturaViewSet.confirmar_extraccion (ver docstring de esa
+        clase). Ver memoria "tesoreria-flujos-registro-y-conciliacion-ia-
+        plan": este es el paso 4 (revisar/ajustar), la aprobacion final
+        sigue siendo aprobar()/rechazar(), no esta accion.
+
+        Body:
+        - "campos": {<nombre_de_campo>: <valor>, ...} - solo se aceptan
+          campos en CAMPOS_CONFIRMABLES, cualquier otra llave se ignora
+          silenciosamente. Opcional si solo se manda contraparte/factura.
+        - "contraparte_nombre": nombre que la IA leyo en el comprobante para
+          la contraparte del movimiento (extracted_data.contraparte_nombre).
+          Si ya existe una TesoreriaContraparte con ese razon_social
+          (busqueda case-insensitive) se reutiliza; si no, se crea una
+          nueva con origen=ia (email/tipo_persona quedan vacios - ver
+          TesoreriaContraparteSerializer.validate). Se regresa en la
+          respuesta como "contraparte_detectada", no se liga sola al flujo
+          (el flujo no tiene FK directa a contraparte, solo via contrato).
+        - "factura"/"complemento": mismo formato que vincular_factura
+          (timbre_uuid), para que la IA proponga el match y esta misma
+          llamada lo confirme de una vez."""
+        flujo = self.get_object()
+        campos = request.data.get("campos") or {}
+        if campos and not isinstance(campos, dict):
+            return Response({"detail": "'campos' debe ser un objeto."}, status=400)
+
+        datos_validos = {k: v for k, v in campos.items() if k in self.CAMPOS_CONFIRMABLES}
+        if datos_validos:
+            serializer = self.get_serializer(flujo, data=datos_validos, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+        contraparte_detectada = None
+        contraparte_nombre = (request.data.get("contraparte_nombre") or "").strip()
+        if contraparte_nombre:
+            contraparte_detectada = TesoreriaContraparte.objects.filter(
+                razon_social__iexact=contraparte_nombre
+            ).first()
+            if contraparte_detectada is None:
+                contraparte_detectada = TesoreriaContraparte.objects.create(
+                    razon_social=contraparte_nombre,
+                    origen=TesoreriaContraparte.ORIGEN_IA,
+                )
+
+        timbre_uuid_factura = request.data.get("factura")
+        timbre_uuid_complemento = request.data.get("complemento")
+        if timbre_uuid_factura:
+            try:
+                flujo.factura = TesoreriaFactura.objects.get(timbre_uuid=timbre_uuid_factura)
+                flujo.save(update_fields=["factura"])
+            except TesoreriaFactura.DoesNotExist:
+                return Response({"factura": ["No existe una factura con ese UUID."]}, status=400)
+        if timbre_uuid_complemento:
+            try:
+                flujo.complemento = TesoreriaComplementoPago.objects.get(timbre_uuid=timbre_uuid_complemento)
+                flujo.save(update_fields=["complemento"])
+            except TesoreriaComplementoPago.DoesNotExist:
+                return Response({"complemento": ["No existe un complemento de pago con ese UUID."]}, status=400)
+
+        emitir_evento_auditoria(
+            "tesoreria_flujos.confirmar_conciliacion",
+            "tesoreria_flujos",
+            flujo.id_flujo,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={
+                "campos": datos_validos,
+                "contraparte_detectada": contraparte_detectada.id_contraparte if contraparte_detectada else None,
+            },
+        )
+
+        flujo.refresh_from_db()
+        data = self.get_serializer(flujo).data
+        data["contraparte_detectada"] = (
+            TesoreriaContraparteSerializer(contraparte_detectada).data if contraparte_detectada else None
+        )
+        return Response(data)
 
 
 class TesoreriaTicketReembolsoViewSet(ModelViewSet):

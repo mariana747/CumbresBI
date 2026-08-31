@@ -61,6 +61,7 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
             "contacto",
             "telefono_sms",
             "email",
+            "origen",
             "cliente",
             "proveedor",
             "comentarios",
@@ -82,6 +83,20 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
         # veia en pantalla nunca coincidia con el que de verdad quedaba
         # guardado.
         read_only_fields = ["created_at", "updated_at"]
+
+    def validate(self, attrs):
+        # email/tipo_persona son obligatorios otra vez (28/Ago/2026, ver
+        # comentario en models.py) EXCEPTO para el alta automatica de la IA
+        # de conciliacion bancaria (origen=ia) - esa via no tiene forma de
+        # inventar un correo real. El alta manual (pantalla de
+        # Contrapartes, origen default = "manual") sigue exigiendo ambos.
+        origen = attrs.get("origen", getattr(self.instance, "origen", TesoreriaContraparte.ORIGEN_MANUAL))
+        if origen == TesoreriaContraparte.ORIGEN_MANUAL:
+            if not attrs.get("email", getattr(self.instance, "email", None)):
+                raise serializers.ValidationError({"email": ["Este campo es requerido."]})
+            if not attrs.get("tipo_persona", getattr(self.instance, "tipo_persona", None)):
+                raise serializers.ValidationError({"tipo_persona": ["Este campo es requerido."]})
+        return attrs
 
 
 class TesoreriaBancoSerializer(serializers.ModelSerializer):
