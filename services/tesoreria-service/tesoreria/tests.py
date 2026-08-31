@@ -29,6 +29,7 @@ from .models import (
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaNotaCredito,
+    TesoreriaContratoDocumento,
     TesoreriaRecNomina,
     TesoreriaSaldo,
 )
@@ -48,8 +49,11 @@ from .views import (
     TesoreriaFacturaViewSet,
     TesoreriaFlujoViewSet,
     TesoreriaNotaCreditoViewSet,
+    TesoreriaContratoDocumentoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
+    TesoreriaTicketProveedorViewSet,
+    TesoreriaTicketReembolsoViewSet,
 )
 
 RFC_TIZARA = "#####1"
@@ -182,12 +186,11 @@ class TesoreriaContratoTests(TestCase):
         )
         self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
 
-    def _crear_contrato(self, sociedad, scope=None):
-        request = self.factory.post(
-            "/api/contratos/",
-            {"sociedad": sociedad, "contraparte": self.contraparte.id_contraparte, "tipo": "INTERNO"},
-            format="json",
-        )
+    def _crear_contrato(self, sociedad, scope=None, centro=None):
+        body = {"sociedad": sociedad, "contraparte": self.contraparte.id_contraparte, "tipo": "INTERNO"}
+        if centro:
+            body["centro"] = centro
+        request = self.factory.post("/api/contratos/", body, format="json")
         request.effective_scope = scope or self.scope_crear
         view = TesoreriaContratoViewSet.as_view({"post": "create"})
         return view(request)
@@ -242,6 +245,33 @@ class TesoreriaContratoTests(TestCase):
     def test_incluye_nombre_de_la_contraparte(self):
         response = self._crear_contrato(RFC_TIZARA)
         self.assertEqual(response.data["contraparte_nombre"], "Contraparte de prueba")
+
+    def test_usuario_con_acceso_solo_a_un_centro_ve_solo_esos_contratos(self):
+        # 31/Ago/2026: SCOPE_FIELD_CENTRO recien declarado - el claim
+        # centro_ids ya existia en el JWT (IamUserCentroAccess) pero
+        # ningun modelo lo consumia todavia.
+        self._crear_contrato(RFC_TIZARA, centro="OBRA")
+        self._crear_contrato(RFC_TIZARA, centro="VENTAS")
+
+        request = self.factory.get("/api/contratos/")
+        request.effective_scope = EffectiveScope(is_global=False, centro_ids=("OBRA",))
+        view = TesoreriaContratoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["centro"], "OBRA")
+
+    def test_usuario_con_acceso_solo_a_un_contrato_ve_solo_ese_contrato(self):
+        # 31/Ago/2026: SCOPE_FIELD_CONTRATO recien declarado - mismo
+        # criterio que centro_ids, via IamUserContratoAccess.
+        creado1 = self._crear_contrato(RFC_TIZARA)
+        self._crear_contrato(RFC_TIZARA)
+
+        request = self.factory.get("/api/contratos/")
+        request.effective_scope = EffectiveScope(is_global=False, contrato_ids=(creado1.data["id_contrato"],))
+        view = TesoreriaContratoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_contrato"], creado1.data["id_contrato"])
 
 
 class TesoreriaFlujoTests(TestCase):
@@ -308,6 +338,46 @@ class TesoreriaFlujoTests(TestCase):
         request2.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
         response2 = view(request2)
         self.assertEqual(len(response2.data), 1)
+
+    def test_usuario_con_acceso_a_un_centro_ve_flujos_de_contratos_de_ese_centro(self):
+        # 31/Ago/2026: SCOPE_FIELD_CENTRO recien declarado, via contrato__centro.
+        contrato_obra = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-002",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+            centro="OBRA",
+        )
+        request_flujo = self.factory.post(
+            "/api/flujos/",
+            {"contrato": contrato_obra.id_contrato, "cuenta": self.cuenta.id_cuenta_bancaria, "total_mxp": "1000.00"},
+            format="json",
+        )
+        request_flujo.effective_scope = self.scope_crear
+        TesoreriaFlujoViewSet.as_view({"post": "create"})(request_flujo)
+        self._crear_flujo()  # flujo del self.contrato, sin centro
+
+        request = self.factory.get("/api/flujos/")
+        request.effective_scope = EffectiveScope(is_global=False, centro_ids=("OBRA",))
+        view = TesoreriaFlujoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["contrato"], contrato_obra.id_contrato)
+
+    def test_usuario_con_acceso_a_un_contrato_ve_solo_sus_flujos(self):
+        # 31/Ago/2026: SCOPE_FIELD_CONTRATO recien declarado.
+        self._crear_flujo()
+
+        request = self.factory.get("/api/flujos/")
+        request.effective_scope = EffectiveScope(is_global=False, contrato_ids=(self.contrato.id_contrato,))
+        view = TesoreriaFlujoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+
+        request2 = self.factory.get("/api/flujos/")
+        request2.effective_scope = EffectiveScope(is_global=False, contrato_ids=("otro-contrato-que-no-existe",))
+        response2 = view(request2)
+        self.assertEqual(len(response2.data), 0)
 
     def test_no_se_puede_pagar_sin_autorizar_primero(self):
         creado = self._crear_flujo()
@@ -1350,3 +1420,278 @@ class TesoreriaCorteEdcCrudTests(TestCase):
         response2 = view(request2, pk=corte.pk)
         self.assertEqual(response2.status_code, 200)
         self.assertTrue(response2.data["disponible"])
+
+
+class TesoreriaTicketReembolsoCrudTests(TestCase):
+    """Alta del empleado (MiCumbres, pantalla provisional - ver docstring
+    del modelo). 31/Ago/2026: agrega moneda/sociedad/centro/categoria_gasto
+    (hallazgo de la comparacion contra Tesoreria2.pdf) - el empleado los
+    llena al crear, igual que descripcion/monto/fecha_gasto."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_empleado = EffectiveScope(is_global=False, identity_user_id="empleado1")
+
+    def test_crear_sin_sesion_da_403(self):
+        request = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Taxi a obra", "monto": "150.00", "fecha_gasto": "2026-08-30"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=False)
+        view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_sesion_guarda_los_campos_nuevos(self):
+        request = self.factory.post(
+            "/api/tickets-reembolso/",
+            {
+                "descripcion": "Taxi a obra",
+                "monto": "150.00",
+                "moneda": "USD",
+                "sociedad": "CIF010101AAA",
+                "centro": "OBRA",
+                "categoria_gasto": "TRANSPORTE",
+                "fecha_gasto": "2026-08-30",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_empleado
+        view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["moneda"], "USD")
+        self.assertEqual(response.data["sociedad"], "CIF010101AAA")
+        self.assertEqual(response.data["centro"], "OBRA")
+        self.assertEqual(response.data["categoria_gasto"], "TRANSPORTE")
+        # id_empleado lo pone perform_create del JWT, no lo que mande el body.
+        self.assertEqual(response.data["id_empleado"], "empleado1")
+
+    def test_crear_sin_los_campos_nuevos_usa_moneda_mxp_por_default(self):
+        request = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Taxi a obra", "monto": "150.00", "fecha_gasto": "2026-08-30"},
+            format="json",
+        )
+        request.effective_scope = self.scope_empleado
+        view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["moneda"], "MXP")
+        self.assertIsNone(response.data["sociedad"])
+        self.assertIsNone(response.data["centro"])
+        self.assertIsNone(response.data["categoria_gasto"])
+
+    def test_empleado_solo_ve_sus_propios_tickets(self):
+        # 31/Ago/2026 (auditoria de scope): antes era un filtro manual
+        # ("tiene tesoreria.editar? ve todo : filtra por id_empleado");
+        # ahora es SCOPE_FIELD_IDENTITY del ScopedManager - mismo resultado
+        # para este caso, pero por el mecanismo real de RLS.
+        request1 = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Taxi", "monto": "100.00", "fecha_gasto": "2026-08-30"},
+            format="json",
+        )
+        request1.effective_scope = self.scope_empleado
+        TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request1)
+
+        otro_empleado = EffectiveScope(is_global=False, identity_user_id="empleado2")
+        request2 = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Comida", "monto": "200.00", "fecha_gasto": "2026-08-30"},
+            format="json",
+        )
+        request2.effective_scope = otro_empleado
+        TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request2)
+
+        request = self.factory.get("/api/tickets-reembolso/")
+        request.effective_scope = self.scope_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_empleado"], "empleado1")
+
+    def test_staff_acotado_a_una_sociedad_no_ve_tickets_de_otra(self):
+        # 31/Ago/2026 (auditoria de scope, caso real: colaborador externo
+        # tipo contador con tesoreria.editar acotado a una sola sociedad) -
+        # antes CUALQUIERA con tesoreria.editar veia TODOS los tickets sin
+        # importar su alcance; ahora respeta sociedad/centro igual que el
+        # resto del proyecto.
+        request1 = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Taxi", "monto": "100.00", "fecha_gasto": "2026-08-30", "sociedad": RFC_TIZARA},
+            format="json",
+        )
+        request1.effective_scope = self.scope_empleado
+        TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request1)
+
+        request2 = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Comida", "monto": "200.00", "fecha_gasto": "2026-08-30", "sociedad": RFC_CAPITAL},
+            format="json",
+        )
+        request2.effective_scope = self.scope_empleado
+        TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request2)
+
+        staff_acotado = EffectiveScope(is_global=False, perm_keys=("tesoreria.editar",), sociedad_rfcs=(RFC_TIZARA,))
+        request = self.factory.get("/api/tickets-reembolso/")
+        request.effective_scope = staff_acotado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
+
+    def test_staff_global_ve_todos_los_tickets(self):
+        request1 = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Taxi", "monto": "100.00", "fecha_gasto": "2026-08-30", "sociedad": RFC_TIZARA},
+            format="json",
+        )
+        request1.effective_scope = self.scope_empleado
+        TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request1)
+
+        staff_global = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+        request = self.factory.get("/api/tickets-reembolso/")
+        request.effective_scope = staff_global
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 1)
+
+
+class TesoreriaContratoDocumentoScopeTests(TestCase):
+    """31/Ago/2026 (auditoria de scope): get_queryset() solo filtraba por
+    el ?contrato=<id> tal cual venia en la URL, sin validar que ESE
+    contrato estuviera dentro del alcance del usuario - cualquiera con
+    tesoreria.crear/editar/aprobar podia pedir el checklist de cualquier
+    contrato con solo saber su id, y sin ?contrato= regresaba TODO."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Contraparte de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.contrato_tizara = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.contrato_capital = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_CAPITAL}-{contraparte.id_contraparte}-001",
+            sociedad=RFC_CAPITAL,
+            contraparte=contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        TesoreriaContratoDocumento.objects.create(
+            contrato=self.contrato_tizara, nombre=TesoreriaContratoDocumento.NOMBRE_CONTRATO_FIRMADO
+        )
+        TesoreriaContratoDocumento.objects.create(
+            contrato=self.contrato_capital, nombre=TesoreriaContratoDocumento.NOMBRE_CONTRATO_FIRMADO
+        )
+
+    def test_sin_filtro_de_contrato_no_regresa_nada(self):
+        request = self.factory.get("/api/contratos-documentos/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        response = TesoreriaContratoDocumentoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 0)
+
+    def test_usuario_de_una_sociedad_no_puede_pedir_checklist_de_otra(self):
+        request = self.factory.get(f"/api/contratos-documentos/?contrato={self.contrato_capital.id_contrato}")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        response = TesoreriaContratoDocumentoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 0)
+
+    def test_usuario_de_la_sociedad_correcta_si_ve_su_checklist(self):
+        request = self.factory.get(f"/api/contratos-documentos/?contrato={self.contrato_tizara.id_contrato}")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        response = TesoreriaContratoDocumentoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 1)
+
+
+class TesoreriaTicketProveedorScopeTests(TestCase):
+    """31/Ago/2026 ("los tickets de cliente si se filtran automaticamente?"
+    -> "hay que hacer ese filtro por sociedad y proyecto") - antes
+    `.all()` sin RLS, cualquiera con tesoreria.crear/editar veia los
+    tickets de todos los proveedores."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+
+    def _crear_ticket(self, sociedad, proyecto="", scope=None):
+        request = self.factory.post(
+            "/api/tickets-proveedor/",
+            {
+                "contraparte": self.contraparte.id_contraparte,
+                "email": "proveedor@ejemplo.com",
+                "sociedad": sociedad,
+                "proyecto": proyecto,
+                "expires_at": "2027-01-01T00:00:00Z",
+                "max_uses": 1,
+                "issued_by": "u001",
+            },
+            format="json",
+        )
+        request.effective_scope = scope or self.scope_crear
+        view = TesoreriaTicketProveedorViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_usuario_de_una_sociedad_no_ve_tickets_de_otra(self):
+        self._crear_ticket(RFC_TIZARA)
+        self._crear_ticket(RFC_CAPITAL)
+
+        request = self.factory.get("/api/tickets-proveedor/")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        view = TesoreriaTicketProveedorViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
+
+    def test_usuario_de_un_proyecto_no_ve_tickets_de_otro(self):
+        self._crear_ticket(RFC_TIZARA, proyecto="P01")
+        self._crear_ticket(RFC_TIZARA, proyecto="P02")
+
+        request = self.factory.get("/api/tickets-proveedor/")
+        request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=("P01",))
+        view = TesoreriaTicketProveedorViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["proyecto"], "P01")
+
+    def test_filtro_sociedad_acota_dentro_del_scope_union(self):
+        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
+        # filtro") - un usuario con acceso a AMBAS sociedades puede acotar
+        # la vista a una sola sin cambiar su alcance real.
+        self._crear_ticket(RFC_TIZARA)
+        self._crear_ticket(RFC_CAPITAL)
+
+        request = self.factory.get(f"/api/tickets-proveedor/?sociedad={RFC_TIZARA}")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA, RFC_CAPITAL))
+        view = TesoreriaTicketProveedorViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
+
+    def test_global_ve_todos(self):
+        self._crear_ticket(RFC_TIZARA)
+        self._crear_ticket(RFC_CAPITAL)
+
+        request = self.factory.get("/api/tickets-proveedor/")
+        request.effective_scope = EffectiveScope(is_global=True)
+        view = TesoreriaTicketProveedorViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 2)
+
+    def test_validar_publico_no_depende_del_scope(self):
+        # "validar" (sin sesion, canjea por token) no debe pasar por
+        # get_queryset/for_scope - un proveedor externo no trae ningun
+        # scope propio.
+        creado = self._crear_ticket(RFC_TIZARA)
+        token = creado.data["token"]
+
+        request = self.factory.post("/api/tickets-proveedor/validar/", {"token": token}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaTicketProveedorViewSet.as_view({"post": "validar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)

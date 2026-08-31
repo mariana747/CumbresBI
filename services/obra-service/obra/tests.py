@@ -131,6 +131,33 @@ class ObraEstimacionTests(TestCase):
         response = view(request)
         self.assertEqual(response.data["numero_estimacion"], 1)
 
+    def test_usuario_de_un_proyecto_no_ve_estimaciones_de_otro(self):
+        # 31/Ago/2026 (auditoria de scope): antes get_queryset() usaba
+        # `.all()` sin RLS pese a que ObraLote ya tenia SCOPE_FIELD_PROYECTO
+        # - cualquiera con permiso de obra veia el avance de todos los
+        # proyectos. Ahora hereda el scope via lote__proyecto.
+        self._crear_estimacion()
+        otro_lote = ObraLote.objects.create(proyecto=PROYECTO_B, numero_lote="1")
+        request_otro = self.factory.post(
+            "/api/estimaciones/",
+            {
+                "concepto": self.concepto.id_concepto,
+                "lote": otro_lote.id_lote,
+                "porcentaje": "0.5",
+                "fecha_captura": "2026-08-24",
+            },
+            format="json",
+        )
+        request_otro.effective_scope = self.scope_crear
+        ObraEstimacionViewSet.as_view({"post": "create"})(request_otro)
+
+        request = self.factory.get("/api/estimaciones/")
+        request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=(PROYECTO_A,))
+        view = ObraEstimacionViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["lote"], self.lote.id_lote)
+
 
 class ObraEvidenciaTests(TestCase):
     """revisar() requiere obra.aprobar, no obra.crear/.editar - segregacion
@@ -144,6 +171,22 @@ class ObraEvidenciaTests(TestCase):
         self.evidencia = ObraEvidencia.objects.create(
             concepto=concepto, lote=lote, fecha_captura="2026-08-24", link_drive="https://drive/foto.jpg"
         )
+
+    def test_usuario_de_un_proyecto_no_ve_evidencias_de_otro(self):
+        # 31/Ago/2026 (auditoria de scope), mismo hallazgo que ObraEstimacion.
+        etapa2 = ObraEtapa.objects.create(numero=Decimal("2.0"), nombre="Otra etapa")
+        concepto2 = ObraConcepto.objects.create(etapa=etapa2, numero="2.1", descripcion="Otro concepto")
+        lote_b = ObraLote.objects.create(proyecto=PROYECTO_B, numero_lote="1")
+        ObraEvidencia.objects.create(
+            concepto=concepto2, lote=lote_b, fecha_captura="2026-08-24", link_drive="https://drive/otra.jpg"
+        )
+
+        request = self.factory.get("/api/evidencias/")
+        request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=(PROYECTO_A,))
+        view = ObraEvidenciaViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_evidencia"], self.evidencia.id_evidencia)
 
     def test_revisar_requiere_permiso_obra_aprobar(self):
         request = self.factory.post(

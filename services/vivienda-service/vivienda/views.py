@@ -85,12 +85,18 @@ class _PermisosVentasViviendaMixin:
 class ViviendaProyectoViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
     """Proyectos de vivienda. Busqueda de texto libre (?search=) sobre
     denominacion/alias_proyecto. DELETE es fisico (sin soft-delete en el
-    ERD real) - usar con cuidado, mismo criterio que TesoreriaContraparte."""
+    ERD real) - usar con cuidado, mismo criterio que TesoreriaContraparte.
 
-    queryset = ViviendaProyecto.objects.all().order_by("denominacion")
+    31/Ago/2026 (auditoria de scope): antes `.all()` sin RLS pese a que
+    roles-y-permisos.md sec. 4 ya citaba este modelo como ejemplo de
+    alcance PROYECTO - ahora usa ScopedManager real."""
+
     serializer_class = ViviendaProyectoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["denominacion", "alias_proyecto"]
+
+    def get_queryset(self):
+        return ViviendaProyecto.objects.for_scope(self.request.effective_scope).order_by("denominacion")
 
 
 class ViviendaListadoViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
@@ -102,7 +108,11 @@ class ViviendaListadoViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
     search_fields = ["num_oficial", "denominacion", "modelo", "torre"]
 
     def get_queryset(self):
-        queryset = ViviendaListado.objects.select_related("proyecto").order_by("-created_at")
+        queryset = (
+            ViviendaListado.objects.for_scope(self.request.effective_scope)
+            .select_related("proyecto")
+            .order_by("-created_at")
+        )
         proyecto_id = self.request.query_params.get("proyecto")
         if proyecto_id:
             queryset = queryset.filter(proyecto_id=proyecto_id)
@@ -127,8 +137,10 @@ class ViviendaVentasExpedienteViewSet(_PermisosVentasViviendaMixin, ModelViewSet
     search_fields = ["id_expediente", "id_contrato"]
 
     def get_queryset(self):
-        queryset = ViviendaVentasExpediente.objects.select_related("vivienda", "asesor").order_by(
-            "-created_at"
+        queryset = (
+            ViviendaVentasExpediente.objects.for_scope(self.request.effective_scope)
+            .select_related("vivienda", "asesor")
+            .order_by("-created_at")
         )
         vivienda_id = self.request.query_params.get("vivienda")
         if vivienda_id:
@@ -146,8 +158,10 @@ class ViviendaRelExpedienteClienteViewSet(_PermisosVentasViviendaMixin, ModelVie
     serializer_class = ViviendaRelExpedienteClienteSerializer
 
     def get_queryset(self):
-        queryset = ViviendaRelExpedienteCliente.objects.select_related("expediente").order_by(
-            "-created_at"
+        queryset = (
+            ViviendaRelExpedienteCliente.objects.for_scope(self.request.effective_scope)
+            .select_related("expediente")
+            .order_by("-created_at")
         )
         expediente_id = self.request.query_params.get("expediente")
         if expediente_id:
@@ -176,8 +190,10 @@ class ViviendaVentasExpedienteItemViewSet(_PermisosVentasViviendaMixin, ModelVie
     serializer_class = ViviendaVentasExpedienteItemSerializer
 
     def get_queryset(self):
-        queryset = ViviendaVentasExpedienteItem.objects.select_related("expediente").order_by(
-            "-created_at"
+        queryset = (
+            ViviendaVentasExpedienteItem.objects.for_scope(self.request.effective_scope)
+            .select_related("expediente")
+            .order_by("-created_at")
         )
         expediente_id = self.request.query_params.get("expediente")
         if expediente_id:

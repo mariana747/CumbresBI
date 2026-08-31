@@ -26,6 +26,8 @@ import MotorDocumentalDialog, { MotorDocumentalContexto } from "@/components/Mot
 import { SessionUser } from "@/lib/auth";
 import {
   aprobarTicket,
+  CATEGORIA_GASTO_LABELS,
+  CENTRO_COSTO_LABELS,
   listTicketsReembolso,
   rechazarTicket,
   subirFacturaTicket,
@@ -309,7 +311,16 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                   <strong>Descripción:</strong> {ticketAbierto.descripcion}
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Monto:</strong> ${ticketAbierto.monto} — {ticketAbierto.fecha_gasto}
+                  <strong>Monto:</strong> ${ticketAbierto.monto} {ticketAbierto.moneda} — {ticketAbierto.fecha_gasto}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"} ·{" "}
+                  <strong>Centro de costo:</strong>{" "}
+                  {ticketAbierto.centro ? CENTRO_COSTO_LABELS[ticketAbierto.centro] : "—"}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Categoría de gasto:</strong>{" "}
+                  {ticketAbierto.categoria_gasto ? CATEGORIA_GASTO_LABELS[ticketAbierto.categoria_gasto] : "—"}
                 </Typography>
                 {ticketAbierto.link_ticket && (
                   <MuiLink href={ticketAbierto.link_ticket} target="_blank" rel="noopener">

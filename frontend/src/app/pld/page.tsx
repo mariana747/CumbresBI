@@ -70,6 +70,12 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   const [tipoContraparte, setTipoContraparte] = useState<"cliente" | "proveedor">("cliente");
   const [contraparte, setContraparte] = useState<TesoreriaContraparte | null>(null);
   const [sociedadRfc, setSociedadRfc] = useState("");
+  // 31/Ago/2026 (pedido de Mariana: "hay que hacer ese filtro por
+  // sociedad y proyecto" - caso real de un colaborador externo acotado a
+  // un solo proyecto) - opcional, a diferencia de sociedadRfc; sin
+  // catalogo real de Proyecto todavia (texto libre, mismo criterio que
+  // /tesoreria/contratos).
+  const [proyecto, setProyecto] = useState("");
   const [creando, setCreando] = useState(false);
   const [creandoError, setCreandoError] = useState<string | null>(null);
 
@@ -85,10 +91,30 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       .catch(() => setSociedades([]));
   }, []);
 
+  // 31/Ago/2026 (pedido de Mariana: "en el filtro de sociedades solo
+  // deben aparecer las activas para ese rol - en global o super admin asi
+  // esta bien") - el filtro de la lista (a diferencia del selector del
+  // dialogo "Nuevo expediente", que se queda con el catalogo completo)
+  // solo debe ofrecer sociedades a las que el usuario de verdad tiene
+  // acceso. GLOBAL sigue viendo el catalogo entero.
+  const sociedadesDelFiltro =
+    session?.is_global || !session ? sociedades : sociedades.filter((s) => session.sociedad_rfcs.includes(s.rfc));
+
+  // 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para poder
+  // ver unicamente los de una sociedad o la otra") - un analista con
+  // acceso a varias sociedades (union real del scope) las ve todas
+  // mezcladas por default; este filtro acota la vista sin cambiar el
+  // alcance real de la sesion.
+  const [filtroSociedad, setFiltroSociedad] = useState("");
+
   function cargar() {
     setLoading(true);
     setError(null);
-    listKyc({ estadoLlenado: estadoLlenado || undefined, search: search || undefined })
+    listKyc({
+      estadoLlenado: estadoLlenado || undefined,
+      search: search || undefined,
+      sociedadRfc: filtroSociedad || undefined,
+    })
       .then(setExpedientes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -98,7 +124,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
     const timeout = setTimeout(cargar, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, estadoLlenado]);
+  }, [search, estadoLlenado, filtroSociedad]);
 
   // Aprobar/reactivar se movieron a la vista de detalle (/pld/[idKyc],
   // 17/Ago/2026) - la lista ya solo tiene "Ver", igual que se acordo con
@@ -121,11 +147,13 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       await createKyc({
         createdBy: session.user_id,
         sociedadRfc,
+        proyecto: proyecto || undefined,
         idContraparte: contraparte.id_contraparte,
       });
       setDialogoAbierto(false);
       setContraparte(null);
       setSociedadRfc("");
+      setProyecto("");
       cargar();
     } catch (err) {
       setCreandoError(err instanceof Error ? err.message : "Error al crear el expediente.");
@@ -213,6 +241,14 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   ))}
                 </Select>
               </FormControl>
+              <TextField
+                size="small"
+                fullWidth
+                label="Proyecto (opcional)"
+                helperText="Solo si este expediente pertenece a un proyecto específico — ej. para acotar el acceso de un colaborador externo."
+                value={proyecto}
+                onChange={(e) => setProyecto(e.target.value)}
+              />
             </Stack>
             {creandoError && (
               <Alert severity="error" sx={{ mt: 2 }}>
@@ -256,6 +292,22 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
             {ESTADO_OPTIONS.map((o) => (
               <MenuItem key={o.value} value={o.value}>
                 {o.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="sociedad-filter-label">Sociedad</InputLabel>
+          <Select
+            labelId="sociedad-filter-label"
+            label="Sociedad"
+            value={filtroSociedad}
+            onChange={(e) => setFiltroSociedad(e.target.value)}
+          >
+            <MenuItem value="">Todas</MenuItem>
+            {sociedadesDelFiltro.map((sociedad) => (
+              <MenuItem key={sociedad.rfc} value={sociedad.rfc}>
+                {sociedad.razon_social || sociedad.rfc}
               </MenuItem>
             ))}
           </Select>

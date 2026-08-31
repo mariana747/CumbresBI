@@ -26,7 +26,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
-from .models import IamRole, IamUser, IamUserCentroAccess, IamUserRole
+from .models import IamRole, IamUser, IamUserCentroAccess, IamUserContratoAccess, IamUserRole
 from .session_utils import decode_session_jwt, issue_session_jwt
 
 _SCOPE_TYPES_VALIDOS = {choice[0] for choice in IamUserRole.SCOPE_TYPE_CHOICES}
@@ -62,7 +62,13 @@ def dev_role_switch(request):
     scope_type = request.GET.get("scope_type", IamUserRole.SCOPE_GLOBAL)
     if scope_type not in _SCOPE_TYPES_VALIDOS:
         return HttpResponseBadRequest(f"scope_type invalido: {scope_type}")
-    scope_id = request.GET.get("scope_id", "*")
+    # "?scope_id=A,B" (31/Ago/2026, pedido de Mariana: "pon para que pueda
+    # seleccionar mas de dos sociedades") - un analista real puede tener
+    # varias sociedades a la vez (compute_effective_scope_claims las junta
+    # por UNION desde varias filas IamUserRole, ver scope_utils.py); antes
+    # esta pantalla solo podia simular una. Sigue aceptando un solo valor
+    # (o "*" para GLOBAL) igual que antes.
+    scope_ids = [s.strip() for s in request.GET.get("scope_id", "*").split(",") if s.strip()] or ["*"]
 
     user = IamUser.objects.get(user_id=claims["sub"])
     now = timezone.now()
@@ -71,17 +77,21 @@ def dev_role_switch(request):
     # roles activos del usuario y dejar solo los que se estan probando
     # (uno o varios), para que la UI se vea "limpia" (sin permisos
     # acumulados de pruebas anteriores mezclados) - mismo scope_type para
-    # todos por simplicidad de esta herramienta de dev.
+    # todos por simplicidad de esta herramienta de dev. Una fila IamUserRole
+    # por combinacion (rol, scope_id) - es como se junta de verdad la union
+    # de varias sociedades/proyectos en produccion, no un truco especial de
+    # esta pantalla.
     IamUserRole.objects.filter(user=user).delete()
     for role in roles:
-        IamUserRole.objects.create(
-            user=user,
-            role=role,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            granted_by=user,
-            granted_at=now,
-        )
+        for scope_id in scope_ids:
+            IamUserRole.objects.create(
+                user=user,
+                role=role,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                granted_by=user,
+                granted_at=now,
+            )
 
     # RRHH_SUPERVISOR_CENTRO es CENTRO (grant plano aparte, no scope_type -
     # ver IamUserCentroAccess) - si se pide un centro_id de prueba, se
@@ -90,6 +100,14 @@ def dev_role_switch(request):
     if centro_id:
         IamUserCentroAccess.objects.filter(user=user).delete()
         IamUserCentroAccess.objects.create(user=user, centro_id=centro_id, granted_by=user, granted_at=now)
+
+    # CONTRATO es el mismo tipo de grant plano que CENTRO arriba (ver
+    # IamUserContratoAccess) - 31/Ago/2026, se agrega para poder probar
+    # SCOPE_FIELD_CONTRATO (tesoreria-service) desde esta pantalla.
+    contrato_id = request.GET.get("contrato_id")
+    if contrato_id:
+        IamUserContratoAccess.objects.filter(user=user).delete()
+        IamUserContratoAccess.objects.create(user=user, id_contrato=contrato_id, granted_by=user, granted_at=now)
 
     session_jwt = issue_session_jwt(user)
     response = redirect(settings.OIDC_FRONTEND_SUCCESS_URL)

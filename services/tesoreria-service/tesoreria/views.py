@@ -321,7 +321,17 @@ class TesoreriaContratoDocumentoViewSet(ModelViewSet):
     modelo), el alcance real llega filtrando por ?contrato=<id>, cuyo
     TesoreriaContrato si aplica RLS. Filtro obligatorio ?contrato=<id>
     (misma idea que TesoreriaFlujoViewSet con ?contrato=): sin el, no tiene
-    sentido listar todo el checklist de todos los contratos junto."""
+    sentido listar todo el checklist de todos los contratos junto.
+
+    31/Ago/2026 (corregido tras auditoria de scope): el docstring de
+    arriba describia el diseño correcto, pero get_queryset() nunca lo
+    aplicaba de verdad - solo filtraba por el ?contrato=<id> tal cual
+    vino en la URL, sin validar que ESE contrato estuviera dentro del
+    alcance del usuario (hueco real: cualquiera con tesoreria.crear/
+    editar/aprobar podia pedir el checklist de CUALQUIER contrato con
+    solo saber su id, y sin ?contrato= regresaba TODO el checklist de
+    TODOS los contratos). Ahora get_queryset valida el contrato contra
+    TesoreriaContrato.objects.for_scope() antes de regresar nada."""
 
     serializer_class = TesoreriaContratoDocumentoSerializer
 
@@ -348,11 +358,15 @@ class TesoreriaContratoDocumentoViewSet(ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     def get_queryset(self):
-        queryset = TesoreriaContratoDocumento.objects.select_related("contrato").all()
         contrato_id = self.request.query_params.get("contrato")
-        if contrato_id:
-            queryset = queryset.filter(contrato_id=contrato_id)
-        return queryset
+        if not contrato_id:
+            return TesoreriaContratoDocumento.objects.none()
+        contrato_visible = TesoreriaContrato.objects.for_scope(self.request.effective_scope).filter(
+            pk=contrato_id
+        )
+        if not contrato_visible.exists():
+            return TesoreriaContratoDocumento.objects.none()
+        return TesoreriaContratoDocumento.objects.select_related("contrato").filter(contrato_id=contrato_id)
 
 class TesoreriaDocumentoTicketViewSet(ViewSet):
     """Ticket publico de UN documento del checklist (28/Ago/2026, pedido
@@ -792,9 +806,15 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
     adjunta la factura real y liga el pago - el empleado NUNCA puede
     editar/borrar un ticket una vez creado.
 
-    Lectura: un empleado sin tesoreria.editar solo ve SUS PROPIOS tickets
-    (filtro por identity_user_id); quien tiene tesoreria.editar (Tesoreria/
-    Admin) ve todos, para poder darles seguimiento."""
+    Lectura (31/Ago/2026, corregido tras auditoria de scope - antes era un
+    filtro manual "tesoreria.editar ve TODO sin importar su alcance", hueco
+    real para un colaborador externo con tesoreria.editar acotado a una
+    sola sociedad/centro): ahora usa el mismo ScopedManager que el resto
+    del proyecto, via SCOPE_FIELD_IDENTITY/SOCIEDAD/CENTRO del modelo. Un
+    empleado (self-service, sin permiso, con identity_user_id) ve solo lo
+    suyo; quien tiene tesoreria.editar Y es is_global ve todo; quien tiene
+    tesoreria.editar pero esta acotado por sociedad/centro ve solo esos -
+    ya no ve todo por el simple hecho de tener el permiso."""
 
     serializer_class = TesoreriaTicketReembolsoSerializer
     filter_backends = [SearchFilter]
@@ -811,10 +831,20 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         return super().get_permissions()
 
     def get_queryset(self):
-        queryset = TesoreriaTicketReembolso.objects.select_related("flujo").order_by("-created_at")
-        scope = self.request.effective_scope
-        if scope and not scope.has_permission("tesoreria.editar"):
-            queryset = queryset.filter(id_empleado=scope.identity_user_id)
+        queryset = (
+            TesoreriaTicketReembolso.objects.for_scope(self.request.effective_scope)
+            .select_related("flujo")
+            .order_by("-created_at")
+        )
+        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
+        # filtro") - acota la vista sin cambiar el scope real de la sesion,
+        # mismo criterio que PldContraparteKycViewSet.get_queryset.
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(sociedad=sociedad)
+        centro = self.request.query_params.get("centro")
+        if centro:
+            queryset = queryset.filter(centro=centro)
         return queryset
 
     def perform_create(self, serializer):
@@ -1044,9 +1074,13 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
     tickets.
 
     DELETE no esta permitido conceptualmente: un ticket no se borra, se
-    revoca - usa POST /api/tickets-proveedor/{id}/revocar/."""
+    revoca - usa POST /api/tickets-proveedor/{id}/revocar/.
 
-    queryset = TesoreriaTicketProveedor.objects.select_related("contraparte").all()
+    31/Ago/2026 (auditoria de scope): antes `.all()` sin RLS - cualquiera
+    con tesoreria.crear/editar veia los tickets de todos los proveedores.
+    sociedad/proyecto los declara el analista al emitir el ticket (la
+    contraparte es catalogo compartido, sin alcance propio)."""
+
     serializer_class = TesoreriaTicketProveedorSerializer
     filter_backends = [SearchFilter]
     search_fields = ["id_ticket", "email", "contraparte__razon_social"]
@@ -1059,6 +1093,23 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
         if self.action == "revocar":
             return [require_permission("tesoreria.editar")()]
         return super().get_permissions()
+
+    def get_queryset(self):
+        # "validar"/"subir_factura" (publicos, sin sesion) NO pasan por
+        # aqui - resuelven el ticket directo por token via _resolver_ticket,
+        # ver mas abajo. Esto solo aplica a list/retrieve/revocar (staff).
+        queryset = TesoreriaTicketProveedor.objects.for_scope(self.request.effective_scope).select_related(
+            "contraparte"
+        )
+        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
+        # filtro") - acota la vista sin cambiar el scope real de la sesion.
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(sociedad=sociedad)
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(proyecto=proyecto)
+        return queryset
 
     def get_throttles(self):
         # Mismo criterio que PldTicketClienteViewSet: rate limiting solo en

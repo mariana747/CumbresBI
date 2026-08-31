@@ -89,7 +89,12 @@ class ObraEstimacionViewSet(_PermisosObraMixin, ModelViewSet):
 
     `numero_estimacion` se calcula aqui (siguiente consecutivo 1-4 dentro
     del concepto+lote), mismo criterio que TesoreriaContrato.id_contrato
-    generado en perform_create en vez de dejarlo a mano del cliente."""
+    generado en perform_create en vez de dejarlo a mano del cliente.
+
+    31/Ago/2026 (corregido tras auditoria de scope): get_queryset() usaba
+    `.all()` sin RLS pese a que ObraLote (via `lote`) ya tenia
+    SCOPE_FIELD_PROYECTO - cualquiera con permiso de obra veia el avance
+    de TODOS los proyectos. Ahora hereda el scope del lote."""
 
     serializer_class = ObraEstimacionSerializer
     filter_backends = [SearchFilter]
@@ -97,8 +102,8 @@ class ObraEstimacionViewSet(_PermisosObraMixin, ModelViewSet):
 
     def get_queryset(self):
         return (
-            ObraEstimacion.objects.select_related("concepto", "lote")
-            .all()
+            ObraEstimacion.objects.for_scope(self.request.effective_scope)
+            .select_related("concepto", "lote")
             .order_by("-fecha_captura")
         )
 
@@ -116,14 +121,21 @@ class ObraEvidenciaViewSet(_PermisosObraMixin, ModelViewSet):
     (URL pegada) mientras no exista la Unidad compartida de Drive para
     Obra (ver docstring del modelo). `revisar` marca la evidencia como
     revisada por el Supervisor de Obra, mismo criterio de segregacion
-    captura/revision que ObraCorteSemanal.aprobar."""
+    captura/revision que ObraCorteSemanal.aprobar.
+
+    31/Ago/2026: mismo fix de scope que ObraEstimacionViewSet arriba
+    (`.all()` -> `.for_scope()`, via `lote__proyecto`)."""
 
     serializer_class = ObraEvidenciaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["concepto__descripcion", "lote__numero_lote"]
 
     def get_queryset(self):
-        return ObraEvidencia.objects.select_related("concepto", "lote").all().order_by("-fecha_captura")
+        return (
+            ObraEvidencia.objects.for_scope(self.request.effective_scope)
+            .select_related("concepto", "lote")
+            .order_by("-fecha_captura")
+        )
 
     @action(detail=True, methods=["post"])
     def revisar(self, request, pk=None):

@@ -94,6 +94,16 @@ class PldContraparteKyc(models.Model):
     # (pld-ticket/[token]/page.tsx) sin que esa pagina publica, sin sesion,
     # tenga que llamar a iam-service (que si requiere permiso real).
     sociedad_nombre = models.CharField(max_length=250, blank=True, null=True)
+    # 31/Ago/2026 (pedido de Mariana: "hay que hacer ese filtro por
+    # sociedad y proyecto" - caso real de Dellanira, abogada externa que
+    # solo debe ver el PLD de un proyecto) - cierra el pendiente
+    # documentado en la memoria de sesion "pld-necesita-scope-por-
+    # proyecto". Igual que TesoreriaContrato.proyecto: CharField libre,
+    # sin catalogo real todavia (ver "centro-proyecto-no-son-catalogo-
+    # generico"), opcional (a diferencia de sociedad_rfc, que ya es
+    # obligatorio para expedientes nuevos) - no todo expediente pertenece
+    # a un proyecto especifico.
+    proyecto = models.CharField(max_length=3, blank=True, null=True)
     # A partir de aqui, los campos de "datos del cliente" son opcionales al
     # crear (decision 17/Ago/2026, Opcion B: expediente minimo autonomo -
     # ver memoria de sesion "pld-crear-expediente-opcion-b"): el analista
@@ -186,6 +196,7 @@ class PldContraparteKyc(models.Model):
     # expedientes de su(s) sociedad(es) - ya no es solo GLOBAL/nada, salvo
     # para expedientes viejos con sociedad_rfc=NULL (backfill pendiente).
     SCOPE_FIELD_SOCIEDAD = "sociedad_rfc"
+    SCOPE_FIELD_PROYECTO = "proyecto"
     objects = ScopedManager()
 
     class Meta:
@@ -240,6 +251,7 @@ class PldContraparteDoc(models.Model):
     # con "__" en el nombre del campo) - un documento hereda la sociedad de
     # su PldContraparteKyc, no tiene sociedad propia.
     SCOPE_FIELD_SOCIEDAD = "kyc__sociedad_rfc"
+    SCOPE_FIELD_PROYECTO = "kyc__proyecto"
     objects = ScopedManager()
 
     class Meta:
@@ -295,6 +307,9 @@ class PldSolicitudEliminacionDoc(models.Model):
     # regresa nada) y perderia el nombre del archivo en pantalla.
     denominacion_doc = models.CharField(max_length=250, blank=True, null=True)
     sociedad_rfc = models.CharField(max_length=13, blank=True, null=True)
+    # 31/Ago/2026, mismo snapshot que sociedad_rfc arriba - sobrevive a que
+    # el documento (y con el, el join a kyc__proyecto) se borre.
+    proyecto = models.CharField(max_length=3, blank=True, null=True)
     razon = models.CharField(max_length=500)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
     solicitado_por = models.CharField(max_length=8)
@@ -306,6 +321,7 @@ class PldSolicitudEliminacionDoc(models.Model):
     # Via la columna propia sociedad_rfc (snapshot), no un join en vivo a
     # traves de documento - sobrevive a que el documento se borre.
     SCOPE_FIELD_SOCIEDAD = "sociedad_rfc"
+    SCOPE_FIELD_PROYECTO = "proyecto"
     objects = ScopedManager()
 
     class Meta:
@@ -346,11 +362,17 @@ class PldTicketCliente(models.Model):
     last_used_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
 
-    # Igual que PldContraparteDoc: sin columna propia de alcance, pero
-    # ScopedManager sigue siendo el gate GLOBAL/no-GLOBAL para el listado
-    # interno (ver PldTicketClienteViewSet.get_queryset). El endpoint
-    # publico "validar" usa PldTicketCliente.objects.get(...) directo, sin
-    # for_scope, a proposito - es la unica via de acceso sin sesion interna.
+    # 31/Ago/2026 (auditoria de scope, "hay que hacer ese filtro por
+    # sociedad y proyecto"): antes sin columna propia de alcance, solo el
+    # gate binario GLOBAL/no-GLOBAL. Ahora hereda sociedad/proyecto del
+    # expediente via kyc (mismo criterio que PldContraparteDoc) - un
+    # ticket sin kyc asignado (blank=True, null=True arriba) sigue sin
+    # coincidir con ningun alcance no-GLOBAL (fail-closed, no un caso
+    # especial). El endpoint publico "validar" usa
+    # PldTicketCliente.objects.get(...) directo, sin for_scope, a
+    # proposito - es la unica via de acceso sin sesion interna.
+    SCOPE_FIELD_SOCIEDAD = "kyc__sociedad_rfc"
+    SCOPE_FIELD_PROYECTO = "kyc__proyecto"
     objects = ScopedManager()
 
     class Meta:

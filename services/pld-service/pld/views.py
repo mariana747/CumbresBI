@@ -219,6 +219,18 @@ class PldContraparteKycViewSet(ModelViewSet):
         estado_llenado = self.request.query_params.get("estado_llenado")
         if estado_llenado:
             queryset = queryset.filter(estado_llenado=estado_llenado.upper())
+        # 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para
+        # poder ver unicamente los de una sociedad o la otra") - un
+        # analista con acceso a varias sociedades (scope union, ver
+        # ScopedQuerySet) ve todas mezcladas por default; este filtro deja
+        # acotar la vista a una sola sin tener que cambiar el scope real
+        # de la sesion. Mismo criterio que ?estado_llenado= arriba.
+        sociedad_rfc = self.request.query_params.get("sociedad")
+        if sociedad_rfc:
+            queryset = queryset.filter(sociedad_rfc=sociedad_rfc)
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(proyecto=proyecto)
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -738,7 +750,9 @@ class PldSolicitudEliminacionDocViewSet(ModelViewSet):
         # ver comentario en models.py sobre por que no es un join en vivo).
         documento = serializer.validated_data["documento"]
         solicitud = serializer.save(
-            denominacion_doc=documento.denominacion, sociedad_rfc=documento.kyc.sociedad_rfc
+            denominacion_doc=documento.denominacion,
+            sociedad_rfc=documento.kyc.sociedad_rfc,
+            proyecto=documento.kyc.proyecto,
         )
         emitir_evento_auditoria(
             "pld_solicitudes_eliminacion_doc.solicitar",
@@ -826,7 +840,6 @@ class PldTicketClienteViewSet(ModelViewSet):
     revoca - usa POST /api/ticket-cliente/{id}/revocar/.
     """
 
-    queryset = PldTicketCliente.objects.all().order_by("-issued_at")
     serializer_class = PldTicketClienteSerializer
 
     def get_permissions(self):
@@ -853,13 +866,26 @@ class PldTicketClienteViewSet(ModelViewSet):
         return super().get_throttles()
 
     def get_queryset(self):
-        # Sin ScopedManager a proposito: mismo criterio que IamMagicLink
-        # (ver memoria de sesion "iam-magic-link-alcance") - el cliente
-        # externo canjea el ticket por su token, sin sesion/alcance previo.
-        queryset = super().get_queryset()
+        # 31/Ago/2026 (auditoria de scope): antes `.all()` sin RLS pese a
+        # que el modelo ya tenia ScopedManager - cualquiera con permiso
+        # interno veia los tickets de todos los expedientes. "validar"/
+        # "subir_documento"/"actualizar_datos" (publicos) NO pasan por
+        # aqui - resuelven el ticket directo por token (ver mas abajo).
+        queryset = PldTicketCliente.objects.for_scope(self.request.effective_scope).select_related(
+            "kyc"
+        ).order_by("-issued_at")
         kyc_param = self.request.query_params.get("kyc")
         if kyc_param:
             queryset = queryset.filter(kyc_id=kyc_param)
+        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
+        # filtro") - mismo criterio que PldContraparteKycViewSet.get_queryset:
+        # acota la vista sin cambiar el scope real de la sesion.
+        sociedad_rfc = self.request.query_params.get("sociedad")
+        if sociedad_rfc:
+            queryset = queryset.filter(kyc__sociedad_rfc=sociedad_rfc)
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(kyc__proyecto=proyecto)
         return queryset
 
     def perform_create(self, serializer):

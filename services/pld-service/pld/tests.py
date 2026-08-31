@@ -106,6 +106,27 @@ class PldContraparteKycScopeTests(TestCase):
         response = self._listar(EffectiveScope.anonymous())
         self.assertEqual(len(response.data), 0)
 
+    def test_filtro_sociedad_acota_dentro_del_scope_union(self):
+        # 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para
+        # poder ver unicamente los de una sociedad o la otra") - un
+        # analista con acceso a AMBAS sociedades (union real del scope)
+        # puede acotar la vista a una sola sin cambiar su alcance real.
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA, RFC_CAPITAL))
+        request = self.factory.get(f"/api/kyc/?sociedad={RFC_TIZARA}")
+        request.effective_scope = scope
+        response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
+        ids = {row["id_contraparte"] for row in response.data}
+        self.assertEqual(ids, {"cp000001"})
+
+    def test_filtro_sociedad_no_expande_mas_alla_del_scope(self):
+        # El filtro acota, no amplia - un usuario de Tizara no puede pedir
+        # ?sociedad=Capital y ver algo que su scope ya excluye.
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        request = self.factory.get(f"/api/kyc/?sociedad={RFC_CAPITAL}")
+        request.effective_scope = scope
+        response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 0)
+
 
 class PldContraparteDocScopeTests(TestCase):
     """El documento hereda el alcance de su expediente KYC padre
@@ -397,6 +418,82 @@ class PldTicketClienteTests(TestCase):
         view = PldTicketClienteViewSet.as_view({"post": "validar"})
         response = view(request)
         self.assertEqual(response.status_code, 403)
+
+
+class PldTicketClienteScopeTests(TestCase):
+    """31/Ago/2026 ("hay que hacer ese filtro por sociedad y proyecto")
+    - antes `.all()` sin RLS pese a que el modelo ya tenia ScopedManager;
+    ahora hereda sociedad/proyecto del expediente KYC via kyc__."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc_tizara = _kyc("cp000201", RFC_TIZARA)
+        self.kyc_capital = _kyc("cp000202", RFC_CAPITAL)
+        self.kyc_capital.proyecto = "P01"
+        self.kyc_capital.save(update_fields=["proyecto"])
+        self.kyc_tizara.proyecto = "P02"
+        self.kyc_tizara.save(update_fields=["proyecto"])
+
+        self.ticket_tizara = PldTicketCliente.objects.create(
+            kyc=self.kyc_tizara,
+            email="cliente1@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-tizara"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=1,
+        )
+        self.ticket_capital = PldTicketCliente.objects.create(
+            kyc=self.kyc_capital,
+            email="cliente2@externo.com",
+            issued_by="usr00001",
+            token_hash=hash_token("token-capital"),
+            expires_at=timezone.now() + datetime.timedelta(minutes=30),
+            max_uses=1,
+        )
+
+    def _listar(self, scope):
+        request = self.factory.get("/api/ticket-cliente/")
+        request.effective_scope = scope
+        view = PldTicketClienteViewSet.as_view({"get": "list"})
+        return view(request)
+
+    def test_usuario_de_una_sociedad_no_ve_tickets_de_otra(self):
+        response = self._listar(EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,)))
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_pld_ticket"], self.ticket_tizara.id_pld_ticket)
+
+    def test_usuario_de_un_proyecto_no_ve_tickets_de_otro(self):
+        response = self._listar(EffectiveScope(is_global=False, proyecto_ids=("P01",)))
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_pld_ticket"], self.ticket_capital.id_pld_ticket)
+
+    def test_global_ve_ambos(self):
+        response = self._listar(EffectiveScope(is_global=True))
+        self.assertEqual(len(response.data), 2)
+
+    def test_sin_scope_que_aplique_no_ve_nada(self):
+        response = self._listar(EffectiveScope.anonymous())
+        self.assertEqual(len(response.data), 0)
+
+    def test_filtro_sociedad_acota_dentro_del_scope_union(self):
+        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
+        # filtro") - un usuario con acceso a AMBAS sociedades puede acotar
+        # la vista a una sola sin cambiar su alcance real.
+        request = self.factory.get(f"/api/ticket-cliente/?sociedad={RFC_TIZARA}")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA, RFC_CAPITAL))
+        response = PldTicketClienteViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_pld_ticket"], self.ticket_tizara.id_pld_ticket)
+
+    def test_validar_publico_no_depende_del_scope(self):
+        # "validar" (sin sesion, canjea por token) no debe pasar por
+        # get_queryset/for_scope - un cliente externo no trae ningun
+        # scope propio, solo su token.
+        request = self.factory.post("/api/ticket-cliente/validar/", {"token": "token-tizara"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = PldTicketClienteViewSet.as_view({"post": "validar"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
 
     def test_validar_token_inexistente_da_404(self):
         request = self.factory.post("/api/ticket-cliente/validar/", {"token": "no-existe"}, format="json")

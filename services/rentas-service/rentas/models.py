@@ -1,5 +1,6 @@
 import uuid
 
+from cumbresbi_scope.managers import ScopedManager
 from django.db import models
 
 
@@ -30,6 +31,14 @@ class RentasUbicacion(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    # 31/Ago/2026 (auditoria de scope): este servicio todavia no tiene
+    # views.py/serializers.py/tests.py (solo modelos, sin API expuesta),
+    # asi que hoy no hay endpoint vulnerable - se declara el scope de una
+    # vez para que quede listo cuando se construya el CRUD, mismo criterio
+    # ya aplicado en materiales/vivienda-service.
+    SCOPE_FIELD_SOCIEDAD = "propietario_rfc"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "rentas_ubicaciones"
@@ -79,6 +88,9 @@ class RentasInmueble(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_SOCIEDAD = "ubicacion__propietario_rfc"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "rentas_inmuebles"
@@ -152,6 +164,10 @@ class RentasContrato(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
 
+    SCOPE_FIELD_SOCIEDAD = "arrendador"
+    SCOPE_FIELD_CONTRATO = "id_contrato_tesoreria"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "rentas_contratos"
 
@@ -178,6 +194,9 @@ class RentasInmuebleContrato(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_SOCIEDAD = "rentas_contrato__arrendador"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "rentas_inmuebles_contratos"
@@ -215,6 +234,9 @@ class RentasContratoDoc(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_SOCIEDAD = "rentas_contrato__arrendador"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "rentas_contratos_docs"

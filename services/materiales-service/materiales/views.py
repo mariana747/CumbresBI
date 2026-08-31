@@ -65,12 +65,17 @@ class ManoObraCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
 
 
 class PresupuestoViewSet(_PermisosMaterialesMixin, ModelViewSet):
-    """Cabecera de presupuesto por proyecto."""
+    """Cabecera de presupuesto por proyecto.
 
-    queryset = Presupuesto.objects.all().order_by("-created_at")
+    31/Ago/2026 (auditoria de scope): antes `.all()` sin RLS pese a tener
+    `proyecto` como columna propia - ahora usa ScopedManager real."""
+
     serializer_class = PresupuestoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["proyecto", "denominacion"]
+
+    def get_queryset(self):
+        return Presupuesto.objects.for_scope(self.request.effective_scope).order_by("-created_at")
 
 
 class ConceptoPresupuestoViewSet(_PermisosMaterialesMixin, ModelViewSet):
@@ -79,15 +84,16 @@ class ConceptoPresupuestoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     partir de la etapa constructiva no esta construido todavia (ver
     docstring del modelo) - alta manual por ahora."""
 
-    queryset = ConceptoPresupuesto.objects.select_related("presupuesto", "material", "mano_obra").order_by(
-        "presupuesto", "etapa_constructiva"
-    )
     serializer_class = ConceptoPresupuestoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["etapa_constructiva", "concepto"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = (
+            ConceptoPresupuesto.objects.for_scope(self.request.effective_scope)
+            .select_related("presupuesto", "material", "mano_obra")
+            .order_by("presupuesto", "etapa_constructiva")
+        )
         presupuesto_id = self.request.query_params.get("presupuesto")
         if presupuesto_id:
             queryset = queryset.filter(presupuesto_id=presupuesto_id)
@@ -98,13 +104,16 @@ class PresupuestoFirmaViewSet(_PermisosMaterialesMixin, ModelViewSet):
     """Firmas de un presupuesto - registro interno simple, sin firma
     electronica real todavia (ver docstring del modelo)."""
 
-    queryset = PresupuestoFirma.objects.select_related("presupuesto").order_by("-fecha")
     serializer_class = PresupuestoFirmaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["firmante", "cargo"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = (
+            PresupuestoFirma.objects.for_scope(self.request.effective_scope)
+            .select_related("presupuesto")
+            .order_by("-fecha")
+        )
         presupuesto_id = self.request.query_params.get("presupuesto")
         if presupuesto_id:
             queryset = queryset.filter(presupuesto_id=presupuesto_id)
@@ -120,12 +129,17 @@ class SolicitudMaterialViewSet(_PermisosMaterialesMixin, ModelViewSet):
     3 estados, sin paso intermedio de aprobacion: `entregar`/`rechazar`
     cambian el estado desde SOLICITADO."""
 
-    queryset = SolicitudMaterial.objects.select_related("material").prefetch_related("evidencias").order_by(
-        "-fecha_solicitud"
-    )
     serializer_class = SolicitudMaterialSerializer
     filter_backends = [SearchFilter]
     search_fields = ["proyecto", "material__material"]
+
+    def get_queryset(self):
+        return (
+            SolicitudMaterial.objects.for_scope(self.request.effective_scope)
+            .select_related("material")
+            .prefetch_related("evidencias")
+            .order_by("-fecha_solicitud")
+        )
 
     def _cambiar_estado(self, request, nuevo_estado, extra_fields=None):
         solicitud = self.get_object()
@@ -195,15 +209,17 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
     Ruben hoy) - solo expone la data via API para que el frontend renderice
     el documento."""
 
-    queryset = Requisicion.objects.select_related("presupuesto").prefetch_related("lineas").order_by(
-        "-created_at"
-    )
     serializer_class = RequisicionSerializer
     filter_backends = [SearchFilter]
     search_fields = ["folio", "proyecto", "etapa_constructiva"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = (
+            Requisicion.objects.for_scope(self.request.effective_scope)
+            .select_related("presupuesto")
+            .prefetch_related("lineas")
+            .order_by("-created_at")
+        )
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
@@ -287,13 +303,16 @@ class EvidenciaRecepcionViewSet(_PermisosMaterialesMixin, ModelViewSet):
     SolicitudMaterial - una solicitud puede tener varias entradas (entregas
     parciales). Alta requiere materiales.crear, igual que el resto."""
 
-    queryset = EvidenciaRecepcion.objects.select_related("solicitud").order_by("-fecha", "-hora")
     serializer_class = EvidenciaRecepcionSerializer
     filter_backends = [SearchFilter]
     search_fields = ["solicitud__proyecto", "registrado_por"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = (
+            EvidenciaRecepcion.objects.for_scope(self.request.effective_scope)
+            .select_related("solicitud")
+            .order_by("-fecha", "-hora")
+        )
         solicitud_id = self.request.query_params.get("solicitud")
         if solicitud_id:
             queryset = queryset.filter(solicitud_id=solicitud_id)

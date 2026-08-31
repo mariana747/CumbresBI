@@ -23,7 +23,13 @@ from .audit_utils import emitir_evento_auditoria
 from .auth_views import LoginRechazadoSinInvitacion, _upsert_identity
 from .models import GeneralSociedad, IamInvitation, IamRole, IamUser, IamUserRole
 from .session_utils import decode_session_jwt, issue_session_jwt
-from .views import GeneralSociedadViewSet, IamInvitationViewSet, IamUserRoleViewSet, IamUserViewSet
+from .views import (
+    GeneralSociedadViewSet,
+    IamInvitationViewSet,
+    IamRoleViewSet,
+    IamUserRoleViewSet,
+    IamUserViewSet,
+)
 
 
 def _with_scope(request, scope):
@@ -99,6 +105,220 @@ class IamUserRoleScopeTests(TestCase):
         response = self._listar(EffectiveScope(is_global=False, proyecto_ids=("p1",)))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+
+class IamRoleCrearTests(TestCase):
+    """31/Ago/2026 (pedido de Mariana: "super admin debe poder crear roles
+    para colaboradores externos") - IamRoleViewSet.create() antes existia
+    en la ruta pero el serializer era 100% read_only, asi que no tenia
+    forma real de llenarse. Mismo criterio de permiso que
+    IamUserRoleViewSet.create (iam.crear)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.actor = IamUser.objects.create(user_id="usr00010", primary_email="admin@cumbresbi.mx")
+
+    def _crear_rol(self, scope, **overrides):
+        body = {"role_key": "PLD_EXTERNO_TEST", "role_name": "PLD externo (prueba)"}
+        body.update(overrides)
+        request = self.factory.post("/api/roles/", body, format="json")
+        request.effective_scope = scope
+        view = IamRoleViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_sin_permiso_da_403(self):
+        response = self._crear_rol(EffectiveScope(is_global=True, perm_keys=(), identity_user_id=self.actor.user_id))
+        self.assertEqual(response.status_code, 403)
+
+    def test_con_iam_crear_crea_el_rol(self):
+        scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",), identity_user_id=self.actor.user_id)
+        response = self._crear_rol(scope)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["role_key"], "PLD_EXTERNO_TEST")
+        self.assertEqual(response.data["permisos"], [])
+
+        rol = IamRole.objects.get(role_key="PLD_EXTERNO_TEST")
+        self.assertEqual(rol.created_by, self.actor)
+        self.assertEqual(rol.updated_by, self.actor)
+
+    def test_sin_actor_identificado_da_400(self):
+        # identity_user_id ausente/desconocido - no se puede resolver
+        # created_by (FK obligatoria, ver IamRole.created_by).
+        scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",))
+        response = self._crear_rol(scope)
+        self.assertEqual(response.status_code, 400)
+
+    def test_role_key_duplicado_da_400(self):
+        scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",), identity_user_id=self.actor.user_id)
+        self._crear_rol(scope)
+        response = self._crear_rol(scope)
+        self.assertEqual(response.status_code, 400)
+
+    def test_crear_rol_externo(self):
+        scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",), identity_user_id=self.actor.user_id)
+        response = self._crear_rol(scope, role_key="ABOGADA_EXTERNA_TEST", tipo="EXTERNO")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["tipo"], "EXTERNO")
+
+    def test_rol_nuevo_es_interno_por_default(self):
+        scope = EffectiveScope(is_global=True, perm_keys=("iam.crear",), identity_user_id=self.actor.user_id)
+        response = self._crear_rol(scope)
+        self.assertEqual(response.data["tipo"], "INTERNO")
+
+
+class IamRoleExternoScopeTests(TestCase):
+    """31/Ago/2026 (pedido de Mariana: "en matriz de permisos hay que
+    dividir entre internos y externos, ya que en externos se debe asignar
+    su sociedad y proyecto") - un rol EXTERNO nunca se puede otorgar en
+    alcance GLOBAL."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.actor = IamUser.objects.create(user_id="usr00013", primary_email="admin3@cumbresbi.mx")
+        self.target = IamUser.objects.create(user_id="usr00014", primary_email="destino3@cumbresbi.mx")
+        self.rol_externo = IamRole.objects.create(
+            role_key="TEST_ROLE_EXTERNO", role_name="Rol de prueba (externo)", tipo=IamRole.TIPO_EXTERNO,
+            created_by=self.actor, updated_by=self.actor,
+        )
+        self.scope_crear = EffectiveScope(
+            is_global=True, perm_keys=("iam.crear",), identity_user_id=self.actor.user_id
+        )
+
+    def test_no_se_puede_otorgar_rol_externo_en_global(self):
+        request = self.factory.post(
+            "/api/user-roles/",
+            {"user": self.target.user_id, "role": self.rol_externo.role_id, "scope_type": "GLOBAL"},
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        view = IamUserRoleViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_si_se_puede_otorgar_rol_externo_acotado_a_sociedad(self):
+        request = self.factory.post(
+            "/api/user-roles/",
+            {
+                "user": self.target.user_id,
+                "role": self.rol_externo.role_id,
+                "scope_type": "SOCIEDAD",
+                "scope_id": "#####3",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        view = IamUserRoleViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+
+
+class IamRoleBorrarRealTests(TestCase):
+    """31/Ago/2026 ("quiero agregar tambien un borrado real") - DELETE
+    real, pero bloqueado si el rol tiene alguna IamUserRole activa."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.actor = IamUser.objects.create(user_id="usr00015", primary_email="admin4@cumbresbi.mx")
+        self.target = IamUser.objects.create(user_id="usr00016", primary_email="destino4@cumbresbi.mx")
+        self.role = IamRole.objects.create(
+            role_key="TEST_ROLE_BORRAR", role_name="Rol de prueba (borrar)",
+            created_by=self.actor, updated_by=self.actor,
+        )
+        self.scope_editar = EffectiveScope(
+            is_global=True, perm_keys=("iam.editar",), identity_user_id=self.actor.user_id
+        )
+
+    def _borrar(self):
+        request = self.factory.delete(f"/api/roles/{self.role.role_id}/")
+        request.effective_scope = self.scope_editar
+        view = IamRoleViewSet.as_view({"delete": "destroy"})
+        return view(request, pk=self.role.role_id)
+
+    def test_borrar_requiere_iam_editar(self):
+        request = self.factory.delete(f"/api/roles/{self.role.role_id}/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=(), identity_user_id=self.actor.user_id)
+        view = IamRoleViewSet.as_view({"delete": "destroy"})
+        response = view(request, pk=self.role.role_id)
+        self.assertEqual(response.status_code, 403)
+
+    def test_no_se_puede_borrar_con_asignacion_activa(self):
+        IamUserRole.objects.create(user=self.target, role=self.role, scope_type="GLOBAL")
+        response = self._borrar()
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(IamRole.objects.filter(pk=self.role.role_id).exists())
+
+    def test_si_se_puede_borrar_sin_asignaciones(self):
+        response = self._borrar()
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(IamRole.objects.filter(pk=self.role.role_id).exists())
+
+    def test_si_se_puede_borrar_con_asignacion_ya_revocada(self):
+        assignment = IamUserRole.objects.create(user=self.target, role=self.role, scope_type="GLOBAL")
+        assignment.revoked_at = timezone.now()
+        assignment.save(update_fields=["revoked_at"])
+        response = self._borrar()
+        self.assertEqual(response.status_code, 204)
+
+
+class IamRoleDesactivarTests(TestCase):
+    """31/Ago/2026 ("se pueden borrar?" -> soft-delete, no DELETE real).
+    Un rol desactivado no se puede asignar a nadie nuevo, pero las
+    asignaciones que ya existian antes de desactivarlo siguen vigentes."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.actor = IamUser.objects.create(user_id="usr00011", primary_email="admin2@cumbresbi.mx")
+        self.target = IamUser.objects.create(user_id="usr00012", primary_email="destino2@cumbresbi.mx")
+        self.role = IamRole.objects.create(
+            role_key="TEST_ROLE_DESACT", role_name="Rol de prueba (desactivar)",
+            created_by=self.actor, updated_by=self.actor,
+        )
+        self.scope_editar = EffectiveScope(
+            is_global=True, perm_keys=("iam.editar",), identity_user_id=self.actor.user_id
+        )
+
+    def test_desactivar_requiere_iam_editar(self):
+        request = self.factory.post(f"/api/roles/{self.role.role_id}/desactivar/", {}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=(), identity_user_id=self.actor.user_id)
+        view = IamRoleViewSet.as_view({"post": "desactivar"})
+        response = view(request, pk=self.role.role_id)
+        self.assertEqual(response.status_code, 403)
+
+    def test_desactivar_y_reactivar(self):
+        request = self.factory.post(f"/api/roles/{self.role.role_id}/desactivar/", {}, format="json")
+        request.effective_scope = self.scope_editar
+        view = IamRoleViewSet.as_view({"post": "desactivar"})
+        response = view(request, pk=self.role.role_id)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["activo"])
+
+        request2 = self.factory.post(f"/api/roles/{self.role.role_id}/activar/", {}, format="json")
+        request2.effective_scope = self.scope_editar
+        view2 = IamRoleViewSet.as_view({"post": "activar"})
+        response2 = view2(request2, pk=self.role.role_id)
+        self.assertEqual(response2.status_code, 200)
+        self.assertTrue(response2.data["activo"])
+
+    def test_no_se_puede_asignar_un_rol_desactivado(self):
+        self.role.activo = False
+        self.role.save(update_fields=["activo"])
+
+        request = self.factory.post(
+            "/api/user-roles/", {"user": self.target.user_id, "role": self.role.role_id}, format="json"
+        )
+        request.effective_scope = EffectiveScope(
+            is_global=True, perm_keys=("iam.crear",), identity_user_id=self.actor.user_id
+        )
+        view = IamUserRoleViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_asignaciones_existentes_siguen_vigentes_tras_desactivar(self):
+        # Una asignacion creada ANTES de desactivar el rol no se revoca sola.
+        assignment = IamUserRole.objects.create(user=self.target, role=self.role, scope_type="GLOBAL")
+        self.role.activo = False
+        self.role.save(update_fields=["activo"])
+        self.assertIsNone(IamUserRole.objects.get(pk=assignment.pk).revoked_at)
 
 
 class CumplimientoDePermisosEnEscrituraTests(TestCase):
