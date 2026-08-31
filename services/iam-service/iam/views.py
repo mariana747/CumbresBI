@@ -6,6 +6,7 @@ from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
@@ -253,23 +254,82 @@ class IamUserViewSet(ReadOnlyModelViewSet):
 class IamRoleViewSet(ModelViewSet):
     """Catalogo de roles para el filtro del directorio de usuarios y, via el
     campo "permisos" del serializer, la matriz de permisos roles x permisos
-    (Fase 1, Semana 5). El rol en si sigue siendo de solo lectura (crear/
-    editar/borrar un rol sigue pendiente) - lo unico editable son sus
-    permisos, via las dos acciones de abajo (matriz de permisos editable).
-    """
+    (Fase 1, Semana 5).
 
-    http_method_names = ["get", "post", "head", "options"]
+    31/Ago/2026 (pedido de Mariana: "super admin debe poder crear roles
+    para colaboradores externos" - hasta ahora un SUPER_ADMIN podia
+    otorgar/acotar el ALCANCE de un rol ya existente via RoleAssignmentDialog,
+    pero no podia crear un rol nuevo de cero con exactamente los permisos
+    que necesitaba - ej. "solo PLD" para un abogado externo - sin tocar
+    Django admin). create() ya existe.
+
+    "se pueden borrar?" -> soft-delete via desactivar()/activar() para el
+    caso normal (un rol puede tener IamUserRole ya asignadas; borrar la
+    fila tumbaria el acceso de quien lo tuviera sin aviso ni registro).
+    Un rol inactivo ya no se puede asignar a nadie nuevo (ver
+    IamUserRoleViewSet.perform_create) pero las asignaciones existentes NO
+    se revocan solas.
+
+    31/Ago/2026 (pedido de Mariana: "quiero agregar tambien un borrado
+    real"): destroy() SI esta expuesto, pero bloqueado (400) si el rol
+    tiene alguna IamUserRole activa (revoked_at IS NULL) - solo se puede
+    borrar de verdad un rol que nadie tiene asignado hoy. role.user_roles
+    usa on_delete=CASCADE (ver IamUserRole.role), asi que el DELETE real
+    tambien se lleva las asignaciones YA REVOCADAS de ese rol (pierde ese
+    pedacito de historial) - aceptable porque el caso de uso es "cree un
+    rol de prueba/me equivoque y nadie lo llego a usar en serio", no
+    limpieza de roles con historial real."""
+
+    http_method_names = ["get", "post", "delete", "head", "options"]
     queryset = IamRole.objects.all().order_by("role_name")
     serializer_class = IamRoleSerializer
 
     def get_permissions(self):
-        # Editar la matriz de permisos (otorgar/revocar) requiere
-        # "iam.editar" - el rol en si sigue siendo de solo lectura (sin
-        # accion de create/update expuesta), asi que solo estas dos
-        # acciones necesitan el gate.
-        if self.action in ("otorgar_permiso", "revocar_permiso"):
+        # Crear un rol nuevo = "iam.crear" (mismo criterio que
+        # IamUserRoleViewSet.create). Editar la matriz de permisos
+        # (otorgar/revocar), activar/desactivar y borrar requieren "iam.editar".
+        if self.action == "create":
+            return [require_permission("iam.crear")()]
+        if self.action in ("otorgar_permiso", "revocar_permiso", "activar", "desactivar", "destroy"):
             return [require_permission("iam.editar")()]
         return super().get_permissions()
+
+    def destroy(self, request, *args, **kwargs):
+        role = self.get_object()
+        if role.user_roles.filter(revoked_at__isnull=True).exists():
+            return Response(
+                {"detail": "Este rol tiene usuarios con la asignación activa, no se puede borrar. Desactívalo en su lugar."},
+                status=400,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        actor = IamUser.objects.filter(pk=self.request.effective_scope.identity_user_id).first()
+        if not actor:
+            raise ValidationError({"detail": "No se pudo identificar al usuario autenticado."})
+        serializer.save(created_by=actor, updated_by=actor)
+
+    @action(detail=True, methods=["post"])
+    def desactivar(self, request, pk=None):
+        actor = IamUser.objects.filter(pk=request.effective_scope.identity_user_id).first()
+        if not actor:
+            return Response({"detail": "No se pudo identificar al usuario autenticado."}, status=400)
+        role = self.get_object()
+        role.activo = False
+        role.updated_by = actor
+        role.save(update_fields=["activo", "updated_by", "updated_at"])
+        return Response(self.get_serializer(role).data)
+
+    @action(detail=True, methods=["post"])
+    def activar(self, request, pk=None):
+        actor = IamUser.objects.filter(pk=request.effective_scope.identity_user_id).first()
+        if not actor:
+            return Response({"detail": "No se pudo identificar al usuario autenticado."}, status=400)
+        role = self.get_object()
+        role.activo = True
+        role.updated_by = actor
+        role.save(update_fields=["activo", "updated_by", "updated_at"])
+        return Response(self.get_serializer(role).data)
 
     @action(detail=True, methods=["post"])
     def otorgar_permiso(self, request, pk=None):
@@ -387,6 +447,22 @@ class IamUserRoleViewSet(ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        # 31/Ago/2026: un rol desactivado (IamRole.activo=False) ya no se
+        # puede otorgar a nadie nuevo - las asignaciones que ya existian
+        # antes de desactivarlo siguen vigentes hasta que alguien las
+        # revoque a mano, esto solo cierra la puerta a asignaciones NUEVAS.
+        role = serializer.validated_data.get("role")
+        if role and not role.activo:
+            raise ValidationError({"role": ["Este rol está desactivado, no se puede asignar."]})
+        # Un rol EXTERNO nunca se otorga en alcance GLOBAL (pedido de
+        # Mariana: "en externos se debe asignar su sociedad y proyecto") -
+        # el backend rechaza el caso mas grave (GLOBAL) aunque alguien
+        # llame la API directo sin pasar por RoleAssignmentDialog. El
+        # frontend exige ademas Sociedad Y Proyecto los dos (dos filas de
+        # IamUserRole, una por dimension) - eso no se puede validar en una
+        # sola fila aqui, queda como responsabilidad de la UI.
+        if role and role.tipo == IamRole.TIPO_EXTERNO and serializer.validated_data.get("scope_type") == IamUserRole.SCOPE_GLOBAL:
+            raise ValidationError({"scope_type": ["Un rol externo no se puede otorgar con alcance GLOBAL."]})
         serializer.save(granted_at=timezone.now())
 
     @action(detail=True, methods=["post"])

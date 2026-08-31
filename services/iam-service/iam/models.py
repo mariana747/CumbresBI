@@ -141,10 +141,34 @@ class IamIdentity(models.Model):
 
 
 class IamRole(models.Model):
+    # 31/Ago/2026 (pedido de Mariana: "en matriz de permisos hay que
+    # dividir entre internos y externos, ya que en externos se debe
+    # asignar su sociedad y proyecto") - un rol EXTERNO nunca puede
+    # otorgarse en alcance GLOBAL (ver IamUserRoleViewSet.perform_create),
+    # solo con Sociedad Y Proyecto especificos (RoleAssignmentDialog exige
+    # ambos, no uno solo). No cambia el mecanismo de scope subyacente
+    # (siguen siendo IamUserRole normales, dos filas - una SOCIEDAD y una
+    # PROYECTO, ver compute_effective_scope_claims que ya union-a por
+    # dimension), solo endurece la UI/validacion para este tipo de rol.
+    TIPO_INTERNO = "INTERNO"
+    TIPO_EXTERNO = "EXTERNO"
+    TIPO_CHOICES = [(TIPO_INTERNO, "Interno"), (TIPO_EXTERNO, "Externo")]
+
     role_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     role_key = models.CharField(max_length=50, unique=True)
     role_name = models.CharField(max_length=100)
     description = models.CharField(max_length=255, blank=True, null=True)
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, default=TIPO_INTERNO)
+    # 31/Ago/2026 (pedido de Mariana: "se pueden borrar?" -> soft-delete,
+    # no DELETE real) - un rol puede tener IamUserRole ya asignadas; borrar
+    # la fila de verdad tumbaria el acceso de quien lo tuviera sin aviso
+    # ni registro (mismo riesgo que motivo IamUser.STATUS_DELETED en vez
+    # de un DELETE real). "activo=False" = ya no se puede asignar a nadie
+    # nuevo (ver IamUserRoleViewSet.perform_create), pero las asignaciones
+    # existentes NO se revocan solas - eso sigue siendo una accion aparte
+    # y deliberada (RoleAssignmentDialog), para no tumbar accesos en
+    # cadena por una sola desactivacion.
+    activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         IamUser, on_delete=models.PROTECT, related_name="roles_created"
