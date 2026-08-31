@@ -108,6 +108,11 @@ export default function MiCumbresTicketsPage() {
   const [archivoTicket, setArchivoTicket] = useState<File | null>(null);
   // Piloto de escaneo (28/Ago/2026, pedido de Mariana): foto tomada con
   // "Tomar foto" pasa por EscanerDocumento antes de quedar como adjunto.
+  // 31/Ago/2026 - "Elegir archivo" tambien manda ahi cuando lo elegido es
+  // una imagen (no PDF): en escritorio no hay camara, asi que "Tomar
+  // foto" ahi ya es solo un selector de archivos disfrazado - el recorte
+  // debe poder usarse igual eligiendo una imagen ya existente, en
+  // escritorio o celular.
   const [fotoParaEscanear, setFotoParaEscanear] = useState<File | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [errorAlta, setErrorAlta] = useState<string | null>(null);
@@ -144,14 +149,25 @@ export default function MiCumbresTicketsPage() {
 
   return (
     <AppShell>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "stretch", sm: "center" }}
+        spacing={1.5}
+        sx={{ mb: 2 }}
+      >
         <Box>
-          <Typography variant="h5">Tickets de reembolso</Typography>
+          <Typography variant={esMovil ? "h6" : "h5"}>Tickets de reembolso</Typography>
           <Typography variant="body2" color="text.secondary">
             Pantalla provisional de MiCumbres — sube tu ticket de gasto para que Tesorería lo procese.
           </Typography>
         </Box>
-        <Button variant="contained" startIcon={<Upload size={18} strokeWidth={1.5} />} onClick={() => setOpenNuevo(true)}>
+        <Button
+          variant="contained"
+          size={esMovil ? "small" : "medium"}
+          startIcon={<Upload size={18} strokeWidth={1.5} />}
+          onClick={() => setOpenNuevo(true)}
+        >
           Subir ticket
         </Button>
       </Stack>
@@ -174,15 +190,23 @@ export default function MiCumbresTicketsPage() {
         <Stack spacing={1.5}>
           {tickets.map((t) => (
             <Card key={t.id_ticket} variant="outlined">
-              <CardContent>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                  <Box>
-                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
-                      {t.id_ticket}
-                    </Typography>
-                    <Typography variant="body2">{t.descripcion}</Typography>
-                  </Box>
-                  <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
+              <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+                <Stack spacing={0.5}>
+                  <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
+                    {t.id_ticket}
+                  </Typography>
+                  <Typography variant="body2">{t.descripcion}</Typography>
+                  {/* El texto del estado es largo ("Aprobado — Tesorería
+                      está facturando") - compartiendo fila con el
+                      ID/descripción no cabía en pantallas de 320px y
+                      forzaba todo a verse apretado (reportado
+                      31/Ago/2026). En su propia fila, envuelve solo. */}
+                  <Chip
+                    size="small"
+                    label={ESTADO_LABEL[t.estado]}
+                    color={ESTADO_COLOR[t.estado]}
+                    sx={{ alignSelf: "flex-start", height: "auto", "& .MuiChip-label": { whiteSpace: "normal", py: 0.5 } }}
+                  />
                 </Stack>
                 <Divider sx={{ my: 1 }} />
                 <Stack spacing={0.5}>
@@ -292,34 +316,48 @@ export default function MiCumbresTicketsPage() {
               InputLabelProps={{ shrink: true }}
               fullWidth
             />
-            {/* Dos botones a proposito (27/Ago/2026, pedido de Mariana:
-                "escaneo con celular"): `capture` solo abre la camara
-                directo cuando accept es estrictamente imagen - mezclado
-                con application/pdf el navegador lo ignora y cae siempre
-                al selector normal. "Tomar foto" es la via rapida en
-                celular; "Elegir archivo" cubre PDF/galeria/escritorio. */}
+            {/* "Tomar foto" con `capture` solo abre la camara directo en
+                celular (pedido de Mariana 27/Ago/2026) - en escritorio no
+                hay camara que abrir, asi que el boton quedaba ahi como un
+                selector de archivos redundante con "Elegir archivo". Desde
+                que "Elegir archivo" tambien manda las imagenes al recorte
+                (31/Ago/2026 - ver su onChange: la distincion real ya no es
+                camara-vs-archivo sino imagen-vs-PDF), "Tomar foto" ya no
+                aporta nada en escritorio - se oculta con esMovil. */}
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-              <Button component="label" variant="outlined" startIcon={<Camera size={16} strokeWidth={1.5} />}>
-                Tomar foto
-                <input
-                  type="file"
-                  hidden
-                  accept="image/*"
-                  capture="environment"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setFotoParaEscanear(f);
-                    e.target.value = "";
-                  }}
-                />
-              </Button>
+              {esMovil && (
+                <Button component="label" variant="outlined" startIcon={<Camera size={16} strokeWidth={1.5} />}>
+                  Tomar foto
+                  <input
+                    type="file"
+                    hidden
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      setFotoParaEscanear(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </Button>
+              )}
               <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />}>
                 Elegir archivo
                 <input
                   type="file"
                   hidden
                   accept="image/*,application/pdf"
-                  onChange={(e) => setArchivoTicket(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    // Un PDF no tiene esquinas que recortar - solo las
+                    // imagenes pasan por el escaner, igual que "Tomar foto".
+                    if (f && f.type.startsWith("image/")) {
+                      setFotoParaEscanear(f);
+                    } else {
+                      setArchivoTicket(f);
+                    }
+                    e.target.value = "";
+                  }}
                 />
               </Button>
             </Stack>
