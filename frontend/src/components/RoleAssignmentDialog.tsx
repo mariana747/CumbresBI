@@ -76,6 +76,15 @@ export default function RoleAssignmentDialog({
   const [selectedRole, setSelectedRole] = useState("");
   const [scopeType, setScopeType] = useState<ScopeType>("GLOBAL");
   const [scopeId, setScopeId] = useState("");
+  // 31/Ago/2026 (pedido de Mariana: "en externos se debe asignar su
+  // sociedad y proyecto") - un rol EXTERNO no usa el selector de Alcance
+  // de arriba (GLOBAL/SOCIEDAD/PROYECTO, uno solo): exige los DOS a la
+  // vez, asi que va en un formulario aparte con ambos campos obligatorios.
+  // Por dentro sigue siendo el mismo mecanismo (dos IamUserRole - una
+  // SOCIEDAD y una PROYECTO - que se combinan por union en el JWT, ver
+  // compute_effective_scope_claims en iam-service), solo la UI cambia.
+  const [sociedadExterno, setSociedadExterno] = useState("");
+  const [proyectoExterno, setProyectoExterno] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<SessionUser | null>(null);
@@ -86,6 +95,8 @@ export default function RoleAssignmentDialog({
 
   const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
+  const selectedRoleObj = allRoles.find((r) => r.role_id === selectedRole);
+  const esExterno = selectedRoleObj?.tipo === "EXTERNO";
 
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   // Sugerencias freeSolo (no hay catalogo real de proyecto/centro/contrato
@@ -121,14 +132,16 @@ export default function RoleAssignmentDialog({
   // ?search= en iam-service, no solo filtrado en memoria - por si el
   // catalogo crece mas alla de las 3 sociedades actuales).
   useEffect(() => {
-    if (scopeType !== "SOCIEDAD") return;
+    if (scopeType !== "SOCIEDAD" && !esExterno) return;
+    const busqueda = esExterno ? sociedadExterno : scopeId;
     const timeout = setTimeout(() => {
-      listSociedades(scopeId || undefined)
+      listSociedades(busqueda || undefined)
         .then(setSociedades)
         .catch(() => undefined);
     }, 250);
     return () => clearTimeout(timeout);
-  }, [scopeType, scopeId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeType, scopeId, esExterno, sociedadExterno]);
 
   // Sugerencias para Proyecto/Centro/Contrato - se cargan una vez al abrir
   // el dialogo (no hay catalogo real todavia, ver nota arriba).
@@ -152,10 +165,22 @@ export default function RoleAssignmentDialog({
 
   async function handleGrant() {
     if (!selectedRole) return;
-    if (scopeType !== "GLOBAL" && !scopeId.trim()) return;
     setError(null);
     try {
-      await grantRole(userId, selectedRole, scopeType, scopeType === "GLOBAL" ? "*" : scopeId.trim());
+      if (esExterno) {
+        // Rol EXTERNO: Sociedad Y Proyecto los dos, nunca GLOBAL (pedido
+        // de Mariana) - dos IamUserRole (una por dimension), el backend
+        // ya rechaza GLOBAL para estos roles como segunda linea de
+        // defensa (ver IamUserRoleViewSet.perform_create).
+        if (!sociedadExterno.trim() || !proyectoExterno.trim()) return;
+        await grantRole(userId, selectedRole, "SOCIEDAD", sociedadExterno.trim());
+        await grantRole(userId, selectedRole, "PROYECTO", proyectoExterno.trim());
+        setSociedadExterno("");
+        setProyectoExterno("");
+      } else {
+        if (scopeType !== "GLOBAL" && !scopeId.trim()) return;
+        await grantRole(userId, selectedRole, scopeType, scopeType === "GLOBAL" ? "*" : scopeId.trim());
+      }
       setSelectedRole("");
       setScopeType("GLOBAL");
       setScopeId("");
@@ -283,61 +308,102 @@ export default function RoleAssignmentDialog({
                   ))}
                 </Select>
               </FormControl>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                <FormControl size="small" sx={{ minWidth: 130 }}>
-                  <InputLabel id="scope-type-label">Alcance</InputLabel>
-                  <Select
-                    labelId="scope-type-label"
-                    label="Alcance"
-                    value={scopeType}
-                    onChange={(e) => {
-                      setScopeType(e.target.value as ScopeType);
-                      setScopeId("");
-                    }}
+              {esExterno ? (
+                // Rol EXTERNO (31/Ago/2026): nada de selector de Alcance -
+                // Sociedad Y Proyecto son obligatorios los dos, siempre.
+                <Stack spacing={1}>
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    Rol externo: hay que acotarlo a una Sociedad y un Proyecto, nunca GLOBAL.
+                  </Alert>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                    <Autocomplete
+                      openOnFocus
+                      size="small"
+                      fullWidth
+                      options={sociedades}
+                      getOptionLabel={(s) => `${s.razon_social ?? s.rfc} (${s.rfc})`}
+                      isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
+                      onInputChange={(_, value) => setSociedadExterno(value)}
+                      onChange={(_, value) => setSociedadExterno(value?.rfc ?? "")}
+                      renderInput={(params) => <TextField {...params} label="Sociedad *" />}
+                    />
+                    <Autocomplete
+                      freeSolo
+                      openOnFocus
+                      size="small"
+                      fullWidth
+                      options={proyectoSugerencias}
+                      noOptionsText="Sin sugerencias aún — escribe uno nuevo"
+                      inputValue={proyectoExterno}
+                      onInputChange={(_, value) => setProyectoExterno(value)}
+                      renderInput={(params) => <TextField {...params} label="Proyecto *" />}
+                    />
+                  </Stack>
+                  <Button
+                    variant="contained"
+                    disabled={!selectedRole || !sociedadExterno.trim() || !proyectoExterno.trim() || !puedeCrear}
+                    onClick={handleGrant}
                   >
-                    <MenuItem value="GLOBAL">GLOBAL</MenuItem>
-                    <MenuItem value="SOCIEDAD">SOCIEDAD</MenuItem>
-                    <MenuItem value="PROYECTO">PROYECTO</MenuItem>
-                  </Select>
-                </FormControl>
-                {scopeType === "SOCIEDAD" && (
-                  <Autocomplete
-                    openOnFocus
-                    size="small"
-                    fullWidth
-                    options={sociedades}
-                    getOptionLabel={(s) => `${s.razon_social ?? s.rfc} (${s.rfc})`}
-                    isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
-                    onInputChange={(_, value) => setScopeId(value)}
-                    onChange={(_, value) => setScopeId(value?.rfc ?? "")}
-                    renderInput={(params) => <TextField {...params} label="Sociedad" />}
-                  />
-                )}
-                {scopeType === "PROYECTO" && (
-                  // Sin catalogo real todavia (vivienda_proyectos, Fase 3, sin
-                  // construir) - freeSolo: sugiere IDs de proyecto ya usados
-                  // antes en el sistema, pero deja escribir uno nuevo.
-                  <Autocomplete
-                    freeSolo
-                    openOnFocus
-                    size="small"
-                    fullWidth
-                    options={proyectoSugerencias}
-                    noOptionsText="Sin sugerencias aún — escribe uno nuevo"
-                    inputValue={scopeId}
-                    onInputChange={(_, value) => setScopeId(value)}
-                    renderInput={(params) => <TextField {...params} label="ID de proyecto" />}
-                  />
-                )}
-                <Button
-                  variant="contained"
-                  disabled={!selectedRole || (scopeType !== "GLOBAL" && !scopeId.trim()) || !puedeCrear}
-                  onClick={handleGrant}
-                  sx={{ whiteSpace: "nowrap" }}
-                >
-                  Otorgar
-                </Button>
-              </Stack>
+                    Otorgar
+                  </Button>
+                </Stack>
+              ) : (
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  <FormControl size="small" sx={{ minWidth: 130 }}>
+                    <InputLabel id="scope-type-label">Alcance</InputLabel>
+                    <Select
+                      labelId="scope-type-label"
+                      label="Alcance"
+                      value={scopeType}
+                      onChange={(e) => {
+                        setScopeType(e.target.value as ScopeType);
+                        setScopeId("");
+                      }}
+                    >
+                      <MenuItem value="GLOBAL">GLOBAL</MenuItem>
+                      <MenuItem value="SOCIEDAD">SOCIEDAD</MenuItem>
+                      <MenuItem value="PROYECTO">PROYECTO</MenuItem>
+                    </Select>
+                  </FormControl>
+                  {scopeType === "SOCIEDAD" && (
+                    <Autocomplete
+                      openOnFocus
+                      size="small"
+                      fullWidth
+                      options={sociedades}
+                      getOptionLabel={(s) => `${s.razon_social ?? s.rfc} (${s.rfc})`}
+                      isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
+                      onInputChange={(_, value) => setScopeId(value)}
+                      onChange={(_, value) => setScopeId(value?.rfc ?? "")}
+                      renderInput={(params) => <TextField {...params} label="Sociedad" />}
+                    />
+                  )}
+                  {scopeType === "PROYECTO" && (
+                    // Sin catalogo real todavia (vivienda_proyectos, Fase 3, sin
+                    // construir) - freeSolo: sugiere IDs de proyecto ya usados
+                    // antes en el sistema, pero deja escribir uno nuevo.
+                    <Autocomplete
+                      freeSolo
+                      openOnFocus
+                      size="small"
+                      fullWidth
+                      options={proyectoSugerencias}
+                      noOptionsText="Sin sugerencias aún — escribe uno nuevo"
+                      inputValue={scopeId}
+                      onInputChange={(_, value) => setScopeId(value)}
+                      renderInput={(params) => <TextField {...params} label="ID de proyecto" />}
+                    />
+                  )}
+                  <Button
+                    variant="contained"
+                    disabled={!selectedRole || (scopeType !== "GLOBAL" && !scopeId.trim()) || !puedeCrear}
+                    onClick={handleGrant}
+                    sx={{ whiteSpace: "nowrap" }}
+                  >
+                    Otorgar
+                  </Button>
+                </Stack>
+              )}
             </Stack>
 
             <Divider sx={{ mb: 2 }} />

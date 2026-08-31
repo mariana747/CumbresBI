@@ -18,11 +18,23 @@ export interface IamUser {
   updated_at: string;
 }
 
+// 31/Ago/2026 (pedido de Mariana: "en matriz de permisos hay que dividir
+// entre internos y externos, ya que en externos se debe asignar su
+// sociedad y proyecto") - un rol EXTERNO nunca se puede otorgar en
+// alcance GLOBAL (ver IamUserRoleViewSet.perform_create) y
+// RoleAssignmentDialog exige Sociedad Y Proyecto, los dos.
+export type IamRoleTipo = "INTERNO" | "EXTERNO";
+
 export interface IamRole {
   role_id: string;
   role_key: string;
   role_name: string;
   description: string | null;
+  tipo: IamRoleTipo;
+  // 31/Ago/2026 ("se pueden borrar?" -> soft-delete, no DELETE real) - un
+  // rol inactivo ya no se puede asignar a nadie nuevo (IamUserRoleViewSet
+  // lo rechaza), pero las asignaciones que ya existian siguen vigentes.
+  activo: boolean;
   // Claves de permiso otorgadas a este rol (ver iam/serializers.py,
   // IamRoleSerializer.get_permisos) - para la matriz de permisos.
   permisos: string[];
@@ -138,6 +150,63 @@ export async function listRoles(): Promise<IamRole[]> {
     throw await friendlyApiError("IAM", response);
   }
   return response.json();
+}
+
+// Crear un rol nuevo de cero (31/Ago/2026, pedido de Mariana: "super admin
+// debe poder crear roles para colaboradores externos" - antes solo se
+// podian editar los permisos de un rol ya existente en el catalogo, no
+// crear uno nuevo con exactamente los permisos que hacen falta). Requiere
+// iam.crear (ver IamRoleViewSet.get_permissions). El actor se resuelve del
+// JWT en el backend, no se manda aqui.
+export async function createRole(
+  roleKey: string,
+  roleName: string,
+  tipo: IamRoleTipo = "INTERNO",
+  description?: string
+): Promise<IamRole> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/roles/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role_key: roleKey, role_name: roleName, tipo, description: description || null }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+// Soft-delete de un rol (31/Ago/2026, "se pueden borrar?") - no hay DELETE
+// real, ver docstring de IamRoleViewSet. Requiere iam.editar.
+export async function deactivateRole(roleId: string): Promise<IamRole> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/roles/${roleId}/desactivar/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+export async function activateRole(roleId: string): Promise<IamRole> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/roles/${roleId}/activar/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
+  return response.json();
+}
+
+// Borrado real (31/Ago/2026, "quiero agregar tambien un borrado real") -
+// el backend lo rechaza (400) si el rol tiene alguna asignacion activa;
+// usa deactivateRole() en ese caso.
+export async function deleteRole(roleId: string): Promise<void> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/roles/${roleId}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("IAM", response);
+  }
 }
 
 export async function listPermissions(): Promise<IamPermission[]> {
