@@ -12,7 +12,7 @@ from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
 from .models import ConceptoPresupuesto, EvidenciaRecepcion, MaterialCatalogo, Presupuesto, SolicitudMaterial
-from .views import MaterialCatalogoViewSet, RequisicionViewSet, SolicitudMaterialViewSet
+from .views import MaterialCatalogoViewSet, PresupuestoViewSet, RequisicionViewSet, SolicitudMaterialViewSet
 
 
 class MaterialCatalogoCrudTests(TestCase):
@@ -137,6 +137,63 @@ class SolicitudMaterialEntregarTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 400)
         self.assertIn("cantidad_solicitada", response.data)
+
+
+class MaterialesScopeTests(TestCase):
+    """31/Ago/2026 (auditoria de scope): este servicio nunca declaro
+    ScopedManager pese a tener `proyecto` como columna propia desde el
+    inicio - Presupuesto/SolicitudMaterial eran de lectura abierta.
+    Confirma que un usuario acotado a un proyecto no ve el de otro."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.material = MaterialCatalogo.objects.create(
+            material="Cemento gris", unidad_medida="saco", precio_unitario="180.00"
+        )
+
+    def test_usuario_de_un_proyecto_no_ve_presupuestos_de_otro(self):
+        Presupuesto.objects.create(proyecto="AAA", monto_total=Decimal("1000"))
+        Presupuesto.objects.create(proyecto="BBB", monto_total=Decimal("2000"))
+
+        request = self.factory.get("/api/presupuestos/")
+        request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=("AAA",))
+        view = PresupuestoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["proyecto"], "AAA")
+
+    def test_usuario_de_un_proyecto_no_ve_solicitudes_de_otro(self):
+        SolicitudMaterial.objects.create(
+            proyecto="AAA", material=self.material, cantidad_solicitada=Decimal("1"), solicitado_por="u001"
+        )
+        SolicitudMaterial.objects.create(
+            proyecto="BBB", material=self.material, cantidad_solicitada=Decimal("1"), solicitado_por="u001"
+        )
+
+        request = self.factory.get("/api/solicitudes/")
+        request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=("BBB",))
+        view = SolicitudMaterialViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["proyecto"], "BBB")
+
+    def test_global_ve_ambos_proyectos(self):
+        Presupuesto.objects.create(proyecto="AAA", monto_total=Decimal("1000"))
+        Presupuesto.objects.create(proyecto="BBB", monto_total=Decimal("2000"))
+
+        request = self.factory.get("/api/presupuestos/")
+        request.effective_scope = EffectiveScope(is_global=True)
+        view = PresupuestoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 2)
+
+    def test_anonimo_no_ve_nada(self):
+        Presupuesto.objects.create(proyecto="AAA", monto_total=Decimal("1000"))
+        request = self.factory.get("/api/presupuestos/")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = PresupuestoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 0)
 
 
 class RequisicionCicloTests(TestCase):

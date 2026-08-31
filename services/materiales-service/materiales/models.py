@@ -1,5 +1,6 @@
 import uuid
 
+from cumbresbi_scope.managers import ScopedManager
 from django.db import models
 
 
@@ -109,6 +110,13 @@ class Presupuesto(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
 
+    # 31/Ago/2026 (auditoria de scope): este servicio nunca declaro
+    # ScopedManager pese a tener `proyecto` como columna propia desde el
+    # inicio - lectura abierta real, mismo criterio ya resuelto en
+    # ObraLote (obra-service).
+    SCOPE_FIELD_PROYECTO = "proyecto"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "materiales_presupuestos"
 
@@ -155,6 +163,11 @@ class ConceptoPresupuesto(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
 
+    # 31/Ago/2026, hereda el proyecto del presupuesto (mismo criterio que
+    # TesoreriaFlujo.SCOPE_FIELD_SOCIEDAD = "contrato__sociedad").
+    SCOPE_FIELD_PROYECTO = "presupuesto__proyecto"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "materiales_conceptos_presupuesto"
 
@@ -179,6 +192,9 @@ class PresupuestoFirma(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_PROYECTO = "presupuesto__proyecto"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "materiales_presupuesto_firmas"
@@ -229,6 +245,9 @@ class SolicitudMaterial(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
 
+    SCOPE_FIELD_PROYECTO = "proyecto"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "materiales_solicitudes"
 
@@ -261,6 +280,9 @@ class EvidenciaRecepcion(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_PROYECTO = "solicitud__proyecto"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "materiales_evidencias_recepcion"
@@ -318,6 +340,9 @@ class Requisicion(models.Model):
     created_by = models.CharField(max_length=8)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=8)
+
+    SCOPE_FIELD_PROYECTO = "proyecto"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "materiales_requisiciones"
