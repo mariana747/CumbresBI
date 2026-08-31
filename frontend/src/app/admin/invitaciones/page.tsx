@@ -5,9 +5,11 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Paper,
@@ -28,17 +30,22 @@ import { Copy, Link2, ShieldOff, UploadCloud, UserPlus } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
+  GeneralSociedad,
   IamExternalCollaborator,
   IamInvitation,
   IamMagicLink,
   IamMagicLinkMasivoError,
+  IamRole,
   createExternalCollaborator,
   createInvitation,
   createMagicLink,
   createMagicLinksMasivo,
+  grantRole,
   listExternalCollaborators,
   listInvitations,
   listMagicLinks,
+  listRoles,
+  listSociedades,
   resendExternalCollaborator,
   revokeExternalCollaborator,
   revokeInvitation,
@@ -740,6 +747,20 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
   const [accesosExternos, setAccesosExternos] = useState<IamExternalCollaborator[]>([]);
   const [reenviando, setReenviando] = useState<string | null>(null);
 
+  // 31/Ago/2026 (pedido de Mariana: "hay que unificar esa parte, pero sin
+  // borrar lo que ya hay") - opcional, sobre el formulario de arriba: si
+  // se llenan los 3, el acceso externo sale con su rol+alcance ya
+  // asignado en el mismo paso, sin tener que ir a /admin/usuarios
+  // despues. El flujo viejo (crear -> ir a Usuarios -> RoleAssignmentDialog)
+  // sigue intacto para quien no llene esto - es un atajo, no un reemplazo.
+  const [asignarRolAhora, setAsignarRolAhora] = useState(false);
+  const [rolesExternos, setRolesExternos] = useState<IamRole[]>([]);
+  const [rolExternoId, setRolExternoId] = useState("");
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  const [sociedadExterno, setSociedadExterno] = useState("");
+  const [proyectoExterno, setProyectoExterno] = useState("");
+  const [errorRolExterno, setErrorRolExterno] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -756,6 +777,12 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
 
   useEffect(() => {
     refrescarListas();
+    listRoles()
+      .then((todos) => setRolesExternos(todos.filter((r) => r.tipo === "EXTERNO" && r.activo)))
+      .catch(() => setRolesExternos([]));
+    listSociedades()
+      .then(setSociedades)
+      .catch(() => setSociedades([]));
   }, []);
 
   async function handleInvitarWorkspace(e: React.FormEvent) {
@@ -785,8 +812,13 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
 
   async function handleCrearExterno(e: React.FormEvent) {
     e.preventDefault();
+    if (asignarRolAhora && (!rolExternoId || !sociedadExterno || !proyectoExterno.trim())) {
+      setErrorRolExterno("Rol, Sociedad y Proyecto son los tres obligatorios si vas a asignar el rol de una vez.");
+      return;
+    }
     setCreandoExterno(true);
     setError(null);
+    setErrorRolExterno(null);
     try {
       const nuevo = await createExternalCollaborator({
         email: emailExterno,
@@ -794,8 +826,29 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
         actorUserId: session?.user_id,
       });
       setUltimoAccesoGenerado(nuevo);
+      // Atajo opcional (ver estado arriba): mismo mecanismo que
+      // RoleAssignmentDialog para un rol EXTERNO - dos IamUserRole, una
+      // SOCIEDAD y una PROYECTO, nunca GLOBAL. Si esto falla, el acceso
+      // externo YA se creo (no se revierte) - el admin completa el rol
+      // despues desde /admin/usuarios, mismo flujo de siempre.
+      if (asignarRolAhora) {
+        try {
+          await grantRole(nuevo.user, rolExternoId, "SOCIEDAD", sociedadExterno);
+          await grantRole(nuevo.user, rolExternoId, "PROYECTO", proyectoExterno.trim());
+        } catch (err) {
+          setErrorRolExterno(
+            `El colaborador se creó, pero no se pudo asignar el rol: ${
+              err instanceof Error ? err.message : "error desconocido"
+            }. Termínalo desde Admin → Usuarios.`
+          );
+        }
+      }
       setEmailExterno("");
       setDisplayNameExterno("");
+      setAsignarRolAhora(false);
+      setRolExternoId("");
+      setSociedadExterno("");
+      setProyectoExterno("");
       refrescarListas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al crear el acceso externo");
@@ -964,28 +1017,91 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
             (roles/permisos asignados desde /admin/directorio). El link no vence por tiempo — solo
             se revoca a mano.
           </Typography>
-          <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleCrearExterno}>
-            <TextField
-              size="small"
-              label="Correo del colaborador"
-              type="email"
-              required
-              value={emailExterno}
-              onChange={(e) => setEmailExterno(e.target.value)}
-              sx={{ flex: 1 }}
+          <Stack component="form" spacing={2} onSubmit={handleCrearExterno}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="Correo del colaborador"
+                type="email"
+                required
+                value={emailExterno}
+                onChange={(e) => setEmailExterno(e.target.value)}
+                sx={{ flex: 1 }}
+              />
+              <TextField
+                size="small"
+                label="Nombre (opcional)"
+                value={displayNameExterno}
+                onChange={(e) => setDisplayNameExterno(e.target.value)}
+                sx={{ flex: 1 }}
+              />
+            </Stack>
+
+            {/* 31/Ago/2026 (pedido de Mariana: "hay que unificar esa parte,
+            pero sin borrar lo que ya hay") - atajo opcional, el flujo viejo
+            (crear -> Admin Usuarios -> RoleAssignmentDialog) sigue intacto
+            para quien no marque esto. */}
+            <FormControlLabel
+              control={<Checkbox checked={asignarRolAhora} onChange={(e) => setAsignarRolAhora(e.target.checked)} />}
+              label="Asignar rol externo ahora mismo"
             />
-            <TextField
-              size="small"
-              label="Nombre (opcional)"
-              value={displayNameExterno}
-              onChange={(e) => setDisplayNameExterno(e.target.value)}
-              sx={{ flex: 1 }}
-            />
+
+            {asignarRolAhora && (
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
+                  <InputLabel id="rol-externo-label">Rol</InputLabel>
+                  <Select
+                    labelId="rol-externo-label"
+                    label="Rol"
+                    value={rolExternoId}
+                    onChange={(e) => setRolExternoId(e.target.value)}
+                  >
+                    {rolesExternos.length === 0 ? (
+                      <MenuItem value="" disabled>
+                        Sin roles externos creados — Admin → Permisos
+                      </MenuItem>
+                    ) : (
+                      rolesExternos.map((r) => (
+                        <MenuItem key={r.role_id} value={r.role_id}>
+                          {r.role_name}
+                        </MenuItem>
+                      ))
+                    )}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
+                  <InputLabel id="sociedad-externo-label">Sociedad</InputLabel>
+                  <Select
+                    labelId="sociedad-externo-label"
+                    label="Sociedad"
+                    value={sociedadExterno}
+                    onChange={(e) => setSociedadExterno(e.target.value)}
+                  >
+                    {sociedades.map((s) => (
+                      <MenuItem key={s.rfc} value={s.rfc}>
+                        {s.razon_social || s.rfc}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <TextField
+                  size="small"
+                  label="Proyecto"
+                  value={proyectoExterno}
+                  onChange={(e) => setProyectoExterno(e.target.value)}
+                  sx={{ flex: 1 }}
+                />
+              </Stack>
+            )}
+
+            {errorRolExterno && <Alert severity="warning">{errorRolExterno}</Alert>}
+
             <Button
               type="submit"
               variant="contained"
               startIcon={<ShieldOff size={16} strokeWidth={1.5} />}
               disabled={creandoExterno}
+              sx={{ alignSelf: "flex-start" }}
             >
               {creandoExterno ? <CircularProgress size={20} color="inherit" /> : "Crear acceso"}
             </Button>
