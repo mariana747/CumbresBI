@@ -271,6 +271,16 @@ class TesoreriaContrato(models.Model):
     # sin ScopedManager (catalogos compartidos, ver serializers.py) - un
     # Contrato SI pertenece a una sociedad especifica.
     SCOPE_FIELD_SOCIEDAD = "sociedad"
+    # 31/Ago/2026 (pendiente Sem 21 del cronograma, ver memoria de sesion
+    # "tesoreria-fase4-adelanto-y-pendientes"): CENTRO/CONTRATO ya existian
+    # como claim en el JWT (IamUserCentroAccess/IamUserContratoAccess,
+    # scope_utils.py) pero ningun modelo real los consumia todavia. CENTRO
+    # es texto libre (mismo campo `centro`, sin catalogo real - ver
+    # "centro-proyecto-no-son-catalogo-generico"); CONTRATO es auto-
+    # referencia (un usuario con acceso solo a un contrato especifico ve
+    # ese contrato, no toda su sociedad).
+    SCOPE_FIELD_CENTRO = "centro"
+    SCOPE_FIELD_CONTRATO = "id_contrato"
     objects = ScopedManager()
 
     class Meta:
@@ -915,6 +925,10 @@ class TesoreriaFlujo(models.Model):
     # contrato generico de la misma plantilla, ver migracion 0011), asi que
     # ya no hay flujos fuera de alcance por sociedad.
     SCOPE_FIELD_SOCIEDAD = "contrato__sociedad"
+    # 31/Ago/2026, mismo criterio que TesoreriaContrato.SCOPE_FIELD_CENTRO/
+    # CONTRATO arriba - via el contrato relacionado, igual que sociedad.
+    SCOPE_FIELD_CENTRO = "contrato__centro"
+    SCOPE_FIELD_CONTRATO = "contrato_id"
     objects = ScopedManager()
 
     class Meta:
@@ -1045,6 +1059,20 @@ class TesoreriaTicketReembolso(models.Model):
     created_by = models.CharField(max_length=255, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=255, blank=True, null=True)
+
+    # 31/Ago/2026 (auditoria de scope, caso real: colaborador externo tipo
+    # contador/abogado que solo debe ver los tickets de SU sociedad, no
+    # todos) - este modelo ya tenia columnas `sociedad`/`centro` propias
+    # (agregadas el mismo dia) pero nunca declaro ScopedManager, quedando
+    # en lectura abierta para cualquiera con tesoreria.editar. SCOPE_FIELD_
+    # IDENTITY reemplaza el filtro manual que antes vivia en
+    # TesoreriaTicketReembolsoViewSet.get_queryset (empleado ve solo lo
+    # suyo) - ahora es el mismo mecanismo de RLS que el resto del proyecto,
+    # combinado por OR con sociedad/centro (ScopedQuerySet.for_scope).
+    SCOPE_FIELD_SOCIEDAD = "sociedad"
+    SCOPE_FIELD_CENTRO = "centro"
+    SCOPE_FIELD_IDENTITY = "id_empleado"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "tesoreria_tickets_reembolso"
@@ -1335,6 +1363,18 @@ class TesoreriaTicketProveedor(models.Model):
     first_used_at = models.DateTimeField(blank=True, null=True)
     last_used_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
+    # 31/Ago/2026 (pedido de Mariana: "los tickets de cliente si se filtran
+    # automaticamente?" -> "hay que hacer ese filtro por sociedad y
+    # proyecto") - contraparte es un catalogo compartido sin sociedad
+    # propia, asi que no hay de donde heredar el alcance; el analista que
+    # emite el ticket lo declara explicito (igual criterio que
+    # TesoreriaTicketReembolso.sociedad/centro, agregados el mismo dia).
+    sociedad = models.CharField(max_length=13, blank=True, null=True)
+    proyecto = models.CharField(max_length=3, blank=True, null=True)
+
+    SCOPE_FIELD_SOCIEDAD = "sociedad"
+    SCOPE_FIELD_PROYECTO = "proyecto"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "tesoreria_ticket_proveedor"

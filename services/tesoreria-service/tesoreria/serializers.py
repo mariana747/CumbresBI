@@ -827,6 +827,8 @@ class TesoreriaTicketProveedorSerializer(serializers.ModelSerializer):
             "contraparte",
             "contraparte_nombre",
             "email",
+            "sociedad",
+            "proyecto",
             "issued_at",
             "issued_by",
             "expires_at",
