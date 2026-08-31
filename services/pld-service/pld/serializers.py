@@ -107,6 +107,9 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             # comentario en models.py. Lo llena create() en views.py
             # (validado contra iam-service), nunca el cliente a mano.
             "sociedad_nombre",
+            # 31/Ago/2026, mismo criterio que sociedad_rfc arriba - debe
+            # estar en esta lista o DRF lo ignora en silencio al guardar.
+            "proyecto",
             "nombre_completo",
             "fecha_nac_const",
             "pais_nac_const",
