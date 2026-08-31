@@ -166,10 +166,18 @@ export const rechazarSolicitudEliminacion = (
 export async function listKyc(params?: {
   estadoLlenado?: string;
   search?: string;
+  // 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para poder
+  // ver unicamente los de una sociedad o la otra") - un analista con
+  // acceso a varias sociedades las ve todas mezcladas por default; este
+  // filtro acota la vista sin tocar el scope real de la sesion.
+  sociedadRfc?: string;
+  proyecto?: string;
 }): Promise<PldContraparteKyc[]> {
   const query = new URLSearchParams();
   if (params?.estadoLlenado) query.set("estado_llenado", params.estadoLlenado);
   if (params?.search) query.set("search", params.search);
+  if (params?.sociedadRfc) query.set("sociedad", params.sociedadRfc);
+  if (params?.proyecto) query.set("proyecto", params.proyecto);
   const qs = query.toString();
 
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${qs ? `?${qs}` : ""}`);
@@ -201,6 +209,12 @@ export async function createKyc(params: {
   // PldContraparteKycViewSet.create.
   sociedadRfc: string;
   idContraparte?: string;
+  // 31/Ago/2026 (pedido de Mariana: "hay que hacer ese filtro por
+  // sociedad y proyecto" - caso real de un colaborador externo acotado a
+  // un solo proyecto, ej. abogada externa) - opcional, a diferencia de
+  // sociedadRfc; sin catalogo real todavia (mismo criterio que
+  // TesoreriaContrato.proyecto), texto libre.
+  proyecto?: string;
 }): Promise<PldContraparteKyc> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/`, {
     method: "POST",
@@ -209,6 +223,7 @@ export async function createKyc(params: {
       created_by: params.createdBy,
       updated_by: params.createdBy,
       sociedad_rfc: params.sociedadRfc,
+      proyecto: params.proyecto || undefined,
       id_contraparte: params.idContraparte || undefined,
     }),
   });
@@ -472,9 +487,13 @@ export interface PldTicketCliente {
   token?: string;
 }
 
-export async function listTicketsCliente(kycId?: string): Promise<PldTicketCliente[]> {
+// 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener filtro") -
+// sociedadRfc acota la vista sin cambiar el scope real de la sesion,
+// mismo criterio que listKyc().
+export async function listTicketsCliente(kycId?: string, sociedadRfc?: string): Promise<PldTicketCliente[]> {
   const params = new URLSearchParams();
   if (kycId) params.set("kyc", kycId);
+  if (sociedadRfc) params.set("sociedad", sociedadRfc);
   const qs = params.toString();
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/ticket-cliente/${qs ? `?${qs}` : ""}`);
   if (!response.ok) {
