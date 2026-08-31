@@ -31,6 +31,7 @@ from .models import (
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    TesoreriaTicketReembolso,
 )
 from .reportes import calcular_reporte_diario
 from .views import (
@@ -50,6 +51,7 @@ from .views import (
     TesoreriaNotaCreditoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
+    TesoreriaTicketReembolsoViewSet,
 )
 
 RFC_TIZARA = "#####1"
@@ -1350,3 +1352,65 @@ class TesoreriaCorteEdcCrudTests(TestCase):
         response2 = view(request2, pk=corte.pk)
         self.assertEqual(response2.status_code, 200)
         self.assertTrue(response2.data["disponible"])
+
+
+class TesoreriaTicketReembolsoCrudTests(TestCase):
+    """Alta del empleado (MiCumbres, pantalla provisional - ver docstring
+    del modelo). 31/Ago/2026: agrega moneda/sociedad/centro/categoria_gasto
+    (hallazgo de la comparacion contra Tesoreria2.pdf) - el empleado los
+    llena al crear, igual que descripcion/monto/fecha_gasto."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_empleado = EffectiveScope(is_global=False, identity_user_id="empleado1")
+
+    def test_crear_sin_sesion_da_403(self):
+        request = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Taxi a obra", "monto": "150.00", "fecha_gasto": "2026-08-30"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=False)
+        view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_sesion_guarda_los_campos_nuevos(self):
+        request = self.factory.post(
+            "/api/tickets-reembolso/",
+            {
+                "descripcion": "Taxi a obra",
+                "monto": "150.00",
+                "moneda": "USD",
+                "sociedad": "CIF010101AAA",
+                "centro": "OBRA",
+                "categoria_gasto": "TRANSPORTE",
+                "fecha_gasto": "2026-08-30",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_empleado
+        view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["moneda"], "USD")
+        self.assertEqual(response.data["sociedad"], "CIF010101AAA")
+        self.assertEqual(response.data["centro"], "OBRA")
+        self.assertEqual(response.data["categoria_gasto"], "TRANSPORTE")
+        # id_empleado lo pone perform_create del JWT, no lo que mande el body.
+        self.assertEqual(response.data["id_empleado"], "empleado1")
+
+    def test_crear_sin_los_campos_nuevos_usa_moneda_mxp_por_default(self):
+        request = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"descripcion": "Taxi a obra", "monto": "150.00", "fecha_gasto": "2026-08-30"},
+            format="json",
+        )
+        request.effective_scope = self.scope_empleado
+        view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["moneda"], "MXP")
+        self.assertIsNone(response.data["sociedad"])
+        self.assertIsNone(response.data["centro"])
+        self.assertIsNone(response.data["categoria_gasto"])

@@ -956,12 +956,62 @@ class TesoreriaTicketReembolso(models.Model):
         (ESTADO_RECHAZADO, "Rechazado"),
     ]
 
+    # Campos agregados 31/Ago/2026 (hallazgo de la comparacion contra
+    # Tesoreria2.pdf, ver memoria de sesion
+    # "tesoreria-diseno-vs-construido-tesoreria2-pdf"): el ticket original
+    # no traia a que empresa/area se carga el gasto ni en que moneda -
+    # solo se asumia MXP y no se podia reportar por categoria/sociedad.
+    # El empleado los llena al crear (igual que descripcion/monto/
+    # fecha_gasto); solo Tesoreria los puede corregir despues.
+    CATEGORIA_VIATICOS = "VIATICOS"
+    CATEGORIA_PAPELERIA = "PAPELERIA"
+    CATEGORIA_TRANSPORTE = "TRANSPORTE"
+    CATEGORIA_ALIMENTOS = "ALIMENTOS"
+    CATEGORIA_HOSPEDAJE = "HOSPEDAJE"
+    CATEGORIA_OTRO = "OTRO"
+    CATEGORIA_CHOICES = [
+        (CATEGORIA_VIATICOS, "Viáticos"),
+        (CATEGORIA_PAPELERIA, "Papelería"),
+        (CATEGORIA_TRANSPORTE, "Transporte"),
+        (CATEGORIA_ALIMENTOS, "Alimentos"),
+        (CATEGORIA_HOSPEDAJE, "Hospedaje"),
+        (CATEGORIA_OTRO, "Otro"),
+    ]
+    MONEDA_CHOICES = [("MXP", "MXP"), ("USD", "USD"), ("EUR", "EUR")]
+    # Lista cerrada, no catalogo real (pedido explicito de Mariana
+    # 31/Ago/2026: "centro de costo, ponlo como lista desplegable") -
+    # distinto de TesoreriaContrato.centro (texto libre) porque ahi no se
+    # pidio lo mismo; aqui se prefirio una lista fija de areas genericas
+    # de la empresa en vez de dejarlo libre.
+    CENTRO_ADMINISTRACION = "ADMINISTRACION"
+    CENTRO_OBRA = "OBRA"
+    CENTRO_VENTAS = "VENTAS"
+    CENTRO_TESORERIA = "TESORERIA"
+    CENTRO_RRHH = "RRHH"
+    CENTRO_OTRO = "OTRO"
+    CENTRO_CHOICES = [
+        (CENTRO_ADMINISTRACION, "Administración"),
+        (CENTRO_OBRA, "Obra"),
+        (CENTRO_VENTAS, "Ventas"),
+        (CENTRO_TESORERIA, "Tesorería"),
+        (CENTRO_RRHH, "RRHH"),
+        (CENTRO_OTRO, "Otro"),
+    ]
+
     id_ticket = models.CharField(max_length=255, primary_key=True)
     id_empleado = models.CharField(max_length=255)
     descripcion = models.TextField()
     monto = models.DecimalField(max_digits=14, decimal_places=2)
+    moneda = models.CharField(max_length=5, choices=MONEDA_CHOICES, default="MXP")
     fecha_gasto = models.DateField()
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    # Referencia laxa a general_sociedades.rfc (iam-service, fuera de este
+    # esquema) - mismo criterio que TesoreriaContrato.sociedad. A que
+    # empresa se le carga el gasto, no necesariamente la unica sociedad
+    # del empleado (puede tener acceso a mas de una).
+    sociedad = models.CharField(max_length=13, blank=True, null=True)
+    centro = models.CharField(max_length=20, choices=CENTRO_CHOICES, blank=True, null=True)
+    categoria_gasto = models.CharField(max_length=20, choices=CATEGORIA_CHOICES, blank=True, null=True)
     # Foto/comprobante del ticket - sube el empleado al crear.
     link_ticket = models.TextField(blank=True, null=True)
     drive_file_id_ticket = models.TextField(blank=True, null=True)
