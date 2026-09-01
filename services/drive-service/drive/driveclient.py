@@ -44,6 +44,45 @@ class DriveError(Exception):
     googleapiclient al cliente."""
 
 
+def _traducir_error_drive(exc: Exception, contexto: str) -> DriveError:
+    """Traduce una excepcion real de googleapiclient a un mensaje de negocio
+    en espanol (01/Sep/2026, hallazgo real: hasta ahora cada `except
+    Exception as exc` metia `str(exc)` crudo dentro del mensaje - el JSON
+    completo de error de Google, con codigos internos, URIs de la API y
+    detalles tecnicos, llegaba tal cual al frontend via el 502 de las vistas
+    - mismo criterio de traduccion por codigo que ya usa
+    document-intelligence-service/docint/providers/gemini_provider.py, solo
+    que ahi si se aplicaba desde el principio.
+
+    El detalle real SIEMPRE se manda al logger (logger.exception, con
+    traceback completo) para depuracion - nunca se pierde, solo se deja de
+    exponer en la respuesta HTTP que ve el usuario final."""
+    logger.exception("Error real de Google Drive al intentar %s", contexto)
+
+    from googleapiclient.errors import HttpError
+
+    if isinstance(exc, HttpError):
+        status = exc.resp.status
+        if status in (401, 403):
+            return DriveError(
+                f"No se tiene permiso para {contexto} en Drive - la cuenta de servicio no tiene "
+                "acceso a esa carpeta, o el token de acceso expiró. Contacta a un administrador."
+            )
+        if status == 404:
+            return DriveError(f"No se encontró el archivo o carpeta en Drive al intentar {contexto}.")
+        if status == 429:
+            return DriveError(
+                "Se alcanzó el límite de solicitudes a Google Drive. Intenta de nuevo en unos minutos."
+            )
+        if status in (500, 502, 503, 504):
+            return DriveError(
+                "El servicio de Google Drive no está disponible en este momento. Intenta de nuevo más tarde."
+            )
+        return DriveError(f"Google Drive respondió con un error al intentar {contexto} (código {status}).")
+
+    return DriveError(f"No se pudo conectar con Google Drive al intentar {contexto}. Intenta de nuevo.")
+
+
 def _modo_real() -> bool:
     return bool(settings.DRIVE_SERVICE_ACCOUNT_JSON)
 
@@ -70,14 +109,26 @@ def _servicio_real():
     import google_auth_httplib2
     import httplib2
 
-    info = json.loads(settings.DRIVE_SERVICE_ACCOUNT_JSON)
-    credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
-    if settings.DRIVE_IMPERSONATE_SUBJECT:
-        credentials = credentials.with_subject(settings.DRIVE_IMPERSONATE_SUBJECT)
-    http_autorizado = google_auth_httplib2.AuthorizedHttp(
-        credentials, http=httplib2.Http(timeout=_TIMEOUT_SEGUNDOS)
-    )
-    return build("drive", "v3", http=http_autorizado, cache_discovery=False)
+    # 01/Sep/2026 (hallazgo real: nada envolvia esta construccion en
+    # try/except - un DRIVE_SERVICE_ACCOUNT_JSON malformado o una credencial
+    # revocada tumbaba con un 500 crudo de Django, sin pasar por DriveError
+    # ni por el 502 uniforme que ya arman las vistas, distinto de cualquier
+    # otro error de este modulo).
+    try:
+        info = json.loads(settings.DRIVE_SERVICE_ACCOUNT_JSON)
+        credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
+        if settings.DRIVE_IMPERSONATE_SUBJECT:
+            credentials = credentials.with_subject(settings.DRIVE_IMPERSONATE_SUBJECT)
+        http_autorizado = google_auth_httplib2.AuthorizedHttp(
+            credentials, http=httplib2.Http(timeout=_TIMEOUT_SEGUNDOS)
+        )
+        return build("drive", "v3", http=http_autorizado, cache_discovery=False)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("No se pudo construir el cliente de Google Drive (credencial de servicio)")
+        raise DriveError(
+            "No se pudo conectar con Google Drive - la credencial de la cuenta de servicio no es válida "
+            "o no está configurada correctamente. Contacta a un administrador."
+        ) from exc
 
 
 def ensure_folder_path(ruta: str) -> str:
@@ -134,7 +185,7 @@ def ensure_folder_path(ruta: str) -> str:
                 .execute()
             )
         except Exception as exc:  # noqa: BLE001 - cualquier error de googleapiclient
-            raise DriveError(f"No se pudo listar carpetas en Drive: {exc}") from exc
+            raise _traducir_error_drive(exc, "listar carpetas") from exc
 
         encontrados = resultado.get("files", [])
         if encontrados:
@@ -145,7 +196,7 @@ def ensure_folder_path(ruta: str) -> str:
         try:
             carpeta = servicio.files().create(body=metadata, fields="id", supportsAllDrives=True).execute()
         except Exception as exc:  # noqa: BLE001
-            raise DriveError(f"No se pudo crear la carpeta '{nombre}' en Drive: {exc}") from exc
+            raise _traducir_error_drive(exc, f"crear la carpeta '{nombre}'") from exc
         padre_id = carpeta["id"]
 
     return padre_id
@@ -185,7 +236,7 @@ def upload_bytes(carpeta: str, nombre_archivo: str, contenido: bytes, mime_type:
             .execute()
         )
     except Exception as exc:  # noqa: BLE001
-        raise DriveError(f"No se pudo subir '{nombre_archivo}' a Drive: {exc}") from exc
+        raise _traducir_error_drive(exc, f"subir '{nombre_archivo}'") from exc
 
     return {
         "file_id": archivo["id"],
@@ -232,7 +283,7 @@ def iter_download(file_id: str, carpeta: str | None = None, chunk_size: int = 25
             buffer.seek(0)
             buffer.truncate()
     except Exception as exc:  # noqa: BLE001
-        raise DriveError(f"No se pudo descargar el archivo '{file_id}' de Drive: {exc}") from exc
+        raise _traducir_error_drive(exc, f"descargar el archivo '{file_id}'") from exc
 
 
 def file_exists(file_id: str, carpeta: str | None = None) -> bool:
@@ -261,9 +312,9 @@ def file_exists(file_id: str, carpeta: str | None = None) -> bool:
     except HttpError as exc:
         if exc.resp.status == 404:
             return False
-        raise DriveError(f"No se pudo verificar el archivo '{file_id}' en Drive: {exc}") from exc
+        raise _traducir_error_drive(exc, f"verificar el archivo '{file_id}'") from exc
     except Exception as exc:  # noqa: BLE001
-        raise DriveError(f"No se pudo verificar el archivo '{file_id}' en Drive: {exc}") from exc
+        raise _traducir_error_drive(exc, f"verificar el archivo '{file_id}'") from exc
 
     return not metadata.get("trashed", False)
 
@@ -292,7 +343,7 @@ def list_files(carpeta: str) -> list[dict]:
             .execute()
         )
     except Exception as exc:  # noqa: BLE001
-        raise DriveError(f"No se pudo listar '{carpeta}' en Drive: {exc}") from exc
+        raise _traducir_error_drive(exc, f"listar '{carpeta}'") from exc
 
     return [
         {"file_id": f["id"], "nombre": f["name"], "mime_type": f.get("mimeType"), "web_view_link": f.get("webViewLink")}
