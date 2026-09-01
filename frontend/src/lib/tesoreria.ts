@@ -21,8 +21,16 @@ export function generarIdCorto(): string {
 
 export type TesoreriaTipoPersona = "fisica" | "moral" | "fisica_act_emp" | "fideicomiso";
 
+// "manual" (alta normal) vs "ia" (creada automaticamente por
+// confirmar_conciliacion cuando el nombre detectado en el comprobante no
+// hace match con ninguna contraparte existente, ver TesoreriaContraparte.origen
+// en models.py) - una contraparte "ia" puede quedar con email/tipo_persona
+// vacios y necesita revision manual despues (ver /tesoreria/contrapartes).
+export type TesoreriaContraparteOrigen = "manual" | "ia";
+
 export interface TesoreriaContraparte {
   id_contraparte: string;
+  origen: TesoreriaContraparteOrigen;
   rfc: string | null;
   razon_social: string;
   apellido_paterno: string | null;
@@ -905,13 +913,20 @@ export async function registrarPagoFlujo(
   idFlujo: string,
   params?: { descripcionPago?: string; linkComprobanteBanco?: string }
 ): Promise<TesoreriaFlujo> {
+  // Bug real encontrado en prueba end-to-end (01/Sep/2026): antes se mandaban
+  // ambas claves siempre, aunque fuera con valor null. El backend hace
+  // request.data.get("link_comprobante_banco", flujo.link_comprobante_banco)
+  // (ver views.py::registrar_pago) - como la clave SI llegaba en el body
+  // (con null), .get() nunca caia al default y borraba el link que
+  // subir_comprobante() acababa de guardar segundos antes. Ahora solo se
+  // manda la clave si de verdad hay un valor nuevo que escribir.
+  const body: Record<string, string> = {};
+  if (params?.descripcionPago) body.descripcion_pago = params.descripcionPago;
+  if (params?.linkComprobanteBanco) body.link_comprobante_banco = params.linkComprobanteBanco;
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/registrar_pago/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      descripcion_pago: params?.descripcionPago || null,
-      link_comprobante_banco: params?.linkComprobanteBanco || null,
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

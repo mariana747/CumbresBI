@@ -39,6 +39,17 @@ export interface AnalyzeDocumentParams {
   nombreArchivo: string;
   mimeType?: string;
   expectedDocumentType: string;
+  // Cuando el llamador YA sabe con certeza el tipo documental (Tesoreria/
+  // Facturas/Tickets de reembolso - ver comentario en
+  // MotorDocumentalDialog.tsx sobre "el llamador ya sabe que tipo es"),
+  // manda esto para que el backend use ese prompt directo en vez de
+  // re-adivinar por nombre de archivo (views.py::AnalyzeView, "gana
+  // siempre"). Bug real encontrado en prueba end-to-end 01/Sep/2026 (ver
+  // memoria "docint-prompt-especifico-nunca-se-usa-por-tipo-conocido"):
+  // antes nunca se mandaba, asi que tipos sin palabra clave en el nombre
+  // del archivo (ej. comprobantes bancarios) siempre caian a "generic".
+  // Omitir para PLD, que si necesita adivinar por archivo.
+  internalPromptKey?: string;
   servicioSolicitante: string;
   metadata?: Record<string, unknown>;
 }
@@ -101,6 +112,7 @@ export async function analyzeDocument({
   nombreArchivo,
   mimeType,
   expectedDocumentType,
+  internalPromptKey,
   servicioSolicitante,
   metadata,
 }: AnalyzeDocumentParams): Promise<{ analysisId: string; status: AnalysisStatus }> {
@@ -114,6 +126,7 @@ export async function analyzeDocument({
       nombre_archivo: nombreArchivo,
       mime_type: mimeType,
       expected_document_type: expectedDocumentType,
+      internal_prompt_key: internalPromptKey,
       servicio_solicitante: servicioSolicitante,
       metadata: metadata ? JSON.stringify(metadata) : undefined,
     }),

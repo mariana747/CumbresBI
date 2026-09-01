@@ -4,8 +4,9 @@ import requests
 from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
-from django.http import StreamingHttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
@@ -642,6 +643,7 @@ class PldContraparteDocViewSet(ModelViewSet):
         return Response(self.get_serializer(doc).data)
 
     @action(detail=True, methods=["get"])
+    @xframe_options_exempt
     def ver(self, request, pk=None):
         """Sirve el archivo real EN STREAMING a traves de pld-service (25/Ago/2026,
         hallazgo real: el boton "Ver" mandaba al link crudo de Google Drive
@@ -666,6 +668,24 @@ class PldContraparteDocViewSet(ModelViewSet):
         if not doc.drive_file_id:
             return Response({"detail": "Este documento todavía no tiene un archivo subido."}, status=404)
 
+        # ETag = drive_file_id (01/Sep/2026, hallazgo real: reabrir el mismo
+        # documento tardaba lo mismo la segunda vez porque cada apertura
+        # repetia los 3 saltos completos - navegador -> pld-service ->
+        # drive-service -> Google Drive - sin nada reutilizable de por medio).
+        # drive_file_id cambia solo cuando subir() reemplaza el archivo de
+        # este mismo doc (mismo id_kyc_doc, misma URL /ver/) - a diferencia
+        # de un Cache-Control ciego por tiempo, esto nunca sirve una version
+        # vieja despues de un reemplazo, y en un cache-hit ni siquiera se
+        # llama a drive-service (el 304 se resuelve aqui mismo).
+        etag = f'"{doc.drive_file_id}"'
+        if request.META.get("HTTP_IF_NONE_MATCH") == etag:
+            # HttpResponse plano, no Response de DRF - un 304 no debe llevar
+            # body, y el renderer de DRF le agregaria Content-Type de mas.
+            response = HttpResponse(status=304)
+            response["ETag"] = etag
+            response["Cache-Control"] = "private, max-age=300"
+            return response
+
         headers, cookies = forward_auth_headers(request)
         carpeta = f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
         try:
@@ -689,6 +709,24 @@ class PldContraparteDocViewSet(ModelViewSet):
             upstream.iter_content(chunk_size=8192), content_type=doc.mime_type or "application/octet-stream"
         )
         response["Content-Disposition"] = f'inline; filename="{doc.denominacion or doc.id_kyc_doc}"'
+        # ETag + Cache-Control - ver comentario arriba, junto al chequeo de
+        # If-None-Match. "private" porque pasa por autenticacion real (no
+        # es cacheable por un proxy/CDN compartido).
+        response["ETag"] = etag
+        response["Cache-Control"] = "private, max-age=300"
+        # Permite embeber esto en un <iframe> del frontend (01/Sep/2026,
+        # pedido explicito de Mariana: "ver documento" en PLD debe mostrarse
+        # como panel/preview en la misma pantalla, igual que en Facturas -
+        # Motor Documental - en vez de abrir Drive en pestaña nueva).
+        # X-Frame-Options: DENY es el default de Django (XFrameOptionsMiddleware,
+        # ver settings.py) y bloquearia CUALQUIER framing, incluso del propio
+        # frontend; @xframe_options_exempt lo quita para esta vista puntual y
+        # este header CSP toma su lugar, restringido a los mismos origenes ya
+        # confiables de CORS_ALLOWED_ORIGINS (no "cualquier sitio puede
+        # embeber esto", que si seria un riesgo real de clickjacking sobre
+        # documentos de identidad).
+        origenes = " ".join(settings.CORS_ALLOWED_ORIGINS)
+        response["Content-Security-Policy"] = f"frame-ancestors 'self' {origenes}"
         return response
 
     def destroy(self, request, *args, **kwargs):

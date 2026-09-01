@@ -49,6 +49,7 @@ import {
   X as CloseIcon,
 } from "lucide-react";
 import AppShell, { notifySolicitudEliminacionChanged } from "@/components/AppShell";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession, puedeVerBitacora } from "@/lib/auth";
@@ -177,6 +178,10 @@ export default function PldExpedienteDetallePage() {
   const [aprobando, setAprobando] = useState(false);
   const [cambiandoEstadoCuenta, setCambiandoEstadoCuenta] = useState(false);
   const [motorAbierto, setMotorAbierto] = useState(false);
+  // Preview embebido de "Ver documento" (01/Sep/2026) - antes abria Drive en
+  // pestaña nueva; ahora se ve en un dialogo dentro de la misma pantalla,
+  // igual que el panel lateral del Motor Documental en Facturas/Flujos.
+  const [previewDoc, setPreviewDoc] = useState<PldContraparteDoc | null>(null);
   const [verificando, setVerificando] = useState(false);
   const [verificarError, setVerificarError] = useState<string | null>(null);
   const [verificarMensaje, setVerificarMensaje] = useState<string | null>(null);
@@ -972,23 +977,24 @@ export default function PldExpedienteDetallePage() {
                               <Stack direction="row" spacing={1} alignItems="center">
                                 {/* 25/Ago/2026 (requerimiento real del cliente: "en
                                     el expediente se debe poder ver los archivos aqui
-                                    mismo") - boton explicito, abre el archivo real
-                                    en pestaña nueva A TRAVES de pld-service
-                                    (urlVerDocumento), NO del link crudo de Drive
-                                    (doc.link_documento) - un analista con permiso
-                                    real en CumbresBI puede no tener acceso directo
-                                    a la Unidad compartida de Google, ver
+                                    mismo") - sirve el archivo real A TRAVES de
+                                    pld-service (urlVerDocumento), NO del link crudo
+                                    de Drive (doc.link_documento) - un analista con
+                                    permiso real en CumbresBI puede no tener acceso
+                                    directo a la Unidad compartida de Google, ver
                                     PldContraparteDocViewSet.ver. Sin drive_file_id
                                     (documento "solicitado" pendiente de que llegue
                                     el archivo) no hay nada que ver todavía, se
                                     deshabilita en vez de esconderse (el boton no
-                                    "salta" de lugar cuando el archivo si llega). */}
+                                    "salta" de lugar cuando el archivo si llega).
+                                    01/Sep/2026: ya no abre pestaña nueva, se ve en
+                                    DocumentoPreviewDialog (mismo criterio que el
+                                    panel lateral del Motor Documental) - el
+                                    endpoint ver() ahora manda CSP frame-ancestors
+                                    para permitir el embed. */}
                                 <IconButton
                                   size="small"
-                                  component={doc.drive_file_id ? "a" : "button"}
-                                  href={doc.drive_file_id ? urlVerDocumento(doc.id_kyc_doc) : undefined}
-                                  target={doc.drive_file_id ? "_blank" : undefined}
-                                  rel={doc.drive_file_id ? "noopener" : undefined}
+                                  onClick={() => setPreviewDoc(doc)}
                                   disabled={!doc.drive_file_id}
                                   aria-label="Ver documento"
                                   title="Ver documento"
@@ -1108,6 +1114,13 @@ export default function PldExpedienteDetallePage() {
           onDatosActualizados={cargar}
         />
       )}
+
+      <DocumentoPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={previewDoc?.drive_file_id ? urlVerDocumento(previewDoc.id_kyc_doc) : null}
+        titulo={previewDoc?.denominacion || "Documento"}
+      />
 
       <Dialog open={Boolean(confirmandoEliminarDoc)} onClose={() => setConfirmandoEliminarDoc(null)}>
         <DialogTitle>¿Eliminar documento?</DialogTitle>
