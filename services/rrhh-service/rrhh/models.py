@@ -1,3 +1,4 @@
+from cumbresbi_scope.managers import ScopedManager
 from django.db import models
 
 
@@ -7,7 +8,19 @@ class RrhhEmpleado(models.Model):
     usados en iam-service. iam_users.employee_id referencia esta PK desde
     iam-service (fuera de este esquema, no es ForeignKey real aqui tampoco -
     la relacion inversa vive del lado de iam-service).
-    """
+
+    01/Sep/2026 (auditoria de scope RLS, ver memoria de sesion
+    "auditoria-scope-rls-por-servicio") - RrhhEmpleado no tiene columna de
+    sociedad/proyecto propia (es PII pura), el alcance real le llega via su
+    relacion inversa con RrhhPuesto - mismo criterio que
+    TesoreriaFlujo.SCOPE_FIELD_SOCIEDAD = "contrato__sociedad" en
+    tesoreria-service, solo que aqui es 1:N (un empleado puede tener varios
+    puestos) en vez de N:1 - una vista real que use esto debe agregar
+    .distinct() para no duplicar filas si el empleado tiene mas de un puesto
+    que matchea el mismo scope. Todavia no hay views.py/serializers.py en
+    este servicio (API sin construir) - se agrega este manager de una vez
+    para que nadie exponga un ViewSet sin scope despues, no porque haya una
+    fuga activa hoy."""
 
     CIVIL_SOLTERO = "SOLTERO"
     CIVIL_CASADO = "CASADO"
@@ -62,6 +75,10 @@ class RrhhEmpleado(models.Model):
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
 
+    SCOPE_FIELD_SOCIEDAD = "puestos__sociedad"
+    SCOPE_FIELD_PROYECTO = "puestos__proyecto"
+    objects = ScopedManager()
+
     class Meta:
         db_table = "rrhh_empleados"
 
@@ -74,6 +91,10 @@ class RrhhPuesto(models.Model):
     esquema) - se guarda como CharField plano, no ForeignKey real, mismo
     criterio de aislamiento documentado en docs/architecture/README.md
     sec. 11.2 #1.
+
+    01/Sep/2026 (auditoria de scope RLS): este es el modelo con las columnas
+    de scope reales del servicio (sociedad/proyecto) - mismo patron que
+    TesoreriaContrato.SCOPE_FIELD_SOCIEDAD/PROYECTO en tesoreria-service.
     """
 
     id_puesto = models.CharField(max_length=255, primary_key=True)
@@ -116,6 +137,10 @@ class RrhhPuesto(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
+
+    SCOPE_FIELD_SOCIEDAD = "sociedad"
+    SCOPE_FIELD_PROYECTO = "proyecto"
+    objects = ScopedManager()
 
     class Meta:
         db_table = "rrhh_puestos"
