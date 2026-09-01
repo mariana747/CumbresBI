@@ -163,6 +163,22 @@ class CumplimientoDePermisosEnEscrituraTests(TestCase):
         self.kyc = _kyc("cp000009", RFC_TIZARA)
 
     def _crear_kyc(self, scope):
+        # Mock de requests.get (01/Sep/2026, hallazgo real: sin esto, create()
+        # llama de verdad a tesoreria-service/iam-service para validar
+        # id_contraparte/sociedad_rfc - ver _existe_contraparte_en_tesoreria y
+        # _obtener_sociedad_en_iam en views.py. El test "pasaba" solo por
+        # casualidad cuando esos servicios estaban caidos (camino fail-open);
+        # con ellos corriendo (ej. en un entorno de dev con docker compose up)
+        # la llamada real regresaba 404 para el id/RFC ficticio de la prueba
+        # y el test fallaba - no era un bug de produccion, era una prueba sin
+        # aislar. Un solo mock generico satisface las dos llamadas: la de
+        # contraparte solo mira status_code, la de sociedad tambien lee json().
+        patcher = patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara SA de CV"}),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         request = self.factory.post(
             "/api/kyc/",
             {
