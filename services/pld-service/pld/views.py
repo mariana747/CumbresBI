@@ -6,6 +6,7 @@ from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
 from django.http import StreamingHttpResponse
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
@@ -642,6 +643,7 @@ class PldContraparteDocViewSet(ModelViewSet):
         return Response(self.get_serializer(doc).data)
 
     @action(detail=True, methods=["get"])
+    @xframe_options_exempt
     def ver(self, request, pk=None):
         """Sirve el archivo real EN STREAMING a traves de pld-service (25/Ago/2026,
         hallazgo real: el boton "Ver" mandaba al link crudo de Google Drive
@@ -689,6 +691,19 @@ class PldContraparteDocViewSet(ModelViewSet):
             upstream.iter_content(chunk_size=8192), content_type=doc.mime_type or "application/octet-stream"
         )
         response["Content-Disposition"] = f'inline; filename="{doc.denominacion or doc.id_kyc_doc}"'
+        # Permite embeber esto en un <iframe> del frontend (01/Sep/2026,
+        # pedido explicito de Mariana: "ver documento" en PLD debe mostrarse
+        # como panel/preview en la misma pantalla, igual que en Facturas -
+        # Motor Documental - en vez de abrir Drive en pestaña nueva).
+        # X-Frame-Options: DENY es el default de Django (XFrameOptionsMiddleware,
+        # ver settings.py) y bloquearia CUALQUIER framing, incluso del propio
+        # frontend; @xframe_options_exempt lo quita para esta vista puntual y
+        # este header CSP toma su lugar, restringido a los mismos origenes ya
+        # confiables de CORS_ALLOWED_ORIGINS (no "cualquier sitio puede
+        # embeber esto", que si seria un riesgo real de clickjacking sobre
+        # documentos de identidad).
+        origenes = " ".join(settings.CORS_ALLOWED_ORIGINS)
+        response["Content-Security-Policy"] = f"frame-ancestors 'self' {origenes}"
         return response
 
     def destroy(self, request, *args, **kwargs):
