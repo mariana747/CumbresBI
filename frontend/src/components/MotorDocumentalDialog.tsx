@@ -467,6 +467,12 @@ export default function MotorDocumentalDialog({
               nombreArchivo: doc.archivo.nombre,
               mimeType: doc.archivo.mime_type ?? undefined,
               expectedDocumentType: doc.expectedDocumentType,
+              // Solo cuando el llamador fijo un tipo de antemano (Tesoreria/
+              // Facturas/Tickets de reembolso) - PLD deja esto sin mandar
+              // porque adivina por archivo (ver comentario de
+              // expectedDocumentType arriba y AnalyzeDocumentParams en
+              // docint.ts).
+              internalPromptKey: contexto?.expectedDocumentType,
               servicioSolicitante: contexto?.servicioSolicitante ?? servicioSolicitante ?? "desconocido",
             });
             setDocuments((prev) =>
