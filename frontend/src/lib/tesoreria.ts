@@ -913,13 +913,20 @@ export async function registrarPagoFlujo(
   idFlujo: string,
   params?: { descripcionPago?: string; linkComprobanteBanco?: string }
 ): Promise<TesoreriaFlujo> {
+  // Bug real encontrado en prueba end-to-end (01/Sep/2026): antes se mandaban
+  // ambas claves siempre, aunque fuera con valor null. El backend hace
+  // request.data.get("link_comprobante_banco", flujo.link_comprobante_banco)
+  // (ver views.py::registrar_pago) - como la clave SI llegaba en el body
+  // (con null), .get() nunca caia al default y borraba el link que
+  // subir_comprobante() acababa de guardar segundos antes. Ahora solo se
+  // manda la clave si de verdad hay un valor nuevo que escribir.
+  const body: Record<string, string> = {};
+  if (params?.descripcionPago) body.descripcion_pago = params.descripcionPago;
+  if (params?.linkComprobanteBanco) body.link_comprobante_banco = params.linkComprobanteBanco;
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/registrar_pago/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      descripcion_pago: params?.descripcionPago || null,
-      link_comprobante_banco: params?.linkComprobanteBanco || null,
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
