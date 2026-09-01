@@ -185,12 +185,13 @@ describe("buildNavItems - Tesorería", () => {
       expect(tesoreria?.enabled).toBe(true);
       const labels = hijos(tesoreria).map((c) => c.label);
       // Orden real de AppShell.tsx (31/Ago/2026): Contrapartes ahora va
-      // primero (antes de Flujos/Contratos/Saldos/Reporte diario/Notas de
-      // credito), el resto sigue igual desde el 26/Ago/2026.
+      // primero, seguida de Contratos y Flujos (Contrato -> genera Flujos,
+      // ver memoria "tesoreria-alcance-real"), el resto sigue igual desde
+      // el 26/Ago/2026.
       expect(labels).toEqual([
         "Contrapartes",
-        "Flujos",
         "Contratos",
+        "Flujos",
         "Saldos",
         "Reporte diario",
         "Notas de crédito",
