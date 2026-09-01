@@ -29,7 +29,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CheckCircle2, ChevronDown, FolderSearch, X as CloseIcon } from "lucide-react";
+import { CheckCircle2, ChevronDown, ExternalLink, FolderSearch, X as CloseIcon } from "lucide-react";
 import { DriveArchivo, listDriveFiles } from "@/lib/drive";
 import {
   analyzeDocument,
@@ -621,7 +621,25 @@ export default function MotorDocumentalDialog({
               {driveFiles.length > 0 && (
                 <List dense sx={{ bgcolor: "background.default", borderRadius: 1 }}>
                   {driveFiles.map((archivo) => (
-                    <ListItem key={archivo.file_id} disablePadding>
+                    <ListItem
+                      key={archivo.file_id}
+                      disablePadding
+                      secondaryAction={
+                        archivo.web_view_link && (
+                          <IconButton
+                            edge="end"
+                            size="small"
+                            aria-label="Ver documento original en Drive"
+                            href={archivo.web_view_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLink size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        )
+                      }
+                    >
                       <ListItemButton onClick={() => toggleSeleccionado(archivo.file_id)} dense>
                         <ListItemIcon sx={{ minWidth: 36 }}>
                           <Checkbox
@@ -682,6 +700,23 @@ export default function MotorDocumentalDialog({
                     <Typography variant="body2" noWrap sx={{ flex: 1 }}>
                       {doc.archivo.nombre}
                     </Typography>
+                    {doc.archivo.web_view_link && (
+                      // Revisar/corregir lo que propuso la IA sin poder ver el
+                      // documento original obligaba a ir a Drive a mano por
+                      // fuera de esta pantalla (hueco real, 01/Sep/2026) - este
+                      // link usa el web_view_link que listDriveFiles ya
+                      // regresaba pero nunca se mostraba en ningun lado.
+                      <IconButton
+                        size="small"
+                        aria-label="Ver documento original en Drive"
+                        href={doc.archivo.web_view_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    )}
                     {!doc.result && !doc.error && (doc.estadoAnalisis === "PENDIENTE" || doc.estadoAnalisis === "PROCESANDO") && (
                       <Chip
                         size="small"
