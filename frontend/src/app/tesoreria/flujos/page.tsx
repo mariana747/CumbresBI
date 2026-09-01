@@ -197,6 +197,11 @@ export default function TesoreriaFlujosPage() {
   // Motor Documental para catalogar el movimiento y proponer la
   // contraparte, en vez de capturar todo a mano.
   const [motorFlujo, setMotorFlujo] = useState<TesoreriaFlujo | null>(null);
+  // Aviso de contraparte creada/detectada por IA que quedo incompleta (sin
+  // email/tipo_persona, ver origen en tesoreria.ts) - confirmar_conciliacion
+  // la devuelve en contraparte_detectada pero antes se descartaba en
+  // silencio; ahora se avisa con link directo a revisarla.
+  const [avisoContraparteIA, setAvisoContraparteIA] = useState<{ id: string; nombre: string } | null>(null);
 
   // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
   // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
@@ -297,12 +302,22 @@ export default function TesoreriaFlujosPage() {
   async function handleConfirmarConciliacionFlujo(datos: Record<string, unknown>) {
     if (!motorFlujo) return;
     const { contraparte_nombre, factura, complemento, ...campos } = datos;
-    await confirmarConciliacionFlujo(motorFlujo.id_flujo, {
+    const resultado = await confirmarConciliacionFlujo(motorFlujo.id_flujo, {
       campos: Object.keys(campos).length > 0 ? campos : undefined,
       contraparte_nombre: typeof contraparte_nombre === "string" ? contraparte_nombre : undefined,
       factura: typeof factura === "string" ? factura : undefined,
       complemento: typeof complemento === "string" ? complemento : undefined,
     });
+    // Si la IA creo la contraparte de una vez (origen=ia) y le falta lo que
+    // Tesoreria exige para una alta manual, se avisa aqui mismo en vez de
+    // dejarla enterrada sin que nadie se entere (ver memoria
+    // "tesoreria-flujos-registro-y-conciliacion-ia-plan").
+    const detectada = resultado.contraparte_detectada;
+    if (detectada && detectada.origen === "ia" && (!detectada.email || !detectada.tipo_persona)) {
+      setAvisoContraparteIA({ id: detectada.id_contraparte, nombre: detectada.razon_social });
+    } else {
+      setAvisoContraparteIA(null);
+    }
     refresh();
   }
 
@@ -534,6 +549,26 @@ export default function TesoreriaFlujosPage() {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+
+      {avisoContraparteIA && (
+        <Alert
+          severity="warning"
+          sx={{ mb: 3 }}
+          onClose={() => setAvisoContraparteIA(null)}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              href={`/tesoreria/contrapartes?revisar=${encodeURIComponent(avisoContraparteIA.id)}`}
+            >
+              Revisar
+            </Button>
+          }
+        >
+          La contraparte &quot;{avisoContraparteIA.nombre}&quot; se creó automáticamente a partir del comprobante y le
+          falta correo o tipo de persona.
         </Alert>
       )}
 

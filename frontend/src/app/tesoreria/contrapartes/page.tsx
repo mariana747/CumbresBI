@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Alert,
   Box,
@@ -110,9 +111,25 @@ const FORM_VACIO = {
 // proposito (catalogo compartido entre sociedades, ver
 // tesoreria/serializers.py) - el filtro real es por permiso
 // (tesoreria.crear/.editar), mismo criterio que /admin/organizacion.
+// useSearchParams() obliga a envolver en Suspense para el build de
+// produccion (mismo motivo ya documentado en tesoreria/contratos/page.tsx) -
+// lo necesitamos para el deep link "?revisar=" desde el aviso de Flujos.
 export default function TesoreriaContrapartesPage() {
+  return (
+    <Suspense fallback={null}>
+      <TesoreriaContrapartesPageContent />
+    </Suspense>
+  );
+}
+
+function TesoreriaContrapartesPageContent() {
+  const searchParams = useSearchParams();
   const [session, setSession] = useState<SessionUser | null>(null);
   const [contrapartes, setContrapartes] = useState<TesoreriaContraparte[]>([]);
+  // Filtro "pendientes de revision" (creadas por IA en confirmar_conciliacion,
+  // ver origen en tesoreria.ts) - quedan con email/tipo_persona vacios y
+  // nadie se enteraba antes de que existiera este filtro.
+  const [soloPendientesIA, setSoloPendientesIA] = useState(false);
   // "Autorizado por" se llena de colaboradores internos (28/Ago/2026,
   // pedido explicito de Mariana), no texto libre - filtro access_mode=
   // STANDARD (interno/Workspace) para no mezclar proveedores/externos que
@@ -212,6 +229,31 @@ export default function TesoreriaContrapartesPage() {
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  // ?revisar=<id_contraparte> - link directo desde flujos/page.tsx cuando
+  // confirmar_conciliacion detecta/crea una contraparte por IA (ver
+  // handleConfirmarConciliacionFlujo) - abre de una vez el dialogo de
+  // edicion para completar email/tipo_persona sin que el analista tenga
+  // que buscarla a mano.
+  const revisarId = searchParams.get("revisar");
+  useEffect(() => {
+    if (!revisarId || contrapartes.length === 0) return;
+    const c = contrapartes.find((x) => x.id_contraparte === revisarId);
+    if (c) abrirEdicion(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revisarId, contrapartes]);
+
+  // Pendiente de revision = creada por IA y todavia le falta lo que Tesoreria
+  // exige para una alta manual (email/tipo_persona, ver models.py).
+  function pendienteRevisionIA(c: TesoreriaContraparte): boolean {
+    return c.origen === "ia" && (!c.email || !c.tipo_persona);
+  }
+
+  const contrapartesMostradas = useMemo(
+    () => (soloPendientesIA ? contrapartes.filter(pendienteRevisionIA) : contrapartes),
+    [contrapartes, soloPendientesIA]
+  );
+  const totalPendientesIA = useMemo(() => contrapartes.filter(pendienteRevisionIA).length, [contrapartes]);
 
   function abrirAlta() {
     setEditing(null);
@@ -422,6 +464,16 @@ export default function TesoreriaContrapartesPage() {
               ),
             }}
           />
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={soloPendientesIA}
+                onChange={(e) => setSoloPendientesIA(e.target.checked)}
+              />
+            }
+            label={`Pendientes de revisión (IA)${totalPendientesIA > 0 ? ` (${totalPendientesIA})` : ""}`}
+          />
           {puedeCrear && (
             <Button
               size="small"
@@ -458,19 +510,31 @@ export default function TesoreriaContrapartesPage() {
                       <CircularProgress size={20} />
                     </TableCell>
                   </TableRow>
-                ) : contrapartes.length === 0 ? (
+                ) : contrapartesMostradas.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
                       <Typography variant="body2" color="text.secondary">
-                        Sin contrapartes registradas.
+                        {soloPendientesIA ? "Sin contrapartes pendientes de revisión." : "Sin contrapartes registradas."}
                       </Typography>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  contrapartes.map((c) => (
-                    <TableRow key={c.id_contraparte} hover>
+                  contrapartesMostradas.map((c) => (
+                    <TableRow key={c.id_contraparte} hover selected={pendienteRevisionIA(c)}>
                       <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contraparte}</TableCell>
-                      <TableCell>{c.razon_social}</TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.75} alignItems="center">
+                          <span>{c.razon_social}</span>
+                          {c.origen === "ia" && (
+                            <Chip
+                              size="small"
+                              label={pendienteRevisionIA(c) ? "IA — revisar" : "IA"}
+                              color={pendienteRevisionIA(c) ? "warning" : "default"}
+                              variant="outlined"
+                            />
+                          )}
+                        </Stack>
+                      </TableCell>
                       <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.rfc || "—"}</TableCell>
                       <TableCell>{c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}</TableCell>
                       <TableCell>{c.contacto || c.email || "—"}</TableCell>
@@ -512,16 +576,26 @@ export default function TesoreriaContrapartesPage() {
             <Stack alignItems="center" sx={{ py: 3 }}>
               <CircularProgress size={20} />
             </Stack>
-          ) : contrapartes.length === 0 ? (
+          ) : contrapartesMostradas.length === 0 ? (
             <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
-              Sin contrapartes registradas.
+              {soloPendientesIA ? "Sin contrapartes pendientes de revisión." : "Sin contrapartes registradas."}
             </Typography>
           ) : (
-            contrapartes.map((c) => (
+            contrapartesMostradas.map((c) => (
               <Paper key={c.id_contraparte} variant="outlined" sx={{ p: 2 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                   <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle2">{c.razon_social}</Typography>
+                    <Stack direction="row" spacing={0.75} alignItems="center">
+                      <Typography variant="subtitle2">{c.razon_social}</Typography>
+                      {c.origen === "ia" && (
+                        <Chip
+                          size="small"
+                          label={pendienteRevisionIA(c) ? "IA — revisar" : "IA"}
+                          color={pendienteRevisionIA(c) ? "warning" : "default"}
+                          variant="outlined"
+                        />
+                      )}
+                    </Stack>
                     <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {c.id_contraparte}
                     </Typography>

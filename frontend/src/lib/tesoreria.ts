@@ -21,8 +21,16 @@ export function generarIdCorto(): string {
 
 export type TesoreriaTipoPersona = "fisica" | "moral" | "fisica_act_emp" | "fideicomiso";
 
+// "manual" (alta normal) vs "ia" (creada automaticamente por
+// confirmar_conciliacion cuando el nombre detectado en el comprobante no
+// hace match con ninguna contraparte existente, ver TesoreriaContraparte.origen
+// en models.py) - una contraparte "ia" puede quedar con email/tipo_persona
+// vacios y necesita revision manual despues (ver /tesoreria/contrapartes).
+export type TesoreriaContraparteOrigen = "manual" | "ia";
+
 export interface TesoreriaContraparte {
   id_contraparte: string;
+  origen: TesoreriaContraparteOrigen;
   rfc: string | null;
   razon_social: string;
   apellido_paterno: string | null;
