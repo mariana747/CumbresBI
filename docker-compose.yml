@@ -4,6 +4,13 @@ services:
       context: .
       dockerfile: services/api-gateway/Dockerfile
     restart: unless-stopped
+    # --reload (02/Sep/2026, hallazgo real: un cambio de codigo en
+    # tesoreria-service no se reflejaba en las respuestas del API hasta un
+    # `docker restart` manual) - el volumen ya monta el codigo fuente en
+    # vivo, pero gunicorn sin --reload no vuelve a leerlo. Solo aplica en
+    # local (docker-compose); el Dockerfile de produccion/Cloud Run se
+    # queda sin --reload, ver su propio CMD.
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     volumes:
@@ -34,6 +41,8 @@ services:
       context: .
       dockerfile: services/iam-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -74,6 +83,8 @@ services:
       context: .
       dockerfile: services/audit-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -109,6 +120,8 @@ services:
       context: .
       dockerfile: services/pld-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -144,6 +157,8 @@ services:
       context: .
       dockerfile: services/vivienda-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -179,6 +194,8 @@ services:
       context: .
       dockerfile: services/materiales-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -214,6 +231,8 @@ services:
       context: .
       dockerfile: services/compras-tesoreria-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -249,6 +268,8 @@ services:
       context: .
       dockerfile: services/rrhh-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -316,6 +337,9 @@ services:
       context: .
       dockerfile: services/document-intelligence-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba) -
+    # mismo --timeout 120 que su Dockerfile de produccion (OCR/IA tarda).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --timeout 120 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -351,6 +375,8 @@ services:
       context: .
       dockerfile: services/tesoreria-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -386,6 +412,8 @@ services:
       context: .
       dockerfile: services/rentas-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -421,6 +449,8 @@ services:
       context: .
       dockerfile: services/obra-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     environment:
@@ -438,6 +468,8 @@ services:
       context: .
       dockerfile: services/drive-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     volumes:
@@ -453,6 +485,8 @@ services:
       context: .
       dockerfile: services/mail-service/Dockerfile
     restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
     env_file:
       - .env
     volumes:

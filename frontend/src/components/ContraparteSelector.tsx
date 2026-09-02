@@ -89,6 +89,12 @@ export default function ContraparteSelector({
       const nueva = await createContraparte({
         idContraparte: generarIdCorto(),
         razonSocial: seleccion.razon_social,
+        // "selector" (02/Sep/2026, hallazgo real: "no me deja crear desde
+        // aqui" - email/tipo_persona volvieron a ser obligatorios para
+        // origen=manual el 28/Ago/2026 y este componente nunca se
+        // actualizo, la alta minima llevaba meses rota) - exime a esta
+        // alta de requerirlos, ver TesoreriaContraparteSerializer.validate.
+        origen: "selector",
         cliente: tipo === "cliente",
         proveedor: tipo === "proveedor",
       });

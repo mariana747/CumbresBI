@@ -53,16 +53,49 @@ class TesoreriaContraparte(models.Model):
 
     GENERO_MUJER = "MUJER"
     GENERO_HOMBRE = "HOMBRE"
+    # X (02/Sep/2026, pedido explicito: "el campo clave que debes validar
+    # primero es la CURP. Al extraer la letra de la posicion 15 de la
+    # CURP (que solo puede ser H, M o X)...") - la CURP real solo permite
+    # esas 3 letras en esa posicion (H=Hombre, M=Mujer, X=el valor que usa
+    # RENAPO para personas extranjeras o casos sin la clasificacion H/M
+    # estandar), faltaba la tercera opcion para poder derivar el genero
+    # automaticamente de una CURP real sin dejar casos sin representar.
+    GENERO_X = "X"
     GENERO_CHOICES = [
         (GENERO_MUJER, "Mujer"),
         (GENERO_HOMBRE, "Hombre"),
+        (GENERO_X, "No binario"),  # el VALOR guardado sigue siendo "X"
     ]
 
     ORIGEN_MANUAL = "manual"
     ORIGEN_IA = "ia"
+    # Alta automatica desde el expediente KYC autonomo de PLD (Opcion B,
+    # ver pld-service/pld/models.py::PldContraparteKyc) - el analista crea
+    # el expediente sin elegir contraparte del catalogo; en vez de que PLD
+    # invente un id local que nunca existe aqui (huerfano garantizado,
+    # hallazgo 02/Sep/2026 al cerrar la reconciliacion contraparte
+    # maestra), pld-service crea el registro real aqui primero con
+    # razon_social provisional - el cliente completa los datos reales
+    # despues via el link publico de PLD, mismo patron de "completar
+    # despues" que origen=ia ya usa para la conciliacion bancaria.
+    ORIGEN_PLD = "pld"
+    # "selector" (02/Sep/2026, hallazgo real: "no me deja crear desde
+    # aqui" al usar el ContraparteSelector compartido -PLD/Ventas/Flujos-
+    # con solo el nombre) - ese componente esta disenado desde el
+    # principio para alta minima ("créala aquí mismo con solo el nombre.
+    # El resto de sus datos los llena él después, desde el link público
+    # que le mandes") pero nunca se actualizo cuando email/tipo_persona
+    # volvieron a ser obligatorios para origen=manual (28/Ago/2026,
+    # decision de Mariana) - quedo roto desde entonces. Origen propio
+    # (no "ia", que es semanticamente distinto - conciliacion bancaria
+    # automatica, no un analista escribiendo un nombre a mano) para que
+    # la auditoria distinga las 3 vias de alta minima.
+    ORIGEN_SELECTOR = "selector"
     ORIGEN_CHOICES = [
         (ORIGEN_MANUAL, "Alta manual"),
         (ORIGEN_IA, "Alta automatica por IA"),
+        (ORIGEN_PLD, "Alta automatica desde PLD (expediente autónomo)"),
+        (ORIGEN_SELECTOR, "Alta mínima desde selector (pendiente completar por ticket)"),
     ]
 
     id_contraparte = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
@@ -101,12 +134,46 @@ class TesoreriaContraparte(models.Model):
     genero = models.CharField(max_length=20, choices=GENERO_CHOICES, blank=True, null=True)
     cliente = models.BooleanField(default=False)
     proveedor = models.BooleanField(default=False)
+    # Fusion de contrapartes duplicadas (02/Sep/2026, cierre real de la
+    # reconciliacion contraparte maestra) - PLD y Ventas pueden crear cada
+    # uno su propia contraparte de forma autonoma (ver origen=pld/manual
+    # arriba); cuando mas tarde se le asigna el mismo RFC real a dos
+    # registros distintos (el dato unico que de verdad identifica a la
+    # misma persona/empresa), en vez de tronar con un IntegrityError se
+    # fusionan automaticamente - ver TesoreriaContraparteSerializer.save()
+    # y _fusionar_en(). Este campo, cuando NO es null, marca que ESTE
+    # registro "perdio" la fusion: es un alias/tumba que ya no es el
+    # catalogo vigente, apunta al sobreviviente real. self-FK, no CASCADE
+    # (un alias no debe desaparecer si el sobreviviente se borra, aunque en
+    # la practica un sobreviviente referenciado por Contrato/Factura/etc
+    # con PROTECT tampoco se puede borrar).
+    fusionado_en = models.ForeignKey(
+        "self",
+        db_column="fusionado_en",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="alias_fusionados",
+    )
 
     class Meta:
         db_table = "tesoreria_contrapartes"
 
     def __str__(self):
         return self.razon_social
+
+    def resolver_sobreviviente(self):
+        """Sigue la cadena de fusiones hasta el registro vigente real (el
+        que ya no tiene fusionado_en) - normalmente un solo salto, pero se
+        seguiria mas de uno si alguna vez se fusiona un alias que a su vez
+        ya era alias de otro (guard anti-loop por si acaso, un ciclo real
+        no deberia poder ocurrir con la logica de _fusionar_en)."""
+        visitados = set()
+        actual = self
+        while actual.fusionado_en_id and actual.fusionado_en_id not in visitados:
+            visitados.add(actual.pk)
+            actual = actual.fusionado_en
+        return actual
 
 
 class TesoreriaContraparteRelacion(models.Model):

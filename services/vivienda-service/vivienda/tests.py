@@ -13,6 +13,8 @@ sentido tal cual estaban. Se corrigieron a EffectiveScope(is_global=True)
 (usuario autenticado, sin perm_keys especiales) para seguir probando lo
 mismo que antes sin depender del hueco de RLS que ya no existe."""
 
+from unittest.mock import Mock, patch
+
 from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
@@ -392,8 +394,51 @@ class ViviendaExpedienteYRelacionesTests(TestCase):
             format="json",
         )
         request2.effective_scope = self.scope_crear
-        response2 = view(request2)
+        # Mock de requests.get (02/Sep/2026, hallazgo real: sin esto,
+        # create() llama de verdad a tesoreria-service para resolver
+        # id_contraparte - ver _resolver_contraparte_en_tesoreria en
+        # views.py. El test "pasaba" solo por casualidad cuando
+        # tesoreria-service estaba caido (camino fail-open); con el
+        # corriendo (ej. en un entorno de dev con docker compose up) la
+        # llamada real regresaba 404 para el id ficticio "cp001" y el test
+        # fallaba - mismo hallazgo ya documentado en
+        # pld-service/pld/tests.py::CumplimientoDePermisosEnEscrituraTests.
+        with patch(
+            "vivienda.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"id_contraparte": "cp001"}),
+        ):
+            response2 = view(request2)
         self.assertEqual(response2.status_code, 201)
+
+    def test_id_contraparte_fusionado_guarda_el_id_vigente(self):
+        # 02/Sep/2026: si la contraparte elegida en el frontend se fusiono
+        # con otra en tesoreria-service (ver TesoreriaContraparteViewSet.
+        # retrieve/_fusionar_en), el GET regresa 200 con un id_contraparte
+        # DISTINTO al que se pidio (el sobreviviente) - ahi es donde se
+        # debe guardar el id vigente, no el alias viejo.
+        expediente = ViviendaVentasExpediente.objects.create(
+            vivienda=self.vivienda, asesor=self.asesor, id_contrato="c3", created_by="u001", updated_by="u001"
+        )
+        request = self.factory.post(
+            "/api/expedientes-clientes/",
+            {
+                "expediente": expediente.id_expediente,
+                "id_contraparte": "cpalias1",
+                "tipo": "ACREDITADO",
+                "created_by": "u001",
+                "updated_by": "u001",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        view = ViviendaRelExpedienteClienteViewSet.as_view({"post": "create"})
+        with patch(
+            "vivienda.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"id_contraparte": "cpsobrv1"}),
+        ):
+            response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id_contraparte"], "cpsobrv1")
 
     def test_filtro_items_por_expediente(self):
         expediente = ViviendaVentasExpediente.objects.create(

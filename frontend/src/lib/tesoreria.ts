@@ -21,12 +21,16 @@ export function generarIdCorto(): string {
 
 export type TesoreriaTipoPersona = "fisica" | "moral" | "fisica_act_emp" | "fideicomiso";
 
-// "manual" (alta normal) vs "ia" (creada automaticamente por
-// confirmar_conciliacion cuando el nombre detectado en el comprobante no
-// hace match con ninguna contraparte existente, ver TesoreriaContraparte.origen
-// en models.py) - una contraparte "ia" puede quedar con email/tipo_persona
-// vacios y necesita revision manual despues (ver /tesoreria/contrapartes).
-export type TesoreriaContraparteOrigen = "manual" | "ia";
+// "manual" (alta normal, exige email/tipo_persona) vs "ia" (creada
+// automaticamente por confirmar_conciliacion cuando el nombre detectado en
+// el comprobante no hace match con ninguna contraparte existente) vs "pld"
+// (alta autonoma de expediente KYC sin contraparte elegida) vs "selector"
+// (02/Sep/2026, alta minima -solo nombre- desde el ContraparteSelector
+// compartido en PLD/Ventas/Flujos - ver ContraparteSelector.tsx) - ver
+// TesoreriaContraparte.origen en models.py. Las 3 ultimas pueden quedar con
+// email/tipo_persona vacios (se completan despues, via ticket publico o
+// revision manual, ver /tesoreria/contrapartes).
+export type TesoreriaContraparteOrigen = "manual" | "ia" | "pld" | "selector";
 
 export interface TesoreriaContraparte {
   id_contraparte: string;
@@ -40,7 +44,7 @@ export interface TesoreriaContraparte {
   // despues (mismo criterio que ya usaba PLD por su cuenta, ver
   // docs/architecture/README.md sec. 11.2 #7).
   tipo_persona: TesoreriaTipoPersona | null;
-  genero: "MUJER" | "HOMBRE" | null;
+  genero: "MUJER" | "HOMBRE" | "X" | null;
   contacto: string | null;
   telefono_sms: string | null;
   email: string | null;
@@ -53,18 +57,30 @@ export interface TesoreriaContraparte {
   created_by: string | null;
   updated_at: string;
   updated_by: string | null;
+  // sociedades (02/Sep/2026, pedido explicito: "no veo en contraparte a que
+  // empresa esta 'asociada'") - solo lectura, derivada por el backend de
+  // sus Contratos (la contraparte en si es un catalogo compartido entre
+  // sociedades, no tiene columna propia - ver TesoreriaContraparteSerializer
+  // .get_sociedades). Vacio si todavia no tiene ningun contrato.
+  sociedades: string[];
 }
 
 // tipoFiltro (19/Ago/2026): ?cliente=1 / ?proveedor=1 en tesoreria-service -
 // deja mostrar solo uno u otro segun el contexto (ej. ContraparteSelector
 // en el "Nuevo expediente" de PLD, preguntando si es cliente o proveedor).
+// sociedadRfc (02/Sep/2026, pedido explicito: "en todo donde aparezca una
+// sociedad agrega el filtro por sociedad") - ver TesoreriaContraparteViewSet
+// .get_queryset(), filtra por las sociedades de los Contratos de la
+// contraparte (ella misma no tiene columna de sociedad propia).
 export async function listContrapartes(
   search?: string,
-  tipoFiltro?: "cliente" | "proveedor"
+  tipoFiltro?: "cliente" | "proveedor",
+  sociedadRfc?: string
 ): Promise<TesoreriaContraparte[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (tipoFiltro) params.set(tipoFiltro, "1");
+  if (sociedadRfc) params.set("sociedad", sociedadRfc);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrapartes/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -93,12 +109,16 @@ export async function createContraparte(params: {
   idContraparte: string;
   razonSocial: string;
   rfc?: string | null;
+  // "manual" por default (mismo criterio que el modelo) - pasar "selector"
+  // desde ContraparteSelector.tsx exime a esta alta de requerir
+  // email/tipoPersona (ver TesoreriaContraparteSerializer.validate).
+  origen?: TesoreriaContraparteOrigen;
   // Opcionales desde 19/Ago/2026 - ver docstring de TesoreriaContraparte
   // arriba. Alta minima real: solo razonSocial es obligatorio.
   apellidoPaterno?: string | null;
   apellidoMaterno?: string | null;
   tipoPersona?: TesoreriaTipoPersona | null;
-  genero?: "MUJER" | "HOMBRE" | null;
+  genero?: "MUJER" | "HOMBRE" | "X" | null;
   email?: string | null;
   contacto?: string | null;
   telefonoSms?: string | null;
@@ -115,6 +135,7 @@ export async function createContraparte(params: {
       id_contraparte: params.idContraparte,
       razon_social: params.razonSocial,
       rfc: params.rfc || null,
+      origen: params.origen || undefined,
       apellido_paterno: params.apellidoPaterno || null,
       apellido_materno: params.apellidoMaterno || null,
       tipo_persona: params.tipoPersona || null,
@@ -143,7 +164,7 @@ export async function updateContraparte(
     apellidoPaterno: string | null;
     apellidoMaterno: string | null;
     tipoPersona: TesoreriaTipoPersona | null;
-    genero: "MUJER" | "HOMBRE" | null;
+    genero: "MUJER" | "HOMBRE" | "X" | null;
     email: string | null;
     contacto: string | null;
     telefonoSms: string | null;
@@ -1446,10 +1467,20 @@ export interface TesoreriaFactura {
   updated_by: string | null;
 }
 
-export async function listFacturas(search?: string, contraparte?: string): Promise<TesoreriaFactura[]> {
+// receptorRfc (02/Sep/2026, pedido explicito: "receptor debe ser alguna
+// sociedad") - el receptor de una factura de egreso (la mas comun aqui, CFDI
+// recibido de un proveedor) es una sociedad propia de Cumbres, no un
+// TesoreriaContraparte - filtra contra receptor_rfc (RFC de
+// general_sociedades), no contra ?contraparte=.
+export async function listFacturas(
+  search?: string,
+  contraparte?: string,
+  receptorRfc?: string
+): Promise<TesoreriaFactura[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (contraparte) params.set("contraparte", contraparte);
+  if (receptorRfc) params.set("receptor_rfc", receptorRfc);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1762,13 +1793,16 @@ export interface TesoreriaComplementoPago {
   updated_by: string | null;
 }
 
+// receptorRfc - ver comentario equivalente en listFacturas.
 export async function listComplementosPago(
   search?: string,
-  contraparte?: string
+  contraparte?: string,
+  receptorRfc?: string
 ): Promise<TesoreriaComplementoPago[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (contraparte) params.set("contraparte", contraparte);
+  if (receptorRfc) params.set("receptor_rfc", receptorRfc);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/complementos-pago/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1920,10 +1954,16 @@ export interface TesoreriaNotaCredito {
   updated_by: string | null;
 }
 
-export async function listNotasCredito(search?: string, contraparte?: string): Promise<TesoreriaNotaCredito[]> {
+// receptorRfc - ver comentario equivalente en listFacturas.
+export async function listNotasCredito(
+  search?: string,
+  contraparte?: string,
+  receptorRfc?: string
+): Promise<TesoreriaNotaCredito[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (contraparte) params.set("contraparte", contraparte);
+  if (receptorRfc) params.set("receptor_rfc", receptorRfc);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/notas-credito/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

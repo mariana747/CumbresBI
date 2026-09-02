@@ -176,6 +176,17 @@ IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
 # los demas secretos de servicio.
 DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
 
+# Mismo patron que DRIVE_INTERNAL_SECRET, pero hacia tesoreria-service
+# (02/Sep/2026, cierre real de la reconciliacion contraparte maestra):
+# cuando el analista crea un expediente KYC autonomo (Opcion B) sin elegir
+# contraparte del catalogo, pld-service crea la contraparte real alla en
+# vez de inventar un id local huerfano - ver
+# pld/views.py::_crear_contraparte_minima_en_tesoreria. El analista de PLD
+# no necesariamente tiene el permiso tesoreria.crear, por eso este secreto
+# en vez de reenviar su JWT. Espejo exacto en
+# tesoreria-service/config/settings.py::TESORERIA_INTERNAL_SECRET.
+TESORERIA_INTERNAL_SECRET = env("TESORERIA_INTERNAL_SECRET", default="")
+
 # Secret key de reCAPTCHA v2 (docs/architecture/README.md sec. 11) - para
 # verificar del lado del servidor el token que manda el widget del
 # formulario publico (pld-ticket/[token]/page.tsx). Vacio en dev (modo

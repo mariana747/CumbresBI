@@ -7,6 +7,7 @@ import {
   Avatar,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -15,9 +16,14 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
+  FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Tab,
   Table,
@@ -41,6 +47,7 @@ import {
   Flag,
   History,
   Pencil,
+  Plus,
   RefreshCw,
   ShieldQuestion,
   Snowflake,
@@ -55,26 +62,44 @@ import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession, puedeVerBitacora } from "@/lib/auth";
 import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora } from "@/lib/audit";
 import {
+  AUTORIDAD_POR_TIPO_IDENTIFICACION,
   PldContraparteDoc,
   PldContraparteKyc,
   PldDatosEditables,
+  PldRepresentanteLegal,
   PldSolicitudEliminacionDoc,
   aprobarKyc,
   aprobarSolicitudEliminacion,
+  catalogoOcupacionPorTipoPersona,
   congelarKyc,
   crearDocumentoKyc,
+  crearRepresentanteLegal,
   crearSolicitudEliminacion,
   editarKyc,
+  editarRepresentanteLegal,
   eliminarDocumentoKyc,
+  eliminarRepresentanteLegal,
+  esCampoVisibleParaTipoPersona,
+  etiquetaNombreParaTipoPersona,
   getKyc,
+  listRepresentantesLegales,
   listSolicitudesEliminacion,
   marcarSospechosoKyc,
+  nombreParaMostrar,
   reactivarCuentaKyc,
   rechazarSolicitudEliminacion,
   subirArchivoDocumento,
   urlVerDocumento,
   verificarDocumentosKyc,
 } from "@/lib/pld";
+import {
+  TesoreriaComplementoPago,
+  TesoreriaFactura,
+  TesoreriaNotaCredito,
+  listComplementosPago,
+  listFacturas,
+  listNotasCredito,
+} from "@/lib/tesoreria";
 
 // Tipos que el Motor Documental ya reconoce (docint/classifier.py) - solo
 // referencia informativa, la deteccion es automatica por nombre de archivo.
@@ -103,10 +128,37 @@ const ESTADO_CUENTA_COLOR: Record<string, "success" | "warning" | "error"> = {
 // pedida por Mariana: dossier tipo "KYC/AML Customer Dossier" con pestañas
 // y semáforo de riesgo) - adaptado a nuestra paleta clara (BRAND) en vez
 // del mockup oscuro original, y a los datos que REALMENTE existen hoy.
-// "Análisis de riesgo" e "Historial de transacciones" quedan como
-// "próximamente": requieren integración externa de KYC/AML (PEP/OFAC) y el
-// módulo de Tesorería respectivamente, ninguno construido todavía (ver
-// memoria de sesión "pld-validacion-externa-kyc-pendiente").
+// "Análisis de riesgo" se queda como "próximamente" (requiere integración
+// externa de KYC/AML, PEP/OFAC, ninguna elegida todavía - ver memoria de
+// sesión "pld-validacion-externa-kyc-pendiente"). "Historial de
+// transacciones" (02/Sep/2026, pedido explicito: "ya funciona tesorería")
+// SÍ está conectado - lee en vivo Factura/ComplementoPago/NotaCredito de
+// tesoreria-service, filtrado por id_contraparte (ver el useEffect de
+// "transacciones" mas abajo).
+
+
+// Facultades del poder notarial (02/Sep/2026) - espejo de
+// PldRepresentanteLegal.FACULTAD_CHOICES en pld-service/pld/models.py.
+const FACULTADES_LABELS: Record<string, string> = {
+  PLEITOS_COBRANZAS: "Pleitos y cobranzas",
+  ACTOS_ADMINISTRACION: "Actos de administración",
+  ACTOS_DOMINIO: "Actos de dominio",
+  PLEITOS_Y_ADMINISTRACION: "Pleitos y cobranzas + Actos de administración",
+  OTRAS: "Otras",
+};
+
+// Historial de transacciones (02/Sep/2026) - fila comun para presentar
+// Factura/ComplementoPago/NotaCredito de tesoreria-service en una sola
+// tabla ordenada por fecha, sin exponer los ~25 campos CFDI crudos de
+// cada tipo (eso ya vive en las pantallas propias de Tesoreria).
+type TransaccionUnificada = {
+  id: string;
+  tipo: "Factura" | "Complemento de pago" | "Nota de crédito";
+  folio: string;
+  fecha: string | null;
+  monto: string | null;
+  estado: string | null;
+};
 
 // Agrupado en secciones (17/Ago/2026, combinando con KycDetalleDialog.tsx
 // de feature/pld-drive-explorador - esa rama tenia mas campos que esta
@@ -118,7 +170,20 @@ const GRUPOS_CAMPOS_GENERAL: { titulo: string; campos: { campo: keyof PldDatosEd
     titulo: "Identificación",
     campos: [
       { campo: "nombre_completo", label: "Nombre completo / Razón social" },
+      // tipo_persona (02/Sep/2026, pedido explicito) - va justo despues
+      // del nombre porque el catalogo de "Ocupación / actividad económica"
+      // mas abajo depende de este valor (fisica vs moral, catalogo UIF).
+      { campo: "tipo_persona", label: "Tipo de persona" },
+      // nombre/apellido_paterno/apellido_materno (02/Sep/2026, pedido
+      // explicito) - solo se muestran para Fisica (ver
+      // esCampoVisibleParaTipoPersona), reemplazan a nombre_completo que
+      // en ese caso se oculta. Moral/Fideicomiso siguen usando
+      // nombre_completo unico (Denominación o Razón Social).
+      { campo: "nombre", label: "Nombre(s)" },
+      { campo: "apellido_paterno", label: "Primer apellido" },
+      { campo: "apellido_materno", label: "Segundo apellido" },
       { campo: "curp", label: "CURP" },
+      { campo: "rfc", label: "RFC" },
       { campo: "nacionalidad", label: "Nacionalidad" },
       { campo: "pais_nac_const", label: "País de nacimiento / constitución" },
       { campo: "fecha_nac_const", label: "Fecha de nacimiento / constitución" },
@@ -203,6 +268,29 @@ export default function PldExpedienteDetallePage() {
   const [historial, setHistorial] = useState<BitacoraEvento[] | null>(null);
   const [historialLoading, setHistorialLoading] = useState(false);
   const [historialError, setHistorialError] = useState<string | null>(null);
+  // Representantes legales (02/Sep/2026, pedido explicito, solo aplica a
+  // Moral - ver tab "Representantes legales"). Mismo patron de carga
+  // perezosa que historial de auditoria arriba.
+  const [representantes, setRepresentantes] = useState<PldRepresentanteLegal[] | null>(null);
+  const [representantesLoading, setRepresentantesLoading] = useState(false);
+  const [representantesError, setRepresentantesError] = useState<string | null>(null);
+  const [dialogRepAbierto, setDialogRepAbierto] = useState(false);
+  const [editandoRep, setEditandoRep] = useState<PldRepresentanteLegal | null>(null);
+  const [formRep, setFormRep] = useState<Partial<PldRepresentanteLegal>>({});
+  const [guardandoRep, setGuardandoRep] = useState(false);
+  const [errorRep, setErrorRep] = useState<string | null>(null);
+  // Historial de transacciones (02/Sep/2026, pedido explicito: "hay que
+  // trabajar en el historial de transacciones de pld, ya que funciona
+  // tesoreria") - antes era un placeholder "Proximamente" que asumia que
+  // Tesoreria no existia todavia; ya existe y tiene Factura/Complemento
+  // de Pago/Nota de Credito con FK real a la contraparte. Lectura directa
+  // desde el frontend a tesoreria-service (mismo patron que
+  // ContraparteSelector.tsx en esta misma pantalla) - list/retrieve de
+  // esos 3 catalogos es lectura abierta, sin perm_key especifico, no hace
+  // falta que pld-service backend medie.
+  const [transacciones, setTransacciones] = useState<TransaccionUnificada[] | null>(null);
+  const [transaccionesLoading, setTransaccionesLoading] = useState(false);
+  const [transaccionesError, setTransaccionesError] = useState<string | null>(null);
   // Edicion manual del expediente (18/Ago/2026) - ver
   // pld/audit_utils.py::contexto_kyc y views.py::update, ya auditado en el
   // backend; esto es la UI que faltaba. editandoCampos es null cuando no
@@ -264,6 +352,10 @@ export default function PldExpedienteDetallePage() {
   const puedeGestionarArchivos = session?.perm_keys.includes("pld-documentos.crear") ?? false;
   const puedeEliminarArchivos = session?.perm_keys.includes("pld-documentos.editar") ?? false;
   const puedeVerHistorial = puedeVerBitacora(session);
+  // esPersonaMoral (02/Sep/2026, pedido explicito) - gate del tab
+  // "Representantes legales", solo tiene sentido para Moral (una persona
+  // Fisica no tiene representante legal de si misma).
+  const esPersonaMoral = kyc?.tipo_persona === "moral";
 
   // Solicitudes de eliminacion pendientes de este expediente (25/Ago/2026)
   // - visibles tanto para quien solicita (el analista quiere ver que sigue
@@ -299,6 +391,114 @@ export default function PldExpedienteDetallePage() {
       .finally(() => setHistorialLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, kyc, puedeVerHistorial]);
+
+  function cargarRepresentantes() {
+    if (!kyc) return;
+    setRepresentantesLoading(true);
+    setRepresentantesError(null);
+    listRepresentantesLegales(kyc.id_kyc)
+      .then(setRepresentantes)
+      .catch((err) => setRepresentantesError(err instanceof Error ? err.message : "Error al cargar"))
+      .finally(() => setRepresentantesLoading(false));
+  }
+
+  useEffect(() => {
+    if (tab !== 5 || !kyc || !esPersonaMoral || representantes !== null) return;
+    cargarRepresentantes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, kyc, esPersonaMoral]);
+
+  useEffect(() => {
+    if (tab !== 3 || !kyc || transacciones !== null) return;
+    setTransaccionesLoading(true);
+    setTransaccionesError(null);
+    Promise.all([
+      listFacturas(undefined, kyc.id_contraparte),
+      listComplementosPago(undefined, kyc.id_contraparte),
+      listNotasCredito(undefined, kyc.id_contraparte),
+    ])
+      .then(([facturas, complementos, notas]) => {
+        const filaFactura = (f: TesoreriaFactura): TransaccionUnificada => ({
+          id: `factura-${f.id}`,
+          tipo: "Factura",
+          folio: f.comprobante_folio || f.timbre_uuid,
+          fecha: f.comprobante_fecha,
+          monto: f.comprobante_total,
+          estado: f.estado,
+        });
+        const filaComplemento = (c: TesoreriaComplementoPago): TransaccionUnificada => ({
+          id: `complemento-${c.id}`,
+          tipo: "Complemento de pago",
+          folio: c.folio || c.timbre_uuid,
+          fecha: c.fecha,
+          monto: c.total,
+          estado: c.estado,
+        });
+        const filaNota = (n: TesoreriaNotaCredito): TransaccionUnificada => ({
+          id: `nota-${n.id}`,
+          tipo: "Nota de crédito",
+          folio: n.comprobante_folio || n.timbre_uuid,
+          fecha: n.comprobante_fecha,
+          monto: n.comprobante_total,
+          estado: n.estado,
+        });
+        const filas = [
+          ...facturas.map(filaFactura),
+          ...complementos.map(filaComplemento),
+          ...notas.map(filaNota),
+        ].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+        setTransacciones(filas);
+      })
+      .catch((err) => setTransaccionesError(err instanceof Error ? err.message : "Error al cargar"))
+      .finally(() => setTransaccionesLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, kyc]);
+
+  function abrirNuevoRep() {
+    setEditandoRep(null);
+    setFormRep({ tipo: "REPRESENTANTE_LEGAL", poder_vigente: true });
+    setErrorRep(null);
+    setDialogRepAbierto(true);
+  }
+
+  function abrirEditarRep(rep: PldRepresentanteLegal) {
+    setEditandoRep(rep);
+    setFormRep(rep);
+    setErrorRep(null);
+    setDialogRepAbierto(true);
+  }
+
+  async function handleGuardarRep() {
+    if (!kyc || !formRep.nombre_completo?.trim()) {
+      setErrorRep("El nombre completo es requerido.");
+      return;
+    }
+    setGuardandoRep(true);
+    setErrorRep(null);
+    try {
+      if (editandoRep) {
+        await editarRepresentanteLegal(editandoRep.id_representante, formRep, session?.user_id);
+      } else {
+        await crearRepresentanteLegal(kyc.id_kyc, formRep, session?.user_id);
+      }
+      setDialogRepAbierto(false);
+      cargarRepresentantes();
+    } catch (err) {
+      setErrorRep(err instanceof Error ? err.message : "Error al guardar");
+    } finally {
+      setGuardandoRep(false);
+    }
+  }
+
+  async function handleEliminarRep(rep: PldRepresentanteLegal) {
+    if (!window.confirm(`¿Borrar a ${rep.nombre_completo}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await eliminarRepresentanteLegal(rep.id_representante);
+      cargarRepresentantes();
+    } catch (err) {
+      setRepresentantesError(err instanceof Error ? err.message : "Error al borrar");
+    }
+  }
 
   const denominacionesDuplicadas = (() => {
     const conteo = new Map<string, number>();
@@ -369,7 +569,17 @@ export default function PldExpedienteDetallePage() {
     setGuardandoEdicion(true);
     setErrorEdicion(null);
     try {
-      await editarKyc(params.idKyc, editandoCampos, session?.user_id);
+      // "" -> null antes de mandar (02/Sep/2026, hallazgo real: "Fecha con
+      // formato erróneo... PLD-400") - handleIniciarEdicion llena el
+      // formulario con "" para cualquier campo vacio (kyc[campo] ?? ""),
+      // y si el analista no toca ese campo (ej. fecha_nac_const en un
+      // <input type="date">, que tambien produce "" cuando esta vacio) se
+      // reenvia tal cual - el backend espera null para un DateField vacio,
+      // no una cadena vacia, y DRF lo rechaza como formato invalido.
+      const campos = Object.fromEntries(
+        Object.entries(editandoCampos).map(([campo, valor]) => [campo, valor === "" ? null : valor])
+      ) as PldDatosEditables;
+      await editarKyc(params.idKyc, campos, session?.user_id);
       setEditandoCampos(null);
       cargar();
     } catch (err) {
@@ -529,13 +739,32 @@ export default function PldExpedienteDetallePage() {
           <Grid item xs={12} md={3}>
             <Paper variant="outlined" sx={{ p: 3, textAlign: "center" }}>
               <Avatar sx={{ width: 64, height: 64, mx: "auto", mb: 1.5, bgcolor: BRAND.azul, fontSize: 22 }}>
-                {kyc.id_contraparte.slice(0, 2).toUpperCase()}
+                {/* 02/Sep/2026, hallazgo real: "porque el avatar es un
+                numero?" - antes siempre mostraba las primeras 2 letras de
+                id_contraparte (un hex tipo "8d1bfbfa"), sin importar si ya
+                habia un nombre real capturado. Ahora usa las iniciales del
+                nombre cuando existe (primera letra de las 2 primeras
+                palabras, ej. "María López" -> "ML"), y solo cae de vuelta
+                al id si todavia no hay nombre (alta autonoma sin
+                completar). nombreParaMostrar() (02/Sep/2026, tras dividir
+                el nombre en 3 campos para Fisica) junta nombre/apellidos
+                para Fisica en vez de leer nombre_completo, que ahi se
+                queda vacio. */}
+                {nombreParaMostrar(kyc)
+                  ? nombreParaMostrar(kyc)
+                      .trim()
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((palabra) => palabra[0])
+                      .join("")
+                      .toUpperCase()
+                  : kyc.id_contraparte.slice(0, 2).toUpperCase()}
               </Avatar>
               <Typography variant="subtitle1" fontWeight={600}>
-                {kyc.nombre_completo || `Contraparte ${kyc.id_contraparte}`}
+                {nombreParaMostrar(kyc) || `Contraparte ${kyc.id_contraparte}`}
               </Typography>
               <Typography variant="caption" color="text.secondary" display="block">
-                {kyc.nombre_completo ? `Contraparte ${kyc.id_contraparte}` : "Nombre sin capturar todavía"}
+                {nombreParaMostrar(kyc) ? `Contraparte ${kyc.id_contraparte}` : "Nombre sin capturar todavía"}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {kyc.curp ? `CURP: ${kyc.curp}` : "Sin CURP capturado todavía"}
@@ -683,11 +912,25 @@ export default function PldExpedienteDetallePage() {
                 allowScrollButtonsMobile
                 sx={{ borderBottom: "1px solid", borderColor: "divider", px: 2 }}
               >
-                <Tab label="Información general" />
-                <Tab label="Análisis de riesgo" />
-                <Tab label="Documentos KYC" />
-                <Tab label="Historial de transacciones" />
-                {puedeVerHistorial && <Tab label="Historial de auditoría" icon={<History size={16} strokeWidth={1.5} />} iconPosition="start" />}
+                <Tab value={0} label="Información general" />
+                <Tab value={1} label="Análisis de riesgo" />
+                <Tab value={2} label="Documentos KYC" />
+                <Tab value={3} label="Historial de transacciones" />
+                {puedeVerHistorial && (
+                  <Tab
+                    value={4}
+                    label="Historial de auditoría"
+                    icon={<History size={16} strokeWidth={1.5} />}
+                    iconPosition="start"
+                  />
+                )}
+                {/* Representantes legales (02/Sep/2026, pedido explicito:
+                "Incluir como requisito obligatorio los datos... del
+                Representante Legal / Apoderado" para Moral) - value=5
+                explicito (igual que los demas, ver arriba) para que el
+                indice no se corra cuando puedeVerHistorial es false y ese
+                Tab de enmedio no se renderiza. */}
+                {esPersonaMoral && <Tab value={5} label="Representantes legales" />}
               </Tabs>
 
               <Box sx={{ p: 2.5, pt: 2 }}>
@@ -739,30 +982,204 @@ export default function PldExpedienteDetallePage() {
                               </Stack>
                             ))}
                         </Stack>
-                        <Grid container rowSpacing={0.75} columnSpacing={2}>
-                          {grupo.campos.map(({ campo, label }) =>
-                            editandoCampos !== null ? (
+                        <Grid container rowSpacing={2} columnSpacing={2}>
+                          {grupo.campos
+                            .filter(({ campo }) =>
+                              esCampoVisibleParaTipoPersona(
+                                campo,
+                                editandoCampos ? editandoCampos.tipo_persona : kyc.tipo_persona
+                              )
+                            )
+                            .map(({ campo, label }) =>
+                            editandoCampos !== null ? campo === "tipo_identificacion" ? (
+                              <Grid item xs={12} sm={6} key={campo}>
+                                <FormControl size="small" fullWidth>
+                                  <InputLabel id="tipo-identificacion-label">{label}</InputLabel>
+                                  <Select
+                                    labelId="tipo-identificacion-label"
+                                    label={label}
+                                    value={editandoCampos.tipo_identificacion ?? ""}
+                                    onChange={(e) => {
+                                      const tipo = e.target.value;
+                                      // Autoridad emisora se llena sola segun
+                                      // el catalogo (02/Sep/2026, pedido
+                                      // explicito) - solo cuando el tipo
+                                      // elegido tiene una autoridad conocida;
+                                      // si el analista despues quiere
+                                      // corregirla a mano, el campo de abajo
+                                      // sigue siendo editable normal.
+                                      setEditandoCampos((prev) =>
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              tipo_identificacion: tipo,
+                                              ...(AUTORIDAD_POR_TIPO_IDENTIFICACION[tipo]
+                                                ? { autoridad_identificacion: AUTORIDAD_POR_TIPO_IDENTIFICACION[tipo] }
+                                                : {}),
+                                            }
+                                          : prev
+                                      );
+                                    }}
+                                  >
+                                    <MenuItem value="">
+                                      <em>Sin especificar</em>
+                                    </MenuItem>
+                                    {Object.keys(AUTORIDAD_POR_TIPO_IDENTIFICACION).map((tipo) => (
+                                      <MenuItem key={tipo} value={tipo}>
+                                        {tipo}
+                                      </MenuItem>
+                                    ))}
+                                    <MenuItem value="Otra">Otra</MenuItem>
+                                  </Select>
+                                </FormControl>
+                              </Grid>
+                            ) : campo === "tipo_persona" ? (
+                              <Grid item xs={12} sm={6} key={campo}>
+                                <FormControl size="small" fullWidth>
+                                  <InputLabel id="tipo-persona-kyc-label">{label}</InputLabel>
+                                  <Select
+                                    labelId="tipo-persona-kyc-label"
+                                    label={label}
+                                    value={editandoCampos.tipo_persona ?? ""}
+                                    onChange={(e) => {
+                                      const tipoPersona = e.target.value;
+                                      // Limpia ocupacion_act_economica al
+                                      // cambiar de tipo (02/Sep/2026) - un
+                                      // codigo del catalogo UIF de fisica no
+                                      // tiene sentido guardado para una moral
+                                      // y viceversa (ver
+                                      // catalogoOcupacionPorTipoPersona).
+                                      setEditandoCampos((prev) =>
+                                        prev
+                                          ? { ...prev, tipo_persona: tipoPersona, ocupacion_act_economica: "" }
+                                          : prev
+                                      );
+                                    }}
+                                  >
+                                    <MenuItem value="">
+                                      <em>Sin especificar</em>
+                                    </MenuItem>
+                                    <MenuItem value="fisica">Física</MenuItem>
+                                    <MenuItem value="moral">Moral</MenuItem>
+                                    <MenuItem value="fideicomiso">Fideicomiso</MenuItem>
+                                  </Select>
+                                </FormControl>
+                              </Grid>
+                            ) : campo === "ocupacion_act_economica" ? (
+                              <Grid item xs={12} sm={6} key={campo}>
+                                <FormControl size="small" fullWidth disabled={!editandoCampos.tipo_persona}>
+                                  <InputLabel id="ocupacion-uif-label">{label}</InputLabel>
+                                  <Select
+                                    labelId="ocupacion-uif-label"
+                                    label={label}
+                                    value={editandoCampos.ocupacion_act_economica ?? ""}
+                                    onChange={(e) =>
+                                      setEditandoCampos((prev) =>
+                                        prev ? { ...prev, ocupacion_act_economica: e.target.value } : prev
+                                      )
+                                    }
+                                  >
+                                    <MenuItem value="">
+                                      <em>Sin especificar</em>
+                                    </MenuItem>
+                                    {Object.entries(catalogoOcupacionPorTipoPersona(editandoCampos.tipo_persona)).map(
+                                      ([codigo, etiqueta]) => (
+                                        <MenuItem key={codigo} value={`${codigo} – ${etiqueta}`}>
+                                          {codigo} – {etiqueta}
+                                        </MenuItem>
+                                      )
+                                    )}
+                                  </Select>
+                                  {!editandoCampos.tipo_persona && (
+                                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                                      Elige el tipo de persona primero
+                                    </Typography>
+                                  )}
+                                </FormControl>
+                              </Grid>
+                            ) : (
                               <Grid item xs={12} sm={6} key={campo}>
                                 <TextField
                                   size="small"
                                   fullWidth
-                                  label={label}
+                                  // "Denominación o Razón Social" para Moral
+                                  // (02/Sep/2026, pedido explicito) - solo
+                                  // afecta nombre_completo, el resto de los
+                                  // campos usa su label normal.
+                                  label={
+                                    campo === "nombre_completo"
+                                      ? etiquetaNombreParaTipoPersona(
+                                          editandoCampos ? editandoCampos.tipo_persona : kyc.tipo_persona
+                                        )
+                                      : label
+                                  }
                                   // Selector de calendario nativo para fechas
                                   // (25/Ago/2026) - sin agregar una libreria
                                   // nueva, <input type="date"> del navegador
                                   // ya trae el picker.
                                   type={campo === "fecha_nac_const" ? "date" : "text"}
                                   InputLabelProps={campo === "fecha_nac_const" ? { shrink: true } : undefined}
-                                  value={editandoCampos[campo] ?? ""}
-                                  onChange={(e) =>
-                                    setEditandoCampos((prev) => (prev ? { ...prev, [campo]: e.target.value } : prev))
+                                  // lang="es-MX" (02/Sep/2026, hallazgo real:
+                                  // "esto esta en mal orden" - el selector
+                                  // nativo de <input type="date"> mostraba
+                                  // el formato MM/DD/YYYY del navegador en
+                                  // ingles por default; Chrome respeta el
+                                  // atributo lang del propio input para
+                                  // decidir el orden de dia/mes/año que
+                                  // muestra (el value que SI se guarda
+                                  // siempre es YYYY-MM-DD, esto solo cambia
+                                  // como se ve).
+                                  inputProps={
+                                    campo === "fecha_nac_const"
+                                      ? { lang: "es-MX" }
+                                      : campo === "dom_cp" || campo === "dom_corresp_dom_cp"
+                                        ? // 5 digitos numericos (02/Sep/2026,
+                                          // pedido explicito del checklist de
+                                          // cumplimiento) - maxLength/inputMode
+                                          // son solo ayuda visual, la
+                                          // validacion real esta en el backend
+                                          // (PldContraparteKycSerializer.validate).
+                                          { maxLength: 5, inputMode: "numeric" }
+                                        : undefined
                                   }
+                                  error={
+                                    ((campo === "dom_cp" || campo === "dom_corresp_dom_cp") &&
+                                      !!editandoCampos[campo] &&
+                                      !/^\d{5}$/.test(editandoCampos[campo] ?? "")) ||
+                                    // Colonia no puede ser solo numeros
+                                    // (02/Sep/2026, pedido explicito) -
+                                    // mismo criterio visual que CP, la
+                                    // validacion real esta en el backend.
+                                    ((campo === "dom_colonia" || campo === "dom_corresp_dom_colonia") &&
+                                      /^\d+$/.test((editandoCampos[campo] ?? "").trim()))
+                                  }
+                                  helperText={
+                                    (campo === "dom_cp" || campo === "dom_corresp_dom_cp") &&
+                                    !!editandoCampos[campo] &&
+                                    !/^\d{5}$/.test(editandoCampos[campo] ?? "")
+                                      ? "Debe ser un código postal de 5 dígitos numéricos"
+                                      : (campo === "dom_colonia" || campo === "dom_corresp_dom_colonia") &&
+                                          /^\d+$/.test((editandoCampos[campo] ?? "").trim())
+                                        ? "La colonia no puede ser solo números"
+                                        : undefined
+                                  }
+                                  value={editandoCampos[campo] ?? ""}
+                                  onChange={(e) => {
+                                    // Mayusculas automaticas (02/Sep/2026,
+                                    // pedido explicito) - convencion real de
+                                    // formularios oficiales mexicanos
+                                    // (RFC/CURP/nombre siempre en
+                                    // mayusculas). No aplica a fecha.
+                                    const valor =
+                                      campo === "fecha_nac_const" ? e.target.value : e.target.value.toUpperCase();
+                                    setEditandoCampos((prev) => (prev ? { ...prev, [campo]: valor } : prev));
+                                  }}
                                 />
                               </Grid>
                             ) : (
                               <Grid item xs={12} sm={6} key={campo}>
                                 <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
-                                  {label}
+                                  {campo === "nombre_completo" ? etiquetaNombreParaTipoPersona(kyc.tipo_persona) : label}
                                 </Typography>
                                 <Typography variant="body2" sx={{ lineHeight: 1.3 }}>
                                   {kyc[campo] || "—"}
@@ -783,7 +1200,7 @@ export default function PldExpedienteDetallePage() {
                       <Typography variant="subtitle2" gutterBottom>
                         Estado y auditoría
                       </Typography>
-                      <Grid container rowSpacing={0.75} columnSpacing={2}>
+                      <Grid container rowSpacing={2} columnSpacing={2}>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                             Aprobado por
@@ -1051,9 +1468,59 @@ export default function PldExpedienteDetallePage() {
                 )}
 
                 {tab === 3 && (
-                  <Alert severity="info" icon={<ShieldQuestion size={20} strokeWidth={1.5} />}>
-                    Próximamente — depende del módulo de Tesorería, que todavía no existe.
-                  </Alert>
+                  <Stack spacing={2}>
+                    <Typography variant="body2" color="text.secondary">
+                      Facturas, complementos de pago y notas de crédito de esta contraparte en
+                      tesoreria-service — lectura directa, en tiempo real, sin duplicar datos aquí.
+                    </Typography>
+                    {transaccionesLoading && (
+                      <Stack alignItems="center" sx={{ py: 4 }}>
+                        <CircularProgress size={24} />
+                      </Stack>
+                    )}
+                    {transaccionesError && <Alert severity="error">{transaccionesError}</Alert>}
+                    {!transaccionesLoading && !transaccionesError && transacciones?.length === 0 && (
+                      <Alert severity="info">
+                        Todavía no hay facturas, complementos de pago ni notas de crédito para esta
+                        contraparte en Tesorería.
+                      </Alert>
+                    )}
+                    {!transaccionesLoading && !!transacciones?.length && (
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Tipo</TableCell>
+                              <TableCell>Folio / UUID</TableCell>
+                              <TableCell>Fecha</TableCell>
+                              <TableCell align="right">Monto</TableCell>
+                              <TableCell>Estado</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {transacciones.map((t) => (
+                              <TableRow key={t.id}>
+                                <TableCell>{t.tipo}</TableCell>
+                                <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.folio}</TableCell>
+                                <TableCell>
+                                  {t.fecha ? new Date(t.fecha).toLocaleDateString("es-MX") : "—"}
+                                </TableCell>
+                                <TableCell align="right">
+                                  {t.monto
+                                    ? Number(t.monto).toLocaleString("es-MX", {
+                                        style: "currency",
+                                        currency: "MXN",
+                                      })
+                                    : "—"}
+                                </TableCell>
+                                <TableCell>{t.estado || "—"}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </Stack>
                 )}
 
                 {tab === 4 && puedeVerHistorial && (
@@ -1099,6 +1566,99 @@ export default function PldExpedienteDetallePage() {
                     )}
                   </Stack>
                 )}
+
+                {tab === 5 && esPersonaMoral && (
+                  <Stack spacing={2}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="body2" color="text.secondary">
+                        Representantes legales, apoderados y beneficiarios controladores de esta empresa —
+                        pedido de cumplimiento: al menos uno antes de aprobar el expediente.
+                      </Typography>
+                      {puedeCrear && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          startIcon={<Plus size={16} strokeWidth={1.5} />}
+                          onClick={abrirNuevoRep}
+                          sx={{ whiteSpace: "nowrap" }}
+                        >
+                          Agregar
+                        </Button>
+                      )}
+                    </Stack>
+
+                    {representantesLoading && (
+                      <Stack alignItems="center" sx={{ py: 4 }}>
+                        <CircularProgress size={24} />
+                      </Stack>
+                    )}
+                    {representantesError && <Alert severity="error">{representantesError}</Alert>}
+                    {!representantesLoading && !representantesError && representantes?.length === 0 && (
+                      <Alert severity="warning">
+                        Todavía no hay ningún representante legal capturado para esta empresa.
+                      </Alert>
+                    )}
+                    {!representantesLoading &&
+                      representantes?.map((rep) => (
+                        <Paper key={rep.id_representante} variant="outlined" sx={{ p: 2 }}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                            <Stack spacing={0.5}>
+                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                <Typography variant="subtitle2">{rep.nombre_completo}</Typography>
+                                <Chip
+                                  size="small"
+                                  label={rep.tipo === "APODERADO" ? "Apoderado" : "Representante legal"}
+                                  variant="outlined"
+                                />
+                                {rep.es_principal_del_tramite && (
+                                  <Chip size="small" color="primary" label="Principal del trámite" />
+                                )}
+                                {rep.es_beneficiario_controlador && (
+                                  <Chip
+                                    size="small"
+                                    color="warning"
+                                    label={`Beneficiario controlador${
+                                      rep.porcentaje_participacion ? ` (${rep.porcentaje_participacion}%)` : ""
+                                    }`}
+                                  />
+                                )}
+                                {!rep.poder_vigente && rep.poder_numero_escritura && (
+                                  <Chip size="small" color="error" label="Poder no vigente" />
+                                )}
+                              </Stack>
+                              <Typography variant="caption" color="text.secondary">
+                                {rep.rfc && `RFC: ${rep.rfc}`}
+                                {rep.rfc && rep.curp && " · "}
+                                {rep.curp && `CURP: ${rep.curp}`}
+                              </Typography>
+                              {rep.poder_numero_escritura && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Escritura {rep.poder_numero_escritura}
+                                  {rep.poder_notario_nombre && ` — Notario ${rep.poder_notario_nombre}`}
+                                  {rep.poder_notario_numero && ` (No. ${rep.poder_notario_numero})`}
+                                  {rep.poder_facultades && ` — ${FACULTADES_LABELS[rep.poder_facultades]}`}
+                                </Typography>
+                              )}
+                            </Stack>
+                            {puedeEditar && (
+                              <Stack direction="row" spacing={0.5}>
+                                <IconButton size="small" onClick={() => abrirEditarRep(rep)} aria-label="Editar">
+                                  <Pencil size={16} strokeWidth={1.5} />
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleEliminarRep(rep)}
+                                  aria-label="Borrar"
+                                >
+                                  <Trash2 size={16} strokeWidth={1.5} />
+                                </IconButton>
+                              </Stack>
+                            )}
+                          </Stack>
+                        </Paper>
+                      ))}
+                  </Stack>
+                )}
               </Box>
             </Paper>
           </Grid>
@@ -1121,6 +1681,207 @@ export default function PldExpedienteDetallePage() {
         url={previewDoc?.drive_file_id ? urlVerDocumento(previewDoc.id_kyc_doc) : null}
         titulo={previewDoc?.denominacion || "Documento"}
       />
+
+      <Dialog open={dialogRepAbierto} onClose={() => setDialogRepAbierto(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {editandoRep ? `Editar representante` : "Nuevo representante legal"}
+          <IconButton onClick={() => setDialogRepAbierto(false)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {errorRep && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {errorRep}
+            </Alert>
+          )}
+          <Stack spacing={2}>
+            <TextField
+              size="small"
+              label="Nombre completo"
+              fullWidth
+              value={formRep.nombre_completo ?? ""}
+              onChange={(e) => setFormRep({ ...formRep, nombre_completo: e.target.value.toUpperCase() })}
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel id="rep-tipo-label">Tipo</InputLabel>
+              <Select
+                labelId="rep-tipo-label"
+                label="Tipo"
+                value={formRep.tipo ?? "REPRESENTANTE_LEGAL"}
+                onChange={(e) =>
+                  setFormRep({ ...formRep, tipo: e.target.value as PldRepresentanteLegal["tipo"] })
+                }
+              >
+                <MenuItem value="REPRESENTANTE_LEGAL">Representante legal</MenuItem>
+                <MenuItem value="APODERADO">Apoderado</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!formRep.es_principal_del_tramite}
+                  onChange={(e) => setFormRep({ ...formRep, es_principal_del_tramite: e.target.checked })}
+                />
+              }
+              label="Es quien firma este trámite"
+            />
+            {/* Beneficiario Controlador (02/Sep/2026, pedido explicito: "no
+            confundirlos... un representante legal tiene poder de firma,
+            pero el Beneficiario Controlador es quien realmente posee el
+            control o mas del 25% de las acciones") - flag independiente
+            de "tipo", puede marcarse aunque tambien sea representante. */}
+            <Divider />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!formRep.es_beneficiario_controlador}
+                  onChange={(e) =>
+                    setFormRep({ ...formRep, es_beneficiario_controlador: e.target.checked })
+                  }
+                />
+              }
+              label="También es beneficiario controlador (posee >25% o controla la empresa)"
+            />
+            {formRep.es_beneficiario_controlador && (
+              <TextField
+                size="small"
+                label="% de participación"
+                type="number"
+                inputProps={{ min: 0, max: 100, step: "0.01" }}
+                value={formRep.porcentaje_participacion ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, porcentaje_participacion: e.target.value })}
+              />
+            )}
+            <Divider />
+            <Typography variant="overline" color="text.secondary">
+              Identificación
+            </Typography>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="RFC"
+                fullWidth
+                value={formRep.rfc ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, rfc: e.target.value.toUpperCase() })}
+              />
+              <TextField
+                size="small"
+                label="CURP"
+                fullWidth
+                value={formRep.curp ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, curp: e.target.value.toUpperCase() })}
+              />
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="Tipo de identificación"
+                fullWidth
+                value={formRep.tipo_identificacion ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, tipo_identificacion: e.target.value.toUpperCase() })}
+              />
+              <TextField
+                size="small"
+                label="Número de identificación"
+                fullWidth
+                value={formRep.numero_identificacion ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, numero_identificacion: e.target.value.toUpperCase() })}
+              />
+            </Stack>
+            <Divider />
+            {/* Poder notarial - datos, no el archivo (02/Sep/2026,
+            recordatorio explicito: en la base de datos se guarda el link
+            del archivo, no el archivo - el PDF de la escritura se sube
+            como documento normal en la pestaña "Documentos KYC"). */}
+            <Typography variant="overline" color="text.secondary">
+              Poder notarial
+            </Typography>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="Número de escritura"
+                fullWidth
+                value={formRep.poder_numero_escritura ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, poder_numero_escritura: e.target.value.toUpperCase() })}
+              />
+              <TextField
+                size="small"
+                label="Fecha de la escritura"
+                type="date"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                inputProps={{ lang: "es-MX" }}
+                value={formRep.poder_fecha_escritura ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, poder_fecha_escritura: e.target.value })}
+              />
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="Nombre del notario"
+                fullWidth
+                value={formRep.poder_notario_nombre ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, poder_notario_nombre: e.target.value.toUpperCase() })}
+              />
+              <TextField
+                size="small"
+                label="Número de notaría"
+                fullWidth
+                value={formRep.poder_notario_numero ?? ""}
+                onChange={(e) => setFormRep({ ...formRep, poder_notario_numero: e.target.value.toUpperCase() })}
+              />
+            </Stack>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="rep-facultades-label">Facultades</InputLabel>
+              <Select
+                labelId="rep-facultades-label"
+                label="Facultades"
+                value={formRep.poder_facultades ?? ""}
+                onChange={(e) =>
+                  setFormRep({
+                    ...formRep,
+                    poder_facultades: (e.target.value || null) as PldRepresentanteLegal["poder_facultades"],
+                  })
+                }
+              >
+                <MenuItem value="">
+                  <em>Sin especificar</em>
+                </MenuItem>
+                {Object.entries(FACULTADES_LABELS).map(([value, label]) => (
+                  <MenuItem key={value} value={value}>
+                    {label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={formRep.poder_vigente ?? true}
+                  onChange={(e) => setFormRep({ ...formRep, poder_vigente: e.target.checked })}
+                />
+              }
+              label="El poder sigue vigente"
+            />
+            <TextField
+              size="small"
+              label="Comentarios"
+              fullWidth
+              multiline
+              minRows={2}
+              value={formRep.comentarios ?? ""}
+              onChange={(e) => setFormRep({ ...formRep, comentarios: e.target.value.toUpperCase() })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogRepAbierto(false)}>Cancelar</Button>
+          <Button variant="contained" onClick={handleGuardarRep} disabled={guardandoRep}>
+            {guardandoRep ? <CircularProgress size={16} /> : "Guardar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={Boolean(confirmandoEliminarDoc)} onClose={() => setConfirmandoEliminarDoc(null)}>
         <DialogTitle>¿Eliminar documento?</DialogTitle>

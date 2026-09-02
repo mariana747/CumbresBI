@@ -30,16 +30,20 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
+def _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies):
     """Verifica contra el catalogo maestro real (tesoreria-service) que
-    `id_contraparte` exista (24/Ago/2026, cierre de la reconciliacion
-    contraparte maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md
-    Semana 19, mismo criterio ya usado en
-    pld-service/pld/views.py::_existe_contraparte_en_tesoreria).
-    ContraparteSelector en el frontend siempre manda un id real, pero nada
-    impedia hasta ahora que llegara uno inventado. Fail-open si
-    tesoreria-service no responde - un problema de red entre servicios no
-    debe bloquear el alta de un cliente real."""
+    `id_contraparte` exista, y regresa el id VIGENTE a usar (24/Ago/2026,
+    cierre de la reconciliacion contraparte maestra; 02/Sep/2026, ahora
+    resuelve fusiones - mismo criterio ya usado en
+    pld-service/pld/views.py::_resolver_contraparte_en_tesoreria).
+    ContraparteSelector en el frontend siempre manda un id real, pero
+    puede haberse fusionado con otra desde entonces (ver
+    TesoreriaContraparteViewSet.retrieve/_fusionar_en en tesoreria-service)
+    - se guarda el id vigente que tesoreria-service resuelve, no el alias
+    viejo. Regresa None solo si tesoreria-service confirma con un 404 real
+    que la contraparte no existe en absoluto. Fail-open si tesoreria-
+    service no responde - un problema de red entre servicios no debe
+    bloquear el alta de un cliente real."""
     try:
         upstream = requests.get(
             f"{settings.TESORERIA_SERVICE_URL}/api/contrapartes/{id_contraparte}/",
@@ -51,17 +55,18 @@ def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
         logger.warning(
             "tesoreria-service no respondio al validar id_contraparte %s", id_contraparte, exc_info=True
         )
-        return True
+        return id_contraparte
 
     if upstream.status_code == 404:
-        return False
+        return None
     if upstream.status_code != 200:
         logger.warning(
             "tesoreria-service respondio %s al validar id_contraparte %s",
             upstream.status_code,
             id_contraparte,
         )
-    return True
+        return id_contraparte
+    return upstream.json().get("id_contraparte", id_contraparte)
 
 
 class _PermisosVentasViviendaMixin:
@@ -170,17 +175,32 @@ class ViviendaRelExpedienteClienteViewSet(_PermisosVentasViviendaMixin, ModelVie
 
     def create(self, request, *args, **kwargs):
         """Valida contra el catalogo real de tesoreria-service antes de
-        crear (24/Ago/2026, ver _existe_contraparte_en_tesoreria) - mismo
-        criterio que PldContraparteKycViewSet.create en pld-service."""
+        crear (24/Ago/2026, ver _resolver_contraparte_en_tesoreria) - mismo
+        criterio que PldContraparteKycViewSet.create en pld-service.
+        02/Sep/2026: si esa contraparte se fusiono con otra desde que el
+        frontend la eligio, se guarda el id vigente que tesoreria-service
+        resuelve, no el alias viejo."""
         id_contraparte = request.data.get("id_contraparte")
-        if id_contraparte:
-            headers, cookies = forward_auth_headers(request)
-            if not _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
-                return Response(
-                    {"id_contraparte": "No existe esa contraparte en el catálogo de Tesorería."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        return super().create(request, *args, **kwargs)
+        if not id_contraparte:
+            return super().create(request, *args, **kwargs)
+
+        headers, cookies = forward_auth_headers(request)
+        resuelto = _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies)
+        if resuelto is None:
+            return Response(
+                {"id_contraparte": "No existe esa contraparte en el catálogo de Tesorería."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if resuelto == id_contraparte:
+            return super().create(request, *args, **kwargs)
+
+        data = request.data.copy()
+        data["id_contraparte"] = resuelto
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers_out = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers_out)
 
 
 class ViviendaVentasExpedienteItemViewSet(_PermisosVentasViviendaMixin, ModelViewSet):

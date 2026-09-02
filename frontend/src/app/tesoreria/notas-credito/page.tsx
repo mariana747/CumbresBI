@@ -13,9 +13,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   IconButton,
   InputAdornment,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -29,6 +33,7 @@ import {
 import { FileMinus, Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   NotaCreditoConcepto,
   TesoreriaFactura,
@@ -256,6 +261,13 @@ export default function TesoreriaNotasCreditoPage() {
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Filtro por receptor (02/Sep/2026, pedido explicito: "en todo donde
+  // aparezca una sociedad agrega el filtro por sociedad o receptor" ->
+  // "receptor debe ser alguna sociedad" - el receptor de una nota de
+  // credito es una sociedad propia de Cumbres (quien recibe el ajuste),
+  // NO un TesoreriaContraparte - se filtra por RFC de general_sociedades).
+  const [sociedadesFiltro, setSociedadesFiltro] = useState<GeneralSociedad[]>([]);
+  const [filtroReceptor, setFiltroReceptor] = useState("");
 
   // Factura relacionada (25/Ago/2026, confirmado contra el ERD:
   // tesoreria_notas_credito.UUID_Relacionado tiene FK real a
@@ -268,6 +280,9 @@ export default function TesoreriaNotasCreditoPage() {
 
   useEffect(() => {
     getSession().then(setSession);
+    listSociedades()
+      .then(setSociedadesFiltro)
+      .catch(() => setSociedadesFiltro([]));
   }, []);
 
   useEffect(() => {
@@ -288,7 +303,7 @@ export default function TesoreriaNotasCreditoPage() {
 
   function refresh() {
     setLoading(true);
-    listNotasCredito(search || undefined)
+    listNotasCredito(search || undefined, undefined, filtroReceptor || undefined)
       .then(setItems)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -298,7 +313,7 @@ export default function TesoreriaNotasCreditoPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, filtroReceptor]);
 
   function abrirAlta() {
     setEditing(null);
@@ -411,6 +426,24 @@ export default function TesoreriaNotasCreditoPage() {
               ),
             }}
           />
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="filtro-receptor-nota-label">Filtrar por receptor</InputLabel>
+            <Select
+              labelId="filtro-receptor-nota-label"
+              label="Filtrar por receptor"
+              value={filtroReceptor}
+              onChange={(e) => setFiltroReceptor(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Todos los receptores</em>
+              </MenuItem>
+              {sociedadesFiltro.map((s) => (
+                <MenuItem key={s.rfc} value={s.rfc}>
+                  {s.alias_sociedad || s.razon_social || s.rfc}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           {puedeCrear && (
             <Button
               size="small"

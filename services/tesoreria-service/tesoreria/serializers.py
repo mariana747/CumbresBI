@@ -48,6 +48,17 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
     # backend guardaba uno distinto (el default=_short_id del modelo).
     id_contraparte = serializers.CharField(max_length=8, required=False)
 
+    # sociedades (02/Sep/2026, pedido explicito: "no veo en contraparte a
+    # que empresa esta 'asociada'") - la contraparte en si NO tiene columna
+    # de sociedad (ver docstring de la clase, es catalogo compartido), pero
+    # el analista quiere ver de un vistazo con que empresa(s) ya opera, sin
+    # abrir el dialogo de Contratos. Se deriva de sus Contratos (unico lugar
+    # donde SI vive una sociedad real, ver TesoreriaContrato.sociedad) -
+    # puede regresar mas de una si la contraparte tiene contratos con
+    # distintas sociedades, o vacio si todavia no tiene ningun contrato
+    # (aplica igual para persona fisica/moral, no depende de tipo_persona).
+    sociedades = serializers.SerializerMethodField()
+
     class Meta:
         model = TesoreriaContraparte
         fields = [
@@ -71,6 +82,8 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
             "created_by",
             "updated_at",
             "updated_by",
+            "fusionado_en",
+            "sociedades",
         ]
         # id_contraparte YA NO es read_only (25/Ago/2026) - el modelo sigue
         # generandolo solo si el cliente no manda nada (default=_short_id,
@@ -82,7 +95,14 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
         # POST (DRF descarta valores de campos read_only) y el ID que se
         # veia en pantalla nunca coincidia con el que de verdad quedaba
         # guardado.
-        read_only_fields = ["created_at", "updated_at"]
+        #
+        # fusionado_en (02/Sep/2026, fusion de contrapartes por RFC
+        # duplicado) - solo lectura: nunca se fija a mano, solo lo pone
+        # TesoreriaContraparteViewSet._fusionar_en(). El frontend lo usa
+        # para saber si el registro que esta viendo es un alias viejo (y
+        # deberia estar viendo el sobreviviente en su lugar, aunque
+        # retrieve() ya resuelve esto solo).
+        read_only_fields = ["created_at", "updated_at", "fusionado_en"]
 
     def validate(self, attrs):
         # email/tipo_persona son obligatorios otra vez (28/Ago/2026, ver
@@ -97,6 +117,11 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
             if not attrs.get("tipo_persona", getattr(self.instance, "tipo_persona", None)):
                 raise serializers.ValidationError({"tipo_persona": ["Este campo es requerido."]})
         return attrs
+
+    def get_sociedades(self, obj):
+        return list(
+            obj.contratos.exclude(sociedad="").order_by("sociedad").values_list("sociedad", flat=True).distinct()
+        )
 
 
 class TesoreriaBancoSerializer(serializers.ModelSerializer):

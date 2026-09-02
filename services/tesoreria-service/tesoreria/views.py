@@ -102,6 +102,26 @@ class _PermisosCatalogoTesoreriaMixin:
         return super().get_permissions()
 
 
+class _PermiteSecretoInternoOTesoreriaCrear(BasePermission):
+    """Crear una contraparte por el secreto interno servicio-a-servicio
+    (pld-service, alta automatica del expediente KYC autonomo - ver
+    pld/views.py::_crear_contraparte_minima_en_tesoreria) O por el permiso
+    normal tesoreria.crear (pantalla de Contrapartes). Mismo patron que
+    drive-service/drive/views.py::_autorizado - el secreto es una via
+    adicional, nunca reemplaza el permiso en el caso normal con JWT de
+    usuario (02/Sep/2026, cierre de la reconciliacion contraparte
+    maestra)."""
+
+    message = "No tienes el permiso 'tesoreria.crear' para hacer esto."
+
+    def has_permission(self, request, view):
+        secreto_configurado = settings.TESORERIA_INTERNAL_SECRET
+        secreto_recibido = request.META.get("HTTP_X_INTERNAL_SECRET")
+        if secreto_configurado and secreto_recibido == secreto_configurado:
+            return True
+        return require_permission("tesoreria.crear")().has_permission(request, view)
+
+
 class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     """Catalogo maestro de contrapartes (Fase 4, arranque formal 18/Ago/2026).
     CRUD real, sin ScopedManager (catalogo compartido entre sociedades, ver
@@ -122,13 +142,119 @@ class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet)
     filter_backends = [SearchFilter]
     search_fields = ["razon_social", "rfc", "contacto"]
 
+    def get_permissions(self):
+        if self.action == "create":
+            return [_PermiteSecretoInternoOTesoreriaCrear()]
+        return super().get_permissions()
+
     def get_queryset(self):
+        # OJO: NO filtrar fusionado_en aqui - retrieve()/update() usan
+        # get_object(), que a su vez usa este queryset para encontrar el
+        # objeto por pk (ver mas abajo). Si se excluyeran aqui los alias,
+        # consultar/editar un id_contraparte viejo (ya fusionado) daria
+        # 404 antes de llegar a resolver_sobreviviente() - justo lo
+        # contrario de lo que se busca. El catalogo (list()) filtra los
+        # alias por separado, ver mas abajo.
         queryset = TesoreriaContraparte.objects.all().order_by("razon_social")
         if self.request.query_params.get("cliente") in ("1", "true", "True"):
             queryset = queryset.filter(cliente=True)
         if self.request.query_params.get("proveedor") in ("1", "true", "True"):
             queryset = queryset.filter(proveedor=True)
+        # ?sociedad= (02/Sep/2026, pedido explicito: "en todo donde aparezca
+        # una sociedad agrega el filtro por sociedad") - la contraparte en
+        # si no tiene columna de sociedad (catalogo compartido, ver
+        # TesoreriaContraparteSerializer), se filtra via sus Contratos
+        # (unico lugar donde SI vive una sociedad real). distinct() porque
+        # una contraparte puede tener varios contratos con la misma
+        # sociedad (join 1-a-muchos duplicaria filas sin esto).
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(contratos__sociedad=sociedad).distinct()
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        """02/Sep/2026, fusion de contrapartes por RFC duplicado: un alias
+        fusionado ya no es un registro vigente - no debe aparecer en el
+        catalogo/pantalla de Contrapartes como si nada hubiera pasado (ver
+        _fusionar_en). get_queryset() se queda sin filtrar (lo necesita
+        get_object() para retrieve/update, ver comentario ahi); el filtro
+        va solo aqui, en la vista de lista. Reimplementa
+        ListModelMixin.list() en vez de solo llamar a super() porque ese
+        metodo vuelve a invocar self.get_queryset() internamente, sin
+        forma de inyectarle el filtro extra desde afuera."""
+        queryset = self.filter_queryset(self.get_queryset()).filter(fusionado_en__isnull=True)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        """Si `pk` es un alias fusionado (ver fusionado_en/_fusionar_en),
+        resuelve transparente al sobreviviente real - quien haya guardado
+        el id viejo (PLD/Ventas) sigue recibiendo un 200 con datos reales,
+        no un 404, y nota que el id_contraparte del body cambio."""
+        instance = self.get_object().resolver_sobreviviente()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        """Si el RFC ya existe en un registro vigente (no fusionado), no
+        crea un duplicado - regresa el sobreviviente real con 200 (no 201,
+        no se creo nada nuevo). Cierra el caso de alta manual/por IA que no
+        sabe que esa contraparte ya existia con otro id_contraparte."""
+        rfc = request.data.get("rfc")
+        if rfc:
+            existente = TesoreriaContraparte.objects.filter(rfc=rfc, fusionado_en__isnull=True).first()
+            if existente:
+                return Response(self.get_serializer(existente).data, status=200)
+        return super().create(request, *args, **kwargs)
+
+    def _fusionar_en(self, perdedor, sobreviviente):
+        """Reasigna a `sobreviviente` todo lo que hoy cuelga de `perdedor`
+        (Contratos/Facturas/Complementos/Notas de credito/Relaciones - todo
+        FK real hacia TesoreriaContraparte) y marca a `perdedor` como alias
+        fusionado. `perdedor` no se borra (varias de esas FK son PROTECT) -
+        se queda como tumba/alias, ver fusionado_en en models.py."""
+        TesoreriaContrato.objects.filter(contraparte=perdedor).update(contraparte=sobreviviente)
+        TesoreriaFactura.objects.filter(contraparte=perdedor).update(contraparte=sobreviviente)
+        TesoreriaComplementoPago.objects.filter(contraparte=perdedor).update(contraparte=sobreviviente)
+        TesoreriaNotaCredito.objects.filter(contraparte=perdedor).update(contraparte=sobreviviente)
+        TesoreriaContraparteRelacion.objects.filter(contraparte=perdedor).update(contraparte=sobreviviente)
+        TesoreriaContraparteRelacion.objects.filter(contraparte_relacion=perdedor).update(
+            contraparte_relacion=sobreviviente
+        )
+        perdedor.fusionado_en = sobreviviente
+        perdedor.save(update_fields=["fusionado_en"])
+
+    def update(self, request, *args, **kwargs):
+        """Resuelve siempre al sobreviviente antes de guardar (mismo
+        criterio que retrieve() - editar un alias viejo edita al registro
+        vigente, no crea un fork). Si el body trae un `rfc` que ya
+        pertenece a OTRO registro vigente, fusiona automaticamente en vez
+        de tronar con el IntegrityError de rfc unique=True - ver
+        _fusionar_en."""
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object().resolver_sobreviviente()
+        nuevo_rfc = request.data.get("rfc")
+        if nuevo_rfc:
+            duplicado = (
+                TesoreriaContraparte.objects.filter(rfc=nuevo_rfc, fusionado_en__isnull=True)
+                .exclude(pk=instance.pk)
+                .first()
+            )
+            if duplicado:
+                self._fusionar_en(instance, duplicado)
+                instance = duplicado
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         # created_by/updated_by no se llenaban solos (encontrado en vivo
@@ -138,7 +264,13 @@ class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet)
         # CUALQUIER usuario (no solo self-service, ver scope_utils.py en
         # iam-service) - es el mismo dato que ya usa
         # TesoreriaTicketReembolsoViewSet.perform_create para su created_by.
-        actor = self.request.effective_scope.identity_user_id
+        # 02/Sep/2026: ahora tambien puede crearse via el secreto interno
+        # servicio-a-servicio (sin JWT de usuario, ver
+        # _PermiteSecretoInternoOTesoreriaCrear), donde effective_scope no
+        # trae identity_user_id (o puede venir vacio) - se usa un actor fijo
+        # legible en la bitacora en vez de tronar con AttributeError.
+        scope = getattr(self.request, "effective_scope", None)
+        actor = scope.identity_user_id if scope and scope.identity_user_id else "sistema-pld-service"
         serializer.save(created_by=actor, updated_by=actor)
 
     def perform_update(self, serializer):
@@ -1303,6 +1435,14 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         contraparte_id = self.request.query_params.get("contraparte")
         if contraparte_id:
             queryset = queryset.filter(contraparte_id=contraparte_id)
+        # ?receptor_rfc= (02/Sep/2026, pedido explicito: "receptor debe ser
+        # alguna sociedad" - el receptor de una factura de egreso (la mas
+        # comun aqui, CFDI recibido de un proveedor) es una sociedad propia
+        # de Cumbres, no un TesoreriaContraparte - por eso el filtro es
+        # contra el RFC de general_sociedades, no contra ?contraparte=.
+        receptor_rfc = self.request.query_params.get("receptor_rfc")
+        if receptor_rfc:
+            queryset = queryset.filter(receptor_rfc=receptor_rfc)
         return queryset
 
     def perform_create(self, serializer):
@@ -1472,6 +1612,10 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
         contraparte_id = self.request.query_params.get("contraparte")
         if contraparte_id:
             queryset = queryset.filter(contraparte_id=contraparte_id)
+        # Ver comentario equivalente en TesoreriaFacturaViewSet.
+        receptor_rfc = self.request.query_params.get("receptor_rfc")
+        if receptor_rfc:
+            queryset = queryset.filter(receptor_rfc=receptor_rfc)
         return queryset
 
     def perform_create(self, serializer):
@@ -1495,6 +1639,10 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         contraparte_id = self.request.query_params.get("contraparte")
         if contraparte_id:
             queryset = queryset.filter(contraparte_id=contraparte_id)
+        # Ver comentario equivalente en TesoreriaFacturaViewSet.
+        receptor_rfc = self.request.query_params.get("receptor_rfc")
+        if receptor_rfc:
+            queryset = queryset.filter(receptor_rfc=receptor_rfc)
         return queryset
 
     def perform_create(self, serializer):

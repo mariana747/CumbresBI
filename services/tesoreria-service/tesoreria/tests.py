@@ -711,6 +711,114 @@ class TesoreriaContraparteOrigenTests(TestCase):
         self.assertEqual(response.status_code, 201)
 
 
+class TesoreriaContraparteFusionTests(TestCase):
+    """02/Sep/2026, cierre real de la reconciliacion contraparte maestra:
+    dos contrapartes autonomas (creadas por separado por PLD/Ventas/la IA
+    de conciliacion, sin RFC todavia) que mas tarde resultan tener el
+    mismo RFC real se fusionan automaticamente en vez de tronar con el
+    IntegrityError de rfc unique=True - ver
+    TesoreriaContraparteViewSet.create/update y _fusionar_en."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear", "tesoreria.editar"))
+
+    def _viejo(self, **overrides):
+        # El "sobreviviente": ya existe en el catalogo con RFC real (ej.
+        # dado de alta manual por la pantalla de Contrapartes).
+        data = {
+            "razon_social": "Cliente Real SA de CV",
+            "rfc": "CRE010101AAA",
+            "tipo_persona": "moral",
+            "email": "contacto@clientereal.mx",
+        }
+        data.update(overrides)
+        return TesoreriaContraparte.objects.create(**data)
+
+    def _autonomo(self):
+        # El "perdedor": lo creo pld-service via origen=pld, sin RFC
+        # todavia (ver pld/views.py::_crear_contraparte_minima_en_tesoreria).
+        return TesoreriaContraparte.objects.create(
+            razon_social="Pendiente de completar (alta autónoma PLD)",
+            origen=TesoreriaContraparte.ORIGEN_PLD,
+            cliente=True,
+        )
+
+    def test_create_con_rfc_duplicado_no_crea_nada_regresa_el_sobreviviente(self):
+        sobreviviente = self._viejo()
+        request = self.factory.post(
+            "/api/contrapartes/",
+            {
+                "razon_social": "Cliente Real SA de CV (otra vez)",
+                "rfc": sobreviviente.rfc,
+                "tipo_persona": "moral",
+                "email": "otro@clientereal.mx",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = TesoreriaContraparteViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)  # no 201: no se creo nada nuevo
+        self.assertEqual(response.data["id_contraparte"], sobreviviente.id_contraparte)
+        self.assertEqual(TesoreriaContraparte.objects.count(), 1)
+
+    def test_update_con_rfc_duplicado_fusiona_y_reasigna_referencias_reales(self):
+        sobreviviente = self._viejo()
+        perdedor = self._autonomo()
+        # El perdedor ya tenia un Contrato real encima antes de saber que
+        # era duplicado - esto es justo lo que _fusionar_en debe reasignar.
+        contrato = TesoreriaContrato.objects.create(
+            id_contrato="ctr00001", contraparte=perdedor, sociedad="#####1"
+        )
+
+        request = self.factory.patch(f"/api/contrapartes/{perdedor.id_contraparte}/", {"rfc": sobreviviente.rfc}, format="json")
+        request.effective_scope = self.scope
+        view = TesoreriaContraparteViewSet.as_view({"patch": "partial_update"})
+        response = view(request, pk=perdedor.id_contraparte)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id_contraparte"], sobreviviente.id_contraparte)
+
+        perdedor.refresh_from_db()
+        self.assertEqual(perdedor.fusionado_en_id, sobreviviente.id_contraparte)
+
+        contrato.refresh_from_db()
+        self.assertEqual(contrato.contraparte_id, sobreviviente.id_contraparte)
+
+    def test_get_de_un_alias_fusionado_resuelve_al_sobreviviente(self):
+        sobreviviente = self._viejo()
+        perdedor = self._autonomo()
+        perdedor.fusionado_en = sobreviviente
+        perdedor.save(update_fields=["fusionado_en"])
+
+        request = self.factory.get(f"/api/contrapartes/{perdedor.id_contraparte}/")
+        request.effective_scope = self.scope
+        view = TesoreriaContraparteViewSet.as_view({"get": "retrieve"})
+        response = view(request, pk=perdedor.id_contraparte)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id_contraparte"], sobreviviente.id_contraparte)
+
+    def test_editar_algo_ya_fusionado_edita_al_sobreviviente(self):
+        sobreviviente = self._viejo()
+        perdedor = self._autonomo()
+        perdedor.fusionado_en = sobreviviente
+        perdedor.save(update_fields=["fusionado_en"])
+
+        request = self.factory.patch(
+            f"/api/contrapartes/{perdedor.id_contraparte}/", {"comentarios": "nota nueva"}, format="json"
+        )
+        request.effective_scope = self.scope
+        view = TesoreriaContraparteViewSet.as_view({"patch": "partial_update"})
+        response = view(request, pk=perdedor.id_contraparte)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id_contraparte"], sobreviviente.id_contraparte)
+        sobreviviente.refresh_from_db()
+        self.assertEqual(sobreviviente.comentarios, "nota nueva")
+
+
 class TesoreriaContraparteRelacionTests(TestCase):
     """Representante legal/beneficiario controlador - ambos extremos son
     FK reales a TesoreriaContraparte (misma tabla), dato que pide PLD/AML."""

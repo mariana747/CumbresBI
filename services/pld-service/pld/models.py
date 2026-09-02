@@ -120,11 +120,63 @@ class PldContraparteKyc(models.Model):
     # unifican esas 3 llaves en este solo campo). Mismo criterio de
     # unificacion fisica/moral que fecha_nac_const/pais_nac_const arriba.
     nombre_completo = models.CharField(max_length=250, blank=True, null=True)
+    # nombre/apellido_paterno/apellido_materno (02/Sep/2026, pedido
+    # explicito del checklist de cumplimiento: "Dividir el campo unico...
+    # en tres campos de texto independientes... para Persona Fisica") -
+    # SOLO aplican a fisica. nombre_completo arriba se queda intacto para
+    # Moral/Fideicomiso (sigue siendo "Denominacion o Razon Social", un
+    # campo unico real - una empresa no tiene "apellidos"). Todavia NO se
+    # conecta con el Motor Documental (docint/prompts.py sigue mandando
+    # nombre_completo unico para INE/CURP/acta de nacimiento) ni con el
+    # frontend - ese es el siguiente paso, este es solo el campo nuevo en
+    # el modelo.
+    nombre = models.CharField(max_length=150, blank=True, null=True)
+    apellido_paterno = models.CharField(max_length=100, blank=True, null=True)
+    apellido_materno = models.CharField(max_length=100, blank=True, null=True)
+    # tipo_persona (02/Sep/2026, pedido explicito: el catalogo UIF de
+    # ocupacion/actividad economica es distinto para Fisica vs Moral, y el
+    # expediente KYC no tenia forma propia de saber cual mostrar - antes
+    # solo TesoreriaContraparte.tipo_persona existia, y el expediente no lo
+    # consultaba). Mismas choices que TesoreriaContraparte.TIPO_PERSONA_CHOICES
+    # (tesoreria-service/tesoreria/models.py) por consistencia, pero es su
+    # propio campo aqui - en teoria deberia coincidir con el de la
+    # contraparte vinculada, pero no se sincroniza automatico todavia (el
+    # analista lo elige a mano al llenar el expediente).
+    # "fisica_act_emp" quitado (02/Sep/2026, pedido explicito del checklist
+    # de cumplimiento: "Eliminar la opcion 'Fisica con actividad
+    # empresarial' de la lista de primer nivel. Dejar unicamente...
+    # Fisica, Moral y Fideicomiso") - sin backfill que hacer, el campo se
+    # agrego el mismo dia y no hay expedientes reales con ese valor
+    # todavia. TesoreriaContraparte.tipo_persona (tesoreria-service) SI
+    # sigue teniendo esa opcion - este pedido es especifico del expediente
+    # KYC de PLD, no un cambio al catalogo maestro de Tesoreria.
+    TIPO_FISICA = "fisica"
+    TIPO_MORAL = "moral"
+    TIPO_FIDEICOMISO = "fideicomiso"
+    TIPO_PERSONA_CHOICES = [
+        (TIPO_FISICA, "Física"),
+        (TIPO_MORAL, "Moral"),
+        (TIPO_FIDEICOMISO, "Fideicomiso"),
+    ]
+    tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES, blank=True, null=True)
     fecha_nac_const = models.DateField(blank=True, null=True)
     pais_nac_const = models.CharField(max_length=100, blank=True, null=True)
     folio_mercantil = models.CharField(max_length=250, blank=True, null=True)
     objeto_social = models.CharField(max_length=250, blank=True, null=True)
     curp = models.CharField(max_length=18, blank=True, null=True)
+    # rfc (02/Sep/2026, pedido explicito del checklist de cumplimiento:
+    # "Requerir de forma obligatoria el RFC con homoclave" - fisica 13
+    # caracteres, moral 12) - no existia como campo propio en este
+    # expediente hasta ahora (a diferencia de TesoreriaContraparte.rfc, que
+    # ya existe en tesoreria-service). Es su propia columna aqui, no una
+    # FK - mismo criterio de "referencia laxa" que id_contraparte, para no
+    # acoplar esquemas entre microservicios. blank/null=True a nivel de
+    # modelo (igual que el resto de "datos del cliente", Opcion B de alta
+    # autonoma) - "obligatorio" se aplica como campo requerido en el
+    # formulario (analista/publico), no como NOT NULL en la base de datos;
+    # el FORMATO si se valida siempre que llegue un valor (ver
+    # PldContraparteKycSerializer.validate).
+    rfc = models.CharField(max_length=13, blank=True, null=True)
     nacionalidad = models.CharField(max_length=100, blank=True, null=True)
     ocupacion_act_economica = models.CharField(max_length=100, blank=True, null=True)
     dom_calle = models.CharField(max_length=150, blank=True, null=True)
@@ -259,6 +311,116 @@ class PldContraparteDoc(models.Model):
 
     def __str__(self):
         return self.id_kyc_doc
+
+
+class PldRepresentanteLegal(models.Model):
+    """Representante legal / apoderado de una contraparte Moral (02/Sep/2026,
+    pedido explicito del checklist de cumplimiento: "Incluir como requisito
+    obligatorio los datos e identificacion oficial del Representante Legal /
+    Apoderado"). Modelo separado (no campos sueltos en PldContraparteKyc) -
+    una Moral puede tener mas de un representante/apoderado real (ej. dos
+    apoderados con firma mancomunada), un solo set de campos no alcanzaba.
+
+    No confundir con TesoreriaContraparteRelacion (tesoreria-service, tipo
+    REP LEGAL/BENEF CONTROLADOR) - es el mismo concepto de negocio pero una
+    base de datos distinta (microservicios separados); no hay FK real entre
+    ambos, solo el mismo criterio conceptual replicado aqui para el
+    expediente KYC de PLD.
+
+    "Obligatorio para Moral" se aplica en el formulario (frontend: al menos
+    1 representante antes de poder aprobar el expediente), no como
+    constraint de base de datos - mismo criterio que el resto de "datos del
+    cliente" en un expediente de alta autonoma (Opcion B)."""
+
+    TIPO_REPRESENTANTE_LEGAL = "REPRESENTANTE_LEGAL"
+    TIPO_APODERADO = "APODERADO"
+    TIPO_CHOICES = [
+        (TIPO_REPRESENTANTE_LEGAL, "Representante legal"),
+        (TIPO_APODERADO, "Apoderado"),
+    ]
+
+    # Facultades del poder notarial (02/Sep/2026, pedido explicito: "debe
+    # adjuntarse el instrumento notarial... donde se verifique que la
+    # persona fisica que firma tiene facultades vigentes y suficientes -de
+    # preferencia para Actos de Administracion o Pleitos y Cobranzas") -
+    # catalogo real de facultades notariales mexicanas, no texto libre.
+    FACULTAD_PLEITOS_COBRANZAS = "PLEITOS_COBRANZAS"
+    FACULTAD_ACTOS_ADMINISTRACION = "ACTOS_ADMINISTRACION"
+    FACULTAD_ACTOS_DOMINIO = "ACTOS_DOMINIO"
+    FACULTAD_AMBAS = "PLEITOS_Y_ADMINISTRACION"
+    FACULTAD_OTRAS = "OTRAS"
+    FACULTAD_CHOICES = [
+        (FACULTAD_PLEITOS_COBRANZAS, "Pleitos y cobranzas"),
+        (FACULTAD_ACTOS_ADMINISTRACION, "Actos de administración"),
+        (FACULTAD_ACTOS_DOMINIO, "Actos de dominio"),
+        (FACULTAD_AMBAS, "Pleitos y cobranzas + Actos de administración"),
+        (FACULTAD_OTRAS, "Otras"),
+    ]
+
+    id_representante = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    kyc = models.ForeignKey(
+        PldContraparteKyc, on_delete=models.CASCADE, db_column="id_kyc", related_name="representantes_legales"
+    )
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_REPRESENTANTE_LEGAL)
+    # Representante principal del tramite en curso (02/Sep/2026, pedido
+    # explicito: "el sistema debe permitir registrar los datos... del
+    # Representante Legal que esta ejecutando el contrato o tramite en ese
+    # momento" - una Moral puede tener varios representantes vigentes,
+    # pero solo uno esta firmando ESTE tramite). Bandera simple, no exige
+    # que sea unico a nivel de base de datos (se valida/asegura en el
+    # formulario, mismo criterio que el resto de reglas "obligatorias" de
+    # este modelo) - a lo sumo deberia haber un solo True por expediente.
+    es_principal_del_tramite = models.BooleanField(default=False)
+    # Beneficiario Controlador vs Representante (02/Sep/2026, pedido
+    # explicito: "Es importante no confundirlos en la matriz PLD. Un
+    # representante legal tiene poder de firma, pero el Beneficiario
+    # Controlador es quien realmente posee el control o mas del 25% de las
+    # acciones (aunque a veces una misma persona fisica cumple ambos
+    # roles)") - bandera INDEPENDIENTE de "tipo" a proposito: tipo dice si
+    # firma (representante/apoderado), este campo dice si ademas controla
+    # la empresa - las dos cosas pueden ser ciertas a la vez para la misma
+    # persona, o ninguna, sin que se pisen entre si.
+    es_beneficiario_controlador = models.BooleanField(default=False)
+    # porcentaje_participacion (02/Sep/2026) - solo tiene sentido cuando
+    # es_beneficiario_controlador=True (el umbral legal de "control" es
+    # justo el 25%, ver docstring de arriba) - opcional, no todo expediente
+    # tiene este dato capturado todavia.
+    porcentaje_participacion = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
+    nombre_completo = models.CharField(max_length=250)
+    rfc = models.CharField(max_length=13, blank=True, null=True)
+    curp = models.CharField(max_length=18, blank=True, null=True)
+    tipo_identificacion = models.CharField(max_length=100, blank=True, null=True)
+    numero_identificacion = models.CharField(max_length=100, blank=True, null=True)
+    autoridad_identificacion = models.CharField(max_length=250, blank=True, null=True)
+    # Poder notarial (02/Sep/2026, pedido explicito, ver docstring de
+    # FACULTAD_CHOICES arriba) - el INSTRUMENTO en si (el PDF/escaneo de la
+    # escritura) se sube como documento normal via PldContraparteDoc, mismo
+    # patron Drive-first que el resto del expediente; estos campos son solo
+    # los DATOS del poder (numero de escritura, notario, facultades,
+    # vigencia), para poder validar "facultades vigentes y suficientes"
+    # sin tener que abrir el PDF cada vez.
+    poder_numero_escritura = models.CharField(max_length=100, blank=True, null=True)
+    poder_notario_nombre = models.CharField(max_length=250, blank=True, null=True)
+    poder_notario_numero = models.CharField(max_length=50, blank=True, null=True)
+    poder_fecha_escritura = models.DateField(blank=True, null=True)
+    poder_facultades = models.CharField(max_length=30, choices=FACULTAD_CHOICES, blank=True, null=True)
+    poder_vigente = models.BooleanField(default=True)
+    comentarios = models.CharField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=100, blank=True, null=True)
+
+    # Alcance via el expediente padre - mismo criterio que PldContraparteDoc.
+    SCOPE_FIELD_SOCIEDAD = "kyc__sociedad_rfc"
+    SCOPE_FIELD_PROYECTO = "kyc__proyecto"
+    objects = ScopedManager()
+
+    class Meta:
+        db_table = "pld_representantes_legales"
+
+    def __str__(self):
+        return self.nombre_completo
 
 
 class PldSolicitudEliminacionDoc(models.Model):

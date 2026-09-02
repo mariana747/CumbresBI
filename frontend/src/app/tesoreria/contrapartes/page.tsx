@@ -13,6 +13,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -50,7 +51,7 @@ import {
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
-import { IamUser, listUsers } from "@/lib/iam";
+import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import {
   TesoreriaComplementoPago,
   TesoreriaContraparte,
@@ -95,7 +96,7 @@ const FORM_VACIO = {
   // pudo haberse dado de alta minima desde otro modulo (ej. PLD, ver
   // docs/architecture, "contraparte maestra unica") sin este campo todavia.
   tipoPersona: "moral" as TesoreriaTipoPersona | "",
-  genero: "" as "MUJER" | "HOMBRE" | "",
+  genero: "" as "MUJER" | "HOMBRE" | "X" | "",
   email: "",
   contacto: "",
   telefonoSms: "",
@@ -167,6 +168,34 @@ function TesoreriaContrapartesPageContent() {
   // explicito de Mariana: "no puede pedir apellidos si es moral") - una
   // razon social (Moral/Fideicomiso) no tiene apellidos ni genero.
   const esPersonaFisica = form.tipoPersona === "fisica" || form.tipoPersona === "fisica_act_emp";
+  // "Contacto" es un dato legal distinto del Titular (02/Sep/2026,
+  // aclaracion explicita: el Titular debe identificarse con sus datos
+  // reales -Nombre, RFC/CURP- por el Principio de Calidad de la LFPDPPP;
+  // el Contacto puede ser un "contacto autorizado"/domicilio convencional
+  // DISTINTO de la contraparte, respaldado por el Art. 34 del Codigo Civil
+  // Federal) - NUNCA se autocompleta solo. Este checkbox es la unica via:
+  // el usuario decide explicitamente que, en este caso, el contacto SI es
+  // el mismo titular, y solo entonces se copia (y se mantiene sincronizado
+  // mientras siga marcado) - ver handleToggleContactoMismoTitular.
+  const [contactoMismoTitular, setContactoMismoTitular] = useState(false);
+  function nombreCompletoFisica(razonSocial: string, apellidoPaterno: string, apellidoMaterno: string) {
+    return [razonSocial, apellidoPaterno, apellidoMaterno]
+      .map((parte) => parte.trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+  function handleToggleContactoMismoTitular(checked: boolean) {
+    setContactoMismoTitular(checked);
+    if (checked) {
+      setForm((f) => ({
+        ...f,
+        contacto: nombreCompletoFisica(f.razonSocial, f.apellidoPaterno, f.apellidoMaterno),
+      }));
+    }
+    // Al desmarcar NO se borra el contacto - se queda el ultimo valor
+    // (probablemente el nombre del titular que se copio) editable a mano,
+    // el usuario decide si lo cambia por el contacto autorizado real.
+  }
 
   // Relaciones (rep. legal / benef. controlador, dato pedido por PLD/AML) -
   // dialogo por contraparte, ver TesoreriaContraparteRelacionViewSet
@@ -207,6 +236,30 @@ function TesoreriaContrapartesPageContent() {
   // detras del kebab para no apretar 5 iconos en la misma celda.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuContraparte, setMenuContraparte] = useState<TesoreriaContraparte | null>(null);
+  // Confirmacion de borrado (02/Sep/2026, pedido explicito: "esto debe ser
+  // una pantalla en la ui no asi") - antes usaba window.confirm() nativo
+  // del navegador, se reemplaza por un Dialog propio de MUI consistente
+  // con el resto de la pantalla.
+  const [borrando, setBorrando] = useState<TesoreriaContraparte | null>(null);
+  const [borrandoError, setBorrandoError] = useState<string | null>(null);
+  const [borrandoLoading, setBorrandoLoading] = useState(false);
+
+  // Catalogo de sociedades (02/Sep/2026, pedido explicito: "pero por
+  // nombre") - c.sociedades del backend solo trae el RFC (referencia laxa
+  // a general_sociedades, ver TesoreriaContrato.sociedad), se resuelve a
+  // razon_social del lado del cliente, mismo patron que pld/page.tsx.
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  useEffect(() => {
+    listSociedades()
+      .then(setSociedades)
+      .catch(() => setSociedades([]));
+  }, []);
+  const nombreSociedad = (rfc: string) => sociedades.find((s) => s.rfc === rfc)?.razon_social || rfc;
+  // Filtro por sociedad (02/Sep/2026, pedido explicito: "en todo donde
+  // aparezca una sociedad agrega el filtro por sociedad") - mismo criterio
+  // que contratos/page.tsx, aplicado sobre la columna Sociedad de esta
+  // pantalla (derivada de los Contratos de cada contraparte).
+  const [filtroSociedad, setFiltroSociedad] = useState("");
 
   useEffect(() => {
     getSession().then(setSession);
@@ -218,7 +271,7 @@ function TesoreriaContrapartesPageContent() {
 
   function refresh() {
     setLoading(true);
-    listContrapartes(search || undefined)
+    listContrapartes(search || undefined, undefined, filtroSociedad || undefined)
       .then(setContrapartes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -228,7 +281,7 @@ function TesoreriaContrapartesPageContent() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, filtroSociedad]);
 
   // ?revisar=<id_contraparte> - link directo desde flujos/page.tsx cuando
   // confirmar_conciliacion detecta/crea una contraparte por IA (ver
@@ -261,6 +314,7 @@ function TesoreriaContrapartesPageContent() {
     setForm(FORM_VACIO);
     setIdNuevo(generarIdCorto());
     setFormError(null);
+    setContactoMismoTitular(false);
     setDialogOpen(true);
   }
 
@@ -284,6 +338,17 @@ function TesoreriaContrapartesPageContent() {
       autorizadoPor: c.autorizado_por || "",
     });
     setFormError(null);
+    // El checkbox arranca marcado SOLO si el contacto ya guardado coincide
+    // exactamente con nombre+apellidos del titular - es una inferencia
+    // razonable de "esto ya estaba en modo mismo titular", no una
+    // sincronizacion forzada; si el analista lo desmarca, el contacto se
+    // queda como esta y deja de recalcularse.
+    const autoCalculado = nombreCompletoFisica(
+      c.razon_social,
+      c.apellido_paterno || "",
+      c.apellido_materno || ""
+    );
+    setContactoMismoTitular(Boolean(c.contacto) && c.contacto === autoCalculado);
     setDialogOpen(true);
   }
 
@@ -336,15 +401,23 @@ function TesoreriaContrapartesPageContent() {
     }
   }
 
-  async function handleBorrar(c: TesoreriaContraparte) {
-    if (!window.confirm(`¿Borrar la contraparte ${c.razon_social}? Esta acción no se puede deshacer.`)) {
-      return;
-    }
+  function handleBorrar(c: TesoreriaContraparte) {
+    setBorrandoError(null);
+    setBorrando(c);
+  }
+
+  async function confirmarBorrar() {
+    if (!borrando) return;
+    setBorrandoLoading(true);
+    setBorrandoError(null);
     try {
-      await deleteContraparte(c.id_contraparte);
+      await deleteContraparte(borrando.id_contraparte);
+      setBorrando(null);
       refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error desconocido");
+      setBorrandoError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setBorrandoLoading(false);
     }
   }
 
@@ -464,6 +537,24 @@ function TesoreriaContrapartesPageContent() {
               ),
             }}
           />
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="filtro-sociedad-contraparte-label">Filtrar por sociedad</InputLabel>
+            <Select
+              labelId="filtro-sociedad-contraparte-label"
+              label="Filtrar por sociedad"
+              value={filtroSociedad}
+              onChange={(e) => setFiltroSociedad(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Todas las sociedades</em>
+              </MenuItem>
+              {sociedades.map((s) => (
+                <MenuItem key={s.rfc} value={s.rfc}>
+                  {s.alias_sociedad || s.razon_social || s.rfc}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <FormControlLabel
             control={
               <Checkbox
@@ -499,6 +590,15 @@ function TesoreriaContrapartesPageContent() {
                   <TableCell>RFC</TableCell>
                   <TableCell>Tipo</TableCell>
                   <TableCell>Nombre del contacto</TableCell>
+                  {/* Sociedad (02/Sep/2026, pedido explicito: "no veo en
+                  contraparte a que empresa esta 'asociada'" - "igual para
+                  personas fisica, etc") - misma columna para cualquier
+                  tipo_persona, no es exclusiva de moral. La contraparte en
+                  si no tiene sociedad propia (catalogo compartido, ver
+                  TesoreriaContraparteSerializer.get_sociedades) - se
+                  deriva de sus Contratos, por eso puede mostrar varias o
+                  "—" si todavia no tiene ninguno. */}
+                  <TableCell>Sociedad</TableCell>
                   <TableCell>Cliente / Proveedor</TableCell>
                   <TableCell align="right">Acciones</TableCell>
                 </TableRow>
@@ -506,13 +606,13 @@ function TesoreriaContrapartesPageContent() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                    <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                       <CircularProgress size={20} />
                     </TableCell>
                   </TableRow>
                 ) : contrapartesMostradas.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                    <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                       <Typography variant="body2" color="text.secondary">
                         {soloPendientesIA ? "Sin contrapartes pendientes de revisión." : "Sin contrapartes registradas."}
                       </Typography>
@@ -538,6 +638,7 @@ function TesoreriaContrapartesPageContent() {
                       <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.rfc || "—"}</TableCell>
                       <TableCell>{c.tipo_persona ? TIPO_PERSONA_LABELS[c.tipo_persona] ?? c.tipo_persona : "—"}</TableCell>
                       <TableCell>{c.contacto || c.email || "—"}</TableCell>
+                      <TableCell>{c.sociedades?.length > 0 ? c.sociedades.map(nombreSociedad).join(", ") : "—"}</TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={0.5}>
                           {c.cliente && <Chip size="small" label="Cliente" color="success" variant="outlined" />}
@@ -625,6 +726,9 @@ function TesoreriaContrapartesPageContent() {
                   </Typography>
                   <Typography variant="body2">
                     <strong>Nombre del contacto:</strong> {c.contacto || c.email || "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Sociedad:</strong> {c.sociedades?.length > 0 ? c.sociedades.map(nombreSociedad).join(", ") : "—"}
                   </Typography>
                   <Stack direction="row" spacing={0.5}>
                     {c.cliente && <Chip size="small" label="Cliente" color="success" variant="outlined" />}
@@ -804,20 +908,22 @@ function TesoreriaContrapartesPageContent() {
                 />
               </Stack>
             )}
-            <TextField
-              size="small"
-              label="Razón social"
-              value={form.razonSocial}
-              onChange={(e) => setForm({ ...form, razonSocial: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              size="small"
-              label="RFC"
-              value={form.rfc}
-              onChange={(e) => setForm({ ...form, rfc: e.target.value })}
-              fullWidth
-            />
+            {/* Datos personales (02/Sep/2026, formulario reorganizado en
+            secciones - antes era una sola lista plana de campos sin
+            agrupar). El campo sigue guardándose en razon_social (misma
+            columna del ERD, la que usan Contrato/Factura/etc.) en los dos
+            casos, pero el LABEL cambia segun el tipo de persona (pedido
+            explicito: "en persona fisica, no pongas razon social sino
+            nombre") - para Fisica/Fisica con actividad empresarial es
+            SOLO el/los nombre(s) de pila (sin apellidos, esos van en sus
+            propios campos abajo); para Moral/Fideicomiso sigue siendo la
+            razon social real. */}
+            <Typography variant="overline" color="text.secondary">
+              Datos personales
+            </Typography>
+            {/* Tipo de persona sube antes del Nombre/Razón social
+            (02/Sep/2026, pedido explicito) - el label del campo de abajo
+            depende de este valor, tiene mas sentido elegirlo primero. */}
             <FormControl size="small" fullWidth required>
               <InputLabel id="tipo-persona-label">Tipo de persona</InputLabel>
               <Select
@@ -832,8 +938,21 @@ function TesoreriaContrapartesPageContent() {
                     tipoPersona,
                     // Limpia apellidos/genero al cambiar a Moral/Fideicomiso -
                     // no tiene sentido guardar datos de persona fisica para
-                    // una razon social.
-                    ...(esFisica ? {} : { apellidoPaterno: "", apellidoMaterno: "", genero: "" }),
+                    // una razon social. Si el checkbox "mismo titular" sigue
+                    // marcado, el contacto se recalcula aqui tambien (los
+                    // apellidos que se acaban de vaciar).
+                    ...(esFisica
+                      ? {}
+                      : { apellidoPaterno: "", apellidoMaterno: "", genero: "" }),
+                    ...(contactoMismoTitular
+                      ? {
+                          contacto: nombreCompletoFisica(
+                            form.razonSocial,
+                            esFisica ? form.apellidoPaterno : "",
+                            esFisica ? form.apellidoMaterno : ""
+                          ),
+                        }
+                      : {}),
                   });
                 }}
                 disabled={soloLectura}
@@ -845,6 +964,23 @@ function TesoreriaContrapartesPageContent() {
                 ))}
               </Select>
             </FormControl>
+            <TextField
+              size="small"
+              label={esPersonaFisica ? "Nombre" : "Razón social"}
+              value={form.razonSocial}
+              onChange={(e) => {
+                const razonSocial = e.target.value;
+                // "Contacto" solo se sincroniza si el usuario marco a
+                // proposito el checkbox "El contacto es el mismo titular"
+                // (ver handleToggleContactoMismoTitular) - nunca por
+                // default, son dos datos legales distintos.
+                const contactoAuto = contactoMismoTitular
+                  ? { contacto: nombreCompletoFisica(razonSocial, form.apellidoPaterno, form.apellidoMaterno) }
+                  : {};
+                setForm({ ...form, razonSocial, ...contactoAuto });
+              }}
+              fullWidth
+            />
             {esPersonaFisica && (
               <>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
@@ -852,14 +988,26 @@ function TesoreriaContrapartesPageContent() {
                     size="small"
                     label="Apellido paterno"
                     value={form.apellidoPaterno}
-                    onChange={(e) => setForm({ ...form, apellidoPaterno: e.target.value })}
+                    onChange={(e) => {
+                      const apellidoPaterno = e.target.value;
+                      const contactoAuto = contactoMismoTitular
+                        ? { contacto: nombreCompletoFisica(form.razonSocial, apellidoPaterno, form.apellidoMaterno) }
+                        : {};
+                      setForm({ ...form, apellidoPaterno, ...contactoAuto });
+                    }}
                     fullWidth
                   />
                   <TextField
                     size="small"
                     label="Apellido materno"
                     value={form.apellidoMaterno}
-                    onChange={(e) => setForm({ ...form, apellidoMaterno: e.target.value })}
+                    onChange={(e) => {
+                      const apellidoMaterno = e.target.value;
+                      const contactoAuto = contactoMismoTitular
+                        ? { contacto: nombreCompletoFisica(form.razonSocial, form.apellidoPaterno, apellidoMaterno) }
+                        : {};
+                      setForm({ ...form, apellidoMaterno, ...contactoAuto });
+                    }}
                     fullWidth
                   />
                 </Stack>
@@ -869,35 +1017,32 @@ function TesoreriaContrapartesPageContent() {
                     labelId="genero-label"
                     label="Género"
                     value={form.genero}
-                    onChange={(e) => setForm({ ...form, genero: e.target.value as "MUJER" | "HOMBRE" | "" })}
+                    onChange={(e) => setForm({ ...form, genero: e.target.value as "MUJER" | "HOMBRE" | "X" | "" })}
                     disabled={soloLectura}
                   >
                     <MenuItem value="MUJER">Mujer</MenuItem>
                     <MenuItem value="HOMBRE">Hombre</MenuItem>
+                    {/* X (02/Sep/2026) - la posicion 15 de una CURP real solo
+                    puede ser H, M o X (RENAPO); faltaba esta tercera opcion
+                    para poder derivar el genero automaticamente de una CURP
+                    sin dejar casos sin representar. Label "No binario"
+                    (pedido explicito) - el VALOR que se guarda sigue siendo
+                    "X" (coincide con la letra real de la CURP). */}
+                    <MenuItem value="X">No binario</MenuItem>
                   </Select>
                 </FormControl>
               </>
             )}
+
+            <Divider />
+            <Typography variant="overline" color="text.secondary">
+              Datos fiscales
+            </Typography>
             <TextField
               size="small"
-              label="Correo"
-              required
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              size="small"
-              label="Nombre del contacto"
-              value={form.contacto}
-              onChange={(e) => setForm({ ...form, contacto: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              size="small"
-              label="Teléfono / SMS"
-              value={form.telefonoSms}
-              onChange={(e) => setForm({ ...form, telefonoSms: e.target.value })}
+              label="RFC"
+              value={form.rfc}
+              onChange={(e) => setForm({ ...form, rfc: e.target.value })}
               fullWidth
             />
             <Stack direction="row" spacing={2}>
@@ -920,6 +1065,52 @@ function TesoreriaContrapartesPageContent() {
                 label="Proveedor"
               />
             </Stack>
+
+            <Divider />
+            <Typography variant="overline" color="text.secondary">
+              Contacto
+            </Typography>
+            <TextField
+              size="small"
+              label="Correo"
+              required
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              fullWidth
+            />
+            {esPersonaFisica && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={contactoMismoTitular}
+                    onChange={(e) => handleToggleContactoMismoTitular(e.target.checked)}
+                  />
+                }
+                // El Contacto (dato de correspondencia, Art. 34 Codigo
+                // Civil Federal) puede ser distinto del Titular (que debe
+                // llevar sus datos reales por la LFPDPPP) - este checkbox
+                // es la unica forma de copiarlo, nunca automatico.
+                label="El contacto es el mismo titular"
+              />
+            )}
+            <TextField
+              size="small"
+              label="Nombre del contacto"
+              value={form.contacto}
+              onChange={(e) => setForm({ ...form, contacto: e.target.value })}
+              disabled={soloLectura || contactoMismoTitular}
+              helperText={contactoMismoTitular ? "Copiado del titular - desmarca la casilla para editarlo" : undefined}
+              fullWidth
+            />
+            <TextField
+              size="small"
+              label="Teléfono / SMS"
+              value={form.telefonoSms}
+              onChange={(e) => setForm({ ...form, telefonoSms: e.target.value })}
+              fullWidth
+            />
+
+            <Divider />
             <TextField
               size="small"
               label="Comentarios"
@@ -1102,7 +1293,7 @@ function TesoreriaContrapartesPageContent() {
                   contratos.map((c) => (
                     <TableRow key={c.id_contrato} hover>
                       <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contrato}</TableCell>
-                      <TableCell>{c.sociedad}</TableCell>
+                      <TableCell>{nombreSociedad(c.sociedad)}</TableCell>
                       <TableCell>{c.tipo || "—"}</TableCell>
                       <TableCell>{c.status || "—"}</TableCell>
                       <TableCell align="right">
@@ -1257,6 +1448,28 @@ function TesoreriaContrapartesPageContent() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDocumentosContraparte(null)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!borrando} onClose={() => (borrandoLoading ? undefined : setBorrando(null))} fullWidth maxWidth="xs">
+        <DialogTitle>Borrar contraparte</DialogTitle>
+        <DialogContent>
+          <Typography>
+            ¿Borrar la contraparte {borrando?.razon_social}? Esta acción no se puede deshacer.
+          </Typography>
+          {borrandoError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {borrandoError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBorrando(null)} disabled={borrandoLoading}>
+            Cancelar
+          </Button>
+          <Button onClick={confirmarBorrar} color="error" variant="contained" disabled={borrandoLoading}>
+            {borrandoLoading ? "Borrando…" : "Borrar"}
+          </Button>
         </DialogActions>
       </Dialog>
     </AppShell>

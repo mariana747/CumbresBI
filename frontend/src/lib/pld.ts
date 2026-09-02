@@ -172,7 +172,7 @@ export async function listKyc(params?: {
   // filtro acota la vista sin tocar el scope real de la sesion.
   sociedadRfc?: string;
   proyecto?: string;
-}): Promise<PldContraparteKyc[]> {
+}): Promise<(PldContraparteKyc & PldDatosEditables)[]> {
   const query = new URLSearchParams();
   if (params?.estadoLlenado) query.set("estado_llenado", params.estadoLlenado);
   if (params?.search) query.set("search", params.search);
@@ -241,6 +241,27 @@ export async function createKyc(params: {
 // ver ALIAS_CAMPOS en pld/views.py, el backend hace la traduccion real.
 export const PLD_CAMPOS_CONFIRMABLES = [
   "nombre_completo",
+  // tipo_persona (02/Sep/2026, pedido explicito: filtrar el catalogo UIF
+  // de ocupacion/actividad economica segun fisica/moral) - solo lo edita
+  // el analista via /pld/[idKyc] (PATCH normal, ver update() en
+  // pld-service/pld/views.py), NO se agrego al whitelist real del backend
+  // para el formulario publico/Motor Documental (CAMPOS_CONFIRMABLES en
+  // views.py) - esta en esta lista de TypeScript solo porque
+  // PldDatosEditables/GRUPOS_CAMPOS_GENERAL en el detalle del expediente
+  // se tipan contra ella, no porque el cliente externo pueda tocarlo.
+  "tipo_persona",
+  // nombre/apellido_paterno/apellido_materno (02/Sep/2026, pedido
+  // explicito: dividir el nombre en 3 campos SOLO para persona fisica) -
+  // el analista via /pld/[idKyc] y el cliente via pld-ticket/[token] los
+  // editan (ya estan en CAMPOS_CONFIRMABLES en pld-service/pld/views.py).
+  "nombre",
+  "apellido_paterno",
+  "apellido_materno",
+  // rfc (02/Sep/2026, pedido explicito: "Requerir de forma obligatoria el
+  // RFC con homoclave") - no existia como campo propio del expediente
+  // hasta ahora (TesoreriaContraparte.rfc, en tesoreria-service, es un
+  // registro distinto). Tambien en CAMPOS_CONFIRMABLES del backend.
+  "rfc",
   // Alias que el backend traduce a "nombre_completo" antes de guardar (ver
   // ALIAS_CAMPOS en pld/views.py) - deben seguir en esta lista para que el
   // filtro de MotorDocumentalDialog.tsx no los descarte antes de mandarlos.
@@ -398,6 +419,97 @@ export async function subirArchivoDocumento(
     throw await friendlyApiError("PLD", response);
   }
   return response.json();
+}
+
+// Representante legal / apoderado de una contraparte Moral (02/Sep/2026,
+// ver PldRepresentanteLegal en pld-service/pld/models.py).
+export type PldRepresentanteLegalTipo = "REPRESENTANTE_LEGAL" | "APODERADO";
+export type PldRepresentanteLegalFacultades =
+  | "PLEITOS_COBRANZAS"
+  | "ACTOS_ADMINISTRACION"
+  | "ACTOS_DOMINIO"
+  | "PLEITOS_Y_ADMINISTRACION"
+  | "OTRAS";
+
+export interface PldRepresentanteLegal {
+  id_representante: string;
+  kyc: string;
+  tipo: PldRepresentanteLegalTipo;
+  es_principal_del_tramite: boolean;
+  es_beneficiario_controlador: boolean;
+  porcentaje_participacion: string | null;
+  nombre_completo: string;
+  rfc: string | null;
+  curp: string | null;
+  tipo_identificacion: string | null;
+  numero_identificacion: string | null;
+  autoridad_identificacion: string | null;
+  poder_numero_escritura: string | null;
+  poder_notario_nombre: string | null;
+  poder_notario_numero: string | null;
+  poder_fecha_escritura: string | null;
+  poder_facultades: PldRepresentanteLegalFacultades | null;
+  poder_vigente: boolean;
+  comentarios: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listRepresentantesLegales(idKyc: string): Promise<PldRepresentanteLegal[]> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/representantes-legales/?kyc=${idKyc}`);
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export async function crearRepresentanteLegal(
+  idKyc: string,
+  params: Partial<Omit<PldRepresentanteLegal, "id_representante" | "kyc" | "created_at" | "updated_at">>,
+  actorUserId?: string | null
+): Promise<PldRepresentanteLegal> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/representantes-legales/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...params, kyc: idKyc, created_by: actorUserId, updated_by: actorUserId }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export async function editarRepresentanteLegal(
+  idRepresentante: string,
+  params: Partial<Omit<PldRepresentanteLegal, "id_representante" | "kyc" | "created_at" | "updated_at">>,
+  actorUserId?: string | null
+): Promise<PldRepresentanteLegal> {
+  const response = await apiFetch(
+    "PLD",
+    `${PLD_API_BASE_URL}/api/representantes-legales/${idRepresentante}/`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...params, updated_by: actorUserId }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export async function eliminarRepresentanteLegal(idRepresentante: string): Promise<void> {
+  const response = await apiFetch(
+    "PLD",
+    `${PLD_API_BASE_URL}/api/representantes-legales/${idRepresentante}/`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
 }
 
 // Apaga estado_llenado_manual y recalcula de inmediato segun los
@@ -653,3 +765,156 @@ export async function revocarTicketCliente(idPldTicket: string): Promise<PldTick
   }
   return response.json();
 }
+
+// Catalogo de ocupaciones/actividades economicas (02/Sep/2026, pedido
+// explicito, codigos de 7 digitos "extraidos del listado oficial de la
+// UIF"). AVISO DE PRECISION: estos codigos se copiaron tal cual del
+// listado que compartio el usuario (citando fuentes de terceros -
+// Studocu, Heru - no el catalogo oficial descargado directo de
+// sppld.sat.gob.mx) - no se verificaron aqui contra el documento oficial
+// de la UIF. Antes de usarse en un reporte real a la UIF, alguien con
+// acceso al catalogo oficial debe confirmar que estos codigos y
+// etiquetas son exactos.
+//
+// Separado en 2 listas (fisica vs moral, ver PldContraparteKyc.tipo_persona
+// en el backend) porque la UIF NO distingue esto en el codigo mismo - es
+// el software el que debe controlar que catalogo mostrar segun el tipo de
+// persona (evita que a una persona moral se le puedan asignar codigos de
+// "Estudiante"/"Labores del hogar", etc.). Vive aqui (no en
+// app/pld/[idKyc]/page.tsx) porque tanto la pantalla del analista como el
+// formulario publico (pld-ticket/[token]/page.tsx) lo usan.
+export const UIF_OCUPACIONES_PERSONA_FISICA: Record<string, string> = {
+  "7110100": "Directores, Gerentes y Administradores",
+  "7130100": "Contadores, Auditores y Especialistas en Finanzas",
+  "7140100": "Auxiliares Administrativos, Archivistas y Oficinistas",
+  "7140200": "Cajeros, Cobradores y Recepcionistas",
+  "7120100": "Abogados, Notarios y Profesionales del Derecho",
+  "7120300": "Médicos, Enfermeros y Especialistas de la Salud",
+  "7120400": "Ingenieros, Arquitectos y Diseñadores Industriales",
+  "7120600": "Profesores, Maestros y Personal Docente",
+  "7120700": "Consultores, Asesores y Analistas de Negocios",
+  "7150100": "Comerciantes, Vendedores y Distribuidores Minoristas",
+  "7150500": "Choferes, Taxistas y Operadores de Transporte",
+  "7210100": "Mecánicos, Electricistas y Técnicos en Mantenimiento",
+  "1000000": "No Aplica / Sin Actividad Económica Organizada",
+  "7160100": "Estudiantes",
+  "7160200": "Personas dedicadas a las labores del hogar",
+  "7160300": "Jubilados, Pensionados y Retirados",
+  "7160400": "Desempleados",
+};
+
+export const UIF_SECTORES_PERSONA_MORAL: Record<string, string> = {
+  "1110000": "Agricultura, Silvicultura y Actividades del Campo",
+  "1220000": "Ganadería y Crianza de Animales",
+  "1330000": "Pesca, Acuacultura y Actividades Marítimas",
+  "2130000": "Minería, Extracción de Minerales y Petróleo",
+  "3110000": "Industria Manufacturera (Fábricas, Maquiladoras, Producción de Bienes)",
+  "4110000": "Construcción, Desarrollo Inmobiliario e Infraestructura",
+  "5110000": "Comercio al por Mayor (Distribuidoras masivas y Proveedores)",
+  "6110000": "Comercio al por Menor (Tiendas, Retail, Venta al consumidor final)",
+  "8110000": "Transportes, Almacenamiento y Logística de Carga",
+  "9110000": "Servicios Financieros y de Seguros (Bancos, SOFOMES, Fintech)",
+  "9210000": "Servicios Inmobiliarios y de Alquiler de Bienes",
+  "9310000": "Servicios Profesionales, Científicos y Técnicos Corporativos",
+};
+
+export function catalogoOcupacionPorTipoPersona(tipoPersona: string | null | undefined): Record<string, string> {
+  // fisica -> catalogo ocupacional; moral/fideicomiso -> catalogo por
+  // sector. Fideicomiso se trata como moral (es una entidad, no una
+  // persona con ocupacion individual).
+  if (tipoPersona === "fisica") {
+    return UIF_OCUPACIONES_PERSONA_FISICA;
+  }
+  return UIF_SECTORES_PERSONA_MORAL;
+}
+
+// Campos del expediente KYC que solo aplican a un tipo de persona
+// especifico (02/Sep/2026, pedido explicito del checklist de
+// cumplimiento: "Al seleccionar 'Física', el sistema debe ocultar
+// dinamicamente los campos Folio Mercantil, Objeto Social e
+// Identificacion de Fideicomiso" / "Mostrar unicamente cuando se
+// seleccione [Fideicomiso] los campos..."). Comparten esta lista las 2
+// pantallas que editan el expediente (analista en /pld/[idKyc] y el
+// formulario publico en pld-ticket/[token]).
+const CAMPOS_SOLO_MORAL: ReadonlyArray<keyof PldDatosEditables> = ["folio_mercantil", "objeto_social"];
+const CAMPOS_SOLO_FIDEICOMISO: ReadonlyArray<keyof PldDatosEditables> = ["ident_fideicomiso"];
+// nombre/apellido_paterno/apellido_materno (02/Sep/2026, pedido explicito:
+// "Dividir el campo único... en tres campos... para Persona Física") -
+// solo tienen sentido para Fisica; nombre_completo (Denominación o Razón
+// Social) se queda como el campo real para Moral/Fideicomiso.
+const CAMPOS_SOLO_FISICA: ReadonlyArray<keyof PldDatosEditables> = ["nombre", "apellido_paterno", "apellido_materno"];
+
+export function esCampoVisibleParaTipoPersona(
+  campo: keyof PldDatosEditables,
+  tipoPersona: string | null | undefined
+): boolean {
+  if (CAMPOS_SOLO_FISICA.includes(campo)) return tipoPersona === "fisica";
+  // nombre_completo se oculta SOLO cuando ya se eligio Fisica (ahi lo
+  // reemplazan nombre/apellidos) - para Moral/Fideicomiso/sin elegir
+  // todavia sigue siendo el campo real a llenar.
+  if (campo === "nombre_completo") return tipoPersona !== "fisica";
+  // Sin tipo de persona elegido todavia, el resto se muestra todo - no
+  // tiene sentido esconder un campo antes de que el analista/cliente haya
+  // decidido cual aplica (evita que algo "desaparezca" antes de elegir).
+  if (!tipoPersona) return true;
+  if (CAMPOS_SOLO_MORAL.includes(campo)) return tipoPersona === "moral";
+  if (CAMPOS_SOLO_FIDEICOMISO.includes(campo)) return tipoPersona === "fideicomiso";
+  return true;
+}
+
+// Etiqueta de "nombre_completo" segun tipo de persona (02/Sep/2026,
+// pedido explicito del checklist de cumplimiento: "Cambiar el texto del
+// campo por 'Denominación o Razón Social'" para Moral) - el campo real
+// sigue siendo el mismo (nombre_completo en el modelo), solo cambia lo
+// que ve el analista/cliente. Fisica/Fideicomiso/sin elegir se quedan con
+// la etiqueta combinada de siempre (el checklist solo pidio el cambio
+// para Moral).
+export function etiquetaNombreParaTipoPersona(tipoPersona: string | null | undefined): string {
+  return tipoPersona === "moral" ? "Denominación o Razón Social" : "Nombre completo / Razón social";
+}
+
+// Nombre real a mostrar de un expediente (02/Sep/2026, tras dividir el
+// nombre en 3 campos para Fisica): para Fisica, junta
+// nombre/apellido_paterno/apellido_materno (nombre_completo queda vacio,
+// ver esCampoVisibleParaTipoPersona); para Moral/Fideicomiso/sin elegir
+// todavia, sigue siendo nombre_completo tal cual. Un solo lugar para no
+// repetir esta logica en cada pantalla que muestra el nombre (avatar,
+// titulo, tabla de expedientes).
+export function nombreParaMostrar(
+  kyc: Partial<
+    Pick<
+      PldContraparteKyc & PldDatosEditables,
+      "tipo_persona" | "nombre_completo" | "nombre" | "apellido_paterno" | "apellido_materno"
+    >
+  >
+): string {
+  if (kyc.tipo_persona === "fisica") {
+    const partes = [kyc.nombre, kyc.apellido_paterno, kyc.apellido_materno].filter(Boolean);
+    if (partes.length > 0) return partes.join(" ");
+  }
+  return kyc.nombre_completo || "";
+}
+
+// Catalogo real de identificaciones oficiales mexicanas y su autoridad
+// emisora (02/Sep/2026, pedido explicito: "en autoridad que emitio la
+// identificacion... se debe llenar en automaticamente") - antes
+// "Tipo de identificación" era texto libre sin ninguna relacion con
+// "Autoridad emisora" (tambien texto libre). Compartido entre la pantalla
+// del analista (/pld/[idKyc]) y el formulario público (pld-ticket/[token])
+// - las llaves DEBEN coincidir exactamente con
+// lib/paises.ts::TIPOS_IDENTIFICACION (el catalogo real de opciones que
+// ve el usuario en ambas pantallas), reconciliado el 02/Sep/2026 (antes
+// cada pantalla tenia su propia lista con etiquetas ligeramente
+// distintas). Sigue siendo un CharField de texto en el modelo
+// (tipo_identificacion/autoridad_identificacion, ver
+// pld-service/pld/models.py) - este catalogo vive solo aqui, en el
+// frontend, no es una migracion de esquema.
+export const AUTORIDAD_POR_TIPO_IDENTIFICACION: Record<string, string> = {
+  "INE / Credencial para votar": "Instituto Nacional Electoral (INE)",
+  "Pasaporte": "Secretaría de Relaciones Exteriores (SRE)",
+  "Cédula profesional": "Secretaría de Educación Pública (SEP)",
+  "Cartilla del Servicio Militar Nacional": "Secretaría de la Defensa Nacional (SEDENA)",
+  "Matrícula consular": "Secretaría de Relaciones Exteriores (SRE)",
+  "Forma migratoria (FM2/FM3)": "Instituto Nacional de Migración (INM)",
+  "Licencia de conducir": "Secretaría/Instituto de Movilidad de la entidad (varía por estado)",
+};
