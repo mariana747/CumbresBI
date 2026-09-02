@@ -93,6 +93,15 @@ DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080"
 # hasta configurarlo explicitamente en ambos lados).
 DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
 
+# Secreto servicio-a-servicio para que pld-service pueda crear una
+# contraparte minima en el catalogo maestro de aqui sin exigirle al
+# analista de PLD el perm_key tesoreria.crear (02/Sep/2026, cierre real de
+# la reconciliacion contraparte maestra - ver
+# TesoreriaContraparteViewSet.get_permissions y su espejo en
+# pld-service/pld/views.py::_crear_contraparte_minima_en_tesoreria). Mismo
+# patron que DRIVE_INTERNAL_SECRET arriba - vacio en dev por default.
+TESORERIA_INTERNAL_SECRET = env("TESORERIA_INTERNAL_SECRET", default="")
+
 # Ticket publico de proveedores (27/Ago/2026, mismo patron que
 # PldTicketCliente/pld-service - ver tesoreria/ticket_utils.py,
 # tesoreria/recaptcha.py, TesoreriaTicketProveedorViewSet). Mismos
