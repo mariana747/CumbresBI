@@ -29,7 +29,11 @@ import {
 import { CheckCircle2, ChevronDown, FileText, ShieldAlert, ShieldCheck, UploadCloud } from "lucide-react";
 import {
   actualizarDatosPublico,
+  AUTORIDAD_POR_TIPO_IDENTIFICACION,
+  catalogoOcupacionPorTipoPersona,
   DocumentoEliminadoResumen,
+  esCampoVisibleParaTipoPersona,
+  etiquetaNombreParaTipoPersona,
   PldContraparteDoc,
   PldDatosEditables,
   ResultadoSubidaDocumento,
@@ -54,6 +58,16 @@ type OpcionSelect = string | { value: string; label: string };
 const OPCIONES_POR_CAMPO: Partial<Record<keyof PldDatosEditables, readonly OpcionSelect[]>> = {
   nacionalidad: GENTILICIOS,
   tipo_identificacion: TIPOS_IDENTIFICACION,
+  // tipo_persona (02/Sep/2026, pedido explicito: exponerlo tambien en el
+  // link publico) - determina que catalogo UIF de ocupacion/actividad
+  // economica se muestra en ese otro campo (ver catalogoOcupacionPorTipoPersona
+  // en lib/pld.ts, usado mas abajo con logica propia porque depende de
+  // otro campo del mismo formulario, no cabe en este mapa estatico).
+  tipo_persona: [
+    { value: "fisica", label: "Física" },
+    { value: "moral", label: "Moral" },
+    { value: "fideicomiso", label: "Fideicomiso" },
+  ],
 };
 
 // Estado civil (25/Ago/2026) - 5 opciones estandar de la industria para
@@ -81,7 +95,28 @@ const GRUPOS_DATOS: {
     titulo: "Identificación",
     campos: [
       { campo: "nombre_completo", label: "Nombre completo / Razón social", requerido: true },
-      { campo: "curp", label: "CURP" },
+      // tipo_persona (02/Sep/2026) - antes de ocupacion_act_economica, el
+      // catalogo de ese otro campo depende de este valor.
+      { campo: "tipo_persona", label: "Tipo de persona" },
+      // nombre/apellido_paterno/apellido_materno (02/Sep/2026, pedido
+      // explicito: dividir el nombre en 3 campos, los 3 obligatorios, SOLO
+      // para Fisica) - reemplazan a nombre_completo en ese caso (ver
+      // esCampoVisibleParaTipoPersona). El check de camposFaltantes mas
+      // abajo ya descarta los campos ocultos, asi que "requerido" aqui no
+      // exige nombre_completo cuando estos 3 estan visibles en su lugar.
+      { campo: "nombre", label: "Nombre(s)", requerido: true },
+      { campo: "apellido_paterno", label: "Primer apellido", requerido: true },
+      { campo: "apellido_materno", label: "Segundo apellido", requerido: true },
+      // curp: obligatorio SOLO para Fisica (una Moral no tiene CURP
+      // propia) - "requerido: true" aqui es el default para cuando no
+      // hay tipo_persona elegido todavia; camposFaltantes/el label con "*"
+      // usan requeridoEfectivo() mas abajo para excluirlo si es Moral.
+      { campo: "curp", label: "CURP", requerido: true },
+      // rfc (02/Sep/2026, pedido explicito: "Requerir de forma obligatoria
+      // el RFC con homoclave") - obligatorio para los 2 tipos (13
+      // caracteres Fisica, 12 Moral) - el backend valida el formato exacto
+      // segun tipo_persona (ver PldContraparteKycSerializer.validate).
+      { campo: "rfc", label: "RFC", requerido: true },
       { campo: "nacionalidad", label: "Nacionalidad", requerido: true },
       { campo: "pais_nac_const", label: "País de nacimiento / constitución" },
       { campo: "fecha_nac_const", label: "Fecha de nacimiento / constitución" },
@@ -135,6 +170,21 @@ const GRUPOS_DATOS: {
 ];
 
 const CAMPOS_REQUERIDOS = GRUPOS_DATOS.flatMap((g) => g.campos.filter((c) => c.requerido).map((c) => c.campo));
+
+// nombre_completo/nombre/apellido_paterno/apellido_materno (02/Sep/2026,
+// hallazgo real: "no debería traer datos ya puestos" - "la parte de
+// nombre/razón social") - estos pueden venir llenos porque el analista
+// eligio/creo la contraparte via ContraparteSelector al armar el
+// expediente, no porque el cliente ya los haya escrito antes con ESTE
+// link publico. Arrancan vacios a proposito, ver el useEffect que arma
+// "datos" mas abajo - el resto de los campos SI se precarga normal (esos
+// si pudo haberlos guardado el cliente en una visita anterior al link).
+const CAMPOS_SIN_PRECARGAR = new Set<keyof PldDatosEditables>([
+  "nombre_completo",
+  "nombre",
+  "apellido_paterno",
+  "apellido_materno",
+]);
 
 // Pagina publica (sin AppShell) - a donde llega el cliente externo real al
 // abrir el link recibido (hoy, en modo dev, mostrado directo en
@@ -218,7 +268,23 @@ export default function PldTicketPage() {
         setTieneExpediente(Boolean(resultado.kyc));
         if (resultado.kyc) {
           const todosLosCampos = GRUPOS_DATOS.flatMap((g) => g.campos.map((c) => c.campo));
-          setDatos(Object.fromEntries(todosLosCampos.map((c) => [c, resultado.kyc?.[c] ?? ""])));
+          setDatos(
+            Object.fromEntries(
+              todosLosCampos.map((c) => [
+                c,
+                // 02/Sep/2026, hallazgo real: "no debería traer datos ya
+                // puestos" - nombre_completo/nombre/apellidos pueden venir
+                // llenos por el analista al crear el expediente (elegido
+                // en el ContraparteSelector), no porque el cliente ya los
+                // haya capturado antes con ESTE link - el mensaje de
+                // arriba ("si ya habías capturado tus datos antes...")
+                // solo aplica de verdad al resto de los campos. Estos 4
+                // siempre arrancan vacios en el formulario publico, el
+                // cliente los escribe desde cero.
+                CAMPOS_SIN_PRECARGAR.has(c) ? "" : (resultado.kyc?.[c] ?? ""),
+              ])
+            )
+          );
           setDocumentosExistentes(resultado.kyc.documentos ?? []);
         }
         setDocumentosEliminados(resultado.documentosEliminados);
@@ -234,7 +300,18 @@ export default function PldTicketPage() {
   // en cada render, se usa tanto para bloquear el boton como para el
   // mensaje de error si de todos modos se intenta enviar (ej. Enter en un
   // campo).
-  const camposFaltantes = CAMPOS_REQUERIDOS.filter((campo) => !datos[campo]);
+  // 02/Sep/2026: un campo requerido pero OCULTO por el tipo de persona
+  // (ej. nombre_completo cuando ya se eligio Fisica, ver
+  // esCampoVisibleParaTipoPersona) no debe contar como faltante - de lo
+  // contrario el boton de guardar se quedaria bloqueado para siempre.
+  // curp (02/Sep/2026, pedido explicito) solo es obligatorio para Fisica -
+  // una Moral no tiene CURP propia. Es la unica excepcion a "requerido"
+  // fijo por campo, de ahi este chequeo aparte en vez de solo
+  // CAMPOS_REQUERIDOS.includes(campo).
+  const camposFaltantes = CAMPOS_REQUERIDOS.filter((campo) => {
+    if (campo === "curp" && datos.tipo_persona !== "fisica") return false;
+    return esCampoVisibleParaTipoPersona(campo, datos.tipo_persona) && !datos[campo];
+  });
 
   async function handleGuardarDatos(e: React.FormEvent) {
     e.preventDefault();
@@ -392,6 +469,12 @@ export default function PldTicketPage() {
                       Si ya habías capturado tus datos antes con este mismo enlace, aquí los ves y puedes
                       corregirlos. Un campo en blanco no borra lo que ya estaba guardado.
                     </Typography>
+                    {/* 02/Sep/2026, pedido explicito: nota del significado
+                    del "*" - convencion estandar de formularios, pero no
+                    estaba explicada en ningun lado de esta pantalla. */}
+                    <Typography variant="caption" color="text.secondary">
+                      Los campos marcados con <strong>*</strong> son obligatorios.
+                    </Typography>
 
                     {GRUPOS_DATOS.map((grupo) => (
                       <Accordion key={grupo.titulo} disableGutters>
@@ -402,8 +485,29 @@ export default function PldTicketPage() {
                         </AccordionSummary>
                         <AccordionDetails>
                           <Grid container spacing={1.5}>
-                            {grupo.campos.map(({ campo, label, requerido }) => {
-                              const opciones = campo === "estado_civil" ? ESTADO_CIVIL_OPCIONES : OPCIONES_POR_CAMPO[campo];
+                            {grupo.campos
+                              .filter(({ campo }) => esCampoVisibleParaTipoPersona(campo, datos.tipo_persona))
+                              .map(({ campo, label, requerido }) => {
+                              // ocupacion_act_economica (02/Sep/2026) - el
+                              // catalogo UIF depende de tipo_persona, otro
+                              // campo del mismo formulario, no cabe en el
+                              // mapa estatico OPCIONES_POR_CAMPO de arriba.
+                              const opciones =
+                                campo === "estado_civil"
+                                  ? ESTADO_CIVIL_OPCIONES
+                                  : campo === "ocupacion_act_economica"
+                                    ? Object.entries(catalogoOcupacionPorTipoPersona(datos.tipo_persona)).map(
+                                        ([codigo, etiqueta]) => ({
+                                          value: `${codigo} – ${etiqueta}`,
+                                          label: `${codigo} – ${etiqueta}`,
+                                        })
+                                      )
+                                    : OPCIONES_POR_CAMPO[campo];
+                              // curp (02/Sep/2026, pedido explicito) solo
+                              // es obligatorio para Fisica - unica
+                              // excepcion a "requerido" fijo por campo.
+                              const requeridoEfectivo =
+                                campo === "curp" ? datos.tipo_persona === "fisica" : requerido;
                               return (
                                 <Grid item xs={12} sm={6} key={campo}>
                                   {opciones ? (
@@ -411,11 +515,31 @@ export default function PldTicketPage() {
                                       select
                                       fullWidth
                                       size="small"
-                                      label={requerido ? `${label} *` : label}
-                                      required={requerido}
-                                      error={requerido && !datos[campo]}
+                                      // Sin "*" manual (02/Sep/2026,
+                                      // hallazgo real: "* *" doble) - MUI
+                                      // ya agrega su propio asterisco al
+                                      // label cuando required=true.
+                                      label={label}
+                                      required={requeridoEfectivo}
+                                      error={requeridoEfectivo && !datos[campo]}
                                       value={datos[campo] ?? ""}
-                                      onChange={(e) => setDatos((prev) => ({ ...prev, [campo]: e.target.value }))}
+                                      onChange={(e) => {
+                                        const valor = e.target.value;
+                                        // Autoridad emisora se llena sola
+                                        // (02/Sep/2026, pedido explicito,
+                                        // mismo catalogo compartido que la
+                                        // pantalla del analista - ver
+                                        // AUTORIDAD_POR_TIPO_IDENTIFICACION
+                                        // en lib/pld.ts) - solo cuando el
+                                        // tipo elegido tiene una autoridad
+                                        // conocida; el cliente puede
+                                        // corregirla despues a mano.
+                                        const autoridadAuto =
+                                          campo === "tipo_identificacion" && AUTORIDAD_POR_TIPO_IDENTIFICACION[valor]
+                                            ? { autoridad_identificacion: AUTORIDAD_POR_TIPO_IDENTIFICACION[valor] }
+                                            : {};
+                                        setDatos((prev) => ({ ...prev, [campo]: valor, ...autoridadAuto }));
+                                      }}
                                     >
                                       {opciones.map((opcion) =>
                                         typeof opcion === "string" ? (
@@ -433,18 +557,69 @@ export default function PldTicketPage() {
                                     <TextField
                                       fullWidth
                                       size="small"
-                                      label={requerido ? `${label} *` : label}
-                                      required={requerido}
-                                      error={requerido && !datos[campo]}
+                                      // "Denominación o Razón Social" para
+                                      // Moral (02/Sep/2026, pedido explicito)
+                                      // - solo afecta nombre_completo. Sin
+                                      // "*" manual (hallazgo real: "* *"
+                                      // doble) - MUI ya lo agrega solo
+                                      // cuando required=true.
+                                      label={
+                                        campo === "nombre_completo"
+                                          ? etiquetaNombreParaTipoPersona(datos.tipo_persona)
+                                          : label
+                                      }
+                                      required={requeridoEfectivo}
+                                      error={
+                                        (requeridoEfectivo && !datos[campo]) ||
+                                        ((campo === "dom_cp" || campo === "dom_corresp_dom_cp") &&
+                                          !!datos[campo] &&
+                                          !/^\d{5}$/.test(datos[campo] ?? "")) ||
+                                        // Colonia no puede ser solo numeros
+                                        // (02/Sep/2026, pedido explicito) -
+                                        // mismo criterio visual que CP, la
+                                        // validacion real esta en el backend.
+                                        ((campo === "dom_colonia" || campo === "dom_corresp_dom_colonia") &&
+                                          /^\d+$/.test((datos[campo] ?? "").trim()))
+                                      }
+                                      helperText={
+                                        (campo === "dom_cp" || campo === "dom_corresp_dom_cp") &&
+                                        !!datos[campo] &&
+                                        !/^\d{5}$/.test(datos[campo] ?? "")
+                                          ? "Debe ser un código postal de 5 dígitos numéricos"
+                                          : (campo === "dom_colonia" || campo === "dom_corresp_dom_colonia") &&
+                                              /^\d+$/.test((datos[campo] ?? "").trim())
+                                            ? "La colonia no puede ser solo números"
+                                            : undefined
+                                      }
                                       // Selector de calendario nativo para
                                       // fechas (25/Ago/2026) - sin libreria
                                       // nueva, <input type="date"> ya trae
                                       // el picker del navegador.
                                       type={campo === "fecha_nac_const" ? "date" : "text"}
                                       InputLabelProps={campo === "fecha_nac_const" ? { shrink: true } : undefined}
+                                      // 5 digitos numericos (02/Sep/2026,
+                                      // pedido explicito del checklist de
+                                      // cumplimiento) - solo ayuda visual, la
+                                      // validacion real esta en el backend.
+                                      inputProps={
+                                        campo === "dom_cp" || campo === "dom_corresp_dom_cp"
+                                          ? { maxLength: 5, inputMode: "numeric" }
+                                          : undefined
+                                      }
                                       multiline={campo === "comentarios" || campo === "objeto_social"}
                                       value={datos[campo] ?? ""}
-                                      onChange={(e) => setDatos((prev) => ({ ...prev, [campo]: e.target.value }))}
+                                      onChange={(e) => {
+                                        // Mayusculas automaticas (02/Sep/2026,
+                                        // pedido explicito) - convencion real
+                                        // de formularios oficiales mexicanos
+                                        // (RFC/CURP/nombre siempre en
+                                        // mayusculas). No aplica a fecha (tipo
+                                        // date, sin letras que convertir de
+                                        // todos modos).
+                                        const valor =
+                                          campo === "fecha_nac_const" ? e.target.value : e.target.value.toUpperCase();
+                                        setDatos((prev) => ({ ...prev, [campo]: valor }));
+                                      }}
                                     />
                                   )}
                                 </Grid>

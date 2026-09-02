@@ -32,7 +32,7 @@ import ContraparteSelector from "@/components/ContraparteSelector";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
-import { PldContraparteKyc, createKyc, listKyc } from "@/lib/pld";
+import { PldContraparteKyc, PldDatosEditables, createKyc, listKyc, nombreParaMostrar } from "@/lib/pld";
 import { TesoreriaContraparte } from "@/lib/tesoreria";
 
 const ESTADO_OPTIONS = [
@@ -53,7 +53,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // aprobar=pld-compliance.aprobar - segregacion de funciones a
   // proposito, PLD_ANALISTA no puede aprobar su propio trabajo).
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
-  const [expedientes, setExpedientes] = useState<PldContraparteKyc[]>([]);
+  const [expedientes, setExpedientes] = useState<(PldContraparteKyc & PldDatosEditables)[]>([]);
   const [search, setSearch] = useState("");
   const [estadoLlenado, setEstadoLlenado] = useState("");
   const [loading, setLoading] = useState(true);
@@ -327,6 +327,13 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
               <TableCell>Contraparte</TableCell>
               <TableCell>Nombre / Razón social</TableCell>
               <TableCell>CURP</TableCell>
+              {/* Sociedad (02/Sep/2026, pedido explicito: mismo criterio que
+              la columna "Sociedad" de Tesoreria/Contrapartes - "no veo en
+              contraparte a que empresa esta 'asociada'") - a diferencia de
+              Tesoreria, PLD SI tiene la sociedad como columna propia del
+              expediente (sociedad_nombre, snapshot de sociedad_rfc al
+              crear, ver models.py), no hay que derivarla de nada mas. */}
+              <TableCell>Sociedad</TableCell>
               <TableCell>Estado</TableCell>
               <TableCell>Documentos</TableCell>
               <TableCell>Aprobación</TableCell>
@@ -337,13 +344,13 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                   <CircularProgress size={24} />
                 </TableCell>
               </TableRow>
             ) : expedientes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     Sin expedientes todavía.
                   </Typography>
@@ -353,8 +360,9 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
               expedientes.map((kyc) => (
                 <TableRow key={kyc.id_kyc} hover>
                   <TableCell>{kyc.id_contraparte}</TableCell>
-                  <TableCell>{kyc.nombre_completo || "—"}</TableCell>
+                  <TableCell>{nombreParaMostrar(kyc) || "—"}</TableCell>
                   <TableCell>{kyc.curp || "—"}</TableCell>
+                  <TableCell>{kyc.sociedad_nombre || "—"}</TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Chip

@@ -305,7 +305,12 @@ export async function updateSociedad(
   rfc: string,
   params: { razonSocial?: string; regimenMercantil?: string; aliasSociedad?: string }
 ): Promise<GeneralSociedad> {
-  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/${rfc}/`, {
+  // encodeURIComponent (02/Sep/2026, mismo hallazgo real que
+  // pld/views.py::_obtener_sociedad_en_iam: un RFC placeholder como
+  // "#####3" -CONSULTORÍA Y PROYECTOS CUMBRES, decision permanente de
+  // Fase 1- rompe la URL sin escapar, "#" es el delimitador de fragmento
+  // y todo lo que sigue se descarta antes de salir del navegador.
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/${encodeURIComponent(rfc)}/`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -321,7 +326,7 @@ export async function updateSociedad(
 }
 
 export async function deleteSociedad(rfc: string): Promise<void> {
-  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/${rfc}/`, {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/sociedades/${encodeURIComponent(rfc)}/`, {
     method: "DELETE",
   });
   if (!response.ok) {

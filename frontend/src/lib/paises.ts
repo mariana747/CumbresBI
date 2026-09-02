@@ -178,11 +178,19 @@ export const ESTADOS_MEXICO = [
 // Tipos de identificacion oficial aceptados para KYC (25/Ago/2026) -
 // mismo campo que ya existia como texto libre (tipo_identificacion),
 // ahora acotado a un catalogo cerrado.
+// 02/Sep/2026: reconciliado con el catalogo que ya usaba la pantalla del
+// analista (antes tenian etiquetas ligeramente distintas para el mismo
+// tipo - "INE / IFE" aqui vs "INE / Credencial para votar" alla, y esta
+// lista no tenia "Matrícula consular" - ahora es un solo catalogo
+// compartido, ver AUTORIDAD_POR_TIPO_IDENTIFICACION en lib/pld.ts, que
+// depende exactamente de estas etiquetas para el auto-llenado de
+// "Autoridad emisora").
 export const TIPOS_IDENTIFICACION = [
-  "INE / IFE",
+  "INE / Credencial para votar",
   "Pasaporte",
   "Cédula profesional",
-  "Forma migratoria (FM2/FM3)",
   "Cartilla del Servicio Militar Nacional",
+  "Matrícula consular",
+  "Forma migratoria (FM2/FM3)",
   "Licencia de conducir",
 ];

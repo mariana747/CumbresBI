@@ -208,6 +208,13 @@ function TesoreriaContratosPageContent() {
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
 
+  // nombreSociedad (02/Sep/2026, pedido explicito: "en contratos la columna
+  // sociedad pon el nombre") - c.sociedad es un CharField plano (referencia
+  // laxa a general_sociedades.rfc, ver TesoreriaContrato.sociedad), se
+  // resuelve a razon_social del lado del cliente, mismo patron que
+  // tesoreria/contrapartes/page.tsx.
+  const nombreSociedad = (rfc: string) => sociedades.find((s) => s.rfc === rfc)?.razon_social || rfc;
+
   function refresh() {
     setLoading(true);
     listContratos(search || undefined)
@@ -601,7 +608,7 @@ function TesoreriaContratosPageContent() {
                 contratosFiltrados.map((c) => (
                   <TableRow key={c.id_contrato} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contrato}</TableCell>
-                    <TableCell>{c.sociedad}</TableCell>
+                    <TableCell>{nombreSociedad(c.sociedad)}</TableCell>
                     <TableCell>{c.contraparte_nombre}</TableCell>
                     <TableCell>{c.tipo || "—"}</TableCell>
                     <TableCell>{c.fecha_vencimiento || "—"}</TableCell>
@@ -675,7 +682,7 @@ function TesoreriaContratosPageContent() {
                 </Stack>
                 <Stack spacing={0.5} sx={{ mt: 1 }}>
                   <Typography variant="body2">
-                    <strong>Sociedad:</strong> {c.sociedad}
+                    <strong>Sociedad:</strong> {nombreSociedad(c.sociedad)}
                   </Typography>
                   <Typography variant="body2">
                     <strong>Contraparte:</strong> {c.contraparte_nombre}
