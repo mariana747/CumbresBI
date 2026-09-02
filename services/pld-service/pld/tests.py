@@ -18,11 +18,18 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from .audit_utils import emitir_evento_auditoria
-from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
+from .models import (
+    PldContraparteDoc,
+    PldContraparteKyc,
+    PldRepresentanteLegal,
+    PldSolicitudEliminacionDoc,
+    PldTicketCliente,
+)
 from .ticket_utils import hash_token
 from .views import (
     PldContraparteDocViewSet,
     PldContraparteKycViewSet,
+    PldRepresentanteLegalViewSet,
     PldSolicitudEliminacionDocViewSet,
     PldTicketClienteViewSet,
 )
@@ -165,7 +172,7 @@ class CumplimientoDePermisosEnEscrituraTests(TestCase):
     def _crear_kyc(self, scope):
         # Mock de requests.get (01/Sep/2026, hallazgo real: sin esto, create()
         # llama de verdad a tesoreria-service/iam-service para validar
-        # id_contraparte/sociedad_rfc - ver _existe_contraparte_en_tesoreria y
+        # id_contraparte/sociedad_rfc - ver _resolver_contraparte_en_tesoreria y
         # _obtener_sociedad_en_iam en views.py. El test "pasaba" solo por
         # casualidad cuando esos servicios estaban caidos (camino fail-open);
         # con ellos corriendo (ej. en un entorno de dev con docker compose up)
@@ -311,13 +318,198 @@ class ValidacionSociedadAlCrearTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["sociedad_nombre"], "Tizara SA de CV")
 
+    def test_rfc_con_numeral_no_rompe_la_url(self):
+        # 02/Sep/2026, hallazgo real en vivo: RFC_TIZARA = "#####1" (RFC
+        # placeholder permanente, decision Fase 1) - "#" es el delimitador
+        # de fragmento de una URL. Este test mockea requests.get (no
+        # exercita la libreria real que arma/parsea la URL), asi que por
+        # si solo NO habria detectado el bug real - hay que revisar
+        # explicitamente que la URL que se le pasa a requests.get ya viene
+        # escapada (%23), no el "#" crudo, o el bug se puede reintroducir
+        # sin que ningun test lo note.
+        mock_get = Mock(status_code=200, json=lambda: {"razon_social": "Tizara SA de CV"})
+        with patch("pld.views.requests.get", return_value=mock_get) as patched_get:
+            self._crear(RFC_TIZARA)
+        llamada_sociedad = [c for c in patched_get.call_args_list if "sociedades" in c.args[0]][0]
+        url = llamada_sociedad.args[0]
+        self.assertNotIn("#", url)
+        self.assertIn("%23", url)
+
     def test_iam_service_caido_deja_pasar_sin_nombre(self):
-        # Fail-open, mismo criterio que _existe_contraparte_en_tesoreria -
+        # Fail-open, mismo criterio que _resolver_contraparte_en_tesoreria -
         # un problema de red no debe bloquear el alta de un expediente real.
         with patch("pld.views.requests.get", side_effect=requests.RequestException()):
             response = self._crear(RFC_TIZARA)
         self.assertEqual(response.status_code, 201)
         self.assertIsNone(response.data["sociedad_nombre"])
+
+
+class ContraparteMaestraAltaAutonomaTests(TestCase):
+    """02/Sep/2026, cierre real de la reconciliacion contraparte maestra:
+    el alta autonoma de un expediente KYC (Opcion B, sin id_contraparte en
+    el payload) ya no debe dejar que el modelo invente un id local
+    huerfano si tesoreria-service esta disponible - debe usar el id real
+    que tesoreria-service genera (ver
+    views.py::_crear_contraparte_minima_en_tesoreria)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",))
+
+    def _crear_sin_id_contraparte(self):
+        request = self.factory.post(
+            "/api/kyc/",
+            {"sociedad_rfc": RFC_TIZARA, "created_by": "usr00001", "updated_by": "usr00001"},
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_sin_secreto_configurado_no_llama_a_tesoreria_y_cae_al_default_local(self):
+        # Override explicito a vacio (el entorno de dev/CI puede o no traer
+        # TESORERIA_INTERNAL_SECRET configurado - la prueba no debe depender
+        # de eso) - el short-circuit debe evitar la llamada HTTP por
+        # completo, no solo fallar silenciosamente si se intentara.
+        with patch.object(settings, "TESORERIA_INTERNAL_SECRET", ""), patch(
+            "pld.views.requests.post"
+        ) as mock_post, patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara SA de CV"}),
+        ):
+            response = self._crear_sin_id_contraparte()
+        mock_post.assert_not_called()
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["id_contraparte"])
+
+    def test_con_secreto_configurado_usa_el_id_real_de_tesoreria(self):
+        with patch.object(settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"), patch(
+            "pld.views.requests.post",
+            return_value=Mock(status_code=201, json=lambda: {"id_contraparte": "tsr00001"}),
+        ) as mock_post, patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara SA de CV"}),
+        ):
+            response = self._crear_sin_id_contraparte()
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args.kwargs["headers"]["X-Internal-Secret"], "dev-secreto")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id_contraparte"], "tsr00001")
+
+    def test_tesoreria_caida_deja_pasar_con_el_default_local(self):
+        # Fail-open, mismo criterio que _resolver_contraparte_en_tesoreria y
+        # _obtener_sociedad_en_iam - un problema de red entre servicios no
+        # debe bloquear el alta de un expediente KYC real.
+        with patch.object(settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"), patch(
+            "pld.views.requests.post", side_effect=requests.RequestException()
+        ), patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara SA de CV"}),
+        ):
+            response = self._crear_sin_id_contraparte()
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["id_contraparte"])
+
+
+class ContraparteFusionadaAlCrearTests(TestCase):
+    """02/Sep/2026: si el id_contraparte que manda el frontend (elegido
+    con el ContraparteSelector) ya se fusiono con otro en tesoreria-service
+    (ver TesoreriaContraparteViewSet.retrieve/_fusionar_en), el GET de
+    validacion regresa 200 con un id_contraparte DISTINTO al que se pidio
+    - el expediente debe guardar el id vigente, no el alias viejo."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",))
+
+    def test_guarda_el_id_sobreviviente_no_el_alias(self):
+        request = self.factory.post(
+            "/api/kyc/",
+            {
+                "id_contraparte": "cpalias1",
+                "sociedad_rfc": RFC_TIZARA,
+                "created_by": "usr00001",
+                "updated_by": "usr00001",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"post": "create"})
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(
+                status_code=200,
+                json=lambda: {"id_contraparte": "cpsobrv1", "razon_social": "Tizara SA de CV"},
+            ),
+        ):
+            response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id_contraparte"], "cpsobrv1")
+
+
+class NombreCompletoAlCrearTests(TestCase):
+    """02/Sep/2026, hallazgo real: "al crear el expediente no se llena el
+    nombre" - nombre_completo antes solo lo llenaba el Motor Documental
+    (confirmar_extraccion), nunca al crear el expediente aunque ya se
+    hubiera elegido/creado la contraparte real via ContraparteSelector -
+    ver _nombre_completo_de_contraparte."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",))
+
+    def _crear(self, id_contraparte, datos_tesoreria):
+        request = self.factory.post(
+            "/api/kyc/",
+            {
+                "id_contraparte": id_contraparte,
+                "sociedad_rfc": RFC_TIZARA,
+                "created_by": "usr00001",
+                "updated_by": "usr00001",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"post": "create"})
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: datos_tesoreria),
+        ):
+            return view(request)
+
+    def test_persona_moral_usa_razon_social(self):
+        response = self._crear(
+            "cp000020",
+            {"id_contraparte": "cp000020", "razon_social": "Tizara SA de CV", "tipo_persona": "moral"},
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["nombre_completo"], "Tizara SA de CV")
+
+    def test_persona_fisica_junta_nombre_y_apellidos(self):
+        response = self._crear(
+            "cp000021",
+            {
+                "id_contraparte": "cp000021",
+                "razon_social": "María",
+                "apellido_paterno": "López",
+                "apellido_materno": "Hernández",
+                "tipo_persona": "fisica",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["nombre_completo"], "María López Hernández")
+
+    def test_placeholder_de_alta_autonoma_no_se_guarda_como_nombre_real(self):
+        response = self._crear(
+            "cp000022",
+            {
+                "id_contraparte": "cp000022",
+                "razon_social": "Pendiente de completar (alta autónoma PLD)",
+                "origen": "pld",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIn(response.data["nombre_completo"], (None, ""))
 
 
 class PldTicketClienteTests(TestCase):
@@ -1010,7 +1202,11 @@ class EdicionManualExpedienteTests(TestCase):
         return view(request, pk=self.kyc.id_kyc)
 
     def test_editar_emite_evento_solo_con_los_campos_que_cambiaron(self):
-        with patch("pld.audit_utils.requests.post") as mock_post:
+        # curp dispara ahora la sincronizacion de genero derivado (ver
+        # test_editar_curp_sincroniza_genero_derivado) - se mockea
+        # pld.views.requests.patch para no depender de una llamada real a
+        # tesoreria-service, aunque este test no verifique ese payload.
+        with patch("pld.audit_utils.requests.post") as mock_post, patch("pld.views.requests.patch"):
             response = self._editar({"curp": "EDIT900101HDFRRL01", "updated_by": "usr00005"})
         self.assertEqual(response.status_code, 200)
         payload = mock_post.call_args.kwargs["json"]
@@ -1034,7 +1230,7 @@ class EdicionManualExpedienteTests(TestCase):
         """estado_cuenta/aprobado_por son read_only en el serializer - la
         auditoria tampoco debe reportarlos como "cambiados" aunque el
         cliente los mande en el body (no tienen efecto real)."""
-        with patch("pld.audit_utils.requests.post") as mock_post:
+        with patch("pld.audit_utils.requests.post") as mock_post, patch("pld.views.requests.patch"):
             response = self._editar({"estado_cuenta": "CONGELADA", "curp": "EDIT900101HDFRRL02"})
         self.assertEqual(response.status_code, 200)
         self.kyc.refresh_from_db()
@@ -1046,6 +1242,344 @@ class EdicionManualExpedienteTests(TestCase):
         self.scope = EffectiveScope(is_global=True, perm_keys=())
         response = self._editar({"curp": "EDIT900101HDFRRL01"})
         self.assertEqual(response.status_code, 403)
+
+    def test_editar_rfc_sincroniza_de_vuelta_a_tesoreria(self):
+        # 02/Sep/2026, pedido explicito: "si en PLD ya dio RFC y numero se
+        # puede colocar ya en tesoreria... igual lo de tipo de persona" -
+        # ver _sincronizar_contraparte_en_tesoreria.
+        with patch("pld.audit_utils.requests.post"), patch.object(
+            settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"
+        ), patch("pld.views.requests.patch") as mock_patch:
+            mock_patch.return_value = Mock(status_code=200)
+            response = self._editar({"tipo_persona": "fisica", "rfc": "GOMC850315AB1"})
+        self.assertEqual(response.status_code, 200)
+        mock_patch.assert_called_once()
+        self.assertEqual(
+            mock_patch.call_args.kwargs["json"], {"rfc": "GOMC850315AB1", "tipo_persona": "fisica"}
+        )
+        self.assertEqual(mock_patch.call_args.kwargs["headers"]["X-Internal-Secret"], "dev-secreto")
+        self.assertIn(self.kyc.id_contraparte, mock_patch.call_args.args[0])
+
+    def test_editar_nombre_y_apellidos_sincroniza_nombre_como_razon_social_y_contacto(self):
+        # 02/Sep/2026, pedido explicito: "igual lo de nombre y apellidos y
+        # genero" - "nombre" (PLD) se manda como "razon_social" (tesoreria-
+        # service), son la misma columna con nombre distinto. "igual el
+        # nombre del contacto" - en PLD el contacto es siempre el titular,
+        # asi que el mismo nombre completo tambien se manda como "contacto".
+        with patch("pld.audit_utils.requests.post"), patch.object(
+            settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"
+        ), patch("pld.views.requests.patch") as mock_patch:
+            mock_patch.return_value = Mock(status_code=200)
+            response = self._editar(
+                {"nombre": "Daniel David", "apellido_paterno": "Aparicio", "apellido_materno": "Suarez"}
+            )
+        self.assertEqual(response.status_code, 200)
+        mock_patch.assert_called_once()
+        self.assertEqual(
+            mock_patch.call_args.kwargs["json"],
+            {
+                "razon_social": "Daniel David",
+                "apellido_paterno": "Aparicio",
+                "apellido_materno": "Suarez",
+                "contacto": "Daniel David Aparicio Suarez",
+            },
+        )
+
+    def test_editar_curp_sincroniza_genero_derivado(self):
+        # 02/Sep/2026, pedido explicito: "el genero tambien deberia
+        # extenderse" - PLD no tiene columna genero propia, se deriva de la
+        # letra H/M en la posicion 11 de la CURP (indice 10).
+        with patch("pld.audit_utils.requests.post"), patch.object(
+            settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"
+        ), patch("pld.views.requests.patch") as mock_patch:
+            mock_patch.return_value = Mock(status_code=200)
+            response = self._editar({"curp": "EDIT900101MDFRRL03"})
+        self.assertEqual(response.status_code, 200)
+        mock_patch.assert_called_once()
+        self.assertEqual(mock_patch.call_args.kwargs["json"], {"genero": "MUJER"})
+
+    def test_editar_telefono_sms_sincroniza_a_tesoreria(self):
+        # 02/Sep/2026, pedido explicito: "sincroniza los datos de
+        # contacto" - telefono_sms se llama igual en los dos servicios.
+        # telefono_fijo no tiene columna equivalente en tesoreria-service.
+        with patch("pld.audit_utils.requests.post"), patch.object(
+            settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"
+        ), patch("pld.views.requests.patch") as mock_patch:
+            mock_patch.return_value = Mock(status_code=200)
+            response = self._editar({"telefono_sms": "5511223344", "telefono_fijo": "5599887766"})
+        self.assertEqual(response.status_code, 200)
+        mock_patch.assert_called_once()
+        self.assertEqual(mock_patch.call_args.kwargs["json"], {"telefono_sms": "5511223344"})
+
+    def test_editar_sin_campos_sincronizables_no_llama_a_tesoreria(self):
+        with patch("pld.audit_utils.requests.post"), patch.object(
+            settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"
+        ), patch("pld.views.requests.patch") as mock_patch:
+            self._editar({"dom_calle": "Calle Falsa 123"})
+        mock_patch.assert_not_called()
+
+    def test_sin_secreto_configurado_no_llama_a_tesoreria(self):
+        with patch("pld.audit_utils.requests.post"), patch.object(
+            settings, "TESORERIA_INTERNAL_SECRET", ""
+        ), patch("pld.views.requests.patch") as mock_patch:
+            response = self._editar({"rfc": "GOMC850315AB1"})
+        self.assertEqual(response.status_code, 200)
+        mock_patch.assert_not_called()
+
+    def test_tesoreria_caida_no_rompe_el_guardado_en_pld(self):
+        # Fail-open, mismo criterio que el resto de las validaciones
+        # cross-servicio - el expediente de PLD ya se guardo bien.
+        with patch("pld.audit_utils.requests.post"), patch.object(
+            settings, "TESORERIA_INTERNAL_SECRET", "dev-secreto"
+        ), patch("pld.views.requests.patch", side_effect=requests.RequestException()):
+            response = self._editar({"rfc": "GOMC850315AB1"})
+        self.assertEqual(response.status_code, 200)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.rfc, "GOMC850315AB1")
+
+
+class ValidacionCodigoPostalTests(TestCase):
+    """02/Sep/2026, pedido explicito del checklist de cumplimiento: "agregar
+    una regla de validacion para forzar que el campo Codigo Postal acepte
+    exclusivamente 5 digitos numericos" - ver
+    PldContraparteKycSerializer.validate()."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        self.kyc = _kyc("cp000301", RFC_TIZARA)
+
+    def _editar(self, campos):
+        request = self.factory.patch(f"/api/kyc/{self.kyc.id_kyc}/", campos, format="json")
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+        return view(request, pk=self.kyc.id_kyc)
+
+    def test_cp_con_letras_da_400(self):
+        response = self._editar({"dom_cp": "ABCDE"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("dom_cp", response.data)
+
+    def test_cp_con_menos_de_5_digitos_da_400(self):
+        response = self._editar({"dom_cp": "1234"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("dom_cp", response.data)
+
+    def test_cp_con_5_digitos_pasa(self):
+        response = self._editar({"dom_cp": "01000"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["dom_cp"], "01000")
+
+    def test_cp_correspondencia_tambien_se_valida(self):
+        response = self._editar({"dom_corresp_dom_cp": "abc12"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("dom_corresp_dom_cp", response.data)
+
+    def test_cp_vacio_no_truena(self):
+        # Sigue siendo opcional - solo se valida el formato si SI llega
+        # un valor, no se vuelve obligatorio de la nada.
+        response = self._editar({"dom_cp": ""})
+        self.assertEqual(response.status_code, 200)
+
+
+class ValidacionColoniaTests(TestCase):
+    """02/Sep/2026, pedido explicito: "en domicilio, colonia no puede ser
+    numeros" - hallazgo real: alguien puede escribir el CP por error en
+    este campo. No se prohiben numeros del todo (hay colonias reales con
+    numeros en el nombre) - solo se rechaza si son puros digitos."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        self.kyc = _kyc("cp000303", RFC_TIZARA)
+
+    def _editar(self, campos):
+        request = self.factory.patch(f"/api/kyc/{self.kyc.id_kyc}/", campos, format="json")
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+        return view(request, pk=self.kyc.id_kyc)
+
+    def test_colonia_solo_numeros_da_400(self):
+        response = self._editar({"dom_colonia": "01000"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("dom_colonia", response.data)
+
+    def test_colonia_correspondencia_tambien_se_valida(self):
+        response = self._editar({"dom_corresp_dom_colonia": "12345"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("dom_corresp_dom_colonia", response.data)
+
+    def test_colonia_con_numero_en_el_nombre_pasa(self):
+        # Colonias reales con numeros en el nombre no deben rechazarse.
+        response = self._editar({"dom_colonia": "20 de Noviembre"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["dom_colonia"], "20 de Noviembre")
+
+    def test_colonia_texto_normal_pasa(self):
+        response = self._editar({"dom_colonia": "Centro"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_colonia_vacia_no_truena(self):
+        response = self._editar({"dom_colonia": ""})
+        self.assertEqual(response.status_code, 200)
+
+
+class ValidacionRfcCurpTests(TestCase):
+    """02/Sep/2026, pedido explicito del checklist de cumplimiento:
+    "Requerir de forma obligatoria el RFC con homoclave... y la CURP...,
+    validando su estructura" - ver PldContraparteKycSerializer.validate().
+    "Obligatorio" se aplica en el formulario (frontend), aqui solo se
+    valida el FORMATO cuando SI llega un valor."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        self.kyc = _kyc("cp000302", RFC_TIZARA)
+
+    def _editar(self, campos):
+        request = self.factory.patch(f"/api/kyc/{self.kyc.id_kyc}/", campos, format="json")
+        request.effective_scope = self.scope
+        view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+        return view(request, pk=self.kyc.id_kyc)
+
+    def test_rfc_fisica_13_caracteres_pasa(self):
+        response = self._editar({"tipo_persona": "fisica", "rfc": "GOMC850315AB1"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["rfc"], "GOMC850315AB1")
+
+    def test_rfc_fisica_con_12_caracteres_da_400(self):
+        # Le falta una letra del nombre - formato de moral (12), no de
+        # fisica (13).
+        response = self._editar({"tipo_persona": "fisica", "rfc": "GMC850315AB1"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("rfc", response.data)
+
+    def test_rfc_moral_12_caracteres_pasa(self):
+        response = self._editar({"tipo_persona": "moral", "rfc": "ABC850315XY2"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["rfc"], "ABC850315XY2")
+
+    def test_rfc_moral_con_13_caracteres_da_400(self):
+        response = self._editar({"tipo_persona": "moral", "rfc": "GOMC850315AB1"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("rfc", response.data)
+
+    def test_rfc_con_caracteres_invalidos_da_400(self):
+        response = self._editar({"tipo_persona": "fisica", "rfc": "1234567890123"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("rfc", response.data)
+
+    def test_curp_18_caracteres_pasa(self):
+        response = self._editar({"curp": "GOMC850315HDFRRL09"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["curp"], "GOMC850315HDFRRL09")
+
+    def test_curp_corta_da_400(self):
+        response = self._editar({"curp": "GOMC850315HDF"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("curp", response.data)
+
+    def test_curp_con_genero_invalido_da_400(self):
+        # La letra en la posicion 11 debe ser H o M, no X.
+        response = self._editar({"curp": "GOMC850315XDFRRL09"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("curp", response.data)
+
+    def test_rfc_y_curp_vacios_no_truenan(self):
+        response = self._editar({"rfc": "", "curp": ""})
+        self.assertEqual(response.status_code, 200)
+
+
+class RepresentanteLegalTests(TestCase):
+    """02/Sep/2026, pedido explicito del checklist de cumplimiento:
+    "Incluir como requisito obligatorio los datos e identificacion oficial
+    del Representante Legal / Apoderado" - ver PldRepresentanteLegal."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000400", RFC_TIZARA)
+
+    def _crear(self, scope, campos=None):
+        body = {
+            "kyc": self.kyc.id_kyc,
+            "nombre_completo": "Juan Pérez López",
+            "created_by": "usr00001",
+            "updated_by": "usr00001",
+            **(campos or {}),
+        }
+        request = self.factory.post("/api/representantes-legales/", body, format="json")
+        request.effective_scope = scope
+        view = PldRepresentanteLegalViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_crear_sin_permiso_da_403(self):
+        response = self._crear(EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_permiso_si_funciona(self):
+        response = self._crear(EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)))
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["tipo"], "REPRESENTANTE_LEGAL")
+
+    def test_rfc_invalido_da_400(self):
+        response = self._crear(
+            EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)), {"rfc": "123"}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("rfc", response.data)
+
+    def test_listado_filtra_por_expediente(self):
+        otro_kyc = _kyc("cp000401", RFC_TIZARA)
+        PldRepresentanteLegal.objects.create(
+            kyc=self.kyc, nombre_completo="Rep de este expediente", created_by="u1", updated_by="u1"
+        )
+        PldRepresentanteLegal.objects.create(
+            kyc=otro_kyc, nombre_completo="Rep de otro expediente", created_by="u1", updated_by="u1"
+        )
+        request = self.factory.get(f"/api/representantes-legales/?kyc={self.kyc.id_kyc}")
+        request.effective_scope = EffectiveScope(is_global=True)
+        view = PldRepresentanteLegalViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["nombre_completo"], "Rep de este expediente")
+
+    def test_puede_ser_representante_y_beneficiario_controlador_a_la_vez(self):
+        # 02/Sep/2026, pedido explicito: "aunque a veces una misma persona
+        # fisica cumple ambos roles" - son 2 campos independientes, no se
+        # pisan entre si.
+        response = self._crear(
+            EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)),
+            {
+                "es_beneficiario_controlador": True,
+                "porcentaje_participacion": "51.00",
+                "poder_facultades": "PLEITOS_Y_ADMINISTRACION",
+                "poder_vigente": True,
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["tipo"], "REPRESENTANTE_LEGAL")
+        self.assertTrue(response.data["es_beneficiario_controlador"])
+        self.assertEqual(response.data["porcentaje_participacion"], "51.00")
+
+    def test_porcentaje_participacion_mayor_a_100_da_400(self):
+        response = self._crear(
+            EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)),
+            {"es_beneficiario_controlador": True, "porcentaje_participacion": "150.00"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("porcentaje_participacion", response.data)
+
+    def test_beneficiario_controlador_como_registro_propio_sin_ser_representante(self):
+        # Alguien puede ser dueño de mas del 25% sin tener poder de firma -
+        # se registra igual, con tipo default (REPRESENTANTE_LEGAL no
+        # aplica realmente aqui, pero el modelo no fuerza exclusion; lo
+        # que si distingue el rol real es es_beneficiario_controlador).
+        response = self._crear(
+            EffectiveScope(is_global=True, perm_keys=("pld-compliance.crear",)),
+            {"es_beneficiario_controlador": True, "porcentaje_participacion": "30.00"},
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["es_beneficiario_controlador"])
 
 
 class EmitirEventoAuditoriaTests(TestCase):

@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 from pld.views import (
     PldContraparteDocViewSet,
     PldContraparteKycViewSet,
+    PldRepresentanteLegalViewSet,
     PldSolicitudEliminacionDocViewSet,
     PldTicketClienteViewSet,
 )
@@ -12,6 +13,7 @@ from pld.views import (
 router = DefaultRouter()
 router.register("kyc", PldContraparteKycViewSet, basename="pldcontrapartekyc")
 router.register("kyc-docs", PldContraparteDocViewSet, basename="pldcontrapartedoc")
+router.register("representantes-legales", PldRepresentanteLegalViewSet, basename="pldrepresentantelegal")
 router.register("solicitudes-eliminacion-doc", PldSolicitudEliminacionDocViewSet, basename="pldsolicitudeliminaciondoc")
 router.register("ticket-cliente", PldTicketClienteViewSet, basename="pldticketcliente")
 

@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import quote
 
 import requests
 from cumbresbi_scope import forward_auth_headers
@@ -16,10 +17,17 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet
 
 from .audit_utils import contexto_kyc, emitir_evento_auditoria
-from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
+from .models import (
+    PldContraparteDoc,
+    PldContraparteKyc,
+    PldRepresentanteLegal,
+    PldSolicitudEliminacionDoc,
+    PldTicketCliente,
+)
 from .serializers import (
     PldContraparteDocSerializer,
     PldContraparteKycSerializer,
+    PldRepresentanteLegalSerializer,
     PldSolicitudEliminacionDocSerializer,
     PldTicketClienteSerializer,
 )
@@ -95,16 +103,25 @@ def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
     return eliminados
 
 
-def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
+def _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies):
     """Verifica contra el catalogo maestro real (tesoreria-service) que
-    `id_contraparte` exista (24/Ago/2026, cierre de la reconciliacion
-    contraparte maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md
-    Semana 19). ContraparteSelector en el frontend siempre manda un id real,
-    pero nada impedia hasta ahora que llegara uno inventado (o el default
-    autogenerado del modelo, si el selector no se uso). Si tesoreria-service
-    no responde, se deja pasar (fail-open, mismo criterio que
-    _limpiar_documentos_borrados_en_drive) - un problema de red entre
-    servicios no debe bloquear el alta de un expediente KYC real."""
+    `id_contraparte` exista, y regresa sus datos VIGENTES - normalmente el
+    mismo id que se mando, pero puede resolver a otro si esa contraparte
+    se fusiono con otra mientras tanto (02/Sep/2026, cierre real de la
+    reconciliacion contraparte maestra - ver
+    TesoreriaContraparteViewSet.retrieve/_fusionar_en en tesoreria-service:
+    consultar el id de un alias fusionado ya no da 404, da 200 con los
+    datos del sobreviviente real). "tesoreria expone el id nuevo, PLD/
+    Ventas se actualizan solos" - el llamador usa el id_contraparte del
+    dict regresado, no el que mando originalmente.
+
+    Regresa None solo si tesoreria-service confirma con un 404 real que la
+    contraparte no existe en absoluto (nunca existio, no es un alias).
+    Fail-open, mismo criterio que _obtener_sociedad_en_iam: si
+    tesoreria-service no responde o da error, regresa un dict minimo con
+    el mismo id_contraparte sin cambios (sin nombre real disponible) - un
+    problema de red entre servicios no debe bloquear el alta de un
+    expediente KYC real."""
     try:
         upstream = requests.get(
             f"{settings.TESORERIA_SERVICE_URL}/api/contrapartes/{id_contraparte}/",
@@ -116,10 +133,10 @@ def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
         logger.warning(
             "tesoreria-service no respondio al validar id_contraparte %s", id_contraparte, exc_info=True
         )
-        return True
+        return {"id_contraparte": id_contraparte}
 
     if upstream.status_code == 404:
-        return False
+        return None
     if upstream.status_code != 200:
         # Error real del lado de tesoreria-service (500, 403 por permisos
         # desalineados, etc.) - mismo criterio fail-open que timeout/red.
@@ -128,8 +145,197 @@ def _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
             upstream.status_code,
             id_contraparte,
         )
-        return True
-    return True
+        return {"id_contraparte": id_contraparte}
+    return upstream.json()
+
+
+def _nombre_completo_de_contraparte(datos_contraparte):
+    """Junta razon_social + apellidos de la respuesta de tesoreria-service
+    en un solo nombre (02/Sep/2026, hallazgo real: "al crear el expediente
+    no se llena el nombre" - PldContraparteKyc.nombre_completo solo se
+    llenaba via confirmar_extraccion del Motor Documental, nunca al crear
+    el expediente aunque ya se hubiera elegido/creado la contraparte real
+    en el selector). Para persona moral/fideicomiso los apellidos vienen
+    vacios, razon_social ya es el nombre completo por si solo. Regresa ""
+    si no hay nada util todavia (ej. alta autonoma con razon_social
+    placeholder "Pendiente de completar...", o si tesoreria-service no
+    respondio) - no tiene caso guardar un nombre a medias o el
+    placeholder como si fuera el nombre real."""
+    if not datos_contraparte:
+        return ""
+    partes = [
+        datos_contraparte.get("razon_social") or "",
+        datos_contraparte.get("apellido_paterno") or "",
+        datos_contraparte.get("apellido_materno") or "",
+    ]
+    nombre = " ".join(p.strip() for p in partes if p.strip())
+    if nombre.startswith("Pendiente de completar"):
+        # El placeholder exacto que usa _crear_contraparte_minima_en_
+        # tesoreria() para el alta autonoma (Opcion B, sin contraparte
+        # elegida) - mejor dejar el nombre vacio que guardarlo como si
+        # fuera el nombre real del cliente. Un nombre real escrito a mano
+        # via ContraparteSelector (origen=selector), aunque minimo, SI se
+        # usa tal cual - es el nombre real que alguien tecleo.
+        return ""
+    return nombre
+
+
+def _crear_contraparte_minima_en_tesoreria():
+    """Crea la contraparte real en el catalogo maestro de tesoreria-service
+    para el alta autonoma de un expediente KYC (Opcion B, ver
+    PldContraparteKyc.id_contraparte en models.py) - 02/Sep/2026, cierre
+    real de la reconciliacion contraparte maestra. Antes, cuando el
+    analista creaba un expediente sin pasar por el ContraparteSelector
+    (sin id_contraparte en el payload), el modelo generaba su propio id
+    local (default=_short_id) que nunca existia de verdad en tesoreria-
+    service - un huerfano garantizado que _existe_contraparte_en_tesoreria
+    no alcanzaba a prevenir porque solo valida cuando SI llega un
+    id_contraparte.
+
+    Usa el secreto interno servicio-a-servicio (X-Internal-Secret, ver
+    settings.TESORERIA_INTERNAL_SECRET) en vez del JWT del analista - un
+    PLD_ANALISTA no necesariamente tiene el permiso tesoreria.crear, y no
+    deberia necesitarlo solo para poder abrir un expediente autonomo.
+    origen="pld" (ver TesoreriaContraparte.ORIGEN_PLD) exime a
+    tesoreria-service de exigir email/tipo_persona - el cliente completa
+    los datos reales despues via el link publico de PLD.
+
+    Fail-open, mismo criterio que _existe_contraparte_en_tesoreria: si el
+    secreto no esta configurado, tesoreria-service no responde, o rechaza
+    la creacion, regresa None y el llamador cae de vuelta al id local
+    autogenerado del modelo - un problema de red entre servicios no debe
+    bloquear el alta de un expediente KYC real."""
+    if not settings.TESORERIA_INTERNAL_SECRET:
+        return None
+    try:
+        upstream = requests.post(
+            f"{settings.TESORERIA_SERVICE_URL}/api/contrapartes/",
+            json={
+                "razon_social": "Pendiente de completar (alta autónoma PLD)",
+                "origen": "pld",
+                "cliente": True,
+            },
+            headers={"X-Internal-Secret": settings.TESORERIA_INTERNAL_SECRET},
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning("tesoreria-service no respondio al crear la contraparte autonoma de PLD", exc_info=True)
+        return None
+    if upstream.status_code != 201:
+        logger.warning(
+            "tesoreria-service rechazo la creacion de la contraparte autonoma de PLD: %s %s",
+            upstream.status_code,
+            upstream.text[:300],
+        )
+        return None
+    return upstream.json().get("id_contraparte")
+
+
+def _sincronizar_contraparte_en_tesoreria(id_contraparte, campos):
+    """Empuja de vuelta a tesoreria-service los datos que ya se capturaron
+    en PLD (02/Sep/2026, pedido explicito: "si en PLD ya dio RFC y
+    numero se puede colocar ya en tesoreria... igual lo de tipo de
+    persona") - cierra el sentido inverso de la reconciliacion: antes solo
+    sincronizabamos tesoreria -> PLD al crear el expediente
+    (_resolver_contraparte_en_tesoreria/_nombre_completo_de_contraparte),
+    nunca PLD -> tesoreria cuando el analista/cliente completaba datos
+    despues via el expediente o el link publico.
+
+    Solo manda los campos que SI tienen columna equivalente en tesoreria-
+    service (rfc, tipo_persona, nombre/apellidos, genero, telefono_sms,
+    contacto - 02/Sep/2026, pedido explicito: "igual lo de nombre y
+    apellidos y genero" + "sincroniza los datos de contacto" + "igual el
+    nombre del contacto") - el resto de "datos del cliente" de PLD
+    (domicilio, telefono_fijo, etc.) no tiene columna equivalente ahi, se
+    quedan solo en el expediente KYC. telefono_fijo NO se sincroniza porque
+    tesoreria-service no tiene columna equivalente (solo tiene
+    telefono_sms/celular, ver TesoreriaContraparte).
+
+    "contacto" (tesoreria-service) tampoco tiene columna propia en PLD -
+    igual que "genero", se deriva: en PLD el contacto SIEMPRE es el
+    titular mismo (no existe un contacto distinto, a diferencia de
+    tesoreria-service que si permite un tercero - ver el checkbox "El
+    contacto es el mismo titular" en tesoreria/contrapartes/page.tsx), asi
+    que basta con mandar ahi el nombre completo que ya se este
+    sincronizando como razon_social/apellidos en esta misma llamada.
+
+    PLD no tiene una columna PldContraparteKyc.genero propia - "genero" SI
+    se sincroniza, pero derivado de la letra H/M en la posicion 11 (indice
+    10) de la CURP (unico lugar de PLD donde vive el dato), no copiado de
+    un campo con el mismo nombre como el resto de campos_a_sincronizar. Ver
+    TesoreriaContraparte.GENERO_HOMBRE/GENERO_MUJER.
+
+    "nombre" de PLD se manda como "razon_social" de tesoreria-service (son
+    columnas con nombres distintos para el mismo concepto - el nombre de
+    pila de una persona fisica, ver TesoreriaContraparte.razon_social y su
+    docstring "Fisica/Fisica con actividad empresarial es SOLO el/los
+    nombre(s) de pila").
+
+    Actualizar el rfc en tesoreria-service puede disparar ahi la fusion
+    automatica por RFC duplicado (ver TesoreriaContraparteViewSet.update/
+    _fusionar_en) si esa contraparte era un huerfano tipo "Pendiente de
+    completar (alta autónoma PLD)" y el RFC ya coincide con otra real -
+    exactamente el cierre del circulo completo de la reconciliacion.
+
+    Usa el secreto interno servicio-a-servicio (mismo criterio que
+    _crear_contraparte_minima_en_tesoreria) - ni el analista ni el cliente
+    externo del link publico tienen por que tener tesoreria.editar. Fail-
+    open y en segundo plano respecto al guardado real: si esto falla, el
+    expediente de PLD ya se guardo bien, solo no se reflejo en tesoreria -
+    no vale la pena tronar el request completo por esto."""
+    if not settings.TESORERIA_INTERNAL_SECRET:
+        return
+    # "nombre" (PLD) -> "razon_social" (tesoreria-service) - mismo dato,
+    # nombre de columna distinto. El resto (rfc, tipo_persona, apellidos,
+    # telefono_sms) ya se llaman igual en los dos servicios.
+    MAPEO_CAMPOS = {"nombre": "razon_social"}
+    campos_a_sincronizar = {
+        MAPEO_CAMPOS.get(k, k): v
+        for k, v in campos.items()
+        if k
+        in ("rfc", "tipo_persona", "nombre", "apellido_paterno", "apellido_materno", "telefono_sms")
+        and v
+    }
+    # "contacto" (tesoreria-service) - en PLD el contacto es siempre el
+    # titular mismo, se arma con las mismas piezas de nombre/apellidos que
+    # vengan en este PATCH (no jala datos previos del expediente que no se
+    # esten tocando ahora, mismo criterio fail-open/parcial del resto de
+    # esta funcion).
+    nombre_completo = " ".join(
+        p for p in (campos.get("nombre"), campos.get("apellido_paterno"), campos.get("apellido_materno")) if p
+    )
+    if nombre_completo:
+        campos_a_sincronizar["contacto"] = nombre_completo
+    curp = campos.get("curp")
+    if curp and len(curp) >= 11:
+        # Posicion 11 (indice 10) de la CURP: unica letra que puede ser
+        # H, M o (casos no binarios, INE 2024) X - mismo alfabeto que
+        # TesoreriaContraparte.GENERO_CHOICES, ver docstring arriba.
+        genero = {"H": "HOMBRE", "M": "MUJER", "X": "X"}.get(curp[10].upper())
+        if genero:
+            campos_a_sincronizar["genero"] = genero
+    if not campos_a_sincronizar:
+        return
+    try:
+        upstream = requests.patch(
+            f"{settings.TESORERIA_SERVICE_URL}/api/contrapartes/{id_contraparte}/",
+            json=campos_a_sincronizar,
+            headers={"X-Internal-Secret": settings.TESORERIA_INTERNAL_SECRET},
+            timeout=10,
+        )
+        if upstream.status_code != 200:
+            logger.warning(
+                "tesoreria-service rechazo la sincronizacion de %s para %s: %s %s",
+                campos_a_sincronizar,
+                id_contraparte,
+                upstream.status_code,
+                upstream.text[:300],
+            )
+    except requests.RequestException:
+        logger.warning(
+            "tesoreria-service no respondio al sincronizar %s para %s", campos_a_sincronizar, id_contraparte,
+            exc_info=True,
+        )
 
 
 def _obtener_sociedad_en_iam(sociedad_rfc, headers, cookies):
@@ -144,8 +350,19 @@ def _obtener_sociedad_en_iam(sociedad_rfc, headers, cookies):
     cuando iam-service confirma con un 404 real que esa sociedad no esta en
     su catalogo."""
     try:
+        # quote() (02/Sep/2026, hallazgo real: "Hubo un problema en el
+        # servidor" PLD-500 al crear un expediente con la sociedad
+        # "CONSULTORÍA Y PROYECTOS CUMBRES") - su RFC real es literalmente
+        # "#####3" (decision permanente de Fase 1: no hay RFC fiscal real
+        # y no lo va a haber, ver iam-service). "#" es el delimitador de
+        # fragmento de una URL - sin escaparlo, todo lo que sigue al
+        # primer "#" se descartaba ANTES de salir de este proceso (ni
+        # siquiera le llegaba a iam-service), asi que la peticion real
+        # terminaba siendo GET /api/sociedades/ (la lista completa, no el
+        # detalle) - de ahi 'list' object has no attribute 'get' al leer
+        # upstream.json().get('razon_social') mas abajo, esperando un dict.
         upstream = requests.get(
-            f"{settings.IAM_SERVICE_URL}/api/sociedades/{sociedad_rfc}/",
+            f"{settings.IAM_SERVICE_URL}/api/sociedades/{quote(sociedad_rfc, safe='')}/",
             headers=headers,
             cookies=cookies,
             timeout=10,
@@ -236,10 +453,14 @@ class PldContraparteKycViewSet(ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """Valida contra el catalogo real de tesoreria-service antes de
-        crear (24/Ago/2026, ver _existe_contraparte_en_tesoreria) - el
+        crear (24/Ago/2026, ver _resolver_contraparte_en_tesoreria) - el
         unique=True del modelo ya evita duplicados, pero no evita un
         id_contraparte que simplemente no existe en Tesoreria (ej. si
         alguien llama a la API directo, sin pasar por ContraparteSelector).
+        02/Sep/2026: si esa contraparte se fusiono con otra (ver
+        tesoreria-service::_fusionar_en), se guarda el id vigente que
+        tesoreria-service resuelve, no el alias viejo que mando el
+        frontend.
 
         25/Ago/2026 (requerimiento real del cliente: "hay que implementar
         sociedad... se ponga en automatico el nombre") - sociedad_rfc pasa
@@ -252,12 +473,42 @@ class PldContraparteKycViewSet(ModelViewSet):
         a iam-service (que si exige un permiso real)."""
         id_contraparte = request.data.get("id_contraparte")
         headers, cookies = forward_auth_headers(request)
+        data = request.data
         if id_contraparte:
-            if not _existe_contraparte_en_tesoreria(id_contraparte, headers, cookies):
+            datos_contraparte = _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies)
+            if datos_contraparte is None:
                 return Response(
                     {"id_contraparte": "No existe esa contraparte en el catálogo de Tesorería."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            resuelto = datos_contraparte.get("id_contraparte", id_contraparte)
+            if resuelto != id_contraparte:
+                data = request.data.copy()
+                data["id_contraparte"] = resuelto
+            # 02/Sep/2026 (hallazgo real: "al crear el expediente no se
+            # llena el nombre" - nombre_completo antes solo lo llenaba el
+            # Motor Documental via confirmar_extraccion, nunca al crear el
+            # expediente aunque ya se hubiera elegido/creado la contraparte
+            # real). Solo se pisa si el cliente no mando ya un
+            # nombre_completo explicito propio (no deberia pasar en el
+            # flujo normal del selector, pero por si acaso).
+            nombre_completo = _nombre_completo_de_contraparte(datos_contraparte)
+            if nombre_completo and not request.data.get("nombre_completo"):
+                if data is request.data:
+                    data = request.data.copy()
+                data["nombre_completo"] = nombre_completo
+        else:
+            # Alta autonoma (Opcion B, 02/Sep/2026): en vez de dejar que el
+            # modelo invente un id local sin relacion real con
+            # tesoreria-service, se crea la contraparte real alla primero
+            # y se usa ese id (ver _crear_contraparte_minima_en_tesoreria).
+            # Si tesoreria-service no responde, se sigue fail-open con el
+            # default local del modelo - mismo criterio que
+            # _resolver_contraparte_en_tesoreria.
+            nuevo_id = _crear_contraparte_minima_en_tesoreria()
+            if nuevo_id:
+                data = request.data.copy()
+                data["id_contraparte"] = nuevo_id
 
         sociedad_rfc = request.data.get("sociedad_rfc")
         if not sociedad_rfc:
@@ -272,7 +523,7 @@ class PldContraparteKycViewSet(ModelViewSet):
         # no lo escribe a mano) - DRF lo descarta si viaja dentro de "data"
         # normal, hay que pisarlo via save(**kwargs) (mismo patron que
         # PldTicketClienteViewSet.actualizar_datos con politicas_aceptadas_en).
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         serializer.instance.sociedad_nombre = sociedad_nombre
@@ -326,6 +577,10 @@ class PldContraparteKycViewSet(ModelViewSet):
                 valores_previos={k: v for k, v in valores_previos.items() if k in cambios},
                 valores_nuevos={**contexto_kyc(instance), "campos": cambios},
             )
+            # 02/Sep/2026, pedido explicito: "si en PLD ya dio RFC y numero
+            # se puede colocar ya en tesoreria... igual lo de tipo de
+            # persona" - ver _sincronizar_contraparte_en_tesoreria.
+            _sincronizar_contraparte_en_tesoreria(instance.id_contraparte, cambios)
         return Response(serializer.data)
 
     # Campos del expediente que el Motor Documental puede llenar con datos ya
@@ -337,11 +592,25 @@ class PldContraparteKycViewSet(ModelViewSet):
     # aprobado_por/aprobado_en, que tienen su propio flujo en aprobar()).
     CAMPOS_CONFIRMABLES = {
         "nombre_completo",
+        # tipo_persona (02/Sep/2026, pedido explicito: exponerlo tambien en
+        # el link publico) - el cliente ahora puede declararlo el mismo
+        # via pld-ticket/[token], no solo el analista desde /pld/[idKyc].
+        "tipo_persona",
+        # nombre/apellido_paterno/apellido_materno (02/Sep/2026, pedido
+        # explicito: dividir el nombre en 3 campos para Fisica, tambien
+        # expuesto en el link publico) - reemplazan a nombre_completo solo
+        # cuando tipo_persona=fisica (logica de visibilidad vive en el
+        # frontend, ver lib/pld.ts::esCampoVisibleParaTipoPersona; aqui
+        # solo se autoriza que el cliente pueda escribir estas 3 llaves).
+        "nombre",
+        "apellido_paterno",
+        "apellido_materno",
         "fecha_nac_const",
         "pais_nac_const",
         "folio_mercantil",
         "objeto_social",
         "curp",
+        "rfc",
         "nacionalidad",
         "ocupacion_act_economica",
         "dom_calle",
@@ -528,6 +797,41 @@ class PldContraparteKycViewSet(ModelViewSet):
     def reactivar_cuenta(self, request, pk=None):
         """Deshace marcar_sospechoso/congelar - vuelve la cuenta a ACTIVA."""
         return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_ACTIVA, "pld_contrapartes_kyc.reactivar_cuenta")
+
+
+class PldRepresentanteLegalViewSet(ModelViewSet):
+    """Representante legal / apoderado de una contraparte Moral (02/Sep/2026,
+    ver PldRepresentanteLegal en models.py). Mismo permiso que editar datos
+    del expediente (pld-compliance.crear/editar) - es informacion de
+    identificacion, no un archivo (eso es PldContraparteDoc, con su propio
+    permiso pld-documentos.*).
+
+    Filtra por ?kyc=<id_kyc> para listar los representantes de un
+    expediente."""
+
+    queryset = PldRepresentanteLegal.objects.all().order_by("-created_at")
+    serializer_class = PldRepresentanteLegalSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("pld-compliance.crear")()]
+        if self.action in ("update", "partial_update", "destroy"):
+            return [require_permission("pld-compliance.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = PldRepresentanteLegal.objects.for_scope(self.request.effective_scope).order_by("-created_at")
+        kyc_param = self.request.query_params.get("kyc")
+        if kyc_param:
+            queryset = queryset.filter(kyc_id=kyc_param)
+        return queryset
+
+    def perform_create(self, serializer):
+        actor = self.request.effective_scope.identity_user_id
+        serializer.save(created_by=actor, updated_by=actor)
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.effective_scope.identity_user_id)
 
 
 class PldContraparteDocViewSet(ModelViewSet):
@@ -1195,6 +1499,13 @@ class PldTicketClienteViewSet(ModelViewSet):
                 "consentimiento_ip": ip_cliente,
             },
         )
+        # 02/Sep/2026, pedido explicito: "si en PLD ya dio RFC y numero se
+        # puede colocar ya en tesoreria... igual lo de tipo de persona" -
+        # el cliente puede ser quien complete estos datos via el link
+        # publico, no solo el analista (ver update() arriba, mismo
+        # criterio). ticket.kyc ya trae el rfc/tipo_persona actualizados
+        # (serializer.save() los aplico sobre la misma instancia).
+        _sincronizar_contraparte_en_tesoreria(ticket.kyc.id_contraparte, datos_validos)
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])

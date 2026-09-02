@@ -1,6 +1,69 @@
+import re
+
 from rest_framework import serializers
 
-from .models import PldContraparteDoc, PldContraparteKyc, PldSolicitudEliminacionDoc, PldTicketCliente
+from .models import (
+    PldContraparteDoc,
+    PldContraparteKyc,
+    PldRepresentanteLegal,
+    PldSolicitudEliminacionDoc,
+    PldTicketCliente,
+)
+
+
+class PldRepresentanteLegalSerializer(serializers.ModelSerializer):
+    """Representante legal / apoderado de una contraparte Moral (02/Sep/2026,
+    ver PldRepresentanteLegal en models.py)."""
+
+    class Meta:
+        model = PldRepresentanteLegal
+        fields = [
+            "id_representante",
+            "kyc",
+            "tipo",
+            "es_principal_del_tramite",
+            "es_beneficiario_controlador",
+            "porcentaje_participacion",
+            "nombre_completo",
+            "rfc",
+            "curp",
+            "tipo_identificacion",
+            "numero_identificacion",
+            "autoridad_identificacion",
+            "poder_numero_escritura",
+            "poder_notario_nombre",
+            "poder_notario_numero",
+            "poder_fecha_escritura",
+            "poder_facultades",
+            "poder_vigente",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate(self, attrs):
+        # Mismos patrones (no oficiales al 100%, ver aviso en
+        # PldContraparteKycSerializer.validate) que el titular del
+        # expediente - un representante legal es siempre persona fisica,
+        # su RFC es de 13 caracteres.
+        rfc = attrs.get("rfc")
+        if rfc and not re.fullmatch(r"[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}", rfc.upper()):
+            raise serializers.ValidationError(
+                {"rfc": ["RFC con formato inválido (verifica longitud y homoclave)."]}
+            )
+        curp = attrs.get("curp")
+        if curp and not re.fullmatch(r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d", curp.upper()):
+            raise serializers.ValidationError({"curp": ["CURP con formato inválido (deben ser 18 caracteres)."]})
+
+        porcentaje = attrs.get("porcentaje_participacion")
+        if porcentaje is not None and not (0 <= porcentaje <= 100):
+            raise serializers.ValidationError(
+                {"porcentaje_participacion": ["Debe ser un porcentaje entre 0 y 100."]}
+            )
+        return attrs
 
 
 class PldContraparteDocSerializer(serializers.ModelSerializer):
@@ -111,11 +174,16 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             # estar en esta lista o DRF lo ignora en silencio al guardar.
             "proyecto",
             "nombre_completo",
+            "nombre",
+            "apellido_paterno",
+            "apellido_materno",
+            "tipo_persona",
             "fecha_nac_const",
             "pais_nac_const",
             "folio_mercantil",
             "objeto_social",
             "curp",
+            "rfc",
             "nacionalidad",
             "ocupacion_act_economica",
             "dom_calle",
@@ -182,6 +250,69 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             # views.py), nunca por PATCH directo.
             "sociedad_nombre",
         ]
+
+    def validate(self, attrs):
+        # Codigo postal a 5 digitos numericos (02/Sep/2026, pedido explicito
+        # del checklist de cumplimiento: "agregar una regla de validacion
+        # para forzar que el campo Codigo Postal acepte exclusivamente 5
+        # digitos numericos") - aplica a los 2 campos de CP del expediente
+        # (domicilio y domicilio de correspondencia, ambos opcionales - solo
+        # se valida el formato si SI llega un valor, no se vuelve
+        # obligatorio de la nada).
+        for campo in ("dom_cp", "dom_corresp_dom_cp"):
+            valor = attrs.get(campo)
+            if valor and not re.fullmatch(r"\d{5}", valor):
+                raise serializers.ValidationError({campo: ["Debe ser un código postal de 5 dígitos numéricos."]})
+
+        # Colonia no puede ser solo numeros (02/Sep/2026, pedido explicito:
+        # "en domicilio, colonia no puede ser numeros") - hallazgo real:
+        # alguien puede escribir el CP por error en este campo en vez del
+        # nombre real de la colonia. No se prohiben numeros del todo (hay
+        # colonias reales con numeros en el nombre, ej. "20 de Noviembre",
+        # "Unidad Habitacional FOVISSSTE 2") - solo se rechaza si el valor
+        # entero son puros digitos, sin ninguna letra.
+        for campo in ("dom_colonia", "dom_corresp_dom_colonia"):
+            valor = attrs.get(campo)
+            if valor and re.fullmatch(r"\d+", valor.strip()):
+                raise serializers.ValidationError(
+                    {campo: ["La colonia no puede ser solo números - escribe el nombre real."]}
+                )
+
+        # RFC/CURP con estructura real (02/Sep/2026, pedido explicito del
+        # checklist de cumplimiento: "Requerir de forma obligatoria el RFC
+        # con homoclave (13 caracteres)... y la CURP (18 caracteres),
+        # validando su estructura"). AVISO: son patrones razonables, no el
+        # validador oficial completo del SAT/RENAPO (ese exige ademas
+        # verificar contra un digito verificador real y una lista cerrada
+        # de codigos de entidad federativa) - esto atrapa errores de
+        # formato obvios (longitud, caracteres invalidos, fecha/genero
+        # imposibles), no sustituye una validacion oficial real.
+        #
+        # Solo se valida el FORMATO si SI llega un valor - "obligatorio"
+        # (bloquear el guardado sin el dato) se aplica en el formulario
+        # (frontend), no aqui, mismo criterio que el resto de "datos del
+        # cliente" en un expediente de alta autonoma (Opcion B).
+        tipo_persona = attrs.get("tipo_persona", getattr(self.instance, "tipo_persona", None))
+        rfc = attrs.get("rfc")
+        if rfc:
+            if tipo_persona == "moral":
+                patron_rfc = r"[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}"
+            elif tipo_persona == "fisica":
+                patron_rfc = r"[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}"
+            else:
+                # Fideicomiso/sin elegir todavia - acepta cualquiera de los
+                # 2 formatos (12 o 13 caracteres).
+                patron_rfc = r"[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}"
+            if not re.fullmatch(patron_rfc, rfc.upper()):
+                raise serializers.ValidationError(
+                    {"rfc": ["RFC con formato inválido (verifica longitud y homoclave)."]}
+                )
+
+        curp = attrs.get("curp")
+        if curp and not re.fullmatch(r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d", curp.upper()):
+            raise serializers.ValidationError({"curp": ["CURP con formato inválido (deben ser 18 caracteres)."]})
+
+        return attrs
 
     def update(self, instance, validated_data):
         # Workflow hibrido (docs/architecture/pld-fase2-alcance.md sec. 3,
