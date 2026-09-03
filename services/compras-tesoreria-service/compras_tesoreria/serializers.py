@@ -33,6 +33,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "solicitud",
             "proveedor",
             "proveedor_nombre",
+            "proveedor_rfc",
             "fecha_cotizacion",
             "vigencia_dias",
             "moneda",

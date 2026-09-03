@@ -97,6 +97,7 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
     # propone, un humano ya reviso/corrigio en pantalla antes de este POST.
     CAMPOS_CONFIRMABLES = {
         "proveedor_nombre",
+        "proveedor_rfc",
         "fecha_cotizacion",
         "vigencia_dias",
         "moneda",

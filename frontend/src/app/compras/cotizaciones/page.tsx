@@ -55,6 +55,7 @@ const ESTADO_COLOR: Record<Cotizacion["estado"], "default" | "warning" | "succes
 // CotizacionViewSet.CAMPOS_CONFIRMABLES en views.py.
 const CAMPOS_CONFIRMABLES = [
   "proveedor_nombre",
+  "proveedor_rfc",
   "fecha_cotizacion",
   "vigencia_dias",
   "moneda",
@@ -66,6 +67,37 @@ const CAMPOS_CONFIRMABLES = [
 ] as const;
 
 type LineaForm = { descripcion: string; cantidad: string; precio_unitario: string; importe: string };
+
+/** Arma la matriz de comparación: una fila por descripción de material
+ * (agrupada por texto normalizado para alinear la misma partida entre
+ * proveedores), una columna por cotización activa (no descartada). Solo
+ * informativa - no cambia el modelo ni pre-selecciona nada, ver memoria
+ * "auditoria-compras-automatizacion-cotizaciones". */
+function armarFilasComparacion(cotizaciones: Cotizacion[]) {
+  const descripciones: string[] = [];
+  const vistos = new Set<string>();
+  for (const c of cotizaciones) {
+    for (const linea of c.lineas) {
+      const clave = linea.descripcion.trim().toLowerCase();
+      if (clave && !vistos.has(clave)) {
+        vistos.add(clave);
+        descripciones.push(linea.descripcion.trim());
+      }
+    }
+  }
+  return descripciones.map((descripcion) => ({
+    descripcion,
+    porCotizacion: cotizaciones.map((c) => {
+      const linea = c.lineas.find((l) => l.descripcion.trim().toLowerCase() === descripcion.toLowerCase());
+      return linea ? Number(linea.precio_unitario) : null;
+    }),
+  }));
+}
+
+function menorValor(valores: Array<number | null>): number | null {
+  const validos = valores.filter((v): v is number => v !== null && !Number.isNaN(v));
+  return validos.length ? Math.min(...validos) : null;
+}
 
 function CotizacionesPageInner() {
   const router = useRouter();
@@ -214,6 +246,14 @@ function CotizacionesPageInner() {
             >
               Nueva cotización
             </Button>
+          )}
+
+          {solicitudId && cotizaciones.filter((c) => c.estado !== "DESCARTADA").length >= 2 && (
+            <ComparacionCotizaciones
+              cotizaciones={cotizaciones.filter((c) => c.estado !== "DESCARTADA")}
+              puedeAprobar={puedeAprobar}
+              onSeleccionar={handleGenerarOrden}
+            />
           )}
 
           {cotizaciones.length === 0 && (
@@ -432,6 +472,95 @@ function CotizacionesPageInner() {
         }
       />
     </AppShell>
+  );
+}
+
+/** Tabla comparativa de precio unitario por línea + total, entre todas las
+ * cotizaciones activas de la solicitud actual. Solo informativa (resalta
+ * el menor precio en verde); la selección real sigue siendo
+ * generar_desde_cotizacion, ahora disparada desde aquí en vez de tener que
+ * abrir cada tarjeta por separado. */
+function ComparacionCotizaciones({
+  cotizaciones,
+  puedeAprobar,
+  onSeleccionar,
+}: {
+  cotizaciones: Cotizacion[];
+  puedeAprobar: boolean;
+  onSeleccionar: (idCotizacion: string) => void;
+}) {
+  const filas = armarFilasComparacion(cotizaciones);
+  const totales = cotizaciones.map((c) => (c.total ? Number(c.total) : null));
+  const menorTotal = menorValor(totales);
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+        Comparación de cotizaciones
+      </Typography>
+      <TableContainer sx={{ overflowX: "auto" }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Material</TableCell>
+              {cotizaciones.map((c) => (
+                <TableCell key={c.id_cotizacion} align="right">
+                  {c.proveedor_nombre || "(sin proveedor)"}
+                </TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {filas.map((fila) => {
+              const menor = menorValor(fila.porCotizacion);
+              return (
+                <TableRow key={fila.descripcion}>
+                  <TableCell>{fila.descripcion}</TableCell>
+                  {fila.porCotizacion.map((precio, index) => (
+                    <TableCell
+                      key={cotizaciones[index].id_cotizacion}
+                      align="right"
+                      sx={precio !== null && precio === menor ? { color: "success.main", fontWeight: 600 } : undefined}
+                    >
+                      {precio !== null ? precio.toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              );
+            })}
+            <TableRow>
+              <TableCell sx={{ fontWeight: 600 }}>Total</TableCell>
+              {totales.map((total, index) => (
+                <TableCell
+                  key={cotizaciones[index].id_cotizacion}
+                  align="right"
+                  sx={{ fontWeight: 600, ...(total !== null && total === menorTotal ? { color: "success.main" } : {}) }}
+                >
+                  {total !== null ? total.toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}
+                </TableCell>
+              ))}
+            </TableRow>
+            {puedeAprobar && (
+              <TableRow>
+                <TableCell />
+                {cotizaciones.map((c) => (
+                  <TableCell key={c.id_cotizacion} align="right">
+                    <Button
+                      size="small"
+                      variant={c.estado === "GANADORA" ? "contained" : "outlined"}
+                      disabled={c.estado === "GANADORA"}
+                      onClick={() => onSeleccionar(c.id_cotizacion)}
+                    >
+                      {c.estado === "GANADORA" ? "Seleccionada" : "Usar esta"}
+                    </Button>
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Paper>
   );
 }
 
