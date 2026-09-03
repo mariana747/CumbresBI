@@ -133,7 +133,7 @@ class FlujoCompletoCompraTests(TestCase):
         orden_id = response.data["id_orden"]
         self.assertEqual(response.data["estado"], OrdenCompra.ESTADO_BORRADOR)
         self.assertEqual(len(response.data["lineas"]), 2)
-        linea_cemento = next(l for l in response.data["lineas"] if "Cemento" in l["descripcion"])
+        linea_cemento = next(linea for linea in response.data["lineas"] if "Cemento" in linea["descripcion"])
 
         self.solicitud.refresh_from_db()
         self.assertEqual(self.solicitud.estado, SolicitudCompra.ESTADO_ORDEN_GENERADA)
@@ -180,9 +180,13 @@ class FlujoCompletoCompraTests(TestCase):
 
         # 6. Completa la recepcion de ambas lineas - la orden pasa a
         # RECIBIDA_TOTAL.
-        linea_varilla = next(l for l in OrdenCompraViewSet.as_view({"get": "retrieve"})(
-            self._get_request_scoped(f"/api/ordenes/{orden_id}/"), pk=orden_id
-        ).data["lineas"] if "Varilla" in l["descripcion"])
+        linea_varilla = next(
+            linea
+            for linea in OrdenCompraViewSet.as_view({"get": "retrieve"})(
+                self._get_request_scoped(f"/api/ordenes/{orden_id}/"), pk=orden_id
+            ).data["lineas"]
+            if "Varilla" in linea["descripcion"]
+        )
         request = self.factory.post(
             "/api/recepciones/",
             {

@@ -12,8 +12,6 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-logger = logging.getLogger(__name__)
-
 from .models import (
     Cotizacion,
     CotizacionLinea,
@@ -29,6 +27,8 @@ from .serializers import (
     RecepcionSerializer,
     SolicitudCompraSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _actor(request):
