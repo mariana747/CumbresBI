@@ -133,7 +133,14 @@ function DirectorioUsuariosPageContent() {
         Usuarios
       </Typography>
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+      <Tabs
+        value={tab}
+        onChange={(_, v) => setTab(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        sx={{ mb: 3 }}
+      >
         <Tab icon={<Users size={16} strokeWidth={1.5} />} iconPosition="start" label="Directorio" />
         <Tab icon={<Clock size={16} strokeWidth={1.5} />} iconPosition="start" label="Pendientes" />
         <Tab icon={<Ban size={16} strokeWidth={1.5} />} iconPosition="start" label="Suspendidos" />
@@ -384,111 +391,189 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
       )}
 
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell></TableCell>
-                <TableCell>Nombre</TableCell>
-                <TableCell>Correo</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell>Tipo</TableCell>
-                <TableCell>Empresa</TableCell>
-                <TableCell>Roles</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - 8 columnas no caben comodas en un
+        telefono, mismo patron que tesoreria/flujos/page.tsx. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
+                  <TableCell></TableCell>
+                  <TableCell>Nombre</TableCell>
+                  <TableCell>Correo</TableCell>
+                  <TableCell>Estado</TableCell>
+                  <TableCell>Tipo</TableCell>
+                  <TableCell>Empresa</TableCell>
+                  <TableCell>Roles</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : users.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin resultados.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                users.map((user) => (
-                  <TableRow key={user.user_id} hover>
-                    <TableCell sx={{ width: 40 }}>
-                      <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main", fontSize: 12 }}>
-                        {(user.display_name || user.primary_email).charAt(0).toUpperCase()}
-                      </Avatar>
-                    </TableCell>
-                    <TableCell>{user.display_name || "—"}</TableCell>
-                    <TableCell>{user.primary_email}</TableCell>
-                    <TableCell>
-                      <Chip size="small" label={STATUS_LABELS[user.status]} color={STATUS_COLORS[user.status]} />
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={ACCESS_MODE_LABELS[user.access_mode]}
-                        color={ACCESS_MODE_COLORS[user.access_mode]}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
-                        {user.empresas.length > 0 ? (
-                          user.empresas.map((e) => (
-                            <Typography key={e.nombre} variant="body2">
-                              {e.nombre}
-                            </Typography>
-                          ))
-                        ) : (
-                          <Typography variant="caption" color="text.secondary">
-                            Sin empresa
-                          </Typography>
-                        )}
-                      </Stack>
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
-                        {user.accesos.length > 0 ? (
-                          user.accesos.map((acceso, i) => (
-                            <Chip
-                              key={`${acceso.role_key}-${i}`}
-                              size="small"
-                              color={scopeChipColor(acceso.scope_type)}
-                              label={
-                                acceso.scope_type === "GLOBAL"
-                                  ? acceso.role_key
-                                  : `${acceso.role_key} · ${acceso.scope_id}`
-                              }
-                            />
-                          ))
-                        ) : (
-                          <Typography variant="caption" color="text.secondary">
-                            Sin rol
-                          </Typography>
-                        )}
-                      </Stack>
-                    </TableCell>
-                    <TableCell align="right">
-                      <IconButton
-                        size="small"
-                        aria-label="Editar usuario"
-                        onClick={(e) => {
-                          setMenuAnchor(e.currentTarget);
-                          setMenuUser(user);
-                        }}
-                      >
-                        <PencilLine size={14} strokeWidth={1.5} />
-                      </IconButton>
+              </TableHead>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                      <CircularProgress size={24} />
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ) : users.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin resultados.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  users.map((user) => (
+                    <TableRow key={user.user_id} hover>
+                      <TableCell sx={{ width: 40 }}>
+                        <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main", fontSize: 12 }}>
+                          {(user.display_name || user.primary_email).charAt(0).toUpperCase()}
+                        </Avatar>
+                      </TableCell>
+                      <TableCell>{user.display_name || "—"}</TableCell>
+                      <TableCell>{user.primary_email}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={STATUS_LABELS[user.status]} color={STATUS_COLORS[user.status]} />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={ACCESS_MODE_LABELS[user.access_mode]}
+                          color={ACCESS_MODE_COLORS[user.access_mode]}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
+                          {user.empresas.length > 0 ? (
+                            user.empresas.map((e) => (
+                              <Typography key={e.nombre} variant="body2">
+                                {e.nombre}
+                              </Typography>
+                            ))
+                          ) : (
+                            <Typography variant="caption" color="text.secondary">
+                              Sin empresa
+                            </Typography>
+                          )}
+                        </Stack>
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.5} alignItems="center">
+                          {user.accesos.length > 0 ? (
+                            user.accesos.map((acceso, i) => (
+                              <Chip
+                                key={`${acceso.role_key}-${i}`}
+                                size="small"
+                                color={scopeChipColor(acceso.scope_type)}
+                                label={
+                                  acceso.scope_type === "GLOBAL"
+                                    ? acceso.role_key
+                                    : `${acceso.role_key} · ${acceso.scope_id}`
+                                }
+                              />
+                            ))
+                          ) : (
+                            <Typography variant="caption" color="text.secondary">
+                              Sin rol
+                            </Typography>
+                          )}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          aria-label="Editar usuario"
+                          onClick={(e) => {
+                            setMenuAnchor(e.currentTarget);
+                            setMenuUser(user);
+                          }}
+                        >
+                          <PencilLine size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : users.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin resultados.
+            </Typography>
+          ) : (
+            users.map((user) => (
+              <Paper key={user.user_id} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+                    <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main", fontSize: 12, flexShrink: 0 }}>
+                      {(user.display_name || user.primary_email).charAt(0).toUpperCase()}
+                    </Avatar>
+                    <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2" noWrap>
+                        {user.display_name || "—"}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap>
+                        {user.primary_email}
+                      </Typography>
+                    </Stack>
+                  </Stack>
+                  <IconButton
+                    size="small"
+                    aria-label="Editar usuario"
+                    onClick={(e) => {
+                      setMenuAnchor(e.currentTarget);
+                      setMenuUser(user);
+                    }}
+                    sx={{ flexShrink: 0 }}
+                  >
+                    <PencilLine size={14} strokeWidth={1.5} />
+                  </IconButton>
+                </Stack>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                  <Chip size="small" label={STATUS_LABELS[user.status]} color={STATUS_COLORS[user.status]} />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={ACCESS_MODE_LABELS[user.access_mode]}
+                    color={ACCESS_MODE_COLORS[user.access_mode]}
+                  />
+                </Stack>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  <strong>Empresa:</strong>{" "}
+                  {user.empresas.length > 0 ? user.empresas.map((e) => e.nombre).join(", ") : "Sin empresa"}
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                  {user.accesos.length > 0 ? (
+                    user.accesos.map((acceso, i) => (
+                      <Chip
+                        key={`${acceso.role_key}-${i}`}
+                        size="small"
+                        color={scopeChipColor(acceso.scope_type)}
+                        label={acceso.scope_type === "GLOBAL" ? acceso.role_key : `${acceso.role_key} · ${acceso.scope_id}`}
+                      />
+                    ))
+                  ) : (
+                    <Typography variant="caption" color="text.secondary">
+                      Sin rol
+                    </Typography>
+                  )}
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={cerrarMenu}>
@@ -720,63 +805,117 @@ function PendientesTab({ session }: { session: SessionUser | null }) {
       )}
 
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Correo</TableCell>
-                <TableCell>Tipo</TableCell>
-                <TableCell>Invitado por</TableCell>
-                <TableCell>Invitado el</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo), mismo patron que el Directorio. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
+                  <TableCell>Correo</TableCell>
+                  <TableCell>Tipo</TableCell>
+                  <TableCell>Invitado por</TableCell>
+                  <TableCell>Invitado el</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : filas.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin invitaciones ni accesos pendientes.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filas.map((fila) => (
-                  <TableRow key={fila.key} hover>
-                    <TableCell>{fila.email}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={fila.tipo}
-                        color={fila.tipo === "Externo" ? "info" : "default"}
-                      />
-                    </TableCell>
-                    <TableCell>{fila.invitadoPorEmail ?? "—"}</TableCell>
-                    <TableCell>{new Date(fila.invitadoEl).toLocaleString("es-MX")}</TableCell>
-                    <TableCell align="right">
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="error"
-                        onClick={fila.onRevocar}
-                        disabled={!puedeEditar || revocando === fila.key.split("-")[1]}
-                      >
-                        Revocar
-                      </Button>
+              </TableHead>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                      <CircularProgress size={24} />
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ) : filas.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin invitaciones ni accesos pendientes.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filas.map((fila) => (
+                    <TableRow key={fila.key} hover>
+                      <TableCell>{fila.email}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={fila.tipo}
+                          color={fila.tipo === "Externo" ? "info" : "default"}
+                        />
+                      </TableCell>
+                      <TableCell>{fila.invitadoPorEmail ?? "—"}</TableCell>
+                      <TableCell>{new Date(fila.invitadoEl).toLocaleString("es-MX")}</TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          onClick={fila.onRevocar}
+                          disabled={!puedeEditar || revocando === fila.key.split("-")[1]}
+                        >
+                          Revocar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : filas.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin invitaciones ni accesos pendientes.
+            </Typography>
+          ) : (
+            filas.map((fila) => (
+              <Paper key={fila.key} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" noWrap>
+                      {fila.email}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={fila.tipo}
+                      color={fila.tipo === "Externo" ? "info" : "default"}
+                      sx={{ alignSelf: "flex-start", mt: 0.5 }}
+                    />
+                  </Stack>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    onClick={fila.onRevocar}
+                    disabled={!puedeEditar || revocando === fila.key.split("-")[1]}
+                    sx={{ flexShrink: 0 }}
+                  >
+                    Revocar
+                  </Button>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Invitado por:</strong> {fila.invitadoPorEmail ?? "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Invitado el:</strong> {new Date(fila.invitadoEl).toLocaleString("es-MX")}
+                  </Typography>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
     </>
   );
@@ -835,6 +974,9 @@ function SuspendidosTab({ session }: { session: SessionUser | null }) {
       )}
 
       <Paper variant="outlined">
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo), mismo patron que el Directorio. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -890,6 +1032,52 @@ function SuspendidosTab({ session }: { session: SessionUser | null }) {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : users.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin usuarios suspendidos.
+            </Typography>
+          ) : (
+            users.map((user) => (
+              <Paper key={user.user_id} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" noWrap>
+                      {user.display_name || "—"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {user.primary_email}
+                    </Typography>
+                  </Stack>
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={ACCESS_MODE_LABELS[user.access_mode]}
+                    color={ACCESS_MODE_COLORS[user.access_mode]}
+                    sx={{ flexShrink: 0 }}
+                  />
+                </Stack>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RotateCcw size={14} strokeWidth={1.5} />}
+                  onClick={() => handleReactivar(user)}
+                  disabled={!puedeEditar || reactivando === user.user_id}
+                  sx={{ mt: 1.5 }}
+                >
+                  {reactivando === user.user_id ? <CircularProgress size={14} /> : "Reactivar"}
+                </Button>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
     </>
   );

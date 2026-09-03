@@ -224,6 +224,10 @@ export default function ObraCortesPage() {
             </Button>
           )}
         </Stack>
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo), mismo patron que tesoreria/flujos/
+        page.tsx. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -288,6 +292,60 @@ export default function ObraCortesPage() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : cortes.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin cortes registrados.
+            </Typography>
+          ) : (
+            cortes.map((corte) => (
+              <Paper key={corte.id_corte} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2">{corte.proyecto}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {corte.fecha_corte} · semana {corte.semana_de_fase}/4
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    {corte.estado !== "APROBADO" && puedeAprobar && (
+                      <IconButton
+                        size="small"
+                        aria-label="Aprobar corte"
+                        onClick={() => handleAprobar(corte)}
+                        disabled={aprobando === corte.id_corte}
+                      >
+                        {aprobando === corte.id_corte ? (
+                          <CircularProgress size={14} />
+                        ) : (
+                          <CheckCircle2 size={16} strokeWidth={1.5} />
+                        )}
+                      </IconButton>
+                    )}
+                    {corte.estado === "APROBADO" && (
+                      <IconButton size="small" aria-label="Ver snapshot" onClick={() => abrirDetalle(corte)}>
+                        <Layers size={16} strokeWidth={1.5} />
+                      </IconButton>
+                    )}
+                  </Stack>
+                </Stack>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1 }}>
+                  <Chip size="small" label={ESTADO_LABELS[corte.estado]} color={ESTADO_COLOR[corte.estado]} />
+                  <Typography variant="body2" color="text.secondary">
+                    {corte.aprobado_por || "—"}
+                  </Typography>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">

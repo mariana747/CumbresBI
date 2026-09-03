@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -111,53 +112,94 @@ export default function RequisicionesPage() {
               </Button>
             )}
           </Stack>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Folio</TableCell>
-                  <TableCell>Proyecto</TableCell>
-                  <TableCell>Etapa constructiva</TableCell>
-                  <TableCell align="right">Viviendas</TableCell>
-                  <TableCell>Estado</TableCell>
-                  <TableCell align="right">Acciones</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {requisiciones.length === 0 ? (
+          {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza
+          por tarjetas apiladas (ver abajo), mismo patron que tesoreria/
+          flujos/page.tsx. */}
+          <Box sx={{ display: { xs: "none", sm: "block" } }}>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                      <Typography variant="body2" color="text.secondary">
-                        Sin requisiciones registradas.
-                      </Typography>
-                    </TableCell>
+                    <TableCell>Folio</TableCell>
+                    <TableCell>Proyecto</TableCell>
+                    <TableCell>Etapa constructiva</TableCell>
+                    <TableCell align="right">Viviendas</TableCell>
+                    <TableCell>Estado</TableCell>
+                    <TableCell align="right">Acciones</TableCell>
                   </TableRow>
-                ) : (
-                  requisiciones.map((r) => (
-                    <TableRow
-                      key={r.id_requisicion}
-                      hover
-                      onClick={() => router.push(`/obra/requisiciones/${r.id_requisicion}`)}
-                      sx={{ cursor: "pointer" }}
-                    >
-                      <TableCell>{r.folio}</TableCell>
-                      <TableCell>
-                        {proyectos.find((p) => p.id_proyecto === r.proyecto)?.alias_proyecto || r.proyecto}
-                      </TableCell>
-                      <TableCell>{r.etapa_constructiva}</TableCell>
-                      <TableCell align="right">{r.num_viviendas}</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={ESTADO_LABELS[r.estado]} color={ESTADO_COLOR[r.estado]} />
-                      </TableCell>
-                      <TableCell align="right">
-                        <Button size="small">Ver</Button>
+                </TableHead>
+                <TableBody>
+                  {requisiciones.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Sin requisiciones registradas.
+                        </Typography>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                  ) : (
+                    requisiciones.map((r) => (
+                      <TableRow
+                        key={r.id_requisicion}
+                        hover
+                        onClick={() => router.push(`/obra/requisiciones/${r.id_requisicion}`)}
+                        sx={{ cursor: "pointer" }}
+                      >
+                        <TableCell>{r.folio}</TableCell>
+                        <TableCell>
+                          {proyectos.find((p) => p.id_proyecto === r.proyecto)?.alias_proyecto || r.proyecto}
+                        </TableCell>
+                        <TableCell>{r.etapa_constructiva}</TableCell>
+                        <TableCell align="right">{r.num_viviendas}</TableCell>
+                        <TableCell>
+                          <Chip size="small" label={ESTADO_LABELS[r.estado]} color={ESTADO_COLOR[r.estado]} />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button size="small">Ver</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+
+          {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+          <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+            {requisiciones.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                Sin requisiciones registradas.
+              </Typography>
+            ) : (
+              requisiciones.map((r) => (
+                <Paper
+                  key={r.id_requisicion}
+                  variant="outlined"
+                  sx={{ p: 2, cursor: "pointer" }}
+                  onClick={() => router.push(`/obra/requisiciones/${r.id_requisicion}`)}
+                >
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                    <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2">{r.folio}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {proyectos.find((p) => p.id_proyecto === r.proyecto)?.alias_proyecto || r.proyecto}
+                      </Typography>
+                    </Stack>
+                    <Chip size="small" label={ESTADO_LABELS[r.estado]} color={ESTADO_COLOR[r.estado]} sx={{ flexShrink: 0 }} />
+                  </Stack>
+                  <Stack spacing={0.5} sx={{ mt: 1 }}>
+                    <Typography variant="body2">
+                      <strong>Etapa:</strong> {r.etapa_constructiva}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Viviendas:</strong> {r.num_viviendas}
+                    </Typography>
+                  </Stack>
+                </Paper>
+              ))
+            )}
+          </Stack>
         </Paper>
       )}
     </AppShell>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -133,51 +134,92 @@ export default function SolicitudesCompraPage() {
               </Button>
             )}
           </Stack>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Proyecto</TableCell>
-                  <TableCell>Descripción</TableCell>
-                  <TableCell>Requisición</TableCell>
-                  <TableCell>Estado</TableCell>
-                  <TableCell align="right">Cotizaciones</TableCell>
-                  <TableCell align="right">Acciones</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {solicitudes.length === 0 ? (
+          {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza
+          por tarjetas apiladas (ver abajo) - mismo patron que
+          tesoreria/flujos/page.tsx. */}
+          <Box sx={{ display: { xs: "none", sm: "block" } }}>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                      <Typography variant="body2" color="text.secondary">
-                        Sin solicitudes registradas.
-                      </Typography>
-                    </TableCell>
+                    <TableCell>Proyecto</TableCell>
+                    <TableCell>Descripción</TableCell>
+                    <TableCell>Requisición</TableCell>
+                    <TableCell>Estado</TableCell>
+                    <TableCell align="right">Cotizaciones</TableCell>
+                    <TableCell align="right">Acciones</TableCell>
                   </TableRow>
-                ) : (
-                  solicitudes.map((s) => (
-                    <TableRow
-                      key={s.id_solicitud}
-                      hover
-                      onClick={() => router.push(`/compras/cotizaciones?solicitud=${s.id_solicitud}`)}
-                      sx={{ cursor: "pointer" }}
-                    >
-                      <TableCell>{s.proyecto}</TableCell>
-                      <TableCell>{s.descripcion}</TableCell>
-                      <TableCell>{s.requisicion || "—"}</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={ESTADO_LABELS[s.estado]} color={ESTADO_COLOR[s.estado]} />
-                      </TableCell>
-                      <TableCell align="right">{s.cotizaciones.length}</TableCell>
-                      <TableCell align="right">
-                        <Button size="small">Ver cotizaciones</Button>
+                </TableHead>
+                <TableBody>
+                  {solicitudes.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Sin solicitudes registradas.
+                        </Typography>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                  ) : (
+                    solicitudes.map((s) => (
+                      <TableRow
+                        key={s.id_solicitud}
+                        hover
+                        onClick={() => router.push(`/compras/cotizaciones?solicitud=${s.id_solicitud}`)}
+                        sx={{ cursor: "pointer" }}
+                      >
+                        <TableCell>{s.proyecto}</TableCell>
+                        <TableCell>{s.descripcion}</TableCell>
+                        <TableCell>{s.requisicion || "—"}</TableCell>
+                        <TableCell>
+                          <Chip size="small" label={ESTADO_LABELS[s.estado]} color={ESTADO_COLOR[s.estado]} />
+                        </TableCell>
+                        <TableCell align="right">{s.cotizaciones.length}</TableCell>
+                        <TableCell align="right">
+                          <Button size="small">Ver cotizaciones</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+
+          {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+          <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+            {solicitudes.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                Sin solicitudes registradas.
+              </Typography>
+            ) : (
+              solicitudes.map((s) => (
+                <Paper
+                  key={s.id_solicitud}
+                  variant="outlined"
+                  sx={{ p: 2, cursor: "pointer" }}
+                  onClick={() => router.push(`/compras/cotizaciones?solicitud=${s.id_solicitud}`)}
+                >
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                    <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2">{s.proyecto}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {s.descripcion}
+                      </Typography>
+                    </Stack>
+                    <Chip size="small" label={ESTADO_LABELS[s.estado]} color={ESTADO_COLOR[s.estado]} sx={{ flexShrink: 0 }} />
+                  </Stack>
+                  <Stack spacing={0.5} sx={{ mt: 1 }}>
+                    <Typography variant="body2">
+                      <strong>Requisición:</strong> {s.requisicion || "—"}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Cotizaciones:</strong> {s.cotizaciones.length}
+                    </Typography>
+                  </Stack>
+                </Paper>
+              ))
+            )}
+          </Stack>
         </Paper>
       )}
 

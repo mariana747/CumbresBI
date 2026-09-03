@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -305,57 +306,107 @@ export default function ObraCatalogoPage() {
                 </Button>
               )}
             </Stack>
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>No.</TableCell>
-                    <TableCell>Etapa</TableCell>
-                    <TableCell>Descripción</TableCell>
-                    <TableCell>Maestro</TableCell>
-                    <TableCell align="right">Acciones</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {conceptos.length === 0 ? (
+            {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza
+            por tarjetas apiladas (ver abajo), mismo patron que tesoreria/
+            flujos/page.tsx. */}
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
                     <TableRow>
-                      <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Sin conceptos registrados.
-                        </Typography>
-                      </TableCell>
+                      <TableCell>No.</TableCell>
+                      <TableCell>Etapa</TableCell>
+                      <TableCell>Descripción</TableCell>
+                      <TableCell>Maestro</TableCell>
+                      <TableCell align="right">Acciones</TableCell>
                     </TableRow>
-                  ) : (
-                    conceptos.map((concepto) => (
-                      <TableRow key={concepto.id_concepto} hover>
-                        <TableCell>{concepto.numero}</TableCell>
-                        <TableCell>{concepto.etapa_nombre}</TableCell>
-                        <TableCell sx={{ maxWidth: 420, fontSize: "0.8rem" }}>{concepto.descripcion}</TableCell>
-                        <TableCell>{concepto.maestro || "—"}</TableCell>
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            aria-label="Editar"
-                            onClick={() => abrirEdicionConcepto(concepto)}
-                            disabled={!puedeEditar}
-                          >
-                            <Pencil size={14} strokeWidth={1.5} />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            aria-label="Borrar"
-                            onClick={() => handleBorrarConcepto(concepto)}
-                            disabled={!puedeEditar}
-                          >
-                            <Trash2 size={14} strokeWidth={1.5} />
-                          </IconButton>
+                  </TableHead>
+                  <TableBody>
+                    {conceptos.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Sin conceptos registrados.
+                          </Typography>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                    ) : (
+                      conceptos.map((concepto) => (
+                        <TableRow key={concepto.id_concepto} hover>
+                          <TableCell>{concepto.numero}</TableCell>
+                          <TableCell>{concepto.etapa_nombre}</TableCell>
+                          <TableCell sx={{ maxWidth: 420, fontSize: "0.8rem" }}>{concepto.descripcion}</TableCell>
+                          <TableCell>{concepto.maestro || "—"}</TableCell>
+                          <TableCell align="right">
+                            <IconButton
+                              size="small"
+                              aria-label="Editar"
+                              onClick={() => abrirEdicionConcepto(concepto)}
+                              disabled={!puedeEditar}
+                            >
+                              <Pencil size={14} strokeWidth={1.5} />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              aria-label="Borrar"
+                              onClick={() => handleBorrarConcepto(concepto)}
+                              disabled={!puedeEditar}
+                            >
+                              <Trash2 size={14} strokeWidth={1.5} />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+
+            {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+            <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+              {conceptos.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                  Sin conceptos registrados.
+                </Typography>
+              ) : (
+                conceptos.map((concepto) => (
+                  <Paper key={concepto.id_concepto} variant="outlined" sx={{ p: 2 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2">
+                          {concepto.numero} — {concepto.etapa_nombre}
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontSize: "0.8rem" }}>
+                          {concepto.descripcion}
+                        </Typography>
+                      </Stack>
+                      <Stack direction="row" sx={{ flexShrink: 0 }}>
+                        <IconButton
+                          size="small"
+                          aria-label="Editar"
+                          onClick={() => abrirEdicionConcepto(concepto)}
+                          disabled={!puedeEditar}
+                        >
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          aria-label="Borrar"
+                          onClick={() => handleBorrarConcepto(concepto)}
+                          disabled={!puedeEditar}
+                        >
+                          <Trash2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </Stack>
+                    </Stack>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      <strong>Maestro:</strong> {concepto.maestro || "—"}
+                    </Typography>
+                  </Paper>
+                ))
+              )}
+            </Stack>
           </Paper>
         </Stack>
       )}

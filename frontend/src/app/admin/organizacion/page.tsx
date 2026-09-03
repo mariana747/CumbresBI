@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -179,51 +180,93 @@ export default function OrganizacionPage() {
             </Button>
           )}
         </Stack>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>RFC</TableCell>
-                <TableCell>Razón social</TableCell>
-                <TableCell>Alias</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo), mismo patron que tesoreria/flujos/
+        page.tsx. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
+                  <TableCell>RFC</TableCell>
+                  <TableCell>Razón social</TableCell>
+                  <TableCell>Alias</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : sociedades.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin sociedades registradas.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sociedades.map((s) => (
-                  <TableRow key={s.rfc} hover>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{s.rfc}</TableCell>
-                    <TableCell>{s.razon_social || "—"}</TableCell>
-                    <TableCell>{s.alias_sociedad || "—"}</TableCell>
-                    <TableCell align="right">
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(s)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(s)} disabled={!puedeEditar}>
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </IconButton>
+              </TableHead>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                      <CircularProgress size={20} />
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ) : sociedades.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin sociedades registradas.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  sociedades.map((s) => (
+                    <TableRow key={s.rfc} hover>
+                      <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{s.rfc}</TableCell>
+                      <TableCell>{s.razon_social || "—"}</TableCell>
+                      <TableCell>{s.alias_sociedad || "—"}</TableCell>
+                      <TableCell align="right">
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(s)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(s)} disabled={!puedeEditar}>
+                          <Trash2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : sociedades.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin sociedades registradas.
+            </Typography>
+          ) : (
+            sociedades.map((s) => (
+              <Paper key={s.rfc} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2">{s.razon_social || "—"}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                      {s.rfc}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" sx={{ flexShrink: 0 }}>
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(s)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(s)} disabled={!puedeEditar}>
+                      <Trash2 size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  <strong>Alias:</strong> {s.alias_sociedad || "—"}
+                </Typography>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       {/* Centros - no es catalogo generico, pertenece al modulo de Tickets */}

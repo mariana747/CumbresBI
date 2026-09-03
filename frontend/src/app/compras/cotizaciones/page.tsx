@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -252,66 +253,122 @@ function CotizacionesPageInner() {
                 </Stack>
               </Stack>
 
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Descripción</TableCell>
-                      <TableCell align="right">Cantidad</TableCell>
-                      <TableCell align="right">Precio unitario</TableCell>
-                      <TableCell align="right">Importe</TableCell>
-                      <TableCell align="right"></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {(lineasCotizacion[c.id_cotizacion] || []).map((linea, index) => (
-                      <TableRow key={index}>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            variant="standard"
-                            value={linea.descripcion}
-                            onChange={(e) => actualizarLinea(c.id_cotizacion, index, "descripcion", e.target.value)}
-                            fullWidth
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            size="small"
-                            variant="standard"
-                            value={linea.cantidad}
-                            onChange={(e) => actualizarLinea(c.id_cotizacion, index, "cantidad", e.target.value)}
-                            sx={{ width: 80 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            size="small"
-                            variant="standard"
-                            value={linea.precio_unitario}
-                            onChange={(e) => actualizarLinea(c.id_cotizacion, index, "precio_unitario", e.target.value)}
-                            sx={{ width: 100 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            size="small"
-                            variant="standard"
-                            value={linea.importe}
-                            onChange={(e) => actualizarLinea(c.id_cotizacion, index, "importe", e.target.value)}
-                            sx={{ width: 100 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
-                            <Trash2 size={14} strokeWidth={2} />
-                          </IconButton>
-                        </TableCell>
+              {/* Tabla normal en pantallas >= sm; en celular (xs) se
+              reemplaza por tarjetas con los mismos campos apilados - una
+              fila con 4 inputs no cabe comoda en un telefono, mismo patron
+              que tesoreria/flujos/page.tsx. */}
+              <Box sx={{ display: { xs: "none", sm: "block" } }}>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Descripción</TableCell>
+                        <TableCell align="right">Cantidad</TableCell>
+                        <TableCell align="right">Precio unitario</TableCell>
+                        <TableCell align="right">Importe</TableCell>
+                        <TableCell align="right"></TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                    </TableHead>
+                    <TableBody>
+                      {(lineasCotizacion[c.id_cotizacion] || []).map((linea, index) => (
+                        <TableRow key={index}>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              variant="standard"
+                              value={linea.descripcion}
+                              onChange={(e) => actualizarLinea(c.id_cotizacion, index, "descripcion", e.target.value)}
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              size="small"
+                              variant="standard"
+                              value={linea.cantidad}
+                              onChange={(e) => actualizarLinea(c.id_cotizacion, index, "cantidad", e.target.value)}
+                              sx={{ width: 80 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              size="small"
+                              variant="standard"
+                              value={linea.precio_unitario}
+                              onChange={(e) =>
+                                actualizarLinea(c.id_cotizacion, index, "precio_unitario", e.target.value)
+                              }
+                              sx={{ width: 100 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              size="small"
+                              variant="standard"
+                              value={linea.importe}
+                              onChange={(e) => actualizarLinea(c.id_cotizacion, index, "importe", e.target.value)}
+                              sx={{ width: 100 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
+                              <Trash2 size={14} strokeWidth={2} />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+
+              {/* Tarjetas apiladas - solo celular (xs), ver comentario
+              arriba. */}
+              <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" } }}>
+                {(lineasCotizacion[c.id_cotizacion] || []).map((linea, index) => (
+                  <Paper key={index} variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack direction="row" justifyContent="flex-end">
+                      <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
+                        <Trash2 size={14} strokeWidth={2} />
+                      </IconButton>
+                    </Stack>
+                    <Stack spacing={1}>
+                      <TextField
+                        label="Descripción"
+                        size="small"
+                        value={linea.descripcion}
+                        onChange={(e) => actualizarLinea(c.id_cotizacion, index, "descripcion", e.target.value)}
+                        fullWidth
+                      />
+                      <Stack direction="row" spacing={1}>
+                        <TextField
+                          label="Cantidad"
+                          size="small"
+                          value={linea.cantidad}
+                          onChange={(e) => actualizarLinea(c.id_cotizacion, index, "cantidad", e.target.value)}
+                          fullWidth
+                        />
+                        <TextField
+                          label="Precio unitario"
+                          size="small"
+                          value={linea.precio_unitario}
+                          onChange={(e) =>
+                            actualizarLinea(c.id_cotizacion, index, "precio_unitario", e.target.value)
+                          }
+                          fullWidth
+                        />
+                      </Stack>
+                      <TextField
+                        label="Importe"
+                        size="small"
+                        value={linea.importe}
+                        onChange={(e) => actualizarLinea(c.id_cotizacion, index, "importe", e.target.value)}
+                        fullWidth
+                      />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
               <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
                 <Button size="small" onClick={() => agregarLinea(c.id_cotizacion)}>
                   + Línea

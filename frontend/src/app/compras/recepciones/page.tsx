@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   CircularProgress,
   Paper,
@@ -160,43 +161,74 @@ export default function RecepcionesPage() {
                       InputLabelProps={{ shrink: true }}
                     />
                   </Stack>
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Descripción</TableCell>
-                          <TableCell align="right">Pedido</TableCell>
-                          <TableCell align="right">Recibido</TableCell>
-                          <TableCell align="right">Pendiente</TableCell>
-                          <TableCell align="right">Recibiendo ahora</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {lineasPendientes.map((l) => {
-                          const pendiente = Number(l.cantidad) - Number(l.cantidad_recibida);
-                          return (
-                            <TableRow key={l.id_linea}>
-                              <TableCell>{l.descripcion}</TableCell>
-                              <TableCell align="right">{l.cantidad}</TableCell>
-                              <TableCell align="right">{l.cantidad_recibida}</TableCell>
-                              <TableCell align="right">{pendiente}</TableCell>
-                              <TableCell align="right">
-                                <TextField
-                                  size="small"
-                                  variant="standard"
-                                  value={cantidades[l.id_linea] || ""}
-                                  onChange={(e) =>
-                                    setCantidades((prev) => ({ ...prev, [l.id_linea]: e.target.value }))
-                                  }
-                                  sx={{ width: 90 }}
-                                />
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                  {/* Tabla normal en pantallas >= sm; en celular (xs) se
+                  reemplaza por tarjetas apiladas (ver abajo) - 5 columnas +
+                  un campo editable no caben comodas en un telefono, mismo
+                  patron que tesoreria/flujos/page.tsx. */}
+                  <Box sx={{ display: { xs: "none", sm: "block" } }}>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Descripción</TableCell>
+                            <TableCell align="right">Pedido</TableCell>
+                            <TableCell align="right">Recibido</TableCell>
+                            <TableCell align="right">Pendiente</TableCell>
+                            <TableCell align="right">Recibiendo ahora</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {lineasPendientes.map((l) => {
+                            const pendiente = Number(l.cantidad) - Number(l.cantidad_recibida);
+                            return (
+                              <TableRow key={l.id_linea}>
+                                <TableCell>{l.descripcion}</TableCell>
+                                <TableCell align="right">{l.cantidad}</TableCell>
+                                <TableCell align="right">{l.cantidad_recibida}</TableCell>
+                                <TableCell align="right">{pendiente}</TableCell>
+                                <TableCell align="right">
+                                  <TextField
+                                    size="small"
+                                    variant="standard"
+                                    value={cantidades[l.id_linea] || ""}
+                                    onChange={(e) =>
+                                      setCantidades((prev) => ({ ...prev, [l.id_linea]: e.target.value }))
+                                    }
+                                    sx={{ width: 90 }}
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+
+                  {/* Tarjetas apiladas - solo celular (xs), ver comentario
+                  arriba. */}
+                  <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" } }}>
+                    {lineasPendientes.map((l) => {
+                      const pendiente = Number(l.cantidad) - Number(l.cantidad_recibida);
+                      return (
+                        <Paper key={l.id_linea} variant="outlined" sx={{ p: 1.5 }}>
+                          <Typography variant="body2" sx={{ mb: 0.5 }}>
+                            {l.descripcion}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                            Pedido {l.cantidad} · recibido {l.cantidad_recibida} · pendiente {pendiente}
+                          </Typography>
+                          <TextField
+                            label="Recibiendo ahora"
+                            size="small"
+                            value={cantidades[l.id_linea] || ""}
+                            onChange={(e) => setCantidades((prev) => ({ ...prev, [l.id_linea]: e.target.value }))}
+                            fullWidth
+                          />
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
                   {puedeCrear && (
                     <Button
                       sx={{ mt: 2 }}

@@ -844,7 +844,9 @@ export default function TesoreriaFlujosPage() {
         <Tabs
           value={tab}
           onChange={(_, value: TabFlujo) => setTab(value)}
-          variant="fullWidth"
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
           sx={{ borderBottom: 1, borderColor: "divider" }}
         >
           {TABS_FLUJO.map((t) => (

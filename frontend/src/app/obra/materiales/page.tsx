@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -16,12 +17,14 @@ import {
   ListItemText,
   Paper,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -101,7 +104,13 @@ const ESTADO_COLOR: Record<SolicitudMaterialEstado, "default" | "success" | "err
 // pedido de Mariana: "no se que va ahi pero nos pueden fundir por tenerlo
 // en materiales") - el modelo ManoObraCatalogo sigue en el backend (lo
 // usa ConceptoPresupuesto), solo falta decidir en que pantalla vive.
+type Seccion = "catalogo" | "disponibles" | "salida";
+
 export default function MaterialesPage() {
+  // Pestañas (02/Sep/2026, pedido de Mariana - mismo patrón de Tabs que
+  // admin/reportes/page.tsx) en vez de tarjetas apiladas/laterales: 3
+  // secciones que antes competían por el mismo scroll vertical.
+  const [seccion, setSeccion] = useState<Seccion>("catalogo");
   const [session, setSession] = useState<SessionUser | null>(null);
   const [materiales, setMateriales] = useState<MaterialCatalogo[]>([]);
   const [solicitudes, setSolicitudes] = useState<SolicitudMaterial[]>([]);
@@ -322,169 +331,304 @@ export default function MaterialesPage() {
           <CircularProgress size={20} />
         </Stack>
       ) : (
-        <Stack spacing={3}>
-          <Paper variant="outlined">
-            <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-              <Typography variant="subtitle1">Catálogo de materiales</Typography>
-              {puedeCrear && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  startIcon={<Plus size={14} strokeWidth={2} />}
-                  onClick={abrirAltaMaterial}
-                  sx={{ ml: "auto" }}
-                >
-                  Nuevo material
-                </Button>
-              )}
-            </Stack>
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Material</TableCell>
-                    <TableCell>Unidad</TableCell>
-                    <TableCell align="right">Disponible</TableCell>
-                    <TableCell align="right">Precio unitario</TableCell>
-                    <TableCell>Proveedor</TableCell>
-                    <TableCell align="right">Acciones</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {materiales.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Sin materiales registrados.
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    materiales.map((m) => (
-                      <TableRow key={m.id_material} hover>
-                        <TableCell>{m.material}</TableCell>
-                        <TableCell>{m.unidad_medida}</TableCell>
-                        <TableCell align="right">{m.cantidad_disponible}</TableCell>
-                        <TableCell align="right">${m.precio_unitario}</TableCell>
-                        <TableCell>{m.proveedor || "—"}</TableCell>
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            aria-label="Editar"
-                            onClick={() => abrirEdicionMaterial(m)}
-                            disabled={!puedeEditar}
-                          >
-                            <Pencil size={14} strokeWidth={1.5} />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            aria-label="Borrar"
-                            onClick={() => handleBorrarMaterial(m)}
-                            disabled={!puedeEditar}
-                          >
-                            <Trash2 size={14} strokeWidth={1.5} />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
+        <>
+          {/* Pestañas (02/Sep/2026, pedido de Mariana: "quiero esas tabs en
+          materiales", mismo patrón que admin/reportes/page.tsx) - antes
+          eran 3 tarjetas compitiendo por el mismo scroll vertical (o 2
+          lado a lado + 1 abajo). "Catálogo de materiales" y "Catálogo de
+          materiales disponibles" leen la misma fuente (MaterialCatalogo);
+          la segunda solo filtra a lo que sí hay en existencia ahora mismo
+          (cantidad_disponible > 0) y es de solo lectura - alta/edición/
+          borrado siguen viviendo en la primera pestaña. */}
+          <Tabs
+            value={seccion}
+            onChange={(_, v) => setSeccion(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
+            sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}
+          >
+            <Tab label="Catálogo de materiales" value="catalogo" />
+            <Tab label="Catálogo de materiales disponibles" value="disponibles" />
+            <Tab icon={<Truck size={16} strokeWidth={1.5} />} iconPosition="start" label="Salida de almacén" value="salida" />
+          </Tabs>
 
-          <Paper variant="outlined">
-            <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-              <Truck size={18} strokeWidth={1.5} />
-              <Typography variant="subtitle1">Salida de almacén</Typography>
-              {puedeCrear && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  startIcon={<Plus size={14} strokeWidth={2} />}
-                  onClick={abrirAltaSolicitud}
-                  disabled={materiales.length === 0}
-                  sx={{ ml: "auto" }}
-                >
-                  Nueva salida
-                </Button>
-              )}
-            </Stack>
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Proyecto</TableCell>
-                    <TableCell>Material</TableCell>
-                    <TableCell align="right">Cantidad</TableCell>
-                    <TableCell>Estado</TableCell>
-                    <TableCell>Fecha solicitud</TableCell>
-                    <TableCell align="right">Acciones</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {solicitudes.length === 0 ? (
+          {seccion === "catalogo" && (
+            <Paper variant="outlined">
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
+                <Typography variant="subtitle1">Catálogo de materiales</Typography>
+                {puedeCrear && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    startIcon={<Plus size={14} strokeWidth={2} />}
+                    onClick={abrirAltaMaterial}
+                    sx={{ ml: "auto" }}
+                  >
+                    Nuevo material
+                  </Button>
+                )}
+              </Stack>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
                     <TableRow>
-                      <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Sin salidas registradas.
-                        </Typography>
-                      </TableCell>
+                      <TableCell>Material</TableCell>
+                      <TableCell>Unidad</TableCell>
+                      <TableCell align="right">Disponible</TableCell>
+                      <TableCell align="right">Precio unitario</TableCell>
+                      <TableCell>Proveedor</TableCell>
+                      <TableCell align="right">Acciones</TableCell>
                     </TableRow>
-                  ) : (
-                    solicitudes.map((s) => (
-                      <TableRow key={s.id_solicitud} hover>
-                        <TableCell>
-                          {proyectos.find((p) => p.id_proyecto === s.proyecto)?.alias_proyecto || s.proyecto}
-                        </TableCell>
-                        <TableCell>{s.material_nombre}</TableCell>
-                        <TableCell align="right">{s.cantidad_solicitada}</TableCell>
-                        <TableCell>
-                          <Chip size="small" label={ESTADO_LABELS[s.estado]} color={ESTADO_COLOR[s.estado]} />
-                        </TableCell>
-                        <TableCell>{s.fecha_solicitud}</TableCell>
-                        <TableCell align="right">
-                          {puedeEditar && s.estado === "SOLICITADO" && (
-                            <>
-                              <Button
-                                size="small"
-                                onClick={() => handleAccionSolicitud(s.id_solicitud, "entregar")}
-                                disabled={accionando === s.id_solicitud || !s.tiene_evidencia}
-                                title={!s.tiene_evidencia ? "Falta la foto en la bitácora de recepción" : undefined}
-                              >
-                                Entregar
-                              </Button>
-                              <Button
-                                size="small"
-                                color="error"
-                                onClick={() => handleAccionSolicitud(s.id_solicitud, "rechazar")}
-                                disabled={accionando === s.id_solicitud}
-                              >
-                                Rechazar
-                              </Button>
-                            </>
-                          )}
-                          <IconButton
-                            size="small"
-                            aria-label={s.tiene_evidencia ? "Bitácora de recepción (con foto)" : "Bitácora de recepción (sin foto)"}
-                            title={s.tiene_evidencia ? "Con foto de recepción" : "Sin foto de recepción"}
-                            onClick={() => abrirBitacora(s)}
-                          >
-                            <Camera
-                              size={14}
-                              strokeWidth={1.5}
-                              color={s.tiene_evidencia ? "#2e7d32" : "#c62828"}
-                            />
-                          </IconButton>
+                  </TableHead>
+                  <TableBody>
+                    {materiales.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Sin materiales registrados.
+                          </Typography>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
-        </Stack>
+                    ) : (
+                      materiales.map((m) => (
+                        <TableRow key={m.id_material} hover>
+                          <TableCell>{m.material}</TableCell>
+                          <TableCell>{m.unidad_medida}</TableCell>
+                          <TableCell align="right">{m.cantidad_disponible}</TableCell>
+                          <TableCell align="right">${m.precio_unitario}</TableCell>
+                          <TableCell>{m.proveedor || "—"}</TableCell>
+                          <TableCell align="right">
+                            <IconButton
+                              size="small"
+                              aria-label="Editar"
+                              onClick={() => abrirEdicionMaterial(m)}
+                              disabled={!puedeEditar}
+                            >
+                              <Pencil size={14} strokeWidth={1.5} />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              aria-label="Borrar"
+                              onClick={() => handleBorrarMaterial(m)}
+                              disabled={!puedeEditar}
+                            >
+                              <Trash2 size={14} strokeWidth={1.5} />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          )}
+
+          {seccion === "disponibles" && (
+            <Paper variant="outlined">
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
+                <Typography variant="subtitle1">Catálogo de materiales disponibles</Typography>
+              </Stack>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Material</TableCell>
+                      <TableCell>Unidad</TableCell>
+                      <TableCell align="right">Disponible</TableCell>
+                      <TableCell align="right">Precio unitario</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {materiales.filter((m) => Number(m.cantidad_disponible) > 0).length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Ningún material tiene existencia disponible ahora mismo.
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      materiales
+                        .filter((m) => Number(m.cantidad_disponible) > 0)
+                        .map((m) => (
+                          <TableRow key={m.id_material} hover>
+                            <TableCell>{m.material}</TableCell>
+                            <TableCell>{m.unidad_medida}</TableCell>
+                            <TableCell align="right">{m.cantidad_disponible}</TableCell>
+                            <TableCell align="right">${m.precio_unitario}</TableCell>
+                          </TableRow>
+                        ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          )}
+
+          {seccion === "salida" && (
+            <Paper variant="outlined">
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
+                <Typography variant="subtitle1">Salida de almacén</Typography>
+                {puedeCrear && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    startIcon={<Plus size={14} strokeWidth={2} />}
+                    onClick={abrirAltaSolicitud}
+                    disabled={materiales.length === 0}
+                    sx={{ ml: "auto" }}
+                  >
+                    Nueva salida
+                  </Button>
+                )}
+              </Stack>
+              {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza
+              por tarjetas apiladas (ver abajo) - 6 columnas no caben comodas
+              en un telefono, mismo patron que tesoreria/flujos/page.tsx. */}
+              <Box sx={{ display: { xs: "none", sm: "block" } }}>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Proyecto</TableCell>
+                        <TableCell>Material</TableCell>
+                        <TableCell align="right">Cantidad</TableCell>
+                        <TableCell>Estado</TableCell>
+                        <TableCell>Fecha solicitud</TableCell>
+                        <TableCell align="right">Acciones</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {solicitudes.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                            <Typography variant="body2" color="text.secondary">
+                              Sin salidas registradas.
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        solicitudes.map((s) => (
+                          <TableRow key={s.id_solicitud} hover>
+                            <TableCell>
+                              {proyectos.find((p) => p.id_proyecto === s.proyecto)?.alias_proyecto || s.proyecto}
+                            </TableCell>
+                            <TableCell>{s.material_nombre}</TableCell>
+                            <TableCell align="right">{s.cantidad_solicitada}</TableCell>
+                            <TableCell>
+                              <Chip size="small" label={ESTADO_LABELS[s.estado]} color={ESTADO_COLOR[s.estado]} />
+                            </TableCell>
+                            <TableCell>{s.fecha_solicitud}</TableCell>
+                            <TableCell align="right">
+                              {puedeEditar && s.estado === "SOLICITADO" && (
+                                <>
+                                  <Button
+                                    size="small"
+                                    onClick={() => handleAccionSolicitud(s.id_solicitud, "entregar")}
+                                    disabled={accionando === s.id_solicitud || !s.tiene_evidencia}
+                                    title={!s.tiene_evidencia ? "Falta la foto en la bitácora de recepción" : undefined}
+                                  >
+                                    Entregar
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    color="error"
+                                    onClick={() => handleAccionSolicitud(s.id_solicitud, "rechazar")}
+                                    disabled={accionando === s.id_solicitud}
+                                  >
+                                    Rechazar
+                                  </Button>
+                                </>
+                              )}
+                              <IconButton
+                                size="small"
+                                aria-label={s.tiene_evidencia ? "Bitácora de recepción (con foto)" : "Bitácora de recepción (sin foto)"}
+                                title={s.tiene_evidencia ? "Con foto de recepción" : "Sin foto de recepción"}
+                                onClick={() => abrirBitacora(s)}
+                              >
+                                <Camera
+                                  size={14}
+                                  strokeWidth={1.5}
+                                  color={s.tiene_evidencia ? "#2e7d32" : "#c62828"}
+                                />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+
+              {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+              <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+                {solicitudes.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                    Sin salidas registradas.
+                  </Typography>
+                ) : (
+                  solicitudes.map((s) => (
+                    <Paper key={s.id_solicitud} variant="outlined" sx={{ p: 2 }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                        <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                          <Typography variant="subtitle2">{s.material_nombre}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {proyectos.find((p) => p.id_proyecto === s.proyecto)?.alias_proyecto || s.proyecto}
+                          </Typography>
+                        </Stack>
+                        <IconButton
+                          size="small"
+                          aria-label={s.tiene_evidencia ? "Bitácora de recepción (con foto)" : "Bitácora de recepción (sin foto)"}
+                          title={s.tiene_evidencia ? "Con foto de recepción" : "Sin foto de recepción"}
+                          onClick={() => abrirBitacora(s)}
+                          sx={{ flexShrink: 0 }}
+                        >
+                          <Camera size={14} strokeWidth={1.5} color={s.tiene_evidencia ? "#2e7d32" : "#c62828"} />
+                        </IconButton>
+                      </Stack>
+                      <Stack spacing={0.5} sx={{ mt: 1 }}>
+                        <Typography variant="body2">
+                          <strong>Cantidad:</strong> {s.cantidad_solicitada}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Fecha solicitud:</strong> {s.fecha_solicitud}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={ESTADO_LABELS[s.estado]}
+                          color={ESTADO_COLOR[s.estado]}
+                          sx={{ alignSelf: "flex-start" }}
+                        />
+                      </Stack>
+                      {puedeEditar && s.estado === "SOLICITADO" && (
+                        <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                          <Button
+                            size="small"
+                            onClick={() => handleAccionSolicitud(s.id_solicitud, "entregar")}
+                            disabled={accionando === s.id_solicitud || !s.tiene_evidencia}
+                          >
+                            Entregar
+                          </Button>
+                          <Button
+                            size="small"
+                            color="error"
+                            onClick={() => handleAccionSolicitud(s.id_solicitud, "rechazar")}
+                            disabled={accionando === s.id_solicitud}
+                          >
+                            Rechazar
+                          </Button>
+                        </Stack>
+                      )}
+                    </Paper>
+                  ))
+                )}
+              </Stack>
+            </Paper>
+          )}
+        </>
       )}
 
       <Dialog open={materialDialogOpen} onClose={() => setMaterialDialogOpen(false)} fullWidth maxWidth="sm">

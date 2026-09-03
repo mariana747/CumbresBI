@@ -820,7 +820,14 @@ export default function TesoreriaFacturasPage() {
         facturas se dan de alta automáticamente desde el Motor Documental.
       </Typography>
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+      <Tabs
+        value={tab}
+        onChange={(_, v) => setTab(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        sx={{ mb: 3 }}
+      >
         <Tab label="Facturas CFDI" icon={<FileText size={16} strokeWidth={1.5} />} iconPosition="start" />
         <Tab label="Tickets de reembolso" icon={<Receipt size={16} strokeWidth={1.5} />} iconPosition="start" />
       </Tabs>
