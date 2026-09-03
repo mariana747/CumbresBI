@@ -157,6 +157,7 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
         if lineas is not None and not isinstance(lineas, list):
             return Response({"lineas": ["Debe ser una lista."]}, status=400)
 
+        lineas_creadas = []
         with transaction.atomic():
             if datos_validos:
                 serializer = self.get_serializer(cotizacion, data=datos_validos, partial=True)
@@ -165,16 +166,24 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
             if lineas is not None:
                 cotizacion.lineas.all().delete()
                 for linea in lineas:
-                    CotizacionLinea.objects.create(
-                        cotizacion=cotizacion,
-                        descripcion=linea.get("descripcion") or "",
-                        cantidad=linea.get("cantidad") or 0,
-                        precio_unitario=linea.get("precio_unitario") or 0,
-                        importe=linea.get("importe") or 0,
+                    lineas_creadas.append(
+                        CotizacionLinea.objects.create(
+                            cotizacion=cotizacion,
+                            descripcion=linea.get("descripcion") or "",
+                            cantidad=linea.get("cantidad") or 0,
+                            precio_unitario=linea.get("precio_unitario") or 0,
+                            importe=linea.get("importe") or 0,
+                        )
                     )
             cotizacion.estado = Cotizacion.ESTADO_CONFIRMADA
             cotizacion.updated_by = actor
             cotizacion.save(update_fields=["estado", "updated_by", "updated_at"])
+
+        # Fuera de la transaccion a proposito - la cotizacion ya quedo
+        # confirmada, un problema de red con materiales-service no debe
+        # revertirla (ver _sincronizar_precio_cotizado.__doc__).
+        for linea in lineas_creadas:
+            _sincronizar_precio_cotizado(cotizacion, linea)
 
         cotizacion.refresh_from_db()
         return Response(self.get_serializer(cotizacion).data)
@@ -269,43 +278,73 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
         return Response(self.get_serializer(orden).data, status=201)
 
 
+def _llamar_materiales_service(endpoint, payload, contexto):
+    """POST a un endpoint interno de materiales-service (X-Internal-Secret,
+    ver settings.MATERIALES_INTERNAL_SECRET) - fail-open, mismo criterio
+    que pld-service/pld/views.py::_crear_contraparte_minima_en_tesoreria:
+    un problema de red entre servicios no debe bloquear ni revertir lo que
+    ya quedo guardado en Compras. `contexto` es solo para el mensaje de
+    log (ej. "recepcion", "cotizacion confirmada")."""
+    if not settings.MATERIALES_INTERNAL_SECRET:
+        return
+    try:
+        upstream = requests.post(
+            f"{settings.MATERIALES_SERVICE_URL}/api/materiales/{endpoint}/",
+            json=payload,
+            headers={"X-Internal-Secret": settings.MATERIALES_INTERNAL_SECRET},
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning("materiales-service no respondio al sincronizar %s", contexto, exc_info=True)
+        return
+    if upstream.status_code != 200:
+        logger.warning(
+            "materiales-service rechazo la sincronizacion de %s: %s %s",
+            contexto,
+            upstream.status_code,
+            upstream.text[:300],
+        )
+
+
 def _sincronizar_inventario_materiales(orden, orden_linea, cantidad_recibida):
     """Suma al inventario de Obra al registrar una recepcion (02/Sep/2026,
     pedido de Mariana: "Recepciones va tener conexion con obra en la parte
     de materiales, para actualizar el inventario... compras es la base").
     Llama a MaterialCatalogoViewSet.recibir_compra en materiales-service -
     busca/crea el material por nombre (case-insensitive), sin que el
-    analista de Compras tenga que elegir uno de un catalogo de antemano.
+    analista de Compras tenga que elegir uno de un catalogo de antemano."""
+    _llamar_materiales_service(
+        "recibir_compra",
+        {
+            "material_nombre": orden_linea.descripcion,
+            "cantidad_recibida": str(cantidad_recibida),
+            "precio_unitario": str(orden_linea.precio_unitario),
+            "proveedor": orden.proveedor,
+        },
+        "la recepcion de compra",
+    )
 
-    Fail-open, mismo criterio que pld-service/pld/views.py::
-    _crear_contraparte_minima_en_tesoreria: si el secreto no esta
-    configurado o materiales-service no responde, la recepcion en Compras
-    ya quedo guardada (esta funcion se llama DESPUES de la transaccion
-    local) - un problema de red entre servicios no debe bloquear ni
-    revertir el registro real de la recepcion."""
-    if not settings.MATERIALES_INTERNAL_SECRET:
+
+def _sincronizar_precio_cotizado(cotizacion, linea):
+    """Actualiza precio_unitario/proveedor en MaterialCatalogo al confirmar
+    una cotizacion (02/Sep/2026, siguiente paso pedido por Mariana tras
+    conectar Recepcion->inventario: "sincronizar cotizacion -> catalogo").
+    A diferencia de _sincronizar_inventario_materiales, esto NO es una
+    entrega real todavia - solo dice "se cotizo a este precio con este
+    proveedor", sin tocar cantidad_disponible (ver
+    MaterialCatalogoViewSet.actualizar_precio_cotizado en
+    materiales-service)."""
+    if not linea.precio_unitario:
         return
-    try:
-        upstream = requests.post(
-            f"{settings.MATERIALES_SERVICE_URL}/api/materiales/recibir_compra/",
-            json={
-                "material_nombre": orden_linea.descripcion,
-                "cantidad_recibida": str(cantidad_recibida),
-                "precio_unitario": str(orden_linea.precio_unitario),
-                "proveedor": orden.proveedor,
-            },
-            headers={"X-Internal-Secret": settings.MATERIALES_INTERNAL_SECRET},
-            timeout=10,
-        )
-    except requests.RequestException:
-        logger.warning("materiales-service no respondio al sincronizar la recepcion de compra", exc_info=True)
-        return
-    if upstream.status_code != 200:
-        logger.warning(
-            "materiales-service rechazo la sincronizacion de inventario: %s %s",
-            upstream.status_code,
-            upstream.text[:300],
-        )
+    _llamar_materiales_service(
+        "actualizar_precio_cotizado",
+        {
+            "material_nombre": linea.descripcion,
+            "precio_unitario": str(linea.precio_unitario),
+            "proveedor": cotizacion.proveedor,
+        },
+        "el precio cotizado",
+    )
 
 
 class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):

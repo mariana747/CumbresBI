@@ -286,3 +286,80 @@ class RecepcionSincronizaInventarioTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.linea.refresh_from_db()
         self.assertEqual(self.linea.cantidad_recibida, Decimal("10"))
+
+
+class ConfirmarExtraccionSincronizaCatalogoTests(TestCase):
+    """02/Sep/2026, pedido de Mariana: "sincronizar cotizacion -> catalogo"
+    (siguiente paso tras conectar Recepcion->inventario). Verifica que
+    confirmar_extraccion llama a materiales-service por cada linea con
+    precio_unitario, y que un fallo de red no tumba la confirmacion local
+    (fail-open, ver views.py::_sincronizar_precio_cotizado)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("compras.crear", "compras.aprobar"), identity_user_id="u001")
+        self.solicitud = SolicitudCompra.objects.create(
+            proyecto="PRYA", descripcion="Cemento", created_by="u001", updated_by="u001"
+        )
+        self.cotizacion = Cotizacion.objects.create(
+            solicitud=self.solicitud, proveedor="CP0001", proveedor_nombre="Materiales del Norte",
+            created_by="u001", updated_by="u001",
+        )
+
+    def _confirmar(self, lineas):
+        request = self.factory.post(
+            f"/api/cotizaciones/{self.cotizacion.id_cotizacion}/confirmar_extraccion/",
+            {"lineas": lineas},
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = CotizacionViewSet.as_view({"post": "confirmar_extraccion"})
+        return view(request, pk=self.cotizacion.id_cotizacion)
+
+    def test_sin_secreto_configurado_no_llama_a_materiales(self):
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", ""), patch(
+            "compras_tesoreria.views.requests.post"
+        ) as mock_post:
+            response = self._confirmar([{"descripcion": "Cemento gris 50kg", "cantidad": "20", "precio_unitario": "180.00", "importe": "3600.00"}])
+        self.assertEqual(response.status_code, 200)
+        mock_post.assert_not_called()
+
+    def test_con_secreto_llama_a_materiales_por_cada_linea(self):
+        mock_response = Mock(status_code=200)
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"), patch(
+            "compras_tesoreria.views.requests.post", return_value=mock_response
+        ) as mock_post:
+            response = self._confirmar(
+                [
+                    {"descripcion": "Cemento gris 50kg", "cantidad": "20", "precio_unitario": "180.00", "importe": "3600.00"},
+                    {"descripcion": "Varilla 3/8", "cantidad": "40", "precio_unitario": "55.00", "importe": "2200.00"},
+                ]
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_post.call_count, 2)
+        primera_llamada_url = mock_post.call_args_list[0].args[0]
+        self.assertIn("actualizar_precio_cotizado", primera_llamada_url)
+        primer_payload = mock_post.call_args_list[0].kwargs["json"]
+        self.assertEqual(primer_payload["material_nombre"], "Cemento gris 50kg")
+        self.assertEqual(primer_payload["precio_unitario"], "180.00")
+        self.assertEqual(primer_payload["proveedor"], "CP0001")
+
+    def test_linea_sin_precio_no_llama_a_materiales(self):
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"), patch(
+            "compras_tesoreria.views.requests.post"
+        ) as mock_post:
+            response = self._confirmar([{"descripcion": "Cemento gris 50kg", "cantidad": "20", "precio_unitario": "", "importe": "0"}])
+        self.assertEqual(response.status_code, 200)
+        mock_post.assert_not_called()
+
+    def test_fallo_de_red_no_tumba_la_confirmacion_local(self):
+        import requests
+
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"), patch(
+            "compras_tesoreria.views.requests.post", side_effect=requests.RequestException("caido")
+        ):
+            response = self._confirmar([{"descripcion": "Cemento gris 50kg", "cantidad": "20", "precio_unitario": "180.00", "importe": "3600.00"}])
+        self.assertEqual(response.status_code, 200)
+        self.cotizacion.refresh_from_db()
+        self.assertEqual(self.cotizacion.estado, Cotizacion.ESTADO_CONFIRMADA)
+        self.assertEqual(self.cotizacion.lineas.count(), 1)
