@@ -7,6 +7,7 @@ from .models import (
     FacturaTraslado,
     TesoreriaBanco,
     TesoreriaComplementoPago,
+    TesoreriaDiaFestivo,
     TesoreriaContraparte,
     TesoreriaContraparteRelacion,
     TesoreriaContrato,
@@ -20,6 +21,7 @@ from .models import (
     TesoreriaSaldo,
     TesoreriaTicketProveedor,
     TesoreriaTicketReembolso,
+    TesoreriaTicketReembolsoConcepto,
 )
 
 
@@ -785,6 +787,23 @@ class TesoreriaRecNominaSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
+class TesoreriaDiaFestivoSerializer(serializers.ModelSerializer):
+    """Catalogo de festivos oficiales, mantenido por Tesoreria (ver docstring
+    del modelo). CRUD simple, sin acciones especiales."""
+
+    class Meta:
+        model = TesoreriaDiaFestivo
+        fields = ["fecha", "descripcion", "created_at", "created_by"]
+        read_only_fields = ["created_at", "created_by"]
+
+
+class TesoreriaTicketReembolsoConceptoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TesoreriaTicketReembolsoConcepto
+        fields = ["id_concepto", "descripcion", "monto", "categoria_gasto"]
+        read_only_fields = ["id_concepto"]
+
+
 class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
     """Ticket de reembolso de MiCumbres (pantalla provisional, ver
     docstring de TesoreriaTicketReembolso en models.py). id_empleado/
@@ -792,10 +811,51 @@ class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
     solo lectura en el update normal - el empleado los fija al crear (o no
     los toca, en el caso de estado/factura/flujo) y solo cambian via las
     acciones dedicadas del ViewSet (aprobar/rechazar, subir_factura,
-    vincular_factura, vincular_flujo), nunca via un PATCH libre."""
+    vincular_factura, vincular_flujo), nunca via un PATCH libre.
+
+    `conceptos` (03/Sep/2026, minuta punto 1: "solicitar varios conceptos")
+    es escribible SOLO al crear - mismo criterio que CotizacionLinea en
+    compras-tesoreria-service (reemplazo completo, no merge parcial). Un
+    update normal (PATCH) no puede tocar los conceptos, solo el header del
+    ticket; agregar/quitar conceptos despues de creado no esta soportado en
+    este primer corte (el empleado no puede editar el ticket de todos
+    modos, ver docstring del modelo)."""
 
     flujo_id = serializers.CharField(source="flujo.id_flujo", read_only=True, default=None)
     factura_folio = serializers.CharField(source="factura.comprobante_folio", read_only=True, default=None)
+    conceptos = TesoreriaTicketReembolsoConceptoSerializer(many=True)
+    monto_total = serializers.SerializerMethodField()
+
+    def get_monto_total(self, obj):
+        return sum((c.monto for c in obj.conceptos.all()), start=0)
+
+    def validate_conceptos(self, value):
+        if not value:
+            raise serializers.ValidationError("Se requiere al menos un concepto.")
+        return value
+
+    def create(self, validated_data):
+        conceptos = validated_data.pop("conceptos")
+        ticket = super().create(validated_data)
+        TesoreriaTicketReembolsoConcepto.objects.bulk_create(
+            [TesoreriaTicketReembolsoConcepto(ticket=ticket, **concepto) for concepto in conceptos]
+        )
+        return ticket
+
+    def update(self, instance, validated_data):
+        """`sociedad`/`moneda` se llenan al crear pero son inmutables
+        despues (03/Sep/2026: "cualquier error de sociedad, tipo de moneda
+        o falta de ortografia... no se aceptara" - mismo criterio que
+        sociedad, ampliado explicitamente a moneda por Mariana en el chat;
+        ni el empleado ni Tesoreria los corrigen, se rechaza el ticket
+        completo y se crea uno nuevo). No pueden ir en
+        Meta.read_only_fields porque eso tambien bloquearia el create; se
+        descartan aqui solo en update. `conceptos` tambien se descarta
+        aqui - no es editable via PATCH (ver docstring de la clase)."""
+        validated_data.pop("sociedad", None)
+        validated_data.pop("moneda", None)
+        validated_data.pop("conceptos", None)
+        return super().update(instance, validated_data)
 
     class Meta:
         model = TesoreriaTicketReembolso
@@ -803,11 +863,10 @@ class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
             "id_ticket",
             "id_empleado",
             "descripcion",
-            "monto",
+            "conceptos",
+            "monto_total",
             "moneda",
             "sociedad",
-            "centro",
-            "categoria_gasto",
             "fecha_gasto",
             "estado",
             "link_ticket",
@@ -818,6 +877,8 @@ class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
             "factura_folio",
             "flujo",
             "flujo_id",
+            "autorizado_por",
+            "fecha_autorizacion",
             "comentarios",
             "created_at",
             "created_by",
@@ -832,6 +893,8 @@ class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
             "drive_file_id_factura",
             "factura",
             "flujo",
+            "autorizado_por",
+            "fecha_autorizacion",
             "created_at",
             "updated_at",
         ]

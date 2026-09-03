@@ -1005,6 +1005,32 @@ class TesoreriaFlujo(models.Model):
         return self.id_flujo
 
 
+class TesoreriaDiaFestivo(models.Model):
+    """Cache local de dias festivos oficiales de MX, sincronizada desde
+    Nager.Date (03/Sep/2026, pedido explicito de Mariana: "usemos
+    Nager.Date o OpenHolidays API" en vez de mantener la lista a mano). La
+    fecha limite mensual de reembolsos necesita excluir festivos ademas de
+    fines de semana al calcular los "ultimos 2 dias habiles" del mes (ver
+    reembolso_utils.sincronizar_festivos_mx/_dias_habiles_del_mes) - se
+    sincroniza sola, perezosamente, la primera vez que se necesita un año;
+    tambien se puede forzar via TesoreriaDiaFestivoViewSet.sincronizar. Se
+    deja como tabla editable (no solo cache en memoria) para poder
+    corregir/agregar un festivo a mano si la fuente externa se equivoca o
+    esta caida."""
+
+    fecha = models.DateField(primary_key=True)
+    descripcion = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_dias_festivos"
+        ordering = ["fecha"]
+
+    def __str__(self):
+        return f"{self.fecha} ({self.descripcion})"
+
+
 class TesoreriaTicketReembolso(models.Model):
     """Ticket de reembolso subido por el empleado (pantalla PROVISIONAL
     "MiCumbres" /mi-cumbres/tickets, 27/Ago/2026) - puente minimo mientras
@@ -1042,8 +1068,10 @@ class TesoreriaTicketReembolso(models.Model):
     # "tesoreria-diseno-vs-construido-tesoreria2-pdf"): el ticket original
     # no traia a que empresa/area se carga el gasto ni en que moneda -
     # solo se asumia MXP y no se podia reportar por categoria/sociedad.
-    # El empleado los llena al crear (igual que descripcion/monto/
-    # fecha_gasto); solo Tesoreria los puede corregir despues.
+    # El empleado los llena al crear; `sociedad` es inmutable despues (ver
+    # comentario en el campo mas abajo, regla de minuta 03/Sep/2026: "si se
+    # equivoca de sociedad ya tampoco se acepta" - se rechaza el ticket
+    # completo, no se corrige).
     CATEGORIA_VIATICOS = "VIATICOS"
     CATEGORIA_PAPELERIA = "PAPELERIA"
     CATEGORIA_TRANSPORTE = "TRANSPORTE"
@@ -1059,30 +1087,27 @@ class TesoreriaTicketReembolso(models.Model):
         (CATEGORIA_OTRO, "Otro"),
     ]
     MONEDA_CHOICES = [("MXP", "MXP"), ("USD", "USD"), ("EUR", "EUR")]
-    # Lista cerrada, no catalogo real (pedido explicito de Mariana
-    # 31/Ago/2026: "centro de costo, ponlo como lista desplegable") -
-    # distinto de TesoreriaContrato.centro (texto libre) porque ahi no se
-    # pidio lo mismo; aqui se prefirio una lista fija de areas genericas
-    # de la empresa en vez de dejarlo libre.
-    CENTRO_ADMINISTRACION = "ADMINISTRACION"
-    CENTRO_OBRA = "OBRA"
-    CENTRO_VENTAS = "VENTAS"
-    CENTRO_TESORERIA = "TESORERIA"
-    CENTRO_RRHH = "RRHH"
-    CENTRO_OTRO = "OTRO"
-    CENTRO_CHOICES = [
-        (CENTRO_ADMINISTRACION, "Administración"),
-        (CENTRO_OBRA, "Obra"),
-        (CENTRO_VENTAS, "Ventas"),
-        (CENTRO_TESORERIA, "Tesorería"),
-        (CENTRO_RRHH, "RRHH"),
-        (CENTRO_OTRO, "Otro"),
-    ]
+    # centro (lista cerrada de areas) se elimino 03/Sep/2026 - pedido
+    # explicito de Mariana en minuta ("centro de costos se elimina"), sin
+    # reemplazo aqui - `proyecto` (division por proyecto) es de Solicitud
+    # de Pago, no de Reembolso (aclarado por Mariana en el chat despues de
+    # agregarlo por error a este modelo, ver memoria de sesion
+    # "tesoreria-solicitud-pago-pendiente" cuando se cree).
 
     id_ticket = models.CharField(max_length=255, primary_key=True)
     id_empleado = models.CharField(max_length=255)
-    descripcion = models.TextField()
-    monto = models.DecimalField(max_digits=14, decimal_places=2)
+    # Nota general del ticket completo (opcional) - el detalle real vive en
+    # los conceptos (TesoreriaTicketReembolsoConcepto), uno por gasto
+    # individual. Antes este campo era obligatorio y unico por ticket;
+    # 03/Sep/2026 (minuta, punto 1: "solicitar varios conceptos") se movio
+    # descripcion/monto/categoria_gasto a una lista de conceptos, mismo
+    # patron que CotizacionLinea en compras-tesoreria-service - un ticket
+    # ahora es "un comprobante, N conceptos", no "un comprobante, un gasto".
+    descripcion = models.TextField(blank=True, null=True)
+    # Inmutable tras crear, igual que `sociedad` mas abajo (03/Sep/2026:
+    # "cualquier error de sociedad, tipo de moneda o falta de ortografia...
+    # no se aceptara" - Mariana amplio la regla de sociedad a moneda
+    # tambien) - se descarta en TesoreriaTicketReembolsoSerializer.update.
     moneda = models.CharField(max_length=5, choices=MONEDA_CHOICES, default="MXP")
     fecha_gasto = models.DateField()
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
@@ -1090,9 +1115,11 @@ class TesoreriaTicketReembolso(models.Model):
     # esquema) - mismo criterio que TesoreriaContrato.sociedad. A que
     # empresa se le carga el gasto, no necesariamente la unica sociedad
     # del empleado (puede tener acceso a mas de una).
+    # Inmutable tras crear (03/Sep/2026, ver comentario arriba) - se
+    # descarta en el serializer para que ni el empleado ni Tesoreria lo
+    # puedan corregir via PATCH; un ticket con la sociedad equivocada se
+    # rechaza entero.
     sociedad = models.CharField(max_length=13, blank=True, null=True)
-    centro = models.CharField(max_length=20, choices=CENTRO_CHOICES, blank=True, null=True)
-    categoria_gasto = models.CharField(max_length=20, choices=CATEGORIA_CHOICES, blank=True, null=True)
     # Foto/comprobante del ticket - sube el empleado al crear.
     link_ticket = models.TextField(blank=True, null=True)
     drive_file_id_ticket = models.TextField(blank=True, null=True)
@@ -1121,6 +1148,12 @@ class TesoreriaTicketReembolso(models.Model):
         blank=True,
         null=True,
     )
+    # Quien aprobo el ticket (paso "autorizar antes de pagar" de la minuta,
+    # 03/Sep/2026) y cuando - antes aprobar() solo cambiaba el estado sin
+    # dejar rastro de quien lo hizo, a diferencia de TesoreriaFlujo.aprobar
+    # que si lo registraba. Se resuelve del JWT en la accion, no del body.
+    autorizado_por = models.CharField(max_length=255, blank=True, null=True)
+    fecha_autorizacion = models.DateField(blank=True, null=True)
     comentarios = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=255, blank=True, null=True)
@@ -1129,15 +1162,18 @@ class TesoreriaTicketReembolso(models.Model):
 
     # 31/Ago/2026 (auditoria de scope, caso real: colaborador externo tipo
     # contador/abogado que solo debe ver los tickets de SU sociedad, no
-    # todos) - este modelo ya tenia columnas `sociedad`/`centro` propias
-    # (agregadas el mismo dia) pero nunca declaro ScopedManager, quedando
-    # en lectura abierta para cualquiera con tesoreria.editar. SCOPE_FIELD_
-    # IDENTITY reemplaza el filtro manual que antes vivia en
+    # todos) - este modelo ya tenia columna `sociedad` propia (agregada el
+    # mismo dia) pero nunca declaro ScopedManager, quedando en lectura
+    # abierta para cualquiera con tesoreria.editar. SCOPE_FIELD_IDENTITY
+    # reemplaza el filtro manual que antes vivia en
     # TesoreriaTicketReembolsoViewSet.get_queryset (empleado ve solo lo
     # suyo) - ahora es el mismo mecanismo de RLS que el resto del proyecto,
-    # combinado por OR con sociedad/centro (ScopedQuerySet.for_scope).
+    # combinado por OR con sociedad (ScopedQuerySet.for_scope).
+    # SCOPE_FIELD_CENTRO se elimino junto con el campo `centro` (03/Sep/2026,
+    # ver comentario arriba) - un colaborador externo scoped por centro deja
+    # de tener ese filtro extra en este modelo; sociedad/id_empleado siguen
+    # cubriendo el resto de los casos de alcance ya probados.
     SCOPE_FIELD_SOCIEDAD = "sociedad"
-    SCOPE_FIELD_CENTRO = "centro"
     SCOPE_FIELD_IDENTITY = "id_empleado"
     objects = ScopedManager()
 
@@ -1147,6 +1183,33 @@ class TesoreriaTicketReembolso(models.Model):
 
     def __str__(self):
         return self.id_ticket
+
+
+class TesoreriaTicketReembolsoConcepto(models.Model):
+    """Un gasto individual dentro de un ticket de reembolso (03/Sep/2026,
+    minuta punto 1: "solicitar varios conceptos") - mismo patron que
+    CotizacionLinea en compras-tesoreria-service. El empleado los declara
+    al crear el ticket (via `conceptos` en el POST, ver
+    TesoreriaTicketReembolsoSerializer); categoria_gasto vive aqui (por
+    concepto), no en el ticket, porque cada gasto del mismo comprobante
+    puede ser de una categoria distinta (ej. taxi + comida en el mismo
+    viaje)."""
+
+    CATEGORIA_CHOICES = TesoreriaTicketReembolso.CATEGORIA_CHOICES
+
+    id_concepto = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    ticket = models.ForeignKey(
+        TesoreriaTicketReembolso, db_column="id_ticket", on_delete=models.CASCADE, related_name="conceptos"
+    )
+    descripcion = models.CharField(max_length=250)
+    monto = models.DecimalField(max_digits=14, decimal_places=2)
+    categoria_gasto = models.CharField(max_length=20, choices=CATEGORIA_CHOICES, blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_tickets_reembolso_conceptos"
+
+    def __str__(self):
+        return f"{self.descripcion} (${self.monto})"
 
 
 class TesoreriaSaldo(models.Model):

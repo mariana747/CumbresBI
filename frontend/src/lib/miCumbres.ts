@@ -35,28 +35,28 @@ export const CATEGORIA_GASTO_LABELS: Record<TesoreriaCategoriaGasto, string> = {
   OTRO: "Otro",
 };
 
-// Espejo de TesoreriaTicketReembolso.CENTRO_CHOICES - lista cerrada (pedido
-// de Mariana 31/Ago/2026), no un catalogo real de Centro todavia.
-export type TesoreriaCentroCosto = "ADMINISTRACION" | "OBRA" | "VENTAS" | "TESORERIA" | "RRHH" | "OTRO";
+// `centro` (lista cerrada) se elimino 03/Sep/2026 - pedido explicito de
+// Mariana en minuta ("centro de costos se elimina"), sin reemplazo aqui
+// (division por proyecto es de Solicitud de Pago, no de Reembolso).
 
-export const CENTRO_COSTO_LABELS: Record<TesoreriaCentroCosto, string> = {
-  ADMINISTRACION: "Administración",
-  OBRA: "Obra",
-  VENTAS: "Ventas",
-  TESORERIA: "Tesorería",
-  RRHH: "RRHH",
-  OTRO: "Otro",
-};
+// Un gasto individual dentro del ticket (03/Sep/2026, minuta punto 1:
+// "solicitar varios conceptos") - mismo patron que CotizacionLinea en
+// compras. El ticket requiere al menos uno al crear.
+export interface TesoreriaTicketReembolsoConcepto {
+  id_concepto: string;
+  descripcion: string;
+  monto: string;
+  categoria_gasto: TesoreriaCategoriaGasto | null;
+}
 
 export interface TesoreriaTicketReembolso {
   id_ticket: string;
   id_empleado: string;
-  descripcion: string;
-  monto: string;
+  descripcion: string | null;
+  conceptos: TesoreriaTicketReembolsoConcepto[];
+  monto_total: string;
   moneda: string;
   sociedad: string | null;
-  centro: TesoreriaCentroCosto | null;
-  categoria_gasto: TesoreriaCategoriaGasto | null;
   fecha_gasto: string;
   estado: TesoreriaTicketEstado;
   link_ticket: string | null;
@@ -67,11 +67,33 @@ export interface TesoreriaTicketReembolso {
   factura_folio: string | null;
   flujo: string | null;
   flujo_id: string | null;
+  // Quien aprobo el ticket y cuando (03/Sep/2026, minuta: "se necesita
+  // autorizar antes de pagar") - se llenan solo via la accion aprobar(),
+  // nunca via PATCH libre.
+  autorizado_por: string | null;
+  fecha_autorizacion: string | null;
   comentarios: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
   updated_by: string | null;
+}
+
+// Fecha de corte real del mes en curso (03/Sep/2026, pedido de Mariana:
+// "que se coloque el dia/mes/año de hasta cuando se aceptan"), no solo la
+// descripcion generica de la regla.
+export interface TesoreriaFechaLimiteReembolso {
+  fecha_corte: string | null;
+  dias_bloqueados: string[];
+  en_cierre_hoy: boolean;
+}
+
+export async function getFechaLimiteReembolso(): Promise<TesoreriaFechaLimiteReembolso> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/fecha_limite/`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 // El empleado dueño solo ve los suyos; quien tiene tesoreria.editar ve
@@ -94,25 +116,25 @@ export async function listTicketsReembolso(search?: string): Promise<TesoreriaTi
 // sube la foto/comprobante despues con subirFotoTicket(), mismo patron en
 // dos pasos que TesoreriaFlujoViewSet (crear -> subir_comprobante).
 export async function crearTicketReembolso(params: {
-  descripcion: string;
-  monto: string;
+  descripcion?: string;
+  conceptos: Array<{ descripcion: string; monto: string; categoriaGasto?: TesoreriaCategoriaGasto }>;
   moneda?: string;
   fechaGasto: string;
   sociedad?: string;
-  centro?: TesoreriaCentroCosto;
-  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaTicketReembolso> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      descripcion: params.descripcion,
-      monto: params.monto,
+      descripcion: params.descripcion || null,
+      conceptos: params.conceptos.map((c) => ({
+        descripcion: c.descripcion,
+        monto: c.monto,
+        categoria_gasto: c.categoriaGasto || null,
+      })),
       moneda: params.moneda || "MXP",
       fecha_gasto: params.fechaGasto,
       sociedad: params.sociedad || null,
-      centro: params.centro || null,
-      categoria_gasto: params.categoriaGasto || null,
     }),
   });
   if (!response.ok) {

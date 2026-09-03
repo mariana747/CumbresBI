@@ -27,7 +27,6 @@ import { SessionUser } from "@/lib/auth";
 import {
   aprobarTicket,
   CATEGORIA_GASTO_LABELS,
-  CENTRO_COSTO_LABELS,
   listTicketsReembolso,
   rechazarTicket,
   subirFacturaTicket,
@@ -250,8 +249,10 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                 <TableRow key={t.id_ticket} hover>
                   <TableCell>{t.id_ticket}</TableCell>
                   <TableCell>{t.id_empleado}</TableCell>
-                  <TableCell sx={{ maxWidth: 240 }}>{t.descripcion}</TableCell>
-                  <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>${t.monto}</TableCell>
+                  <TableCell sx={{ maxWidth: 240 }}>
+                    {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
+                  </TableCell>
+                  <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>${t.monto_total}</TableCell>
                   <TableCell>{t.fecha_gasto}</TableCell>
                   <TableCell>
                     <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
@@ -307,21 +308,48 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                 <Typography variant="body2">
                   <strong>Empleado:</strong> {ticketAbierto.id_empleado}
                 </Typography>
+                {ticketAbierto.descripcion && (
+                  <Typography variant="body2">
+                    <strong>Nota:</strong> {ticketAbierto.descripcion}
+                  </Typography>
+                )}
                 <Typography variant="body2">
-                  <strong>Descripción:</strong> {ticketAbierto.descripcion}
+                  <strong>Total:</strong> ${ticketAbierto.monto_total} {ticketAbierto.moneda} —{" "}
+                  {ticketAbierto.fecha_gasto}
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Monto:</strong> ${ticketAbierto.monto} {ticketAbierto.moneda} — {ticketAbierto.fecha_gasto}
+                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"}
                 </Typography>
-                <Typography variant="body2">
-                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"} ·{" "}
-                  <strong>Centro de costo:</strong>{" "}
-                  {ticketAbierto.centro ? CENTRO_COSTO_LABELS[ticketAbierto.centro] : "—"}
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Categoría de gasto:</strong>{" "}
-                  {ticketAbierto.categoria_gasto ? CATEGORIA_GASTO_LABELS[ticketAbierto.categoria_gasto] : "—"}
-                </Typography>
+                {ticketAbierto.autorizado_por && (
+                  <Typography variant="body2">
+                    <strong>Autorizado por:</strong> {ticketAbierto.autorizado_por}{" "}
+                    ({ticketAbierto.fecha_autorizacion})
+                  </Typography>
+                )}
+                {/* Conceptos (03/Sep/2026, minuta punto 1: "solicitar
+                    varios conceptos") - antes era un solo monto/categoria
+                    por ticket, ahora una tabla de N gastos. */}
+                <Typography variant="subtitle2">Conceptos</Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Descripción</TableCell>
+                        <TableCell align="right">Monto</TableCell>
+                        <TableCell>Categoría</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {ticketAbierto.conceptos.map((c) => (
+                        <TableRow key={c.id_concepto}>
+                          <TableCell>{c.descripcion}</TableCell>
+                          <TableCell align="right">${c.monto}</TableCell>
+                          <TableCell>{c.categoria_gasto ? CATEGORIA_GASTO_LABELS[c.categoria_gasto] : "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
                 {ticketAbierto.link_ticket && (
                   <MuiLink href={ticketAbierto.link_ticket} target="_blank" rel="noopener">
                     Ver foto/comprobante subido por el empleado

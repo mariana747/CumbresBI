@@ -8,6 +8,7 @@ from django.db.models import ProtectedError
 from django.utils import timezone
 from cumbresbi_scope.permissions import require_permission
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import BasePermission
@@ -39,6 +40,7 @@ from .models import (
     TesoreriaContratoDocumento,
     TesoreriaCorteEdc,
     TesoreriaCuenta,
+    TesoreriaDiaFestivo,
     TesoreriaDocumentoTicket,
     TesoreriaFactura,
     TesoreriaFlujo,
@@ -61,6 +63,7 @@ from .serializers import (
     TesoreriaContratoSerializer,
     TesoreriaCorteEdcSerializer,
     TesoreriaCuentaSerializer,
+    TesoreriaDiaFestivoSerializer,
     TesoreriaFacturaSerializer,
     TesoreriaFlujoSerializer,
     TesoreriaNotaCreditoSerializer,
@@ -69,6 +72,7 @@ from .serializers import (
     TesoreriaTicketProveedorSerializer,
     TesoreriaTicketReembolsoSerializer,
 )
+from .reembolso_utils import sincronizar_festivos_mx, ultimos_dos_dias_habiles_y_corte, validar_fecha_limite
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +318,42 @@ class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     serializer_class = TesoreriaCuentaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["alias", "label", "rfc_razon_social", "clabe"]
+
+
+class TesoreriaDiaFestivoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Cache de dias festivos oficiales sincronizada de Nager.Date, usada
+    por reembolso_utils para calcular los ultimos 2 dias habiles de cada
+    mes (ver docstring del modelo). Se sincroniza sola de forma perezosa;
+    esta accion sirve para forzar el refresco de un año sin esperar a que
+    se dispare solo. Mismo criterio de permisos que Contraparte/Banco/
+    Cuenta."""
+
+    queryset = TesoreriaDiaFestivo.objects.all()
+    serializer_class = TesoreriaDiaFestivoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["descripcion"]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.effective_scope.identity_user_id)
+
+    def get_permissions(self):
+        if self.action == "sincronizar":
+            return [require_permission("tesoreria.editar")()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=["post"])
+    def sincronizar(self, request):
+        anio = request.data.get("anio") or timezone.now().year
+        try:
+            anio = int(anio)
+        except (TypeError, ValueError):
+            return Response({"anio": ["Debe ser un año numérico."]}, status=400)
+        ok = sincronizar_festivos_mx(anio)
+        if not ok:
+            return Response(
+                {"detail": "No se pudo contactar a Nager.Date, intenta de nuevo más tarde."}, status=502
+            )
+        return Response({"anio": anio, "sincronizado": True})
 
 
 class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -941,12 +981,14 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
     Lectura (31/Ago/2026, corregido tras auditoria de scope - antes era un
     filtro manual "tesoreria.editar ve TODO sin importar su alcance", hueco
     real para un colaborador externo con tesoreria.editar acotado a una
-    sola sociedad/centro): ahora usa el mismo ScopedManager que el resto
-    del proyecto, via SCOPE_FIELD_IDENTITY/SOCIEDAD/CENTRO del modelo. Un
-    empleado (self-service, sin permiso, con identity_user_id) ve solo lo
-    suyo; quien tiene tesoreria.editar Y es is_global ve todo; quien tiene
-    tesoreria.editar pero esta acotado por sociedad/centro ve solo esos -
-    ya no ve todo por el simple hecho de tener el permiso."""
+    sola sociedad): ahora usa el mismo ScopedManager que el resto
+    del proyecto, via SCOPE_FIELD_IDENTITY/SOCIEDAD del modelo (SCOPE_FIELD_
+    CENTRO se elimino 03/Sep/2026 junto con el campo `centro`, ver
+    docstring del modelo). Un empleado (self-service, sin permiso, con
+    identity_user_id) ve solo lo suyo; quien tiene tesoreria.editar Y es
+    is_global ve todo; quien tiene tesoreria.editar pero esta acotado por
+    sociedad ve solo esos - ya no ve todo por el simple hecho de tener el
+    permiso."""
 
     serializer_class = TesoreriaTicketReembolsoSerializer
     filter_backends = [SearchFilter]
@@ -962,6 +1004,23 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             return [require_permission("tesoreria.editar")()]
         return super().get_permissions()
 
+    @action(detail=False, methods=["get"])
+    def fecha_limite(self, request):
+        """Fecha de corte real del mes en curso (03/Sep/2026, pedido de
+        Mariana: "que se coloque el dia/mes/año de hasta cuando se
+        aceptan" en vez de solo describir la regla en texto). Lectura
+        abierta a cualquier empleado autenticado - la necesitan ver ANTES
+        de intentar crear un ticket, mismo criterio que create/subir_ticket."""
+        hoy = timezone.now().date()
+        bloqueados, corte = ultimos_dos_dias_habiles_y_corte(hoy.year, hoy.month)
+        return Response(
+            {
+                "fecha_corte": corte.isoformat() if corte else None,
+                "dias_bloqueados": [d.isoformat() for d in bloqueados],
+                "en_cierre_hoy": hoy in bloqueados,
+            }
+        )
+
     def get_queryset(self):
         queryset = (
             TesoreriaTicketReembolso.objects.for_scope(self.request.effective_scope)
@@ -974,12 +1033,17 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
             queryset = queryset.filter(sociedad=sociedad)
-        centro = self.request.query_params.get("centro")
-        if centro:
-            queryset = queryset.filter(centro=centro)
         return queryset
 
     def perform_create(self, serializer):
+        # Fecha limite mensual (minuta 03/Sep/2026): ver reembolso_utils.
+        # Se valida aqui, antes de guardar - un ticket rechazado por esto
+        # nunca llega a crearse (no queda un registro RECHAZADO, el
+        # empleado simplemente no puede enviarlo).
+        error = validar_fecha_limite(timezone.now().date(), serializer.validated_data.get("fecha_gasto"))
+        if error:
+            raise ValidationError({"fecha_gasto": [error]})
+
         # id_ticket = "TKT-{consecutivo global de 6 digitos}", mismo
         # criterio que TesoreriaFlujo.id_flujo (ver perform_create de
         # TesoreriaFlujoViewSet).
@@ -1034,13 +1098,20 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         Aprobar) - no hay un campo propio en el modelo para verificar esto
         del lado del backend, igual que el resto de "confirmar extraccion"
         del Motor Documental en otros modulos (PLD, Facturas). Requiere
-        tesoreria.editar."""
+        tesoreria.editar.
+
+        autorizado_por/fecha_autorizacion (03/Sep/2026, minuta: "se necesita
+        autorizar antes de pagar") se resuelven del JWT igual que
+        TesoreriaFlujoViewSet.aprobar - antes este aprobar() solo cambiaba
+        el estado sin dejar rastro de quien lo hizo."""
         ticket = self.get_object()
         if ticket.estado != TesoreriaTicketReembolso.ESTADO_PENDIENTE:
             return Response({"estado": ["Solo se puede aprobar un ticket Pendiente."]}, status=400)
         ticket.estado = TesoreriaTicketReembolso.ESTADO_APROBADO
+        ticket.autorizado_por = request.effective_scope.identity_user_id
+        ticket.fecha_autorizacion = timezone.now().date()
         ticket.comentarios = request.data.get("comentarios", ticket.comentarios)
-        ticket.save(update_fields=["estado", "comentarios"])
+        ticket.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion", "comentarios"])
         emitir_evento_auditoria(
             "tesoreria_tickets_reembolso.aprobar",
             "tesoreria_tickets_reembolso",

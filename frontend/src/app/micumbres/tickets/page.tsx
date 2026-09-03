@@ -33,19 +33,19 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { Camera, Upload, X as CloseIcon } from "lucide-react";
+import { Camera, Plus, Trash2, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import EscanerDocumento from "@/components/EscanerDocumento";
 import { getSession, SessionUser } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   crearTicketReembolso,
+  getFechaLimiteReembolso,
   CATEGORIA_GASTO_LABELS,
-  CENTRO_COSTO_LABELS,
   listTicketsReembolso,
   subirFotoTicket,
   TesoreriaCategoriaGasto,
-  TesoreriaCentroCosto,
+  TesoreriaFechaLimiteReembolso,
   TesoreriaTicketEstado,
   TesoreriaTicketReembolso,
 } from "@/lib/miCumbres";
@@ -79,6 +79,20 @@ const ESTADO_LABEL: Record<TesoreriaTicketEstado, string> = {
   RECHAZADO: "Rechazado",
 };
 
+// "28 de septiembre del 2026" (03/Sep/2026, pedido de Mariana) - formato
+// largo en español para las fechas límite mostradas en la pantalla.
+function formatearFechaLarga(fechaIso: string): string {
+  const [anio, mes, dia] = fechaIso.split("-").map(Number);
+  const fecha = new Date(anio, mes - 1, dia);
+  const mesNombre = fecha.toLocaleDateString("es-MX", { month: "long" });
+  return `${dia} de ${mesNombre} del ${anio}`;
+}
+
+function nombreDelMes(fechaIso: string): string {
+  const [anio, mes, dia] = fechaIso.split("-").map(Number);
+  return new Date(anio, mes - 1, dia).toLocaleDateString("es-MX", { month: "long" });
+}
+
 export default function MiCumbresTicketsPage() {
   const theme = useTheme();
   // En celular la tabla no cabe (demasiadas columnas) - se muestra como
@@ -93,6 +107,13 @@ export default function MiCumbresTicketsPage() {
   const [tickets, setTickets] = useState<TesoreriaTicketReembolso[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Fecha de corte real del mes (03/Sep/2026, pedido de Mariana: mostrar
+  // el dia/mes/año concreto, no solo describir la regla).
+  const [fechaLimite, setFechaLimite] = useState<TesoreriaFechaLimiteReembolso | null>(null);
+  useEffect(() => {
+    getFechaLimiteReembolso().then(setFechaLimite).catch(() => setFechaLimite(null));
+  }, []);
 
   async function cargar() {
     setLoading(true);
@@ -112,12 +133,29 @@ export default function MiCumbresTicketsPage() {
   // --- Alta (empleado) ---
   const [openNuevo, setOpenNuevo] = useState(false);
   const [descripcion, setDescripcion] = useState("");
-  const [monto, setMonto] = useState("");
   const [moneda, setMoneda] = useState("MXP");
   const [fechaGasto, setFechaGasto] = useState("");
   const [sociedad, setSociedad] = useState("");
-  const [centro, setCentro] = useState<TesoreriaCentroCosto | "">("");
-  const [categoriaGasto, setCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
+  // Varios conceptos por ticket (03/Sep/2026, minuta punto 1: "solicitar
+  // varios conceptos") - tabla editable, mismo patron que las lineas de
+  // CotizacionLinea en compras/cotizaciones/page.tsx.
+  type ConceptoForm = { descripcion: string; monto: string; categoriaGasto: TesoreriaCategoriaGasto | "" };
+  const CONCEPTO_VACIO: ConceptoForm = { descripcion: "", monto: "", categoriaGasto: "" };
+  const [conceptos, setConceptos] = useState<ConceptoForm[]>([{ ...CONCEPTO_VACIO }]);
+
+  function actualizarConcepto(index: number, campo: keyof ConceptoForm, valor: string) {
+    setConceptos((prev) => {
+      const copia = [...prev];
+      copia[index] = { ...copia[index], [campo]: valor };
+      return copia;
+    });
+  }
+  function agregarConcepto() {
+    setConceptos((prev) => [...prev, { ...CONCEPTO_VACIO }]);
+  }
+  function quitarConcepto(index: number) {
+    setConceptos((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  }
 
   // Sociedades a las que el empleado tiene acceso (mismo criterio que
   // filtroSociedad en /tesoreria/contratos) - is_global ve todas, el resto
@@ -141,32 +179,33 @@ export default function MiCumbresTicketsPage() {
   function cerrarNuevo() {
     setOpenNuevo(false);
     setDescripcion("");
-    setMonto("");
     setMoneda("MXP");
     setFechaGasto("");
     setSociedad("");
-    setCentro("");
-    setCategoriaGasto("");
+    setConceptos([{ ...CONCEPTO_VACIO }]);
     setArchivoTicket(null);
     setErrorAlta(null);
   }
 
   async function handleCrearTicket() {
-    if (!descripcion || !monto || !fechaGasto) {
-      setErrorAlta("Descripción, monto y fecha del gasto son obligatorios.");
+    const conceptosValidos = conceptos.filter((c) => c.descripcion.trim() && c.monto);
+    if (!conceptosValidos.length || !fechaGasto) {
+      setErrorAlta("Al menos un concepto (descripción + monto) y la fecha del gasto son obligatorios.");
       return;
     }
     setGuardando(true);
     setErrorAlta(null);
     try {
       const nuevo = await crearTicketReembolso({
-        descripcion,
-        monto,
+        descripcion: descripcion || undefined,
+        conceptos: conceptosValidos.map((c) => ({
+          descripcion: c.descripcion,
+          monto: c.monto,
+          categoriaGasto: c.categoriaGasto || undefined,
+        })),
         moneda,
         fechaGasto,
         sociedad: sociedad || undefined,
-        centro: centro || undefined,
-        categoriaGasto: categoriaGasto || undefined,
       });
       if (archivoTicket) {
         await subirFotoTicket(nuevo.id_ticket, archivoTicket);
@@ -205,6 +244,48 @@ export default function MiCumbresTicketsPage() {
         </Button>
       </Stack>
 
+      {/* Reglas del ticket (03/Sep/2026, pedido de Mariana: "las reglas van
+          afuera" - visibles en la pantalla, no solo dentro del dialogo de
+          alta) - mismas reglas que valida reembolso_utils.validar_fecha_limite
+          en el backend. */}
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="body2" component="div">
+          <strong>Reglas para el reembolso:</strong>
+          <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+            <li>La fecha del gasto no puede ser una fecha futura.</li>
+            <li>
+              {fechaLimite?.fecha_corte ? (
+                <>
+                  Este mes se aceptan tickets hasta el <strong>{formatearFechaLarga(fechaLimite.fecha_corte)}</strong>.
+                </>
+              ) : (
+                "No se pueden subir tickets durante los últimos 2 días hábiles del mes (cierre de la contadora)."
+              )}
+              {fechaLimite?.en_cierre_hoy && " Hoy ya está cerrado; podrás subir de nuevo a partir del día 1 del siguiente mes."}
+            </li>
+            <li>
+              {fechaLimite?.dias_bloqueados?.length === 2 ? (
+                <>
+                  Un gasto de <strong>{nombreDelMes(fechaLimite.dias_bloqueados[0])}</strong>, llegado a su fecha de
+                  corte, solo se aceptará si el ticket está fechado el{" "}
+                  <strong>{formatearFechaLarga(fechaLimite.dias_bloqueados[0])}</strong> o el{" "}
+                  <strong>{formatearFechaLarga(fechaLimite.dias_bloqueados[1])}</strong> (los días de cierre de ese
+                  mes); cualquier fecha anterior a esos días ya no se acepta.
+                </>
+              ) : (
+                "Un gasto de un mes ya cerrado solo se acepta si cayó justo en los días de cierre de ese mes; cualquier fecha anterior ya no se acepta."
+              )}
+            </li>
+            <li>
+              La sociedad y el tipo de moneda declarados al crear el ticket son definitivos y no podrán corregirse
+              posteriormente. Cualquier error en la sociedad, en la moneda o en la ortografía de la descripción
+              invalida el ticket; en tal caso deberá capturarse uno nuevo con los datos correctos.
+            </li>
+            <li>Debe declararse al menos un concepto por ticket.</li>
+          </Box>
+        </Typography>
+      </Alert>
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -228,7 +309,9 @@ export default function MiCumbresTicketsPage() {
                   <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
                     {t.id_ticket}
                   </Typography>
-                  <Typography variant="body2">{t.descripcion}</Typography>
+                  <Typography variant="body2">
+                    {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
+                  </Typography>
                   {/* El texto del estado es largo ("Aprobado — Tesorería
                       está facturando") - compartiendo fila con el
                       ID/descripción no cabía en pantallas de 320px y
@@ -244,7 +327,8 @@ export default function MiCumbresTicketsPage() {
                 <Divider sx={{ my: 1 }} />
                 <Stack spacing={0.5}>
                   <Typography variant="body2">
-                    <strong>Monto:</strong> ${t.monto}
+                    <strong>Total ({t.conceptos.length} concepto{t.conceptos.length === 1 ? "" : "s"}):</strong> $
+                    {t.monto_total}
                   </Typography>
                   <Typography variant="body2">
                     <strong>Fecha del gasto:</strong> {t.fecha_gasto}
@@ -272,8 +356,8 @@ export default function MiCumbresTicketsPage() {
             <TableHead>
               <TableRow>
                 <TableCell>ID</TableCell>
-                <TableCell>Descripción</TableCell>
-                <TableCell>Monto</TableCell>
+                <TableCell>Conceptos</TableCell>
+                <TableCell>Total</TableCell>
                 <TableCell>Fecha del gasto</TableCell>
                 <TableCell>Estado</TableCell>
                 <TableCell>Ticket</TableCell>
@@ -284,8 +368,10 @@ export default function MiCumbresTicketsPage() {
               {tickets.map((t) => (
                 <TableRow key={t.id_ticket} hover>
                   <TableCell>{t.id_ticket}</TableCell>
-                  <TableCell sx={{ maxWidth: 240 }}>{t.descripcion}</TableCell>
-                  <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>${t.monto}</TableCell>
+                  <TableCell sx={{ maxWidth: 240 }}>
+                    {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
+                  </TableCell>
+                  <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>${t.monto_total}</TableCell>
                   <TableCell>{t.fecha_gasto}</TableCell>
                   <TableCell>
                     <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
@@ -318,28 +404,43 @@ export default function MiCumbresTicketsPage() {
       {/* Alta del empleado - solo crear, nunca editar despues */}
       <Dialog open={openNuevo} onClose={cerrarNuevo} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          Subir ticket de reembolso
+          Ticket de reembolso
           <IconButton size="small" onClick={cerrarNuevo} aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
+          {/* Orden pedido por Mariana 03/Sep/2026: Sociedad -> Fecha+Moneda
+              -> Conceptos -> Nota general -> Elegir archivo. */}
           <Stack spacing={2} sx={{ mt: 1 }}>
             {errorAlta && <Alert severity="error">{errorAlta}</Alert>}
-            <TextField
-              label="Descripción del gasto"
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              multiline
-              minRows={2}
-              fullWidth
-            />
+            <FormControl fullWidth>
+              <InputLabel id="sociedad-ticket-label">Sociedad</InputLabel>
+              <Select
+                labelId="sociedad-ticket-label"
+                label="Sociedad"
+                value={sociedad}
+                onChange={(e) => setSociedad(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Sin especificar</em>
+                </MenuItem>
+                {sociedades.map((s) => (
+                  <MenuItem key={s.rfc} value={s.rfc}>
+                    {s.razon_social || s.rfc}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
             <Stack direction="row" spacing={2}>
               <TextField
-                label="Monto"
-                type="number"
-                value={monto}
-                onChange={(e) => setMonto(e.target.value)}
+                label="Fecha del gasto"
+                type="date"
+                value={fechaGasto}
+                onChange={(e) => setFechaGasto(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{ max: new Date().toISOString().slice(0, 10) }}
                 fullWidth
               />
               <FormControl sx={{ minWidth: 100 }}>
@@ -356,68 +457,138 @@ export default function MiCumbresTicketsPage() {
                 </Select>
               </FormControl>
             </Stack>
+
+            {/* Conceptos (03/Sep/2026, minuta punto 1: "solicitar varios
+                conceptos") - tabla editable en pantallas >= sm; en celular
+                se reemplaza por tarjetas apiladas (una fila con 3 campos +
+                borrar no cabe comoda en un telefono), mismo patron que
+                compras/cotizaciones/page.tsx y tesoreria/flujos/page.tsx. */}
+            <Typography variant="subtitle2">Conceptos</Typography>
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Descripción</TableCell>
+                      <TableCell sx={{ width: 110 }}>Monto</TableCell>
+                      <TableCell sx={{ width: 160 }}>Categoría</TableCell>
+                      <TableCell sx={{ width: 40 }} />
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {conceptos.map((c, index) => (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            variant="standard"
+                            value={c.descripcion}
+                            onChange={(e) => actualizarConcepto(index, "descripcion", e.target.value)}
+                            fullWidth
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            variant="standard"
+                            type="number"
+                            value={c.monto}
+                            onChange={(e) => actualizarConcepto(index, "monto", e.target.value)}
+                            fullWidth
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            size="small"
+                            variant="standard"
+                            value={c.categoriaGasto}
+                            onChange={(e) => actualizarConcepto(index, "categoriaGasto", e.target.value)}
+                            displayEmpty
+                            fullWidth
+                          >
+                            <MenuItem value="">
+                              <em>—</em>
+                            </MenuItem>
+                            {Object.entries(CATEGORIA_GASTO_LABELS).map(([valor, label]) => (
+                              <MenuItem key={valor} value={valor}>
+                                {label}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </TableCell>
+                        <TableCell>
+                          <IconButton size="small" onClick={() => quitarConcepto(index)} disabled={conceptos.length === 1}>
+                            <Trash2 size={14} strokeWidth={2} />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+
+            {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+            <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" } }}>
+              {conceptos.map((c, index) => (
+                <Paper key={index} variant="outlined" sx={{ p: 1.5 }}>
+                  <Stack direction="row" justifyContent="flex-end">
+                    <IconButton size="small" onClick={() => quitarConcepto(index)} disabled={conceptos.length === 1}>
+                      <Trash2 size={14} strokeWidth={2} />
+                    </IconButton>
+                  </Stack>
+                  <Stack spacing={1}>
+                    <TextField
+                      label="Descripción"
+                      size="small"
+                      value={c.descripcion}
+                      onChange={(e) => actualizarConcepto(index, "descripcion", e.target.value)}
+                      fullWidth
+                    />
+                    <TextField
+                      label="Monto"
+                      size="small"
+                      type="number"
+                      value={c.monto}
+                      onChange={(e) => actualizarConcepto(index, "monto", e.target.value)}
+                      fullWidth
+                    />
+                    <FormControl fullWidth size="small">
+                      <InputLabel id={`categoria-concepto-${index}`}>Categoría</InputLabel>
+                      <Select
+                        labelId={`categoria-concepto-${index}`}
+                        label="Categoría"
+                        value={c.categoriaGasto}
+                        onChange={(e) => actualizarConcepto(index, "categoriaGasto", e.target.value)}
+                      >
+                        <MenuItem value="">
+                          <em>Sin especificar</em>
+                        </MenuItem>
+                        {Object.entries(CATEGORIA_GASTO_LABELS).map(([valor, label]) => (
+                          <MenuItem key={valor} value={valor}>
+                            {label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+
+            <Button size="small" startIcon={<Plus size={14} strokeWidth={2} />} onClick={agregarConcepto} sx={{ alignSelf: "flex-start" }}>
+              Agregar concepto
+            </Button>
+
             <TextField
-              label="Fecha del gasto"
-              type="date"
-              value={fechaGasto}
-              onChange={(e) => setFechaGasto(e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              label="Nota general del ticket (opcional)"
+              value={descripcion}
+              onChange={(e) => setDescripcion(e.target.value)}
+              multiline
+              minRows={1}
               fullWidth
             />
-            <FormControl fullWidth>
-              <InputLabel id="sociedad-ticket-label">Sociedad (empresa a la que se carga el gasto)</InputLabel>
-              <Select
-                labelId="sociedad-ticket-label"
-                label="Sociedad (empresa a la que se carga el gasto)"
-                value={sociedad}
-                onChange={(e) => setSociedad(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Sin especificar</em>
-                </MenuItem>
-                {sociedades.map((s) => (
-                  <MenuItem key={s.rfc} value={s.rfc}>
-                    {s.razon_social || s.rfc}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel id="categoria-gasto-label">Categoría de gasto</InputLabel>
-              <Select
-                labelId="categoria-gasto-label"
-                label="Categoría de gasto"
-                value={categoriaGasto}
-                onChange={(e) => setCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
-              >
-                <MenuItem value="">
-                  <em>Sin especificar</em>
-                </MenuItem>
-                {Object.entries(CATEGORIA_GASTO_LABELS).map(([valor, label]) => (
-                  <MenuItem key={valor} value={valor}>
-                    {label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel id="centro-costo-label">Centro de costo</InputLabel>
-              <Select
-                labelId="centro-costo-label"
-                label="Centro de costo"
-                value={centro}
-                onChange={(e) => setCentro(e.target.value as TesoreriaCentroCosto | "")}
-              >
-                <MenuItem value="">
-                  <em>Sin especificar</em>
-                </MenuItem>
-                {Object.entries(CENTRO_COSTO_LABELS).map(([valor, label]) => (
-                  <MenuItem key={valor} value={valor}>
-                    {label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+
             {/* "Tomar foto" con `capture` solo abre la camara directo en
                 celular (pedido de Mariana 27/Ago/2026) - en escritorio no
                 hay camara que abrir, asi que el boton quedaba ahi como un
