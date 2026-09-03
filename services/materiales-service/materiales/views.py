@@ -1,10 +1,13 @@
 import uuid
+from decimal import Decimal, InvalidOperation
 
 from cumbresbi_scope.permissions import require_permission
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
@@ -44,6 +47,25 @@ class _PermisosMaterialesMixin:
         return super().get_permissions()
 
 
+class _PermiteSecretoInternoOMaterialesEditar(BasePermission):
+    """Mismo patron que tesoreria-service/tesoreria/views.py::
+    _PermiteSecretoInternoOTesoreriaCrear - el secreto interno servicio-a-
+    servicio (X-Internal-Secret, ver settings.MATERIALES_INTERNAL_SECRET)
+    es una via ADICIONAL para que compras-tesoreria-service pueda registrar
+    una recepcion de compra sin que el analista de Compras necesite el
+    permiso materiales.editar; nunca reemplaza el permiso normal para
+    cualquier otro llamador."""
+
+    message = "No tienes el permiso 'materiales.editar' para hacer esto."
+
+    def has_permission(self, request, view):
+        secreto_configurado = settings.MATERIALES_INTERNAL_SECRET
+        secreto_recibido = request.META.get("HTTP_X_INTERNAL_SECRET")
+        if secreto_configurado and secreto_recibido == secreto_configurado:
+            return True
+        return require_permission("materiales.editar")().has_permission(request, view)
+
+
 class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     """Catalogo de materiales - sin ScopedManager (mismo criterio que el
     resto de este primer corte de materiales-service, ver models.py: sin
@@ -53,6 +75,69 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     serializer_class = MaterialCatalogoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["material", "unidad_medida"]
+
+    def get_permissions(self):
+        if self.action == "recibir_compra":
+            return [_PermiteSecretoInternoOMaterialesEditar()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=["post"])
+    def recibir_compra(self, request):
+        """Suma al inventario cuando compras-tesoreria-service registra una
+        recepcion (02/Sep/2026, "Recepciones va tener conexion con obra en
+        la parte de materiales, para actualizar el inventario" - pedido de
+        Mariana). Compras es la base: el analista de Compras no elige un
+        MaterialCatalogo de antemano, esta llamada busca por nombre
+        (case-insensitive) y crea el registro si no existia todavia -
+        mismo criterio de "buscar o crear" que TesoreriaFlujoViewSet.
+        confirmar_conciliacion usa para la contraparte detectada por IA.
+
+        select_for_update evita perder un incremento si dos recepciones del
+        mismo material llegan casi al mismo tiempo (mismo criterio anti-
+        condicion-de-carrera que SolicitudMaterialViewSet.entregar).
+
+        Body: {"material_nombre": str, "cantidad_recibida": number,
+        "unidad_medida": str (solo si se crea nuevo),
+        "precio_unitario": number (opcional, actualiza el ultimo precio),
+        "proveedor": str (opcional, id_contraparte del proveedor)}."""
+        material_nombre = (request.data.get("material_nombre") or "").strip()
+        if not material_nombre:
+            return Response({"material_nombre": ["Este campo es requerido."]}, status=400)
+        try:
+            cantidad_recibida = abs(Decimal(str(request.data.get("cantidad_recibida"))))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({"cantidad_recibida": ["Debe ser un número."]}, status=400)
+        if cantidad_recibida <= 0:
+            return Response({"cantidad_recibida": ["Debe ser mayor a cero."]}, status=400)
+
+        # created_by/updated_by son CharField(8) (id de usuario corto, ver
+        # models.py) - "sistema" es el mismo actor generico que ya usan las
+        # demas escrituras automaticas del servicio (ej. RequisicionViewSet).
+        actor = "sistema"
+        with transaction.atomic():
+            material = MaterialCatalogo.objects.select_for_update().filter(material__iexact=material_nombre).first()
+            if material is None:
+                material = MaterialCatalogo.objects.create(
+                    material=material_nombre,
+                    unidad_medida=request.data.get("unidad_medida") or "pza",
+                    precio_unitario=request.data.get("precio_unitario") or 0,
+                    proveedor=request.data.get("proveedor") or None,
+                    cantidad_disponible=0,
+                    created_by=actor,
+                    updated_by=actor,
+                )
+            material.cantidad_disponible = material.cantidad_disponible + cantidad_recibida
+            update_fields = ["cantidad_disponible", "updated_by", "updated_at"]
+            if request.data.get("precio_unitario"):
+                material.precio_unitario = request.data["precio_unitario"]
+                update_fields.append("precio_unitario")
+            if request.data.get("proveedor"):
+                material.proveedor = request.data["proveedor"]
+                update_fields.append("proveedor")
+            material.updated_by = actor
+            material.save(update_fields=update_fields)
+
+        return Response(MaterialCatalogoSerializer(material).data, status=200)
 
 
 class ManoObraCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):

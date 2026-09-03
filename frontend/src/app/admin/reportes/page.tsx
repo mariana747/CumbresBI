@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -76,61 +77,112 @@ function HistorialCambios() {
         </Alert>
       )}
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Usuario</TableCell>
-                <TableCell>Rol</TableCell>
-                <TableCell>Alcance</TableCell>
-                <TableCell>Otorgado</TableCell>
-                <TableCell>Revocado</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo), mismo patron que tesoreria/flujos/
+        page.tsx. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
+                  <TableCell>Usuario</TableCell>
+                  <TableCell>Rol</TableCell>
+                  <TableCell>Alcance</TableCell>
+                  <TableCell>Otorgado</TableCell>
+                  <TableCell>Revocado</TableCell>
                 </TableRow>
-              ) : historial.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin cambios de roles registrados.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                historial.map((cambio) => (
-                  <TableRow key={cambio.assignment_id} hover>
-                    <TableCell>{cambio.user_email}</TableCell>
-                    <TableCell>{cambio.role_name}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        color={scopeChipColor(cambio.scope_type)}
-                        label={
-                          SCOPE_LABELS[cambio.scope_type] ?? cambio.scope_type
-                        }
-                      />
-                      {cambio.scope_id !== "*" ? ` (${cambio.scope_id})` : ""}
-                    </TableCell>
-                    <TableCell>{new Date(cambio.granted_at).toLocaleString("es-MX")}</TableCell>
-                    <TableCell>
-                      {cambio.revoked_at ? (
-                        new Date(cambio.revoked_at).toLocaleString("es-MX")
-                      ) : (
-                        <Chip size="small" color="success" label="Vigente" />
-                      )}
+              </TableHead>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                      <CircularProgress size={24} />
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ) : historial.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin cambios de roles registrados.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  historial.map((cambio) => (
+                    <TableRow key={cambio.assignment_id} hover>
+                      <TableCell>{cambio.user_email}</TableCell>
+                      <TableCell>{cambio.role_name}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          color={scopeChipColor(cambio.scope_type)}
+                          label={
+                            SCOPE_LABELS[cambio.scope_type] ?? cambio.scope_type
+                          }
+                        />
+                        {cambio.scope_id !== "*" ? ` (${cambio.scope_id})` : ""}
+                      </TableCell>
+                      <TableCell>{new Date(cambio.granted_at).toLocaleString("es-MX")}</TableCell>
+                      <TableCell>
+                        {cambio.revoked_at ? (
+                          new Date(cambio.revoked_at).toLocaleString("es-MX")
+                        ) : (
+                          <Chip size="small" color="success" label="Vigente" />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : historial.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin cambios de roles registrados.
+            </Typography>
+          ) : (
+            historial.map((cambio) => (
+              <Paper key={cambio.assignment_id} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" noWrap>
+                      {cambio.user_email}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {cambio.role_name}
+                    </Typography>
+                  </Stack>
+                  {cambio.revoked_at ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                      {new Date(cambio.revoked_at).toLocaleString("es-MX")}
+                    </Typography>
+                  ) : (
+                    <Chip size="small" color="success" label="Vigente" sx={{ flexShrink: 0 }} />
+                  )}
+                </Stack>
+                <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 1 }}>
+                  <Chip size="small" color={scopeChipColor(cambio.scope_type)} label={SCOPE_LABELS[cambio.scope_type] ?? cambio.scope_type} />
+                  {cambio.scope_id !== "*" && (
+                    <Typography variant="body2" color="text.secondary">
+                      ({cambio.scope_id})
+                    </Typography>
+                  )}
+                </Stack>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  <strong>Otorgado:</strong> {new Date(cambio.granted_at).toLocaleString("es-MX")}
+                </Typography>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
     </>
   );
@@ -445,48 +497,91 @@ function BitacoraAuditoria() {
       )}
 
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Ocurrido</TableCell>
-                <TableCell>Servicio</TableCell>
-                <TableCell>Actor</TableCell>
-                <TableCell>Acción</TableCell>
-                <TableCell>Entidad</TableCell>
-                <TableCell>Registro afectado</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - 6 columnas no caben comodas en un
+        telefono, mismo patron que tesoreria/flujos/page.tsx. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
+                  <TableCell>Ocurrido</TableCell>
+                  <TableCell>Servicio</TableCell>
+                  <TableCell>Actor</TableCell>
+                  <TableCell>Acción</TableCell>
+                  <TableCell>Entidad</TableCell>
+                  <TableCell>Registro afectado</TableCell>
                 </TableRow>
-              ) : eventos.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin eventos.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                eventos.map((evento) => (
-                  <TableRow key={evento.event_id} hover>
-                    <TableCell>{new Date(evento.ocurrido_en).toLocaleString("es-MX")}</TableCell>
-                    <TableCell>{friendlyServiceName(evento.servicio_origen)}</TableCell>
-                    <TableCell>{actorLabels[evento.actor_user_id] ?? evento.actor_user_id}</TableCell>
-                    <TableCell>{friendlyActionName(evento.accion)}</TableCell>
-                    <TableCell>{friendlyEntityName(evento.entidad)}</TableCell>
-                    <TableCell>{evento.entidad_id}</TableCell>
+              </TableHead>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      <CircularProgress size={24} />
+                    </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ) : eventos.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin eventos.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  eventos.map((evento) => (
+                    <TableRow key={evento.event_id} hover>
+                      <TableCell>{new Date(evento.ocurrido_en).toLocaleString("es-MX")}</TableCell>
+                      <TableCell>{friendlyServiceName(evento.servicio_origen)}</TableCell>
+                      <TableCell>{actorLabels[evento.actor_user_id] ?? evento.actor_user_id}</TableCell>
+                      <TableCell>{friendlyActionName(evento.accion)}</TableCell>
+                      <TableCell>{friendlyEntityName(evento.entidad)}</TableCell>
+                      <TableCell>{evento.entidad_id}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : eventos.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin eventos.
+            </Typography>
+          ) : (
+            eventos.map((evento) => (
+              <Paper key={evento.event_id} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Typography variant="subtitle2">{friendlyActionName(evento.accion)}</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                    {new Date(evento.ocurrido_en).toLocaleString("es-MX")}
+                  </Typography>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Servicio:</strong> {friendlyServiceName(evento.servicio_origen)}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Actor:</strong> {actorLabels[evento.actor_user_id] ?? evento.actor_user_id}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Entidad:</strong> {friendlyEntityName(evento.entidad)}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Registro afectado:</strong> {evento.entidad_id}
+                  </Typography>
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
     </>
   );
@@ -516,6 +611,9 @@ function ReportesContent() {
           setSubReporte(value);
           router.replace(`/admin/reportes?tab=${value}`);
         }}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
         sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}
       >
         {SUB_REPORTES.map((tab) => (

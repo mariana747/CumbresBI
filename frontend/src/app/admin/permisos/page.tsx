@@ -477,7 +477,14 @@ export default function MatrizPermisosPage() {
         </Stack>
       </Stack>
 
-      <Tabs value={tipoTab} onChange={(_e, v) => setTipoTab(v)} sx={{ mb: 3 }}>
+      <Tabs
+        value={tipoTab}
+        onChange={(_e, v) => setTipoTab(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        sx={{ mb: 3 }}
+      >
         <Tab label={`Internos (${roles.filter((r) => r.tipo === "INTERNO").length})`} value="INTERNO" />
         <Tab label={`Externos (${roles.filter((r) => r.tipo === "EXTERNO").length})`} value="EXTERNO" />
       </Tabs>

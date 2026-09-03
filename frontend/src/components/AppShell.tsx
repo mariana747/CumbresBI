@@ -56,6 +56,8 @@ import {
   FilePenLine,
   FileBarChart,
   Menu as MenuIcon,
+  ShoppingCart,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -308,11 +310,26 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       ],
     });
   }
-  // "Compras" (compras-tesoreria-service) se quito del sidebar (24/Ago/2026,
-  // pedido de Mariana) - es el mismo dominio que Tesoreria (arriba), que ya
-  // tiene pantallas reales; compras-tesoreria-service en si sigue sin
-  // tablas de negocio propias (ver services/compras-tesoreria-service/
-  // config/models.py), la pagina era solo el placeholder EnDesarrolloPage.
+  // "Compras" (compras-tesoreria-service, 02/Sep/2026) - regresa al
+  // sidebar como apartado real: el hueco de 24/Ago ("sigue sin tablas de
+  // negocio propias") ya se cerro (Fase 4B, ver docs/CumbresBI_estado.md).
+  // Separado de Tesoreria a proposito - dominio propio (solicitud ->
+  // cotizacion -> orden -> recepcion), aunque comparte el catalogo de
+  // proveedores (tesoreria_contrapartes) via ContraparteSelector.
+  if (tieneAlgunPermiso(session, ["compras"])) {
+    items.push({
+      label: "Compras",
+      href: "/compras/solicitudes",
+      icon: ShoppingCart,
+      enabled: true,
+      children: [
+        { label: "Solicitudes", href: "/compras/solicitudes", icon: ClipboardList },
+        { label: "Cotizaciones", href: "/compras/cotizaciones", icon: FileSearch },
+        { label: "Órdenes de compra", href: "/compras/ordenes", icon: FileText },
+        { label: "Recepciones", href: "/compras/recepciones", icon: Truck },
+      ],
+    });
+  }
   if (tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });
   }

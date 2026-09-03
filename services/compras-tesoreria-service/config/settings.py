@@ -110,3 +110,13 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Conexion servicio-a-servicio con materiales-service (02/Sep/2026,
+# Recepcion de Compras actualiza el inventario de Obra - pedido de
+# Mariana: "compras es la base", el registro de una recepcion aqui se
+# propaga solo hacia MaterialCatalogo.cantidad_disponible). Mismo patron
+# que TESORERIA_SERVICE_URL/TESORERIA_INTERNAL_SECRET en pld-service - URL
+# interna de docker-compose por default, secreto vacio en dev hasta
+# configurarlo explicitamente en ambos lados (ver .env.example).
+MATERIALES_SERVICE_URL = env("MATERIALES_SERVICE_URL", default="http://materiales-service:8080")
+MATERIALES_INTERNAL_SECRET = env("MATERIALES_INTERNAL_SECRET", default="")

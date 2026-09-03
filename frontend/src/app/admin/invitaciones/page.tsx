@@ -80,7 +80,14 @@ export default function InvitacionesPage() {
         Invitaciones
       </Typography>
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+      <Tabs
+        value={tab}
+        onChange={(_, v) => setTab(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        sx={{ mb: 3 }}
+      >
         <Tab icon={<Link2 size={16} strokeWidth={1.5} />} iconPosition="start" label="Temporales" />
         <Tab icon={<UserPlus size={16} strokeWidth={1.5} />} iconPosition="start" label="Colaboradores" />
       </Tabs>
@@ -592,6 +599,10 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
       )}
 
       <Paper variant="outlined">
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo) - 7 columnas no caben comodas en un
+        telefono, mismo patron que tesoreria/flujos/page.tsx. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -701,6 +712,103 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : links.length === 0 && ticketsProveedor.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin enlaces generados todavía.
+            </Typography>
+          ) : (
+            <>
+              {links.map((link) => {
+                const estado = estadoDe(link);
+                return (
+                  <Paper key={link.magic_link_id} variant="outlined" sx={{ p: 2 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2" noWrap>
+                          {link.email}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {recursoNombre(link)}
+                        </Typography>
+                      </Stack>
+                      <Stack spacing={0.25} alignItems="flex-end" sx={{ flexShrink: 0 }}>
+                        <Chip size="small" label={estado.label} color={estado.color} />
+                        {estado.label === "Pendiente" && (
+                          <Typography variant="caption" color="text.secondary">
+                            Queda {tiempoRestante(link.expires_at)}
+                          </Typography>
+                        )}
+                      </Stack>
+                    </Stack>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      <strong>Usos:</strong> {link.uses_count}/{link.max_uses}
+                    </Typography>
+                    {estado.label === "Pendiente" && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        onClick={() => handleRevocar(link.magic_link_id)}
+                        disabled={!puedeEditar}
+                        sx={{ mt: 1 }}
+                      >
+                        Revocar
+                      </Button>
+                    )}
+                  </Paper>
+                );
+              })}
+              {ticketsProveedor.map((t) => {
+                const estado = estadoTicketProveedor(t);
+                return (
+                  <Paper key={`prov-${t.id_ticket}`} variant="outlined" sx={{ p: 2 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2" noWrap>
+                          {t.email}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Factura de proveedor (Tesorería) — {t.contraparte_nombre}
+                        </Typography>
+                      </Stack>
+                      <Stack spacing={0.25} alignItems="flex-end" sx={{ flexShrink: 0 }}>
+                        <Chip size="small" label={estado.label} color={estado.color} />
+                        {estado.label === "Pendiente" && (
+                          <Typography variant="caption" color="text.secondary">
+                            Queda {tiempoRestante(t.expires_at)}
+                          </Typography>
+                        )}
+                      </Stack>
+                    </Stack>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      <strong>Usos:</strong> {t.uses_count}/{t.max_uses}
+                    </Typography>
+                    {estado.label === "Pendiente" && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        onClick={() => handleRevocarProveedor(t.id_ticket)}
+                        disabled={!puedeEditar}
+                        sx={{ mt: 1 }}
+                      >
+                        Revocar
+                      </Button>
+                    )}
+                  </Paper>
+                );
+              })}
+            </>
+          )}
+        </Stack>
       </Paper>
     </>
   );
@@ -1126,57 +1234,106 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
       </Stack>
 
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Correo</TableCell>
-                <TableCell>Tipo</TableCell>
-                <TableCell>Invitado por</TableCell>
-                <TableCell>Invitado el</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+        tarjetas apiladas (ver abajo), mismo patron que tesoreria/flujos/
+        page.tsx. */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
+                  <TableCell>Correo</TableCell>
+                  <TableCell>Tipo</TableCell>
+                  <TableCell>Invitado por</TableCell>
+                  <TableCell>Invitado el</TableCell>
+                  <TableCell>Estado</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : filas.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin colaboradores todavía.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filas.map((fila) => (
-                  <TableRow key={fila.key} hover>
-                    <TableCell>{fila.email}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={fila.tipo}
-                        color={fila.tipo === "Externo" ? "info" : "default"}
-                      />
+              </TableHead>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      <CircularProgress size={24} />
                     </TableCell>
-                    <TableCell>{fila.invitadoPorEmail ?? "—"}</TableCell>
-                    <TableCell>{new Date(fila.invitadoEl).toLocaleString("es-MX")}</TableCell>
-                    <TableCell>
-                      <Chip size="small" label={fila.estado.label} color={fila.estado.color} />
-                    </TableCell>
-                    <TableCell align="right">{fila.acciones}</TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ) : filas.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin colaboradores todavía.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filas.map((fila) => (
+                    <TableRow key={fila.key} hover>
+                      <TableCell>{fila.email}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={fila.tipo}
+                          color={fila.tipo === "Externo" ? "info" : "default"}
+                        />
+                      </TableCell>
+                      <TableCell>{fila.invitadoPorEmail ?? "—"}</TableCell>
+                      <TableCell>{new Date(fila.invitadoEl).toLocaleString("es-MX")}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={fila.estado.label} color={fila.estado.color} />
+                      </TableCell>
+                      <TableCell align="right">{fila.acciones}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : filas.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin colaboradores todavía.
+            </Typography>
+          ) : (
+            filas.map((fila) => (
+              <Paper key={fila.key} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" noWrap>
+                      {fila.email}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={fila.tipo}
+                      color={fila.tipo === "Externo" ? "info" : "default"}
+                      sx={{ alignSelf: "flex-start", mt: 0.5 }}
+                    />
+                  </Stack>
+                  <Chip size="small" label={fila.estado.label} color={fila.estado.color} sx={{ flexShrink: 0 }} />
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    <strong>Invitado por:</strong> {fila.invitadoPorEmail ?? "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Invitado el:</strong> {new Date(fila.invitadoEl).toLocaleString("es-MX")}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  {fila.acciones}
+                </Stack>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
     </>
   );

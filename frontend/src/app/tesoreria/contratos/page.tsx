@@ -742,7 +742,9 @@ function TesoreriaContratosPageContent() {
         <Tabs
           value={tab}
           onChange={(_, value: TabContrato) => setTab(value)}
-          variant="fullWidth"
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
           sx={{ borderBottom: 1, borderColor: "divider" }}
         >
           {TABS_CONTRATO.filter((t) => t !== "Documentos" || editing).map((t) => (

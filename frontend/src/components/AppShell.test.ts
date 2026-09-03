@@ -261,10 +261,9 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
     materiales: "/ventas-vivienda/proyectos",
     tesoreria: "/tesoreria/contrapartes",
     "facturacion-cfdi": "/tesoreria/contrapartes",
-    // "compras" ya no tiene pantalla propia (24/Ago/2026, se quito
-    // /compras-tesoreria del sidebar) - mismo dominio que Tesoreria, que
-    // ya cubre catalogos/contratos/flujos reales.
-    compras: "/tesoreria/contrapartes",
+    // "compras" ya tiene apartado real (02/Sep/2026, Fase 4B) - ver
+    // buildNavItems en AppShell.tsx.
+    compras: "/compras/solicitudes",
     rrhh: "/rrhh",
     audit: "Bitácora (dentro de Admin(IAM)/Auditar, no un item propio)",
   };
