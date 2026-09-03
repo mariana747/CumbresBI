@@ -110,3 +110,12 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Secreto servicio-a-servicio (02/Sep/2026, Recepcion de Compras actualiza
+# el inventario de Obra) - autoriza a compras-tesoreria-service a llamar
+# MaterialCatalogoViewSet.recibir_compra sin exigirle al analista de
+# Compras el perm_key materiales.editar, mismo patron que
+# TESORERIA_INTERNAL_SECRET en tesoreria-service/pld-service (ver .env.
+# example). Vacio en dev = ese bypass queda deshabilitado (solo
+# materiales.editar via JWT sirve).
+MATERIALES_INTERNAL_SECRET = env("MATERIALES_INTERNAL_SECRET", default="")

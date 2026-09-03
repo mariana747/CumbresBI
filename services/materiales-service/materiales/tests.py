@@ -8,8 +8,10 @@ Requisicion con el snapshot de RequisicionLinea."""
 from decimal import Decimal
 
 from cumbresbi_scope.scope import EffectiveScope
+from django.conf import settings
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
+from unittest.mock import patch
 
 from .models import ConceptoPresupuesto, EvidenciaRecepcion, MaterialCatalogo, Presupuesto, SolicitudMaterial
 from .views import MaterialCatalogoViewSet, PresupuestoViewSet, RequisicionViewSet, SolicitudMaterialViewSet
@@ -56,6 +58,54 @@ class MaterialCatalogoCrudTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+
+
+class RecibirCompraTests(TestCase):
+    """recibir_compra (02/Sep/2026) es el enlace real con Compras -
+    compras-tesoreria-service llama esto al registrar una Recepcion para
+    sumar al inventario de Obra. Protegido por el secreto interno servicio-
+    a-servicio, no por un perm_key de sesion (ver views.py)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def _post(self, body, secreto="dev-secreto"):
+        request = self.factory.post("/api/materiales/recibir_compra/", body, format="json")
+        if secreto:
+            request.META["HTTP_X_INTERNAL_SECRET"] = secreto
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = MaterialCatalogoViewSet.as_view({"post": "recibir_compra"})
+        return view(request)
+
+    def test_sin_secreto_ni_permiso_da_403(self):
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"):
+            response = self._post({"material_nombre": "Cemento gris", "cantidad_recibida": 10}, secreto=None)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crea_material_si_no_existe(self):
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"):
+            response = self._post(
+                {
+                    "material_nombre": "Cemento gris",
+                    "cantidad_recibida": 20,
+                    "unidad_medida": "saco",
+                    "precio_unitario": "180.00",
+                }
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["cantidad_disponible"], "20.00")
+        self.assertEqual(MaterialCatalogo.objects.count(), 1)
+
+    def test_suma_a_material_existente_sin_condicion_de_carrera(self):
+        material = MaterialCatalogo.objects.create(
+            material="Varilla 3/8", unidad_medida="pza", precio_unitario="95.00", cantidad_disponible=Decimal("5")
+        )
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"):
+            response = self._post({"material_nombre": "varilla 3/8", "cantidad_recibida": 15})
+        self.assertEqual(response.status_code, 200)
+        material.refresh_from_db()
+        self.assertEqual(material.cantidad_disponible, Decimal("20"))
+        self.assertEqual(MaterialCatalogo.objects.count(), 1)
 
 
 class SolicitudMaterialEntregarTests(TestCase):
