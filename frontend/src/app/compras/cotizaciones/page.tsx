@@ -225,13 +225,18 @@ function CotizacionesPageInner() {
 
           {cotizaciones.map((c) => (
             <Paper key={c.id_cotizacion} variant="outlined" sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                alignItems={{ xs: "stretch", sm: "center" }}
+                spacing={2}
+                sx={{ mb: 1 }}
+              >
                 <Typography variant="subtitle1">{c.proveedor_nombre || "(sin proveedor)"}</Typography>
-                <Chip size="small" label={ESTADO_LABELS[c.estado]} color={ESTADO_COLOR[c.estado]} />
+                <Chip size="small" label={ESTADO_LABELS[c.estado]} color={ESTADO_COLOR[c.estado]} sx={{ alignSelf: "flex-start" }} />
                 <Typography variant="body2" color="text.secondary">
                   {c.moneda || "MXN"} {c.total || "—"}
                 </Typography>
-                <Stack direction="row" spacing={1} sx={{ ml: "auto" }}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ ml: { xs: 0, sm: "auto" } }}>
                   <Button
                     size="small"
                     startIcon={<Sparkles size={14} strokeWidth={2} />}
