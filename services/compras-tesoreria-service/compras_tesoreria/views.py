@@ -1,6 +1,9 @@
+import logging
 from decimal import Decimal, InvalidOperation
 
+import requests
 from cumbresbi_scope.permissions import require_permission
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -8,6 +11,8 @@ from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     Cotizacion,
@@ -264,6 +269,45 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
         return Response(self.get_serializer(orden).data, status=201)
 
 
+def _sincronizar_inventario_materiales(orden, orden_linea, cantidad_recibida):
+    """Suma al inventario de Obra al registrar una recepcion (02/Sep/2026,
+    pedido de Mariana: "Recepciones va tener conexion con obra en la parte
+    de materiales, para actualizar el inventario... compras es la base").
+    Llama a MaterialCatalogoViewSet.recibir_compra en materiales-service -
+    busca/crea el material por nombre (case-insensitive), sin que el
+    analista de Compras tenga que elegir uno de un catalogo de antemano.
+
+    Fail-open, mismo criterio que pld-service/pld/views.py::
+    _crear_contraparte_minima_en_tesoreria: si el secreto no esta
+    configurado o materiales-service no responde, la recepcion en Compras
+    ya quedo guardada (esta funcion se llama DESPUES de la transaccion
+    local) - un problema de red entre servicios no debe bloquear ni
+    revertir el registro real de la recepcion."""
+    if not settings.MATERIALES_INTERNAL_SECRET:
+        return
+    try:
+        upstream = requests.post(
+            f"{settings.MATERIALES_SERVICE_URL}/api/materiales/recibir_compra/",
+            json={
+                "material_nombre": orden_linea.descripcion,
+                "cantidad_recibida": str(cantidad_recibida),
+                "precio_unitario": str(orden_linea.precio_unitario),
+                "proveedor": orden.proveedor,
+            },
+            headers={"X-Internal-Secret": settings.MATERIALES_INTERNAL_SECRET},
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning("materiales-service no respondio al sincronizar la recepcion de compra", exc_info=True)
+        return
+    if upstream.status_code != 200:
+        logger.warning(
+            "materiales-service rechazo la sincronizacion de inventario: %s %s",
+            upstream.status_code,
+            upstream.text[:300],
+        )
+
+
 class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):
     """Bitacora de recepcion de mercancia contra una OrdenCompra - puede
     haber varias entradas por orden (entregas parciales). `create` valida
@@ -298,6 +342,7 @@ class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):
         serializer.is_valid(raise_exception=True)
         actor = _actor(request)
 
+        lineas_a_sincronizar = []
         with transaction.atomic():
             orden = OrdenCompra.objects.select_for_update().get(pk=serializer.validated_data["orden"].pk)
             recepcion = serializer.save(recibido_por=actor, created_by=actor, updated_by=actor, orden=orden)
@@ -331,6 +376,7 @@ class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):
                 )
                 orden_linea.cantidad_recibida += cantidad_recibida
                 orden_linea.save(update_fields=["cantidad_recibida"])
+                lineas_a_sincronizar.append((orden_linea, cantidad_recibida))
 
             if orden.lineas.filter(cantidad_recibida__lt=F("cantidad")).exists():
                 orden.estado = OrdenCompra.ESTADO_RECIBIDA_PARCIAL
@@ -338,6 +384,12 @@ class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):
                 orden.estado = OrdenCompra.ESTADO_RECIBIDA_TOTAL
             orden.updated_by = actor
             orden.save(update_fields=["estado", "updated_by", "updated_at"])
+
+        # Fuera de la transaccion a proposito - la recepcion en Compras ya
+        # quedo guardada, un problema de red con materiales-service no debe
+        # revertirla (ver _sincronizar_inventario_materiales.__doc__).
+        for orden_linea, cantidad_recibida in lineas_a_sincronizar:
+            _sincronizar_inventario_materiales(orden, orden_linea, cantidad_recibida)
 
         recepcion.refresh_from_db()
         return Response(self.get_serializer(recepcion).data, status=201)

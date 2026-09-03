@@ -5,12 +5,14 @@ Cotizacion (confirmar_extraccion, el enlace con el Motor Documental) ->
 OrdenCompra (generar_desde_cotizacion) -> Recepcion (parcial y total)."""
 
 from decimal import Decimal
+from unittest.mock import Mock, patch
 
 from cumbresbi_scope.scope import EffectiveScope
+from django.conf import settings
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from .models import Cotizacion, OrdenCompra, SolicitudCompra
+from .models import Cotizacion, OrdenCompra, OrdenCompraLinea, SolicitudCompra
 from .views import CotizacionViewSet, OrdenCompraViewSet, RecepcionViewSet, SolicitudCompraViewSet
 
 PROYECTO_A = "PRYA"
@@ -205,3 +207,78 @@ class FlujoCompletoCompraTests(TestCase):
         request = self.factory.get(path)
         request.effective_scope = self.scope_aprobar
         return request
+
+
+class RecepcionSincronizaInventarioTests(TestCase):
+    """02/Sep/2026, pedido de Mariana: "Recepciones va tener conexion con
+    obra en la parte de materiales, para actualizar el inventario... com-
+    pras es la base". Verifica que RecepcionViewSet.create llama a
+    materiales-service con los datos correctos, y que un fallo de red no
+    tumba el registro local (fail-open, ver views.py::
+    _sincronizar_inventario_materiales)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("compras.crear",), identity_user_id="u001")
+        solicitud = SolicitudCompra.objects.create(
+            proyecto="PRYA", descripcion="Cemento", created_by="u001", updated_by="u001"
+        )
+        cotizacion = Cotizacion.objects.create(
+            solicitud=solicitud, proveedor="CP0001", proveedor_nombre="Materiales del Norte",
+            created_by="u001", updated_by="u001",
+        )
+        self.orden = OrdenCompra.objects.create(
+            folio="OC-TEST-0001", proyecto="PRYA", solicitud=solicitud, cotizacion=cotizacion,
+            proveedor="CP0001", proveedor_nombre="Materiales del Norte", created_by="u001", updated_by="u001",
+        )
+        self.linea = OrdenCompraLinea.objects.create(
+            orden=self.orden, descripcion="Cemento gris 50kg", cantidad=Decimal("20"), precio_unitario=Decimal("180.00"),
+            importe=Decimal("3600.00"),
+        )
+
+    def _registrar_recepcion(self, cantidad="10"):
+        request = self.factory.post(
+            "/api/recepciones/",
+            {
+                "orden": self.orden.id_orden,
+                "fecha": "2026-09-02",
+                "hora": "10:00:00",
+                "lineas": [{"orden_linea": self.linea.id_linea, "cantidad_recibida": cantidad}],
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = RecepcionViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_sin_secreto_configurado_no_llama_a_materiales(self):
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", ""), patch(
+            "compras_tesoreria.views.requests.post"
+        ) as mock_post:
+            response = self._registrar_recepcion()
+        self.assertEqual(response.status_code, 201)
+        mock_post.assert_not_called()
+
+    def test_con_secreto_llama_a_materiales_con_los_datos_de_la_linea(self):
+        mock_response = Mock(status_code=200)
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"), patch(
+            "compras_tesoreria.views.requests.post", return_value=mock_response
+        ) as mock_post:
+            response = self._registrar_recepcion(cantidad="10")
+        self.assertEqual(response.status_code, 201)
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["material_nombre"], "Cemento gris 50kg")
+        self.assertEqual(kwargs["json"]["cantidad_recibida"], "10")
+        self.assertEqual(kwargs["headers"]["X-Internal-Secret"], "dev-secreto")
+
+    def test_fallo_de_red_no_tumba_la_recepcion_local(self):
+        import requests
+
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"), patch(
+            "compras_tesoreria.views.requests.post", side_effect=requests.RequestException("caido")
+        ):
+            response = self._registrar_recepcion()
+        self.assertEqual(response.status_code, 201)
+        self.linea.refresh_from_db()
+        self.assertEqual(self.linea.cantidad_recibida, Decimal("10"))
