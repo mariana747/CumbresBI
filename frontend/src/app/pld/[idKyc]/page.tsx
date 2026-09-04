@@ -64,7 +64,6 @@ import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora }
 import {
   AUTORIDAD_POR_TIPO_IDENTIFICACION,
   CATEGORIA_CUMPLIMIENTO_LABELS,
-  TIPO_DOCUMENTO_PLD_LABELS,
   PldCategoriaCumplimiento,
   PldContraparteDoc,
   PldContraparteKyc,
@@ -78,7 +77,6 @@ import {
   crearDocumentoKyc,
   crearRepresentanteLegal,
   crearSolicitudEliminacion,
-  editarDocumentoKyc,
   editarKyc,
   editarRepresentanteLegal,
   eliminarDocumentoKyc,
@@ -753,24 +751,6 @@ export default function PldExpedienteDetallePage() {
     }
   }
 
-  // Clasificar un documento (04/Sep/2026: tipo_documento, obligatorio,
-  // vigencia_meses) - inline en la tarjeta de cada documento, ver
-  // editarDocumentoKyc en lib/pld.ts.
-  const [guardandoDoc, setGuardandoDoc] = useState<string | null>(null);
-  async function handleEditarDocumento(
-    doc: PldContraparteDoc,
-    campos: Partial<Pick<PldContraparteDoc, "tipo_documento" | "obligatorio" | "vigencia_meses">>
-  ) {
-    setGuardandoDoc(doc.id_kyc_doc);
-    try {
-      await editarDocumentoKyc(doc.id_kyc_doc, campos, session?.user_id);
-      cargar();
-    } catch (err) {
-      setVerificarError(err instanceof Error ? err.message : "Error al clasificar el documento");
-    } finally {
-      setGuardandoDoc(null);
-    }
-  }
 
   return (
     <AppShell>
@@ -1556,77 +1536,6 @@ export default function PldExpedienteDetallePage() {
                                   )
                                 )}
                               </Stack>
-                            </Stack>
-                            {/* Clasificacion (04/Sep/2026, checklist de
-                            proveedores) - tipo_documento/obligatorio/
-                            vigencia_meses son solo para lo especifico de
-                            cumplimiento (la identidad generica ya vive en
-                            tesoreria-service, ver docstring del campo en
-                            models.py). Editable en linea, gateado a
-                            puedeEditar (pld-compliance.editar, mismo
-                            permiso que update/partial_update en el
-                            backend). */}
-                            <Stack
-                              direction="row"
-                              spacing={1.5}
-                              alignItems="center"
-                              flexWrap="wrap"
-                              useFlexGap
-                              sx={{ mt: 1, pt: 1, borderTop: "1px solid", borderColor: "divider" }}
-                            >
-                              <FormControl size="small" sx={{ minWidth: 200 }} disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}>
-                                <Select
-                                  displayEmpty
-                                  value={doc.tipo_documento ?? ""}
-                                  onChange={(e) =>
-                                    handleEditarDocumento(doc, {
-                                      tipo_documento: (e.target.value || null) as PldContraparteDoc["tipo_documento"],
-                                    })
-                                  }
-                                >
-                                  <MenuItem value="">
-                                    <em>Sin tipo (identidad general)</em>
-                                  </MenuItem>
-                                  {Object.entries(TIPO_DOCUMENTO_PLD_LABELS).map(([valor, label]) => (
-                                    <MenuItem key={valor} value={valor}>
-                                      {label}
-                                    </MenuItem>
-                                  ))}
-                                </Select>
-                              </FormControl>
-                              <FormControlLabel
-                                sx={{ m: 0 }}
-                                control={
-                                  <Checkbox
-                                    size="small"
-                                    checked={doc.obligatorio}
-                                    disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}
-                                    onChange={(e) => handleEditarDocumento(doc, { obligatorio: e.target.checked })}
-                                  />
-                                }
-                                label={<Typography variant="caption">Obligatorio</Typography>}
-                              />
-                              <TextField
-                                size="small"
-                                type="number"
-                                label="Vigencia (meses)"
-                                value={doc.vigencia_meses ?? ""}
-                                disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}
-                                onChange={(e) =>
-                                  handleEditarDocumento(doc, {
-                                    vigencia_meses: e.target.value ? Number(e.target.value) : null,
-                                  })
-                                }
-                                sx={{ width: 140 }}
-                                inputProps={{ min: 1 }}
-                              />
-                              {doc.vencido && (
-                                <Chip
-                                  size="small"
-                                  color="error"
-                                  label={`Vencido${doc.fecha_vencimiento_documento ? ` (${doc.fecha_vencimiento_documento})` : ""}`}
-                                />
-                              )}
                             </Stack>
                           </Paper>
                         );
