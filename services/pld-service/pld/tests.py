@@ -842,6 +842,24 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         kyc.save()
         self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
 
+    def test_filtro_categoria_cumplimiento_en_la_lista(self):
+        # 04/Sep/2026, pedido de Mariana: "en pld hay que tener tabs de
+        # KYC y KYB" - mismo criterio de filtro server-side que
+        # estado_llenado/sociedad.
+        fisica = _kyc("cp000066", RFC_TIZARA)
+        fisica.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        fisica.save()
+        moral = _kyc("cp000067", RFC_TIZARA)
+        moral.tipo_persona = PldContraparteKyc.TIPO_MORAL
+        moral.save()
+
+        request = self.factory.get("/api/kyc/?categoria_cumplimiento=KYC")
+        request.effective_scope = EffectiveScope(is_global=True)
+        response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
+        ids = [r["id_kyc"] for r in response.data]
+        self.assertIn(fisica.id_kyc, ids)
+        self.assertNotIn(moral.id_kyc, ids)
+
 
 class CatalogoDocumentosPldTests(TestCase):
     """tipo_documento (04/Sep/2026, checklist de proveedores) - catalogo

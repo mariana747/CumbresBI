@@ -6,12 +6,40 @@ import { GATEWAY_URL } from "./gatewayUrl";
 export type PldEstadoLlenado = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO";
 export type PldDocStatus = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO" | "APROBADO";
 
+// Catalogo cerrado SOLO para lo especifico de cumplimiento (04/Sep/2026,
+// checklist de proveedores) - la identidad generica (Acta, Constancia
+// Fiscal, RPC, comprobantes) ya vive en el checklist por contrato de
+// tesoreria-service, no se duplica aqui. Espejo de
+// PldContraparteDoc.TIPO_DOCUMENTO_CHOICES (pld-service/pld/models.py).
+export type PldTipoDocumento =
+  | "CUESTIONARIO_RIESGO"
+  | "DECLARACION_ORIGEN_FONDOS"
+  | "EVIDENCIA_PEP"
+  | "ORGANIGRAMA_ACCIONARIO"
+  | "OTRO";
+
+export const TIPO_DOCUMENTO_PLD_LABELS: Record<PldTipoDocumento, string> = {
+  CUESTIONARIO_RIESGO: "Cuestionario de riesgo",
+  DECLARACION_ORIGEN_FONDOS: "Declaración de origen de fondos",
+  EVIDENCIA_PEP: "Evidencia de análisis PEP",
+  ORGANIGRAMA_ACCIONARIO: "Organigrama accionario (KYB)",
+  OTRO: "Otro",
+};
+
 export interface PldContraparteDoc {
   id_kyc_doc: string;
   kyc: string;
+  tipo_documento: PldTipoDocumento | null;
   denominacion: string | null;
   detalles_adicionales: string | null;
   status: PldDocStatus | null;
+  // obligatorio/vigencia_meses (04/Sep/2026, pendiente desde la peticion
+  // del 18/Ago) - fecha_vencimiento_documento/vencido son de solo lectura,
+  // calculados en el backend a partir de fecha_entrega + vigencia_meses.
+  obligatorio: boolean;
+  vigencia_meses: number | null;
+  fecha_vencimiento_documento: string | null;
+  vencido: boolean;
   link_documento: string | null;
   drive_file_id: string | null;
   fecha_solicitud: string | null;
@@ -22,6 +50,18 @@ export interface PldContraparteDoc {
   created_at: string;
   updated_at: string;
 }
+
+// KYC/KYB (04/Sep/2026, decision de Mariana: "vamos a tener KYC y KYB") -
+// se deriva sola de tipo_persona salvo override manual, mismo patron
+// hibrido que estado_llenado_manual. PENDIENTE_REVISION es el "caso raro"
+// (fideicomiso, tipo_persona vacio) que un analista debe clasificar a mano.
+export type PldCategoriaCumplimiento = "KYC" | "KYB" | "PENDIENTE_REVISION";
+
+export const CATEGORIA_CUMPLIMIENTO_LABELS: Record<PldCategoriaCumplimiento, string> = {
+  KYC: "KYC",
+  KYB: "KYB",
+  PENDIENTE_REVISION: "Pendiente de revisión",
+};
 
 // Superset del tipo minimo usado en admin/invitaciones/page.tsx (pestaña "Temporales") - mismo
 // contrato de API, aqui se listan todos los campos que la tabla de
@@ -35,6 +75,8 @@ export interface PldContraparteKyc {
   nombre_completo: string | null;
   curp: string | null;
   nacionalidad: string | null;
+  categoria_cumplimiento: PldCategoriaCumplimiento | null;
+  categoria_cumplimiento_manual: boolean;
   estado_cuenta: "ACTIVA" | "SOSPECHOSA" | "CONGELADA";
   estado_llenado: PldEstadoLlenado;
   // Workflow hibrido (pld/signals.py): true si el analista edito
@@ -172,12 +214,17 @@ export async function listKyc(params?: {
   // filtro acota la vista sin tocar el scope real de la sesion.
   sociedadRfc?: string;
   proyecto?: string;
+  // categoria_cumplimiento (04/Sep/2026, pedido de Mariana: "en pld hay
+  // que tener tabs de KYC y KYB") - filtra la lista por KYC/KYB/
+  // PENDIENTE_REVISION, mismo criterio que los demas filtros de arriba.
+  categoriaCumplimiento?: PldCategoriaCumplimiento;
 }): Promise<(PldContraparteKyc & PldDatosEditables)[]> {
   const query = new URLSearchParams();
   if (params?.estadoLlenado) query.set("estado_llenado", params.estadoLlenado);
   if (params?.search) query.set("search", params.search);
   if (params?.sociedadRfc) query.set("sociedad", params.sociedadRfc);
   if (params?.proyecto) query.set("proyecto", params.proyecto);
+  if (params?.categoriaCumplimiento) query.set("categoria_cumplimiento", params.categoriaCumplimiento);
   const qs = query.toString();
 
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${qs ? `?${qs}` : ""}`);
@@ -349,6 +396,28 @@ export async function editarKyc(
   return response.json();
 }
 
+// Reclasificar KYC/KYB a mano (04/Sep/2026) - solo tiene caso de uso real
+// para los "casos raros" que quedan en PENDIENTE_REVISION (fideicomiso,
+// tipo_persona vacio); el backend prende categoria_cumplimiento_manual
+// solo al detectar este campo en el PATCH (ver
+// PldContraparteKycSerializer.update), a partir de ahi deja de
+// recalcularse solo si tipo_persona cambia despues.
+export async function reclasificarCategoriaCumplimiento(
+  idKyc: string,
+  categoria: PldCategoriaCumplimiento,
+  updatedBy?: string | null
+): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ categoria_cumplimiento: categoria, updated_by: updatedBy }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
 // Solo BORRA los documentos cuyo archivo ya no existe en Drive
 // (hallazgo real, 18/Ago/2026: si alguien borra un archivo directo en
 // drive.google.com, la app se quedaba mostrandolo como si siguiera ahi).
@@ -392,6 +461,27 @@ export async function crearDocumentoKyc(
       created_by: createdBy,
       updated_by: createdBy,
     }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Clasificar un documento ya subido (04/Sep/2026: tipo_documento del
+// catalogo cerrado, obligatorio, vigencia_meses) - el uploader sigue
+// creando el documento con solo el nombre del archivo (ver
+// handleSubirDocumento en la pantalla), esto se llena despues inline en la
+// tabla. Requiere pld-compliance.editar (mismo permiso que editarKyc).
+export async function editarDocumentoKyc(
+  idKycDoc: string,
+  campos: Partial<Pick<PldContraparteDoc, "tipo_documento" | "obligatorio" | "vigencia_meses">>,
+  updatedBy?: string | null
+): Promise<PldContraparteDoc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...campos, updated_by: updatedBy }),
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

@@ -460,6 +460,12 @@ class PldContraparteKycViewSet(ModelViewSet):
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
+        # categoria_cumplimiento (04/Sep/2026, pedido de Mariana: "en pld
+        # hay que tener tabs de KYC y KYB") - mismo criterio de filtro que
+        # estado_llenado/sociedad arriba.
+        categoria = self.request.query_params.get("categoria_cumplimiento")
+        if categoria:
+            queryset = queryset.filter(categoria_cumplimiento=categoria.upper())
         return queryset
 
     def create(self, request, *args, **kwargs):
