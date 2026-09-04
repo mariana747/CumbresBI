@@ -1,4 +1,6 @@
 import uuid
+from calendar import monthrange
+from datetime import date
 
 from django.db import models
 
@@ -159,6 +161,31 @@ class PldContraparteKyc(models.Model):
         (TIPO_FIDEICOMISO, "Fideicomiso"),
     ]
     tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES, blank=True, null=True)
+
+    # categoria_cumplimiento (04/Sep/2026, decision de Mariana: "vamos a
+    # tener KYC y KYB" - separa el expediente en dos flujos explicitos en
+    # vez de un "KYC" generico para cualquier tipo_persona). Regla de
+    # derivacion automatica: fisica -> KYC, moral -> KYB; fideicomiso y
+    # tipo_persona vacio son "casos raros" (palabras de Mariana) que se
+    # dejan en PENDIENTE_REVISION para que un analista los clasifique a
+    # mano, nunca se fuerzan a KYC o KYB por default. Se recalcula solo en
+    # PldContraparteKyc.save() (ver metodo abajo) - PERO no si
+    # categoria_cumplimiento_manual esta en True, mismo patron hibrido que
+    # estado_llenado/estado_llenado_manual arriba (el analista puede
+    # reclasificar a mano un caso raro y esa decision no se pisa sola).
+    CATEGORIA_KYC = "KYC"
+    CATEGORIA_KYB = "KYB"
+    CATEGORIA_PENDIENTE = "PENDIENTE_REVISION"
+    CATEGORIA_CUMPLIMIENTO_CHOICES = [
+        (CATEGORIA_KYC, "KYC — persona física"),
+        (CATEGORIA_KYB, "KYB — persona moral"),
+        (CATEGORIA_PENDIENTE, "Pendiente de revisión manual"),
+    ]
+    categoria_cumplimiento = models.CharField(
+        max_length=20, choices=CATEGORIA_CUMPLIMIENTO_CHOICES, blank=True, null=True
+    )
+    categoria_cumplimiento_manual = models.BooleanField(default=False)
+
     fecha_nac_const = models.DateField(blank=True, null=True)
     pais_nac_const = models.CharField(max_length=100, blank=True, null=True)
     folio_mercantil = models.CharField(max_length=250, blank=True, null=True)
@@ -257,6 +284,22 @@ class PldContraparteKyc(models.Model):
     def __str__(self):
         return self.id_kyc
 
+    @staticmethod
+    def categoria_por_tipo_persona(tipo_persona):
+        """Deriva KYC/KYB de `tipo_persona` (ver docstring del campo
+        categoria_cumplimiento) - funcion pura, reusada por save() y por el
+        management command de reclasificacion retroactiva."""
+        if tipo_persona == PldContraparteKyc.TIPO_FISICA:
+            return PldContraparteKyc.CATEGORIA_KYC
+        if tipo_persona == PldContraparteKyc.TIPO_MORAL:
+            return PldContraparteKyc.CATEGORIA_KYB
+        return PldContraparteKyc.CATEGORIA_PENDIENTE
+
+    def save(self, *args, **kwargs):
+        if not self.categoria_cumplimiento_manual:
+            self.categoria_cumplimiento = self.categoria_por_tipo_persona(self.tipo_persona)
+        super().save(*args, **kwargs)
+
 
 class PldContraparteDoc(models.Model):
     STATUS_PENDIENTE = "PENDIENTE"
@@ -270,13 +313,48 @@ class PldContraparteDoc(models.Model):
         (STATUS_APROBADO, "Aprobado"),
     ]
 
+    # tipo_documento (04/Sep/2026, checklist de proveedores + decision de
+    # arquitectura del mismo dia: la identidad generica -Acta, Constancia
+    # Fiscal, RPC, comprobantes- ya vive en el checklist por contrato de
+    # tesoreria-service, TesoreriaContratoDocumento.NOMBRE_CHOICES - no se
+    # duplica aqui. Este catalogo cerrado es SOLO lo especifico de
+    # cumplimiento/KYC-KYB que no tiene lugar en Tesoreria. `denominacion`
+    # se queda como estaba (texto libre) para OTRO/legado - blank/null,
+    # nunca se fuerza a elegir un tipo_documento en documentos ya
+    # existentes.
+    TIPO_CUESTIONARIO_RIESGO = "CUESTIONARIO_RIESGO"
+    TIPO_DECLARACION_ORIGEN_FONDOS = "DECLARACION_ORIGEN_FONDOS"
+    TIPO_EVIDENCIA_PEP = "EVIDENCIA_PEP"
+    TIPO_ORGANIGRAMA_ACCIONARIO = "ORGANIGRAMA_ACCIONARIO"
+    TIPO_OTRO = "OTRO"
+    TIPO_DOCUMENTO_CHOICES = [
+        (TIPO_CUESTIONARIO_RIESGO, "Cuestionario de riesgo"),
+        (TIPO_DECLARACION_ORIGEN_FONDOS, "Declaración de origen de fondos"),
+        (TIPO_EVIDENCIA_PEP, "Evidencia de análisis PEP"),
+        (TIPO_ORGANIGRAMA_ACCIONARIO, "Organigrama accionario (KYB)"),
+        (TIPO_OTRO, "Otro (especificar en denominación)"),
+    ]
+
     id_kyc_doc = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     kyc = models.ForeignKey(
         PldContraparteKyc, on_delete=models.CASCADE, db_column="id_kyc", related_name="documentos"
     )
+    tipo_documento = models.CharField(max_length=30, choices=TIPO_DOCUMENTO_CHOICES, blank=True, null=True)
     denominacion = models.CharField(max_length=250, blank=True, null=True)
     detalles_adicionales = models.CharField(max_length=500, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, blank=True, null=True)
+    # obligatorio (04/Sep/2026, pendiente desde la peticion del 18/Ago:
+    # "que campos del expediente son obligatorios vs. opcionales") -
+    # default True, mismo criterio que TesoreriaContratoDocumento.obligatorio
+    # en tesoreria-service. El analista lo puede apagar por renglon (ej. un
+    # documento "de apoyo" que no bloquea aprobar el expediente).
+    obligatorio = models.BooleanField(default=True)
+    # vigencia_meses (04/Sep/2026, pendiente desde el 18/Ago: "vigencias de
+    # cada documento") - Cumplimiento todavia no manda una tabla oficial de
+    # vigencias por tipo de documento, asi que se captura por renglon (no
+    # un valor fijo por tipo_documento) mientras esa tabla no exista.
+    # blank/null = sin vigencia definida (no vence).
+    vigencia_meses = models.PositiveIntegerField(blank=True, null=True)
     # link_documento se queda como el web_view_link legible (para abrir el
     # documento con un clic, ya lo consumia el frontend) - los campos de
     # abajo son la referencia real a Drive (docs/architecture/
@@ -311,6 +389,23 @@ class PldContraparteDoc(models.Model):
 
     def __str__(self):
         return self.id_kyc_doc
+
+    @property
+    def fecha_vencimiento_documento(self):
+        """None si no hay vigencia definida o el documento no se ha
+        entregado todavia - no se puede calcular un vencimiento sobre una
+        fecha de entrega que no existe."""
+        if not self.vigencia_meses or not self.fecha_entrega:
+            return None
+        anio = self.fecha_entrega.year + (self.fecha_entrega.month - 1 + self.vigencia_meses) // 12
+        mes = (self.fecha_entrega.month - 1 + self.vigencia_meses) % 12 + 1
+        dia = min(self.fecha_entrega.day, monthrange(anio, mes)[1])
+        return date(anio, mes, dia)
+
+    @property
+    def vencido(self):
+        vencimiento = self.fecha_vencimiento_documento
+        return bool(vencimiento and vencimiento < date.today())
 
 
 class PldRepresentanteLegal(models.Model):

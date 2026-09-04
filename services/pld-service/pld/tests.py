@@ -32,6 +32,7 @@ from .views import (
     PldRepresentanteLegalViewSet,
     PldSolicitudEliminacionDocViewSet,
     PldTicketClienteViewSet,
+    _carpeta_documento,
 )
 
 RFC_TIZARA = "#####1"
@@ -778,6 +779,119 @@ class WorkflowEstadoLlenadoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data["estado_llenado_manual"])
         self.assertEqual(response.data["estado_llenado"], PldContraparteKyc.ESTADO_INCOMPLETO)
+
+
+class CategoriaCumplimientoKycKybTests(TestCase):
+    """KYC/KYB (04/Sep/2026, decision de Mariana: "vamos a tener KYC y
+    KYB") - categoria_cumplimiento se deriva sola de tipo_persona salvo
+    override manual, mismo patron hibrido que estado_llenado_manual."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def test_persona_fisica_se_clasifica_kyc(self):
+        kyc = _kyc("cp000060", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYC)
+
+    def test_persona_moral_se_clasifica_kyb(self):
+        kyc = _kyc("cp000061", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_MORAL
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
+
+    def test_fideicomiso_y_tipo_persona_vacio_quedan_pendientes_de_revision(self):
+        # "casos raros se revisan a mano" (Mariana, 04/Sep/2026) - nunca se
+        # fuerzan a KYC o KYB por default.
+        fideicomiso = _kyc("cp000062", RFC_TIZARA)
+        fideicomiso.tipo_persona = PldContraparteKyc.TIPO_FIDEICOMISO
+        fideicomiso.save()
+        self.assertEqual(fideicomiso.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+
+        sin_tipo = _kyc("cp000063", RFC_TIZARA)  # _kyc() no fija tipo_persona
+        self.assertEqual(sin_tipo.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+
+    def test_cambiar_tipo_persona_reclasifica_automatico(self):
+        kyc = _kyc("cp000064", RFC_TIZARA)
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYC)
+
+    def test_override_manual_por_patch_detiene_el_recalculo_automatico(self):
+        """Un analista reclasifica a mano un caso raro (fideicomiso) - a
+        partir de ahi, cambiar tipo_persona NO debe pisar esa decision."""
+        kyc = _kyc("cp000065", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FIDEICOMISO
+        kyc.save()
+
+        request = self.factory.patch(
+            f"/api/kyc/{kyc.id_kyc}/", {"categoria_cumplimiento": "KYB"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+        response = view(request, pk=kyc.id_kyc)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["categoria_cumplimiento"], "KYB")
+        self.assertTrue(response.data["categoria_cumplimiento_manual"])
+
+        # Cambiar tipo_persona despues NO debe recalcular encima del override.
+        kyc.refresh_from_db()
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
+
+
+class CatalogoDocumentosPldTests(TestCase):
+    """tipo_documento (04/Sep/2026, checklist de proveedores) - catalogo
+    cerrado SOLO para lo especifico de cumplimiento (la identidad generica
+    ya vive en tesoreria-service, ver docstring del campo en models.py)."""
+
+    def setUp(self):
+        self.kyc = _kyc("cp000070", RFC_TIZARA)
+
+    def test_documento_sin_tipo_documento_cae_en_carpeta_generales(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="Poder notarial")
+        self.assertEqual(_carpeta_documento(doc), f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}/Generales")
+
+    def test_documento_con_tipo_documento_usa_su_propia_subcarpeta(self):
+        doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc, tipo_documento=PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO
+        )
+        self.assertEqual(
+            _carpeta_documento(doc),
+            f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}/Cuestionario de riesgo",
+        )
+
+    def test_obligatorio_por_default_true(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE")
+        self.assertTrue(doc.obligatorio)
+
+    def test_documento_sin_vigencia_nunca_vence(self):
+        doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc, fecha_entrega=datetime.date(2020, 1, 1)
+        )
+        self.assertIsNone(doc.fecha_vencimiento_documento)
+        self.assertFalse(doc.vencido)
+
+    def test_documento_sin_fecha_entrega_no_calcula_vencimiento(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, vigencia_meses=12)
+        self.assertIsNone(doc.fecha_vencimiento_documento)
+
+    def test_documento_con_vigencia_vencida(self):
+        doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc, fecha_entrega=datetime.date(2020, 1, 15), vigencia_meses=12
+        )
+        self.assertEqual(doc.fecha_vencimiento_documento, datetime.date(2021, 1, 15))
+        self.assertTrue(doc.vencido)
+
+    def test_documento_con_vigencia_todavia_valida(self):
+        manana = timezone.now().date() + datetime.timedelta(days=1)
+        doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc, fecha_entrega=manana, vigencia_meses=120
+        )
+        self.assertFalse(doc.vencido)
 
 
 class ConfirmarExtraccionTests(TestCase):

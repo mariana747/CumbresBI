@@ -39,6 +39,18 @@ from .ticket_utils import generate_token, hash_token
 logger = logging.getLogger(__name__)
 
 
+def _carpeta_documento(doc) -> str:
+    """Subcarpeta real en Drive para `doc` (04/Sep/2026, checklist de
+    proveedores - pendiente desde la peticion del 18/Ago: "si la Unidad
+    compartida de Drive necesita subcarpetas por tipo de documento").
+    `tipo_documento` es NULL para documentos de identidad generica (esos ya
+    viven en Tesoreria, ver docstring del campo en models.py) y para
+    documentos subidos por el cliente via el link publico (nunca elige
+    tipo_documento) - esos caen en "Generales", sin que eso bloquee nada."""
+    subcarpeta = doc.get_tipo_documento_display() if doc.tipo_documento else "Generales"
+    return f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}/{subcarpeta}"
+
+
 def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
     """Revisa contra Drive real cada documento de `kyc` que tenga
     drive_file_id y BORRA de la base de datos los que ya no existen -
@@ -61,14 +73,13 @@ def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
     borrados (para avisar en pantalla) - no lanza si drive-service no
     responde, ese documento simplemente se deja como estaba (fail-safe: un
     problema de red no debe borrar evidencia real por error)."""
-    carpeta = f"PLD/Nuevos Clientes/{kyc.id_contraparte}"
     eliminados = []
 
     for doc in kyc.documentos.exclude(drive_file_id__isnull=True).exclude(drive_file_id=""):
         try:
             upstream = requests.get(
                 f"{settings.DRIVE_SERVICE_URL}/api/existe/{doc.drive_file_id}/",
-                params={"perm": "pld-compliance.leer", "carpeta": carpeta},
+                params={"perm": "pld-compliance.leer", "carpeta": _carpeta_documento(doc)},
                 headers=headers,
                 cookies=cookies,
                 timeout=15,
@@ -910,14 +921,14 @@ class PldContraparteDocViewSet(ModelViewSet):
         headers, cookies = forward_auth_headers(request)
         # "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): subcarpeta fija
         # dentro de la Unidad compartida PLD_CumbresBI - antes se creaba la
-        # carpeta del cliente directo en la raiz.
-        carpeta = f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
+        # carpeta del cliente directo en la raiz. Subcarpeta por
+        # tipo_documento (04/Sep/2026) - ver _carpeta_documento.
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
                 params={"perm": "pld-documentos.crear"},
                 files={"file": (archivo.name, archivo.read(), archivo.content_type)},
-                data={"carpeta": carpeta},
+                data={"carpeta": _carpeta_documento(doc)},
                 headers=headers,
                 cookies=cookies,
                 timeout=30,
@@ -996,11 +1007,10 @@ class PldContraparteDocViewSet(ModelViewSet):
             return response
 
         headers, cookies = forward_auth_headers(request)
-        carpeta = f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
         try:
             upstream = requests.get(
                 f"{settings.DRIVE_SERVICE_URL}/api/download/{doc.drive_file_id}/",
-                params={"perm": "pld-compliance.leer", "carpeta": carpeta},
+                params={"perm": "pld-compliance.leer", "carpeta": _carpeta_documento(doc)},
                 headers=headers,
                 cookies=cookies,
                 stream=True,
@@ -1381,7 +1391,10 @@ class PldTicketClienteViewSet(ModelViewSet):
         if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
             return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
 
-        carpeta = f"PLD/Nuevos Clientes/{ticket.kyc.id_contraparte}"
+        # Sin tipo_documento a proposito (el cliente nunca elige uno) - cae
+        # en "Generales", mismo criterio que _carpeta_documento cuando
+        # tipo_documento es NULL.
+        carpeta = f"PLD/Nuevos Clientes/{ticket.kyc.id_contraparte}/Generales"
         headers = {}
         if settings.DRIVE_INTERNAL_SECRET:
             headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET

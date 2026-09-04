@@ -67,14 +67,25 @@ class PldRepresentanteLegalSerializer(serializers.ModelSerializer):
 
 
 class PldContraparteDocSerializer(serializers.ModelSerializer):
+    # Solo lectura, calculado (04/Sep/2026, ver PldContraparteDoc en
+    # models.py) - None si no hay vigencia_meses definida o el documento no
+    # se ha entregado todavia.
+    fecha_vencimiento_documento = serializers.DateField(read_only=True)
+    vencido = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = PldContraparteDoc
         fields = [
             "id_kyc_doc",
             "kyc",
+            "tipo_documento",
             "denominacion",
             "detalles_adicionales",
             "status",
+            "obligatorio",
+            "vigencia_meses",
+            "fecha_vencimiento_documento",
+            "vencido",
             "link_documento",
             "drive_file_id",
             "mime_type",
@@ -178,6 +189,8 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "apellido_paterno",
             "apellido_materno",
             "tipo_persona",
+            "categoria_cumplimiento",
+            "categoria_cumplimiento_manual",
             "fecha_nac_const",
             "pais_nac_const",
             "folio_mercantil",
@@ -234,6 +247,11 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id_kyc",
             "estado_llenado_manual",
+            # categoria_cumplimiento_manual (04/Sep/2026): mismo criterio que
+            # estado_llenado_manual arriba - se prende solo en update() al
+            # detectar que llego categoria_cumplimiento en el PATCH, nunca a
+            # mano.
+            "categoria_cumplimiento_manual",
             "estado_cuenta",
             "aprobado_por",
             "aprobado_en",
@@ -323,6 +341,12 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         # estado_llenado_manual se prende.
         if "estado_llenado" in validated_data:
             validated_data["estado_llenado_manual"] = True
+        # Mismo patron hibrido (04/Sep/2026) para categoria_cumplimiento -
+        # ver PldContraparteKyc.save() en models.py: si el analista lo edita
+        # a mano (reclasificar un "caso raro" fideicomiso/tipo_persona
+        # vacio), deja de recalcularse solo cada vez que cambie tipo_persona.
+        if "categoria_cumplimiento" in validated_data:
+            validated_data["categoria_cumplimiento_manual"] = True
         return super().update(instance, validated_data)
 
 
