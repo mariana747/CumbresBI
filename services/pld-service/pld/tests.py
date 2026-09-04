@@ -1241,6 +1241,33 @@ class ActualizarDatosPublicoTests(TestCase):
         self.assertIsNotNone(self.kyc.politicas_aceptadas_en)
         self.assertIsNotNone(self.kyc.veracidad_declarada_en)
 
+    def test_tipo_persona_capturado_por_el_cliente_reclasifica_solo_a_kyc_kyb(self):
+        # 04/Sep/2026, pregunta real de Mariana: "si el usuario cuando dio
+        # sus datos coloco es persona fisica o si es moral, porque no se
+        # coloca automaticamente" - SI se coloca automatico: tipo_persona
+        # ya esta en CAMPOS_CONFIRMABLES (whitelist publica) y
+        # actualizar_datos guarda via el serializer normal, que llama a
+        # PldContraparteKyc.save() - mismo recalculo automatico que si lo
+        # editara un analista desde el panel interno.
+        self.assertEqual(self.kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)  # _kyc() no fija tipo_persona
+        request = self.factory.post(
+            "/api/ticket-cliente/actualizar_datos/",
+            {
+                "token": "token-datos",
+                "campos": {"tipo_persona": "moral"},
+                "acepta_politicas": True,
+                "declara_veracidad": True,
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch("requests.post", return_value=Mock(status_code=200)):
+            self.view(request)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.tipo_persona, "moral")
+        self.assertEqual(self.kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
+        self.assertFalse(self.kyc.categoria_cumplimiento_manual)
+
 
 class AuditoriaMotorDocumentalTests(TestCase):
     """Auditoria especifica del Motor Documental dentro de PLD (18/Ago/2026):
