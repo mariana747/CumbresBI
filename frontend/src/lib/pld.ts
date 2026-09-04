@@ -615,6 +615,19 @@ export async function reactivarAutoEstadoKyc(idKyc: string): Promise<PldContrapa
   return response.json();
 }
 
+// "Se debe poner en auto" (Mariana, 04/Sep/2026) - apaga
+// categoria_cumplimiento_manual y recalcula de inmediato segun
+// tipo_persona, mismo patron que reactivarAutoEstadoKyc arriba.
+export async function reactivarAutoCategoriaKyc(idKyc: string): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/reactivar_auto_categoria/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
 // Borrado manual de un documento (18/Ago/2026, decision de Mariana: los
 // duplicados se borran a mano, no automatico - "Verificar en Drive" solo
 // borra lo que ya no existe en Drive). Requiere pld-compliance.editar - ver

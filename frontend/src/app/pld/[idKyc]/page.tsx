@@ -90,6 +90,7 @@ import {
   listSolicitudesEliminacion,
   marcarSospechosoKyc,
   nombreParaMostrar,
+  reactivarAutoCategoriaKyc,
   reactivarCuentaKyc,
   reclasificarCategoriaCumplimiento,
   rechazarSolicitudEliminacion,
@@ -737,6 +738,21 @@ export default function PldExpedienteDetallePage() {
     }
   }
 
+  // "Se debe poner en auto" (04/Sep/2026) - opcion aparte en el mismo
+  // Select (valor especial "AUTO", no es una categoria real) para volver
+  // a dejar que categoria_cumplimiento se derive sola de tipo_persona.
+  async function handleVolverACategoriaAutomatica() {
+    setReclasificando(true);
+    try {
+      await reactivarAutoCategoriaKyc(params.idKyc);
+      cargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reactivar la clasificación automática");
+    } finally {
+      setReclasificando(false);
+    }
+  }
+
   // Clasificar un documento (04/Sep/2026: tipo_documento, obligatorio,
   // vigencia_meses) - inline en la tarjeta de cada documento, ver
   // editarDocumentoKyc en lib/pld.ts.
@@ -814,12 +830,19 @@ export default function PldExpedienteDetallePage() {
               {/* Categoria KYC/KYB (04/Sep/2026) - se deriva sola de
               tipo_persona; el Select solo tiene efecto real cuando queda
               en PENDIENTE_REVISION (fideicomiso/tipo_persona vacio, "casos
-              raros" que un analista debe clasificar a mano). */}
+              raros" que un analista debe clasificar a mano). "AUTO" es un
+              valor especial (no una categoria real, ver
+              handleVolverACategoriaAutomatica) para volver a dejar que se
+              derive sola - "se debe poner en auto" (Mariana). */}
               <FormControl size="small" sx={{ mt: 1, minWidth: 160 }}>
                 <Select
                   value={kyc.categoria_cumplimiento ?? ""}
                   disabled={reclasificando}
-                  onChange={(e) => handleReclasificarCategoria(e.target.value as PldCategoriaCumplimiento)}
+                  onChange={(e) =>
+                    e.target.value === "AUTO"
+                      ? handleVolverACategoriaAutomatica()
+                      : handleReclasificarCategoria(e.target.value as PldCategoriaCumplimiento)
+                  }
                   renderValue={(valor) => (
                     <Stack direction="row" spacing={0.5} alignItems="center">
                       <Chip
@@ -839,6 +862,7 @@ export default function PldExpedienteDetallePage() {
                 >
                   <MenuItem value="KYC">{CATEGORIA_CUMPLIMIENTO_LABELS.KYC}</MenuItem>
                   <MenuItem value="KYB">{CATEGORIA_CUMPLIMIENTO_LABELS.KYB}</MenuItem>
+                  {kyc.categoria_cumplimiento_manual && <MenuItem value="AUTO">Automático (según tipo de persona)</MenuItem>}
                   <MenuItem value="PENDIENTE_REVISION">{CATEGORIA_CUMPLIMIENTO_LABELS.PENDIENTE_REVISION}</MenuItem>
                 </Select>
               </FormControl>

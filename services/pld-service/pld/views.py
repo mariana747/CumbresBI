@@ -5,6 +5,7 @@ import requests
 from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
+from django.db.models import Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_exempt
@@ -434,6 +435,7 @@ class PldContraparteKycViewSet(ModelViewSet):
             "partial_update",
             "confirmar_extraccion",
             "reactivar_auto_estado",
+            "reactivar_auto_categoria",
             "verificar_documentos",
         ):
             return [require_permission("pld-compliance.editar")()]
@@ -461,11 +463,25 @@ class PldContraparteKycViewSet(ModelViewSet):
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
         # categoria_cumplimiento (04/Sep/2026, pedido de Mariana: "en pld
-        # hay que tener tabs de KYC y KYB") - mismo criterio de filtro que
-        # estado_llenado/sociedad arriba.
+        # hay que tener tabs de KYC y KYB, divide los expedientes segun el
+        # KYC/KYB... se vera los pendientes a revision" - solo 2 tabs, sin
+        # tab propio para PENDIENTE_REVISION). Al filtrar por KYC o KYB
+        # tambien se incluyen los "casos raros" en PENDIENTE_REVISION -
+        # deben verse en ambos tabs para que un analista los reclasifique,
+        # no quedar escondidos sin tab que los muestre. Se distinguen por
+        # el color del chip en la columna Categoria del frontend. Filtrar
+        # explicito por PENDIENTE_REVISION (fuera del uso de los tabs,
+        # ej. debug) sigue siendo un match exacto, sin este OR.
         categoria = self.request.query_params.get("categoria_cumplimiento")
         if categoria:
-            queryset = queryset.filter(categoria_cumplimiento=categoria.upper())
+            categoria = categoria.upper()
+            if categoria in (PldContraparteKyc.CATEGORIA_KYC, PldContraparteKyc.CATEGORIA_KYB):
+                queryset = queryset.filter(
+                    Q(categoria_cumplimiento=categoria)
+                    | Q(categoria_cumplimiento=PldContraparteKyc.CATEGORIA_PENDIENTE)
+                )
+            else:
+                queryset = queryset.filter(categoria_cumplimiento=categoria)
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -755,6 +771,19 @@ class PldContraparteKycViewSet(ModelViewSet):
         kyc.save(update_fields=["estado_llenado_manual"])
         recalcular_estado_llenado(kyc)
         kyc.refresh_from_db()
+        return Response(self.get_serializer(kyc).data)
+
+    @action(detail=True, methods=["post"])
+    def reactivar_auto_categoria(self, request, pk=None):
+        """Apaga categoria_cumplimiento_manual y recalcula de inmediato
+        segun tipo_persona (04/Sep/2026, "se debe poner en auto" - mismo
+        patron que reactivar_auto_estado arriba) - para cuando el analista
+        reclasifico un expediente a mano y quiere devolverle el control
+        automatico. Mismo permiso que editar el expediente."""
+        kyc = self.get_object()
+        kyc.categoria_cumplimiento_manual = False
+        kyc.categoria_cumplimiento = PldContraparteKyc.categoria_por_tipo_persona(kyc.tipo_persona)
+        kyc.save(update_fields=["categoria_cumplimiento_manual", "categoria_cumplimiento"])
         return Response(self.get_serializer(kyc).data)
 
     @action(detail=True, methods=["post"])

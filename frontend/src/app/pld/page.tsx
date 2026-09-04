@@ -118,9 +118,12 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   const [filtroSociedad, setFiltroSociedad] = useState("");
 
   // Tabs KYC/KYB (04/Sep/2026, pedido de Mariana: "en pld hay que tener
-  // tabs de KYC y KYB") - "" = todos, mismo criterio de filtro server-side
-  // que estado/sociedad de arriba (categoria_cumplimiento en get_queryset).
-  const [tabCategoria, setTabCategoria] = useState<PldCategoriaCumplimiento | "">("");
+  // tabs de KYC y KYB, divide los expedientes segun el KYC/KYB... se
+  // vera los pendientes a revision" - solo 2 tabs, sin "Todos" ni tab
+  // propio para pendientes: PENDIENTE_REVISION aparece en los dos (ver
+  // get_queryset en el backend), distinguido por el color del chip en la
+  // columna Categoria. Default KYC - no hay "Todos" que sea el default.
+  const [tabCategoria, setTabCategoria] = useState<Extract<PldCategoriaCumplimiento, "KYC" | "KYB">>("KYC");
 
   function cargar() {
     setLoading(true);
@@ -129,7 +132,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       estadoLlenado: estadoLlenado || undefined,
       search: search || undefined,
       sociedadRfc: filtroSociedad || undefined,
-      categoriaCumplimiento: tabCategoria || undefined,
+      categoriaCumplimiento: tabCategoria,
     })
       .then(setExpedientes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
@@ -286,10 +289,8 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         onChange={(_, valor) => setTabCategoria(valor)}
         sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}
       >
-        <Tab value="" label="Todos" />
         <Tab value="KYC" label={CATEGORIA_CUMPLIMIENTO_LABELS.KYC} />
         <Tab value="KYB" label={CATEGORIA_CUMPLIMIENTO_LABELS.KYB} />
-        <Tab value="PENDIENTE_REVISION" label={CATEGORIA_CUMPLIMIENTO_LABELS.PENDIENTE_REVISION} />
       </Tabs>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>

@@ -842,6 +842,25 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         kyc.save()
         self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
 
+    def test_reactivar_auto_categoria_apaga_el_override_y_recalcula(self):
+        # "se debe poner en auto" (Mariana, 04/Sep/2026) - mismo patron que
+        # reactivar_auto_estado.
+        kyc = _kyc("cp000069", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.categoria_cumplimiento = PldContraparteKyc.CATEGORIA_KYB
+        kyc.categoria_cumplimiento_manual = True
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)  # override respetado
+
+        request = self.factory.post(f"/api/kyc/{kyc.id_kyc}/reactivar_auto_categoria/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldContraparteKycViewSet.as_view({"post": "reactivar_auto_categoria"})
+        response = view(request, pk=kyc.id_kyc)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["categoria_cumplimiento_manual"])
+        self.assertEqual(response.data["categoria_cumplimiento"], PldContraparteKyc.CATEGORIA_KYC)
+
     def test_filtro_categoria_cumplimiento_en_la_lista(self):
         # 04/Sep/2026, pedido de Mariana: "en pld hay que tener tabs de
         # KYC y KYB" - mismo criterio de filtro server-side que
@@ -859,6 +878,21 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         ids = [r["id_kyc"] for r in response.data]
         self.assertIn(fisica.id_kyc, ids)
         self.assertNotIn(moral.id_kyc, ids)
+
+    def test_pendiente_de_revision_se_ve_en_ambos_tabs_kyc_y_kyb(self):
+        # 04/Sep/2026, pedido de Mariana: "se veran los pendientes a
+        # revision" - solo 2 tabs (KYC/KYB), sin tab propio para
+        # PENDIENTE_REVISION; los casos raros deben verse en los dos para
+        # que un analista los reclasifique, no quedar escondidos.
+        pendiente = _kyc("cp000068", RFC_TIZARA)  # tipo_persona vacio
+        self.assertEqual(pendiente.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+
+        for valor in ("KYC", "KYB"):
+            request = self.factory.get(f"/api/kyc/?categoria_cumplimiento={valor}")
+            request.effective_scope = EffectiveScope(is_global=True)
+            response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
+            ids = [r["id_kyc"] for r in response.data]
+            self.assertIn(pendiente.id_kyc, ids, f"debería verse en el tab {valor}")
 
 
 class CatalogoDocumentosPldTests(TestCase):
