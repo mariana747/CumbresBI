@@ -10,7 +10,7 @@ de sociedad en el ERD real (son catalogos compartidos entre sociedades,
 mismo criterio que GeneralSociedad en iam-service); el filtro real es por
 permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
-from datetime import date
+from datetime import date, datetime, time
 from unittest.mock import patch
 
 import requests
@@ -39,7 +39,7 @@ from .models import (
     TesoreriaSaldo,
     TesoreriaSolicitudPago,
 )
-from .reembolso_utils import ultimos_dos_dias_habiles_y_corte, validar_fecha_limite
+from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
 from .reportes import calcular_reporte_diario
 from .views import (
     FacturaConceptoViewSet,
@@ -1764,15 +1764,18 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["moneda"], "USD")
 
-    def test_fecha_limite_expone_la_fecha_de_corte_real(self):
+    def test_fecha_limite_expone_la_ventana_real(self):
         # 03/Sep/2026 (pedido de Mariana: "que se coloque el dia/mes/año de
-        # hasta cuando se aceptan" en vez de solo texto generico).
+        # hasta cuando se aceptan" en vez de solo texto generico); campos
+        # reemplazados 04/Sep/2026 junto con la regla.
         request = self.factory.get("/api/tickets-reembolso/fecha_limite/")
         request.effective_scope = self.scope_empleado
         response = TesoreriaTicketReembolsoViewSet.as_view({"get": "fecha_limite"})(request)
         self.assertEqual(response.status_code, 200)
-        self.assertIn("fecha_corte", response.data)
-        self.assertIn("dias_bloqueados", response.data)
+        self.assertIn("dias_permitidos", response.data)
+        self.assertIn("hoy_en_dias_permitidos", response.data)
+        self.assertIn("es_ultimo_dia_habil", response.data)
+        self.assertIn("ventana_cerrada_por_hora", response.data)
 
     def test_ver_ticket_sin_archivo_subido_da_404(self):
         # 04/Sep/2026 ("usa lo mismo que en pld" - preview embebido en vez
@@ -1810,15 +1813,16 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
 
 
 class TesoreriaFechaLimiteReembolsoTests(TestCase):
-    """Fecha limite mensual de reembolsos (minuta 03/Sep/2026): los ultimos
-    2 dias habiles del mes bloquean la creacion; el mes siguiente se acepta
-    fecha_gasto de esos 2 dias (gracia), cualquier otra fecha anterior del
-    mes pasado ya no - confirmado explicitamente por Mariana en el chat:
-    "ya no se acepta y pierde", sin excepcion.
+    """Ventana mensual de reembolsos (minuta 03/Sep/2026, regla reemplazada
+    04/Sep/2026 - ver docstring de reembolso_utils): en cualquier dia del
+    mes se acepta fecha_gasto del mismo mes (nunca de otro, sin periodo de
+    gracia); en los ultimos 2 dias habiles del mes la regla se estrecha a
+    "solo ese mismo dia"; el ultimo dia habil ademas solo recibe hasta
+    mediodia.
 
-    Usa la funcion pura de reembolso_utils directamente (sin mockear
-    timezone.now()) - septiembre 2026 es el mes de referencia porque es el
-    ejemplo real dado en la minuta: 28 = corte, 29 y 30 bloqueados.
+    Usa la funcion pura de reembolso_utils directamente - septiembre 2026
+    es el mes de referencia porque es el ejemplo real dado por Mariana:
+    29 y 30 son los ultimos 2 dias habiles (29 = penultimo, 30 = ultimo).
 
     requests.get se mockea para toda la clase (falla siempre) - sin esto,
     la sincronizacion perezosa de festivos (ver
@@ -1833,49 +1837,73 @@ class TesoreriaFechaLimiteReembolsoTests(TestCase):
         self.addCleanup(parche.stop)
 
     def test_ultimos_dos_dias_habiles_de_septiembre_2026(self):
-        bloqueados, corte = ultimos_dos_dias_habiles_y_corte(2026, 9)
-        self.assertEqual(bloqueados, [date(2026, 9, 29), date(2026, 9, 30)])
-        self.assertEqual(corte, date(2026, 9, 28))
+        ultimos_dos = ultimos_dos_dias_habiles(2026, 9)
+        self.assertEqual(ultimos_dos, [date(2026, 9, 29), date(2026, 9, 30)])
 
     def test_festivo_oficial_se_excluye_del_calculo(self):
         # 16 de septiembre (martes) declarado festivo -> deja de contar
-        # como habil, corriendo el corte un dia hacia atras si cayera cerca
-        # del cierre; aqui solo se verifica que no aparezca en la lista de
-        # habiles usados para septiembre completo.
+        # como habil; aqui solo se verifica que no aparezca en los ultimos
+        # 2 dias habiles de septiembre completo.
         TesoreriaDiaFestivo.objects.create(fecha=date(2026, 9, 16), descripcion="Independencia")
-        bloqueados, corte = ultimos_dos_dias_habiles_y_corte(2026, 9)
-        self.assertNotIn(date(2026, 9, 16), bloqueados)
-        self.assertNotEqual(corte, date(2026, 9, 16))
+        ultimos_dos = ultimos_dos_dias_habiles(2026, 9)
+        self.assertNotIn(date(2026, 9, 16), ultimos_dos)
 
-    def test_hoy_en_dia_bloqueado_rechaza(self):
-        error = validar_fecha_limite(date(2026, 9, 29), fecha_gasto=date(2026, 9, 20))
-        self.assertIsNotNone(error)
-
-    def test_gasto_del_mes_en_curso_se_acepta(self):
-        error = validar_fecha_limite(date(2026, 9, 15), fecha_gasto=date(2026, 9, 10))
+    def test_gasto_del_mes_en_curso_se_acepta_fuera_de_los_ultimos_2_dias(self):
+        # Hoy 15, gasto del 10 - dia normal del mes, cualquier fecha del
+        # mismo mes/año se acepta (no exige "mismo dia").
+        ahora = datetime(2026, 9, 15, 10, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 10))
         self.assertIsNone(error)
 
-    def test_gasto_en_periodo_de_gracia_se_acepta(self):
-        # Hoy 1 de octubre, gasto del 30 de septiembre (uno de los 2 dias
-        # bloqueados de septiembre) - se acepta.
-        error = validar_fecha_limite(date(2026, 10, 1), fecha_gasto=date(2026, 9, 30))
-        self.assertIsNone(error)
-
-    def test_gasto_anterior_a_la_fecha_de_corte_ya_no_se_acepta(self):
-        # Hoy en octubre, gasto del 20 de septiembre (antes del corte del
-        # 28) - se le paso su ventana, se pierde.
-        error = validar_fecha_limite(date(2026, 10, 2), fecha_gasto=date(2026, 9, 20))
-        self.assertIsNotNone(error)
-
-    def test_gasto_de_dos_meses_atras_nunca_se_acepta(self):
-        error = validar_fecha_limite(date(2026, 10, 2), fecha_gasto=date(2026, 8, 30))
+    def test_gasto_de_mes_distinto_nunca_se_acepta_sin_periodo_de_gracia(self):
+        # 04/Sep/2026: "en ningun caso" - ya no hay gracia para el mes
+        # anterior, ni siquiera si la fecha cae en lo que hubieran sido los
+        # ultimos 2 dias habiles de ese mes.
+        ahora = datetime(2026, 9, 15, 10, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 8, 30))
         self.assertIsNotNone(error)
 
     def test_gasto_con_fecha_futura_nunca_se_acepta(self):
         # 03/Sep/2026 (bug real reportado por Mariana): un dia futuro
         # DENTRO del mes en curso se colaba porque el chequeo de "mismo
         # mes que hoy" se evaluaba antes que el de futuro.
-        error = validar_fecha_limite(date(2026, 9, 3), fecha_gasto=date(2026, 9, 30))
+        ahora = datetime(2026, 9, 3, 10, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNotNone(error)
+
+    def test_penultimo_dia_habil_solo_acepta_gasto_de_ese_mismo_dia(self):
+        # 04/Sep/2026, ejemplo real de Mariana: "el 29 de septiembre puede
+        # subir una factura del 29 de septiembre pero no del 28".
+        ahora = datetime(2026, 9, 29, 10, 0)
+        self.assertIsNone(validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 29)))
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 28))
+        self.assertIsNotNone(error)
+
+    def test_ultimo_dia_habil_acepta_gasto_del_mismo_dia_antes_de_mediodia(self):
+        ahora = datetime(2026, 9, 30, 11, 59)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNone(error)
+
+    def test_ultimo_dia_habil_rechaza_despues_de_mediodia(self):
+        # 04/Sep/2026: "el ultimo dia... solo hasta medio dia".
+        ahora = datetime(2026, 9, 30, 12, 1)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNotNone(error)
+
+    def test_ultimo_dia_habil_a_mediodia_exacto_ya_no_se_acepta(self):
+        # Limite inclusivo del lado de "abierto": 12:00:00 en punto ya
+        # cuenta como pasado el corte (se compara con time(12, 0), > no >=,
+        # pero 12:00:00.000000 no es > 12:00 asi que sigue aceptando - este
+        # test documenta el borde exacto: 12:00 todavia pasa.
+        ahora = datetime(2026, 9, 30, 12, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNone(error)
+
+    def test_ultimo_dia_habil_rechaza_gasto_de_un_dia_distinto(self):
+        # El ultimo dia (30) tambien exige "mismo dia" - un gasto del 29
+        # (el otro dia de la ventana estrecha) ya no se acepta el 30.
+        ahora = datetime(2026, 9, 30, 9, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 29))
         self.assertIsNotNone(error)
 
 

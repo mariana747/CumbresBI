@@ -76,7 +76,12 @@ from .serializers import (
     TesoreriaTicketProveedorSerializer,
     TesoreriaTicketReembolsoSerializer,
 )
-from .reembolso_utils import sincronizar_festivos_mx, ultimos_dos_dias_habiles_y_corte, validar_fecha_limite
+from .reembolso_utils import (
+    HORA_CORTE_ULTIMO_DIA,
+    sincronizar_festivos_mx,
+    ultimos_dos_dias_habiles,
+    validar_fecha_limite,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1010,18 +1015,24 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def fecha_limite(self, request):
-        """Fecha de corte real del mes en curso (03/Sep/2026, pedido de
+        """Ventana de reembolso del mes en curso (03/Sep/2026, pedido de
         Mariana: "que se coloque el dia/mes/año de hasta cuando se
-        aceptan" en vez de solo describir la regla en texto). Lectura
-        abierta a cualquier empleado autenticado - la necesitan ver ANTES
-        de intentar crear un ticket, mismo criterio que create/subir_ticket."""
-        hoy = timezone.now().date()
-        bloqueados, corte = ultimos_dos_dias_habiles_y_corte(hoy.year, hoy.month)
+        aceptan"; regla reemplazada 04/Sep/2026, ver docstring de
+        reembolso_utils). Lectura abierta a cualquier empleado autenticado -
+        la necesitan ver ANTES de intentar crear un ticket, mismo criterio
+        que create/subir_ticket."""
+        ahora = timezone.localtime(timezone.now())
+        hoy = ahora.date()
+        ultimos_dos = ultimos_dos_dias_habiles(hoy.year, hoy.month)
+        ultimo_dia_habil = ultimos_dos[-1] if ultimos_dos else None
         return Response(
             {
-                "fecha_corte": corte.isoformat() if corte else None,
-                "dias_bloqueados": [d.isoformat() for d in bloqueados],
-                "en_cierre_hoy": hoy in bloqueados,
+                "dias_permitidos": [d.isoformat() for d in ultimos_dos],
+                "hoy_en_dias_permitidos": hoy in ultimos_dos,
+                "es_ultimo_dia_habil": hoy == ultimo_dia_habil,
+                "ventana_cerrada_por_hora": (
+                    hoy == ultimo_dia_habil and ahora.time() > HORA_CORTE_ULTIMO_DIA
+                ),
             }
         )
 
@@ -1040,11 +1051,16 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        # Fecha limite mensual (minuta 03/Sep/2026): ver reembolso_utils.
-        # Se valida aqui, antes de guardar - un ticket rechazado por esto
-        # nunca llega a crearse (no queda un registro RECHAZADO, el
-        # empleado simplemente no puede enviarlo).
-        error = validar_fecha_limite(timezone.now().date(), serializer.validated_data.get("fecha_gasto"))
+        # Ventana mensual de reembolso (ver reembolso_utils, regla
+        # reemplazada 04/Sep/2026). Se valida aqui, antes de guardar - un
+        # ticket rechazado por esto nunca llega a crearse (no queda un
+        # registro RECHAZADO, el empleado simplemente no puede enviarlo).
+        # Hora LOCAL (no timezone.now() crudo, que es UTC) - el corte de
+        # mediodia del ultimo dia habil debe evaluarse en hora de Mexico
+        # (TIME_ZONE en config/settings.py), no en UTC.
+        error = validar_fecha_limite(
+            timezone.localtime(timezone.now()), serializer.validated_data.get("fecha_gasto")
+        )
         if error:
             raise ValidationError({"fecha_gasto": [error]})
 
@@ -1331,7 +1347,8 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
 
         solicitud.link_comprobante = resultado["web_view_link"]
         solicitud.drive_file_id_comprobante = resultado["file_id"]
-        solicitud.save(update_fields=["link_comprobante", "drive_file_id_comprobante"])
+        solicitud.mime_type_comprobante = resultado.get("mime_type")
+        solicitud.save(update_fields=["link_comprobante", "drive_file_id_comprobante", "mime_type_comprobante"])
         emitir_evento_auditoria(
             "tesoreria_solicitudes_pago.subir_comprobante",
             "tesoreria_solicitudes_pago",
@@ -1340,6 +1357,22 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
             valores_nuevos={"nombre_archivo": archivo.name},
         )
         return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_comprobante(self, request, pk=None):
+        """Preview embebido del comprobante (recibo/linea de captura/CFDI) -
+        mismo patron que TesoreriaTicketReembolsoViewSet.ver_ticket. get_object
+        ya aplica el scope normal (dueño o solicitud-pago.editar/aprobar via
+        for_scope), no hace falta un gate de permiso aparte aqui."""
+        solicitud = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=solicitud.drive_file_id_comprobante,
+            mime_type=solicitud.mime_type_comprobante,
+            nombre_archivo=f"comprobante-{solicitud.id_solicitud}",
+            carpeta=f"Tesoreria/SolicitudesPago/{solicitud.id_solicitud}",
+        )
 
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):

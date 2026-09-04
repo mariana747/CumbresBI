@@ -1077,14 +1077,20 @@ class TesoreriaTicketReembolso(models.Model):
     CATEGORIA_TRANSPORTE = "TRANSPORTE"
     CATEGORIA_ALIMENTOS = "ALIMENTOS"
     CATEGORIA_HOSPEDAJE = "HOSPEDAJE"
-    CATEGORIA_OTRO = "OTRO"
+    CATEGORIA_ADMINISTRACION = "ADMINISTRACION"
+    CATEGORIA_RECURSOSHUMANOS = "RECURSOSHUMANOS"
+    CATEGORIA_LEGAL = "LEGAL"
+    CATEGORIA_EXTRAORDINARIOS = "EXTRAORDINARIOS"
     CATEGORIA_CHOICES = [
         (CATEGORIA_VIATICOS, "Viáticos"),
         (CATEGORIA_PAPELERIA, "Papelería"),
         (CATEGORIA_TRANSPORTE, "Transporte"),
         (CATEGORIA_ALIMENTOS, "Alimentos"),
         (CATEGORIA_HOSPEDAJE, "Hospedaje"),
-        (CATEGORIA_OTRO, "Otro"),
+        (CATEGORIA_ADMINISTRACION, "Administración"),
+        (CATEGORIA_RECURSOSHUMANOS, "Recursos Humanos"),
+        (CATEGORIA_LEGAL, "Legal"),
+        (CATEGORIA_EXTRAORDINARIOS, "Extraordinarios"),
     ]
     MONEDA_CHOICES = [("MXP", "MXP"), ("USD", "USD"), ("EUR", "EUR")]
     # centro (lista cerrada de areas) se elimino 03/Sep/2026 - pedido
@@ -1294,6 +1300,9 @@ class TesoreriaSolicitudPago(models.Model):
     # aqui nunca es requisito para llegar a PAGADO.
     link_comprobante = models.TextField(blank=True, null=True)
     drive_file_id_comprobante = models.TextField(blank=True, null=True)
+    # Content-Type real (ver ver_comprobante/_servir_documento_drive) -
+    # mismo criterio que mime_type_ticket/mime_type_factura en Reembolso.
+    mime_type_comprobante = models.CharField(max_length=100, blank=True, null=True)
     factura = models.ForeignKey(
         TesoreriaFactura,
         db_column="factura_uuid",

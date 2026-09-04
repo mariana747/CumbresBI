@@ -1,10 +1,20 @@
-"""Calculo de la fecha limite mensual de reembolsos (minuta 03/Sep/2026,
-pedido explicito de Mariana): los ultimos 2 dias habiles de cada mes quedan
-bloqueados para que la contadora haga el cierre; el mes siguiente se acepta
-un ticket cuyo fecha_gasto caiga en esos 2 dias (periodo de gracia), pero
-uno con fecha_gasto igual o anterior a la fecha de corte de ese mes ya no
-se acepta - "se le paso su ventana y se pierde", confirmado explicitamente
-por Mariana en el chat, sin excepcion.
+"""Calculo de la ventana mensual de reembolsos (minuta 03/Sep/2026 + ajuste
+04/Sep/2026, pedido explicito de Mariana - reemplaza por completo la regla
+anterior de "cierre bloqueado + periodo de gracia del mes siguiente"):
+
+- Durante el mes, cualquier fecha_gasto del mismo mes/año que hoy se acepta
+  (sin importar el dia), salvo que sea una fecha futura.
+- En NINGUN caso se acepta una fecha_gasto de un mes distinto al que corre -
+  "no se pueden reembolsar facturas de agosto en septiembre", sin excepcion
+  ni periodo de gracia (esto reemplaza la gracia que existia antes para el
+  mes anterior).
+- En los ULTIMOS 2 DIAS HABILES del mes, la regla se vuelve mas estricta:
+  solo se acepta un comprobante fechado EXACTAMENTE ese mismo dia - "el 29
+  de septiembre puede subir una factura del 29 de septiembre pero no del
+  28" (ejemplo real dado por Mariana).
+- El ULTIMO dia habil del mes ademas solo recibe tickets hasta MEDIODIA
+  (12:00 hrs, hora local) - despues de esa hora la ventana del mes ya
+  cerro por completo, sin excepcion.
 
 Festivos oficiales: en vez de un catalogo mantenido a mano, se sincronizan
 de Nager.Date (https://date.nager.at, API publica gratuita, sin API key,
@@ -16,7 +26,7 @@ llamada de red en el camino caliente de crear un ticket."""
 
 import logging
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime, time
 
 import requests
 from django.db import transaction
@@ -26,6 +36,10 @@ from .models import TesoreriaDiaFestivo
 logger = logging.getLogger(__name__)
 
 NAGER_DATE_URL = "https://date.nager.at/api/v3/PublicHolidays/{anio}/MX"
+
+# Hora de corte del ultimo dia habil del mes (12:00 hrs, hora local del
+# servidor - TIME_ZONE = "America/Mexico_City" en config/settings.py).
+HORA_CORTE_ULTIMO_DIA = time(12, 0)
 
 
 def sincronizar_festivos_mx(anio: int) -> bool:
@@ -71,64 +85,57 @@ def _dias_habiles_del_mes(anio: int, mes: int) -> list[date]:
     return [d for d in dias if _es_dia_habil(d, festivos)]
 
 
-def ultimos_dos_dias_habiles_y_corte(anio: int, mes: int) -> tuple[list[date], date | None]:
-    """Regresa (bloqueados, fecha_corte) para el mes/anio dado. `bloqueados`
-    son los ultimos 2 dias habiles (nadie puede subir tickets esos dias);
-    `fecha_corte` es el dia habil inmediato anterior (ultimo dia permitido
-    para subir). None si el mes no tiene al menos 3 dias habiles (caso de
-    borde que no debería pasar en la practica)."""
+def ultimos_dos_dias_habiles(anio: int, mes: int) -> list[date]:
+    """Los ultimos 2 dias habiles de `mes`/`anio`, en orden ascendente
+    (penultimo, ultimo). Lista mas corta si el mes no tiene al menos 2 dias
+    habiles (caso de borde que no deberia pasar en la practica)."""
     habiles = _dias_habiles_del_mes(anio, mes)
-    if len(habiles) < 2:
-        return habiles, None
-    bloqueados = habiles[-2:]
-    corte = habiles[-3] if len(habiles) >= 3 else None
-    return bloqueados, corte
+    return habiles[-2:]
 
 
-def _mes_anterior(anio: int, mes: int) -> tuple[int, int]:
-    if mes == 1:
-        return anio - 1, 12
-    return anio, mes - 1
-
-
-def validar_fecha_limite(hoy: date, fecha_gasto: date | None) -> str | None:
-    """Valida las reglas de cierre mensual al crear un ticket de reembolso.
-    Regresa un mensaje de error si debe rechazarse, o None si procede."""
-    bloqueados_hoy, _ = ultimos_dos_dias_habiles_y_corte(hoy.year, hoy.month)
-    if hoy in bloqueados_hoy:
-        return (
-            "No se pueden subir tickets de reembolso durante el cierre de mes "
-            "(últimos 2 días hábiles). Podrás subir de nuevo a partir del día 1 "
-            "del siguiente mes."
-        )
+def validar_fecha_limite(ahora: datetime, fecha_gasto: date | None) -> str | None:
+    """Valida las reglas de ventana mensual al crear un ticket de reembolso
+    (ver docstring del modulo). `ahora` debe ser hora local (timezone.
+    localtime(timezone.now()) en el llamador, no UTC crudo) - la hora
+    importa para el corte de mediodia del ultimo dia habil. Regresa un
+    mensaje de error si debe rechazarse, o None si procede."""
+    hoy = ahora.date()
 
     if fecha_gasto is None:
         return None
 
-    # 03/Sep/2026 (bug real reportado por Mariana): un gasto no puede ser
-    # de una fecha que todavia no llega, sin importar el mes - antes esto
-    # se colaba porque el chequeo de "mismo mes que hoy" (siguiente linea)
-    # se evaluaba antes que la de futuro, aceptando cualquier dia dentro
-    # del mes en curso aunque fuera posterior a hoy.
+    # Un gasto no puede ser de una fecha que todavia no llega, sin importar
+    # el mes (bug real reportado 03/Sep/2026: este chequeo debe ir ANTES
+    # que el de "mismo mes", si no un dia futuro dentro del mes en curso se
+    # cuela).
     if fecha_gasto > hoy:
         return "La fecha del gasto no puede ser una fecha futura."
 
-    if fecha_gasto.year == hoy.year and fecha_gasto.month == hoy.month:
+    # En ningun caso se acepta un mes distinto al que corre - sin periodo
+    # de gracia para el mes anterior (04/Sep/2026: "no se pueden reembolsar
+    # facturas de agosto en septiembre", confirmado explicitamente por
+    # Mariana, sin excepcion - esto reemplaza la gracia que existia antes).
+    if fecha_gasto.year != hoy.year or fecha_gasto.month != hoy.month:
+        return "Solo se pueden solicitar reembolsos de comprobantes emitidos en el mes en curso."
+
+    ultimos_dos = ultimos_dos_dias_habiles(hoy.year, hoy.month)
+    if hoy not in ultimos_dos:
         return None
 
-    # fecha_gasto en un mes anterior al actual - solo se acepta si cae
-    # exactamente en los 2 dias bloqueados de ESE mes (periodo de gracia,
-    # se pudo haber quedado fuera por el cierre); cualquier otra fecha
-    # anterior ya se le paso su ventana y no se acepta, sin excepcion.
-    anio_prev, mes_prev = fecha_gasto.year, fecha_gasto.month
-    es_mes_inmediato_anterior = (anio_prev, mes_prev) == _mes_anterior(hoy.year, hoy.month)
-    if not es_mes_inmediato_anterior:
-        return "La fecha del gasto es de un mes ya cerrado. Ya no se puede registrar este ticket."
+    # Estamos en uno de los ultimos 2 dias habiles del mes: regla estricta
+    # de "mismo dia" - el comprobante debe estar fechado exactamente hoy,
+    # ningun otro dia del mes (aunque tambien sea del mes en curso).
+    if fecha_gasto != hoy:
+        return (
+            "En los últimos 2 días hábiles del mes solo se aceptan comprobantes "
+            "emitidos ese mismo día."
+        )
 
-    bloqueados_prev, corte_prev = ultimos_dos_dias_habiles_y_corte(anio_prev, mes_prev)
-    if fecha_gasto in bloqueados_prev:
-        return None
-    return (
-        "La fecha del gasto es anterior a la fecha de corte del mes pasado "
-        f"({corte_prev.isoformat() if corte_prev else 'desconocida'}). Ya no se puede registrar este ticket."
-    )
+    # El ultimo dia habil del mes ademas solo recibe hasta mediodia.
+    if hoy == ultimos_dos[-1] and ahora.time() > HORA_CORTE_ULTIMO_DIA:
+        return (
+            "El último día hábil del mes solo recibe tickets hasta las 12:00 hrs. "
+            "La ventana de este mes ya cerró."
+        )
+
+    return None
