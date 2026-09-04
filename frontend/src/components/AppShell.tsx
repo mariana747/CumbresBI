@@ -228,7 +228,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       icon: FileSearch,
       enabled: true,
       children: [
-        { label: "Expedientes KYC", href: "/pld", icon: FileSearch },
+        { label: "Expedientes", href: "/pld", icon: FileSearch },
         { label: "Tickets de Cliente", href: "/pld/tickets", icon: Link2 },
       ],
     });

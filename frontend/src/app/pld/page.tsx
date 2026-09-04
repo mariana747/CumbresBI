@@ -184,7 +184,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         <Stack direction="row" spacing={1.5} alignItems="center">
           <FolderOpen size={22} strokeWidth={1.5} color={BRAND.azul} />
           <Typography variant="subtitle1" fontWeight={600}>
-            Expedientes KYC
+            Expedientes
           </Typography>
         </Stack>
         {puedeCrear && (
@@ -470,7 +470,7 @@ export default function PldPage() {
         PLD / Cumplimiento
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Expedientes KYC y documentos. El Motor Documental se usa desde dentro de cada expediente
+        Expedientes y documentos. El Motor Documental se usa desde dentro de cada expediente
         (pestaña &quot;Documentos KYC&quot;), ya sin tener que volver a elegir a qué cliente pertenece.
       </Typography>
 
