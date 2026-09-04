@@ -22,6 +22,7 @@ list_files/ensure_folder_path) es identica en ambos modos.
 import io
 import json
 import logging
+import mimetypes
 import os
 import uuid
 from pathlib import Path
@@ -244,6 +245,33 @@ def upload_bytes(carpeta: str, nombre_archivo: str, contenido: bytes, mime_type:
         "mime_type": archivo.get("mimeType", mime_type),
         "tamano_bytes": int(archivo.get("size", len(contenido))),
     }
+
+
+def get_mime_type(file_id: str, carpeta: str | None = None) -> str | None:
+    """Tipo real del archivo (04/Sep/2026, hallazgo real: DownloadView
+    siempre devolvia application/octet-stream porque nunca consultaba el
+    tipo real, forzando descarga en vez de previsualizar en un <iframe> -
+    ver PldContraparteDocViewSet.ver / TesoreriaTicketReembolsoViewSet.
+    ver_ticket, que dependen de esto para Content-Type). Se pide aparte del
+    contenido (metadata, no bytes) - barato, no reemplaza el streaming de
+    iter_download."""
+    if not _modo_real():
+        # Simulado: upload_bytes guarda como "{file_id}__{nombre_archivo}",
+        # asi que la extension real vive en el nombre del archivo local.
+        if not carpeta:
+            return None
+        base = Path(ensure_folder_path(carpeta))
+        coincidencias = list(base.glob(f"{file_id}__*"))
+        if not coincidencias:
+            return None
+        return mimetypes.guess_type(coincidencias[0].name)[0]
+
+    servicio = _servicio_real()
+    try:
+        archivo = servicio.files().get(fileId=file_id, fields="mimeType", supportsAllDrives=True).execute()
+    except Exception:  # noqa: BLE001
+        return None
+    return archivo.get("mimeType")
 
 
 def iter_download(file_id: str, carpeta: str | None = None, chunk_size: int = 256 * 1024):
