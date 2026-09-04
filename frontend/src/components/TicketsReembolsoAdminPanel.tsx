@@ -212,7 +212,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Tickets de reembolso subidos por empleados desde MiCumbres — verifica el comprobante con el Motor Documental
+        Tickets de Reembolso subidos por empleados desde MiCumbres — verifica el comprobante con el Motor Documental
         antes de aprobar (o recházalos directo si son obviamente inválidos), y factura los ya aprobados.
       </Typography>
 

@@ -17,14 +17,21 @@ const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ??
 export type TesoreriaTicketEstado = "PENDIENTE" | "APROBADO" | "VINCULADO" | "RECHAZADO";
 
 // Espejo de TesoreriaTicketReembolso.CATEGORIA_CHOICES (models.py,
-// 31/Ago/2026 - hallazgo de la comparacion contra Tesoreria2.pdf).
+// 31/Ago/2026 - hallazgo de la comparacion contra Tesoreria2.pdf; 4
+// categorias agregadas despues en el backend - ADMINISTRACION,
+// RECURSOSHUMANOS, LEGAL, EXTRAORDINARIOS - sin actualizar este espejo,
+// por eso no aparecian en el dropdown; "OTRO" tampoco existe en el
+// backend, se quita).
 export type TesoreriaCategoriaGasto =
   | "VIATICOS"
   | "PAPELERIA"
   | "TRANSPORTE"
   | "ALIMENTOS"
   | "HOSPEDAJE"
-  | "OTRO";
+  | "ADMINISTRACION"
+  | "RECURSOSHUMANOS"
+  | "LEGAL"
+  | "EXTRAORDINARIOS";
 
 export const CATEGORIA_GASTO_LABELS: Record<TesoreriaCategoriaGasto, string> = {
   VIATICOS: "Viáticos",
@@ -32,7 +39,10 @@ export const CATEGORIA_GASTO_LABELS: Record<TesoreriaCategoriaGasto, string> = {
   TRANSPORTE: "Transporte",
   ALIMENTOS: "Alimentos",
   HOSPEDAJE: "Hospedaje",
-  OTRO: "Otro",
+  ADMINISTRACION: "Administración",
+  RECURSOSHUMANOS: "Recursos Humanos",
+  LEGAL: "Legal",
+  EXTRAORDINARIOS: "Extraordinarios",
 };
 
 // `centro` (lista cerrada) se elimino 03/Sep/2026 - pedido explicito de
