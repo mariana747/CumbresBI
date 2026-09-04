@@ -92,6 +92,13 @@ export async function crearSolicitudPago(params: {
   return response.json();
 }
 
+// Preview embebido (04/Sep/2026, mismo patron que urlVerTicket/urlVerFactura
+// en lib/miCumbres.ts) en vez de mandar al link crudo de Drive: sirve el
+// archivo en streaming a traves de tesoreria-service.
+export function urlVerComprobanteSolicitudPago(idSolicitud: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/solicitudes-pago/${idSolicitud}/ver_comprobante/`;
+}
+
 // Comprobante OPCIONAL (recibo oficial, linea de captura pagada, o CFDI si
 // la dependencia lo emite) - subirlo nunca es requisito para llegar a
 // PAGADO, ver docstring del modelo en el backend.

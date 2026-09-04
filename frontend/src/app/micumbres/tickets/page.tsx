@@ -91,15 +91,6 @@ function formatearFechaLarga(fechaIso: string): string {
   return `${dia} de ${mesNombre} del ${anio}`;
 }
 
-// "29 o 30 de septiembre de 2026" - los 2 dias de cierre comparten mes/año,
-// se muestran juntos en vez de repetir "de septiembre" dos veces.
-function formatearRangoDiasCierre(fechaIso1: string, fechaIso2: string): string {
-  const [anio, mes, dia1] = fechaIso1.split("-").map(Number);
-  const dia2 = Number(fechaIso2.split("-")[2]);
-  const mesNombre = new Date(anio, mes - 1, dia1).toLocaleDateString("es-MX", { month: "long" });
-  return `${dia1} o ${dia2} de ${mesNombre} de ${anio}`;
-}
-
 export default function MiCumbresTicketsPage() {
   const theme = useTheme();
   // En celular la tabla no cabe (demasiadas columnas) - se muestra como
@@ -248,7 +239,7 @@ export default function MiCumbresTicketsPage() {
         sx={{ mb: 2 }}
       >
         <Box>
-          <Typography variant={esMovil ? "h6" : "h5"}>Tickets de reembolso</Typography>
+          <Typography variant={esMovil ? "h6" : "h5"}>Tickets de Reembolso</Typography>
           <Typography variant="body2" color="text.secondary">
             Pantalla provisional de MiCumbres — sube tu ticket de gasto para que Tesorería lo procese.
           </Typography>
@@ -273,29 +264,30 @@ export default function MiCumbresTicketsPage() {
           <strong>Política para la Captura y Validación de Tickets de Gasto</strong>
           <Box component="ul" sx={{ mt: 1, pl: 2.5 }}>
             <li>
-              <strong>Validez de fechas.</strong> No se admitirán registros con fecha de gasto futura.
-              {fechaLimite?.fecha_corte && (
-                <>
-                  {" "}
-                  Para el periodo actual, la fecha límite de recepción de tickets es el{" "}
-                  <strong>{formatearFechaLarga(fechaLimite.fecha_corte)}</strong>.
-                </>
-              )}
-              {fechaLimite?.en_cierre_hoy && " Hoy ya está cerrado; podrás capturar de nuevo a partir del día 1 del siguiente mes."}
+              <strong>Validez de fechas.</strong> No se admitirán registros con fecha de gasto futura, ni de un mes
+              distinto al que corre — no se pueden reembolsar comprobantes de un mes anterior, sin excepción.
             </li>
             <li>
-              <strong>Tratamiento tras la fecha de corte.</strong> Una vez concluido el corte del periodo e iniciado
-              el mes posterior, únicamente se admitirán para su procesamiento los comprobantes emitidos el{" "}
-              {fechaLimite?.dias_bloqueados?.length === 2 ? (
-                <strong>
-                  {formatearRangoDiasCierre(fechaLimite.dias_bloqueados[0], fechaLimite.dias_bloqueados[1])}
-                </strong>
+              <strong>Cierre de mes.</strong> Durante los días{" "}
+              {fechaLimite?.dias_permitidos?.length === 2 ? (
+                <>
+                  <strong>{formatearFechaLarga(fechaLimite.dias_permitidos[0])}</strong> y{" "}
+                  <strong>{formatearFechaLarga(fechaLimite.dias_permitidos[1])}</strong>
+                </>
               ) : (
-                "día de cierre correspondiente"
+                "de cierre de este mes"
               )}{" "}
-              (correspondientes al cierre del mes anterior). Transcurrido este lapso, cualquier ticket fechado con
-              anterioridad a dicho periodo de cierre se considerará extemporáneo y será rechazado de forma
-              definitiva.
+              solo se aceptan comprobantes fechados el mismo día en que se suben.
+              {fechaLimite?.dias_permitidos?.[1] ? (
+                <>
+                  {" "}
+                  El día <strong>{formatearFechaLarga(fechaLimite.dias_permitidos[1])}</strong> solo se reciben
+                  tickets hasta las 12:00 hrs.
+                </>
+              ) : (
+                " El último día del mes solo se reciben tickets hasta las 12:00 hrs."
+              )}
+              {fechaLimite?.ventana_cerrada_por_hora && " La ventana de este mes ya está cerrada."}
             </li>
             <li>
               <strong>Inmutabilidad de datos declarados.</strong> Cualquier discrepancia en la sociedad, la divisa o

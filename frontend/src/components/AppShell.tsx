@@ -351,7 +351,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
     href: "/micumbres",
     icon: UserRound,
     enabled: true,
-    children: [{ label: "Tickets de reembolso", href: "/micumbres/tickets", icon: Receipt }],
+    children: [{ label: "Tickets de Reembolso", href: "/micumbres/tickets", icon: Receipt }],
   });
   return items;
 }

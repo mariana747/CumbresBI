@@ -79,13 +79,17 @@ export interface TesoreriaTicketReembolso {
   updated_by: string | null;
 }
 
-// Fecha de corte real del mes en curso (03/Sep/2026, pedido de Mariana:
-// "que se coloque el dia/mes/año de hasta cuando se aceptan"), no solo la
-// descripcion generica de la regla.
+// Ventana de reembolso del mes en curso (03/Sep/2026, pedido de Mariana:
+// "que se coloque el dia/mes/año de hasta cuando se aceptan"; campos
+// reemplazados 04/Sep/2026 junto con la regla - ver
+// reembolso_utils.validar_fecha_limite en el backend).
 export interface TesoreriaFechaLimiteReembolso {
-  fecha_corte: string | null;
-  dias_bloqueados: string[];
-  en_cierre_hoy: boolean;
+  // Los ultimos 2 dias habiles del mes, ascendente [penultimo, ultimo] -
+  // unicos dias en que aplica la regla estricta de "mismo dia".
+  dias_permitidos: string[];
+  hoy_en_dias_permitidos: boolean;
+  es_ultimo_dia_habil: boolean;
+  ventana_cerrada_por_hora: boolean;
 }
 
 export async function getFechaLimiteReembolso(): Promise<TesoreriaFechaLimiteReembolso> {

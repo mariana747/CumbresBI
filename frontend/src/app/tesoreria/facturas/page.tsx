@@ -829,7 +829,7 @@ export default function TesoreriaFacturasPage() {
         sx={{ mb: 3 }}
       >
         <Tab label="Facturas CFDI" icon={<FileText size={16} strokeWidth={1.5} />} iconPosition="start" />
-        <Tab label="Tickets de reembolso" icon={<Receipt size={16} strokeWidth={1.5} />} iconPosition="start" />
+        <Tab label="Tickets de Reembolso" icon={<Receipt size={16} strokeWidth={1.5} />} iconPosition="start" />
       </Tabs>
 
       {tab === 1 && <TicketsReembolsoAdminPanel session={session} />}
