@@ -442,7 +442,7 @@ export default function MiCumbresTicketsPage() {
       {/* Alta del empleado - solo crear, nunca editar despues */}
       <Dialog open={openNuevo} onClose={cerrarNuevo} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          Ticket de reembolso
+          Ticket de Reembolso
           <IconButton size="small" onClick={cerrarNuevo} aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
