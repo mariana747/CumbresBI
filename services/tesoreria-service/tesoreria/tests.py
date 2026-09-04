@@ -10,7 +10,7 @@ de sociedad en el ERD real (son catalogos compartidos entre sociedades,
 mismo criterio que GeneralSociedad en iam-service); el filtro real es por
 permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
-from datetime import date, datetime, time
+from datetime import date, datetime
 from unittest.mock import patch
 
 import requests
@@ -37,7 +37,6 @@ from .models import (
     TesoreriaContratoDocumento,
     TesoreriaRecNomina,
     TesoreriaSaldo,
-    TesoreriaSolicitudPago,
 )
 from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
 from .reportes import calcular_reporte_diario
