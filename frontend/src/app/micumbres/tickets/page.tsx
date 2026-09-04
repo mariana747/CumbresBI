@@ -88,9 +88,13 @@ function formatearFechaLarga(fechaIso: string): string {
   return `${dia} de ${mesNombre} del ${anio}`;
 }
 
-function nombreDelMes(fechaIso: string): string {
-  const [anio, mes, dia] = fechaIso.split("-").map(Number);
-  return new Date(anio, mes - 1, dia).toLocaleDateString("es-MX", { month: "long" });
+// "29 o 30 de septiembre de 2026" - los 2 dias de cierre comparten mes/año,
+// se muestran juntos en vez de repetir "de septiembre" dos veces.
+function formatearRangoDiasCierre(fechaIso1: string, fechaIso2: string): string {
+  const [anio, mes, dia1] = fechaIso1.split("-").map(Number);
+  const dia2 = Number(fechaIso2.split("-")[2]);
+  const mesNombre = new Date(anio, mes - 1, dia1).toLocaleDateString("es-MX", { month: "long" });
+  return `${dia1} o ${dia2} de ${mesNombre} de ${anio}`;
 }
 
 export default function MiCumbresTicketsPage() {
@@ -246,42 +250,47 @@ export default function MiCumbresTicketsPage() {
 
       {/* Reglas del ticket (03/Sep/2026, pedido de Mariana: "las reglas van
           afuera" - visibles en la pantalla, no solo dentro del dialogo de
-          alta) - mismas reglas que valida reembolso_utils.validar_fecha_limite
-          en el backend. */}
+          alta; texto final dictado por Mariana como "Politica para la
+          Captura y Validacion de Tickets de Gasto") - mismas reglas que
+          valida reembolso_utils.validar_fecha_limite en el backend. */}
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2" component="div">
-          <strong>Reglas para el reembolso:</strong>
-          <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
-            <li>La fecha del gasto no puede ser una fecha futura.</li>
+          <strong>Política para la Captura y Validación de Tickets de Gasto</strong>
+          <Box component="ul" sx={{ mt: 1, pl: 2.5 }}>
             <li>
-              {fechaLimite?.fecha_corte ? (
+              <strong>Validez de fechas.</strong> No se admitirán registros con fecha de gasto futura.
+              {fechaLimite?.fecha_corte && (
                 <>
-                  Este mes se aceptan tickets hasta el <strong>{formatearFechaLarga(fechaLimite.fecha_corte)}</strong>.
+                  {" "}
+                  Para el periodo actual, la fecha límite de recepción de tickets es el{" "}
+                  <strong>{formatearFechaLarga(fechaLimite.fecha_corte)}</strong>.
                 </>
-              ) : (
-                "No se pueden subir tickets durante los últimos 2 días hábiles del mes (cierre de la contadora)."
               )}
-              {fechaLimite?.en_cierre_hoy && " Hoy ya está cerrado; podrás subir de nuevo a partir del día 1 del siguiente mes."}
+              {fechaLimite?.en_cierre_hoy && " Hoy ya está cerrado; podrás capturar de nuevo a partir del día 1 del siguiente mes."}
             </li>
             <li>
+              <strong>Tratamiento tras la fecha de corte.</strong> Una vez concluido el corte del periodo e iniciado
+              el mes posterior, únicamente se admitirán para su procesamiento los comprobantes emitidos el{" "}
               {fechaLimite?.dias_bloqueados?.length === 2 ? (
-                <>
-                  Un gasto de <strong>{nombreDelMes(fechaLimite.dias_bloqueados[0])}</strong>, llegado a su fecha de
-                  corte, solo se aceptará si el ticket está fechado el{" "}
-                  <strong>{formatearFechaLarga(fechaLimite.dias_bloqueados[0])}</strong> o el{" "}
-                  <strong>{formatearFechaLarga(fechaLimite.dias_bloqueados[1])}</strong> (los días de cierre de ese
-                  mes); cualquier fecha anterior a esos días ya no se acepta.
-                </>
+                <strong>
+                  {formatearRangoDiasCierre(fechaLimite.dias_bloqueados[0], fechaLimite.dias_bloqueados[1])}
+                </strong>
               ) : (
-                "Un gasto de un mes ya cerrado solo se acepta si cayó justo en los días de cierre de ese mes; cualquier fecha anterior ya no se acepta."
-              )}
+                "día de cierre correspondiente"
+              )}{" "}
+              (correspondientes al cierre del mes anterior). Transcurrido este lapso, cualquier ticket fechado con
+              anterioridad a dicho periodo de cierre se considerará extemporáneo y será rechazado de forma
+              definitiva.
             </li>
             <li>
-              La sociedad y el tipo de moneda declarados al crear el ticket son definitivos y no podrán corregirse
-              posteriormente. Cualquier error en la sociedad, en la moneda o en la ortografía de la descripción
-              invalida el ticket; en tal caso deberá capturarse uno nuevo con los datos correctos.
+              <strong>Inmutabilidad de datos declarados.</strong> Cualquier discrepancia en la sociedad, la divisa o
+              algún error ortográfico en la descripción invalidará el comprobante, requiriendo la cancelación del
+              registro y la captura de uno nuevo con la información correcta.
             </li>
-            <li>Debe declararse al menos un concepto por ticket.</li>
+            <li>
+              <strong>Conceptos requeridos.</strong> Es requisito indispensable declarar al menos un concepto en
+              cada ticket registrado.
+            </li>
           </Box>
         </Typography>
       </Alert>
