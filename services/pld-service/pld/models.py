@@ -227,6 +227,12 @@ class PldContraparteKyc(models.Model):
     dom_corresp_dom_pais = models.CharField(max_length=100, blank=True, null=True)
     telefono_fijo = models.CharField(max_length=10, blank=True, null=True)
     telefono_sms = models.CharField(max_length=10, blank=True, null=True)
+    # email (04/Sep/2026, hallazgo real: "como solicita documentos si no
+    # tiene correo electronico" - sin esto no hay a donde mandarle un aviso
+    # de documento faltante al cliente). Se pide como dato en el link
+    # publico igual que el resto de CAMPOS_CONFIRMABLES (ver views.py) -
+    # blank/null como el resto del expediente (Opcion B, alta autonoma).
+    email = models.CharField(max_length=254, blank=True, null=True)
     estado_civil = models.CharField(max_length=20, choices=ESTADO_CIVIL_CHOICES, blank=True, null=True)
     ident_fideicomiso = models.CharField(max_length=100, blank=True, null=True)
     link_carpeta = models.CharField(max_length=2083, blank=True, null=True)
@@ -313,33 +319,87 @@ class PldContraparteDoc(models.Model):
         (STATUS_APROBADO, "Aprobado"),
     ]
 
-    # tipo_documento (04/Sep/2026, checklist de proveedores + decision de
-    # arquitectura del mismo dia: la identidad generica -Acta, Constancia
-    # Fiscal, RPC, comprobantes- ya vive en el checklist por contrato de
-    # tesoreria-service, TesoreriaContratoDocumento.NOMBRE_CHOICES - no se
-    # duplica aqui. Este catalogo cerrado es SOLO lo especifico de
-    # cumplimiento/KYC-KYB que no tiene lugar en Tesoreria. `denominacion`
-    # se queda como estaba (texto libre) para OTRO/legado - blank/null,
-    # nunca se fuerza a elegir un tipo_documento en documentos ya
-    # existentes.
+    # tipo_documento (04/Sep/2026, checklist de proveedores) - catalogo
+    # cerrado completo: identidad (Acta, Constancia Fiscal, RPC,
+    # identificacion, domicilio, info bancaria, Opinion de Cumplimiento) +
+    # lo especifico de cumplimiento (cuestionario de riesgo, origen de
+    # fondos, PEP, organigrama accionario). Decision de Mariana 04/Sep:
+    # "no importa si se piden lo mismo" que en el checklist por contrato de
+    # tesoreria-service (TesoreriaContratoDocumento.NOMBRE_CHOICES) - se
+    # duplica a proposito en vez de forzar que todo viva en un solo lado.
+    # Cada tipo aplica a KYC (fisica), KYB (moral), o ambos - ver
+    # TIPOS_DOCUMENTO_POR_CATEGORIA abajo, que el frontend usa para no
+    # mostrar Acta Constitutiva en un expediente KYC ni Identificacion
+    # Oficial en uno KYB. `denominacion` se queda como estaba (texto libre)
+    # para lo que no encaje en el catalogo/legado - blank/null, nunca se
+    # fuerza a elegir un tipo_documento en documentos ya existentes.
+    TIPO_IDENTIFICACION_OFICIAL = "IDENTIFICACION_OFICIAL"
+    TIPO_ACTA_CONSTITUTIVA = "ACTA_CONSTITUTIVA"
+    TIPO_CONSTANCIA_SITUACION_FISCAL = "CONSTANCIA_SITUACION_FISCAL"
+    TIPO_INSCRIPCION_RPC = "INSCRIPCION_RPC"
+    TIPO_INFO_BANCARIA = "INFO_BANCARIA"
+    TIPO_VALIDACION_TITULARIDAD_CUENTA = "VALIDACION_TITULARIDAD_CUENTA"
+    TIPO_OPINION_CUMPLIMIENTO = "OPINION_CUMPLIMIENTO"
+    TIPO_COMPROBANTE_DOMICILIO = "COMPROBANTE_DOMICILIO"
     TIPO_CUESTIONARIO_RIESGO = "CUESTIONARIO_RIESGO"
     TIPO_DECLARACION_ORIGEN_FONDOS = "DECLARACION_ORIGEN_FONDOS"
     TIPO_EVIDENCIA_PEP = "EVIDENCIA_PEP"
     TIPO_ORGANIGRAMA_ACCIONARIO = "ORGANIGRAMA_ACCIONARIO"
-    TIPO_OTRO = "OTRO"
     TIPO_DOCUMENTO_CHOICES = [
+        (TIPO_IDENTIFICACION_OFICIAL, "Identificación oficial"),
+        (TIPO_ACTA_CONSTITUTIVA, "Acta constitutiva"),
+        (TIPO_CONSTANCIA_SITUACION_FISCAL, "Constancia de Situación Fiscal"),
+        (TIPO_INSCRIPCION_RPC, "Inscripción en el Registro Público de Comercio"),
+        (TIPO_INFO_BANCARIA, "Carátula / información bancaria"),
+        (TIPO_VALIDACION_TITULARIDAD_CUENTA, "Validación de titularidad de la cuenta"),
+        (TIPO_OPINION_CUMPLIMIENTO, "Opinión de Cumplimiento (SAT)"),
+        (TIPO_COMPROBANTE_DOMICILIO, "Comprobante de domicilio"),
         (TIPO_CUESTIONARIO_RIESGO, "Cuestionario de riesgo"),
         (TIPO_DECLARACION_ORIGEN_FONDOS, "Declaración de origen de fondos"),
         (TIPO_EVIDENCIA_PEP, "Evidencia de análisis PEP"),
         (TIPO_ORGANIGRAMA_ACCIONARIO, "Organigrama accionario (KYB)"),
-        (TIPO_OTRO, "Otro (especificar en denominación)"),
     ]
+    # Que opciones se ofrecen segun la categoria del expediente (04/Sep,
+    # pedido explicito: "que se muestre para los C unicamente los que
+    # necesite y la B solo las que necesite" - "Otro" quitado el mismo dia,
+    # ya existe "Sin tipo" para lo que no encaja en el catalogo) - los 8
+    # compartidos (Constancia Fiscal, info bancaria, validacion de
+    # titularidad, Opinion de Cumplimiento, comprobante de domicilio,
+    # cuestionario de riesgo, declaracion de origen de fondos, evidencia
+    # PEP) aplican a ambos; Identificacion Oficial es SOLO fisica,
+    # Acta/RPC/Organigrama accionario son SOLO moral.
+    TIPOS_DOCUMENTO_POR_CATEGORIA = {
+        PldContraparteKyc.CATEGORIA_KYC: [
+            TIPO_IDENTIFICACION_OFICIAL,
+            TIPO_CONSTANCIA_SITUACION_FISCAL,
+            TIPO_INFO_BANCARIA,
+            TIPO_VALIDACION_TITULARIDAD_CUENTA,
+            TIPO_OPINION_CUMPLIMIENTO,
+            TIPO_COMPROBANTE_DOMICILIO,
+            TIPO_CUESTIONARIO_RIESGO,
+            TIPO_DECLARACION_ORIGEN_FONDOS,
+            TIPO_EVIDENCIA_PEP,
+        ],
+        PldContraparteKyc.CATEGORIA_KYB: [
+            TIPO_ACTA_CONSTITUTIVA,
+            TIPO_CONSTANCIA_SITUACION_FISCAL,
+            TIPO_INSCRIPCION_RPC,
+            TIPO_INFO_BANCARIA,
+            TIPO_VALIDACION_TITULARIDAD_CUENTA,
+            TIPO_OPINION_CUMPLIMIENTO,
+            TIPO_COMPROBANTE_DOMICILIO,
+            TIPO_CUESTIONARIO_RIESGO,
+            TIPO_DECLARACION_ORIGEN_FONDOS,
+            TIPO_EVIDENCIA_PEP,
+            TIPO_ORGANIGRAMA_ACCIONARIO,
+        ],
+    }
 
     id_kyc_doc = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     kyc = models.ForeignKey(
         PldContraparteKyc, on_delete=models.CASCADE, db_column="id_kyc", related_name="documentos"
     )
-    tipo_documento = models.CharField(max_length=30, choices=TIPO_DOCUMENTO_CHOICES, blank=True, null=True)
+    tipo_documento = models.CharField(max_length=35, choices=TIPO_DOCUMENTO_CHOICES, blank=True, null=True)
     denominacion = models.CharField(max_length=250, blank=True, null=True)
     detalles_adicionales = models.CharField(max_length=500, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, blank=True, null=True)
@@ -637,3 +697,44 @@ class PldTicketCliente(models.Model):
 
     def __str__(self):
         return self.id_pld_ticket
+
+
+class PldDocumentoTicket(models.Model):
+    """Ticket publico de UN documento del checklist, sin login (04/Sep/2026,
+    pedido explicito de Mariana: "hay que unificar la solicitud de
+    documento como en contratos" - mismo patron exacto que
+    TesoreriaDocumentoTicket en tesoreria-service). Ligado a UN
+    PldContraparteDoc especifico en vez de al expediente completo
+    (PldTicketCliente, que es de proposito general) - un ticket = un
+    documento, generado al llamar
+    PldContraparteKycViewSet.enviar_recordatorio_documentos (nunca se
+    reusa el mismo ticket para dos documentos)."""
+
+    id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    documento = models.ForeignKey(
+        PldContraparteDoc,
+        on_delete=models.CASCADE,
+        related_name="tickets",
+    )
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    issued_by = models.CharField(max_length=8, blank=True, null=True)
+    expires_at = models.DateTimeField()
+    max_uses = models.IntegerField(default=1)
+    uses_count = models.IntegerField(default=0)
+    first_used_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    # Alcance via el documento -> su kyc (mismo criterio de dos saltos que
+    # PldContraparteDoc.SCOPE_FIELD_SOCIEDAD).
+    SCOPE_FIELD_SOCIEDAD = "documento__kyc__sociedad_rfc"
+    SCOPE_FIELD_PROYECTO = "documento__kyc__proyecto"
+    objects = ScopedManager()
+
+    class Meta:
+        db_table = "pld_documento_tickets"
+
+    def __str__(self):
+        return self.id_ticket

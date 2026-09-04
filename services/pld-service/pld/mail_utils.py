@@ -108,3 +108,53 @@ def enviar_correo_ticket_cliente(request, email: str, token: str) -> bool:
         logger.warning("mail-service rechazo el envio del ticket de cliente a %s: %s", email, respuesta.text)
         return False
     return True
+
+
+def enviar_correo_documento_faltante(
+    request, email: str, id_contraparte: str, nombre_documento: str, token: str
+) -> bool:
+    """Avisa que falta UN documento del checklist del expediente KYC, con
+    un magic link para que el CLIENTE lo suba el mismo, sin login
+    (04/Sep/2026, pedido explicito de Mariana: "hay que unificar la
+    solicitud de documento como en contratos" - mismo patron exacto que
+    tesoreria-service/tesoreria/mail_utils.py::enviar_correo_documento_faltante).
+    Se llama una vez POR documento pendiente, con un token distinto cada
+    vez (ver PldDocumentoTicket) - nunca se agrupan varios documentos en
+    un solo correo ni se reusa un token para dos documentos.
+
+    No propaga la excepcion si mail-service no responde - mismo criterio
+    que el resto de este archivo."""
+    headers, cookies = forward_auth_headers(request)
+    url_completa = f"{settings.FRONTEND_BASE_URL}/pld-documento/{token}"
+    html_body = _renderizar_correo(
+        kicker_texto="Documento pendiente",
+        kicker_bg="#FBF1DE",
+        kicker_color="#9A6400",
+        titulo="Falta un documento de tu expediente",
+        cuerpo_html=(
+            f"<p style='margin:0;'>Para continuar con tu expediente <strong>{escape(id_contraparte)}</strong> "
+            f"todavía necesitamos que nos hagas llegar: <strong>{escape(nombre_documento)}</strong>. "
+            "Usa el siguiente enlace para subirlo directamente, sin necesidad de cuenta ni contraseña.</p>"
+        ),
+        cta_texto="Subir mi documento",
+        cta_url=url_completa,
+        fineprint_texto="Este enlace expira pronto y tiene un límite de usos. Si no esperabas este correo, ignóralo.",
+    )
+
+    try:
+        respuesta = requests.post(
+            f"{settings.MAIL_SERVICE_URL}/api/send/",
+            params={"perm": "pld-compliance.crear"},
+            json={"to": email, "subject": "Documento pendiente de tu expediente - CumbresBI", "html_body": html_body},
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_SEGUNDOS,
+        )
+    except requests.RequestException:
+        logger.warning("mail-service no respondio al avisar del documento faltante a %s", email, exc_info=True)
+        return False
+
+    if respuesta.status_code != 201:
+        logger.warning("mail-service rechazo el aviso de documento faltante a %s: %s", email, respuesta.text)
+        return False
+    return True

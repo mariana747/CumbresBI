@@ -19,11 +19,22 @@ const SESSION_COOKIE_NAME = "cumbresbi_session";
 
 // Rutas que NO requieren sesion - /login existe solo como fallback para el
 // caso de error (?error=oidc) o una cookie invalida detectada del lado del
-// cliente (ver AppShell.tsx); /magic-link, /pld-ticket y /tesoreria-ticket
-// son flujos de acceso externo (proveedores/clientes de KYC), no pasan por
-// Google en absoluto - un cliente externo canjeando su ticket nunca tiene
-// cuenta de Workspace.
-const PUBLIC_PATH_PREFIXES = ["/login", "/magic-link", "/pld-ticket", "/tesoreria-ticket"];
+// cliente (ver AppShell.tsx); /magic-link, /pld-ticket, /tesoreria-ticket,
+// /pld-documento y /tesoreria-documento son flujos de acceso externo
+// (proveedores/clientes de KYC), no pasan por Google en absoluto - un
+// cliente externo canjeando su ticket nunca tiene cuenta de Workspace.
+// /tesoreria-documento y /pld-documento (04/Sep/2026, hallazgo real al
+// construir el segundo: al primero tambien le faltaba estar aqui - sin
+// esto el middleware redirige a /login antes de que la pagina publica
+// siquiera cargue).
+const PUBLIC_PATH_PREFIXES = [
+  "/login",
+  "/magic-link",
+  "/pld-ticket",
+  "/tesoreria-ticket",
+  "/tesoreria-documento",
+  "/pld-documento",
+];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

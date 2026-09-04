@@ -21,6 +21,7 @@ from .audit_utils import emitir_evento_auditoria
 from .models import (
     PldContraparteDoc,
     PldContraparteKyc,
+    PldDocumentoTicket,
     PldRepresentanteLegal,
     PldSolicitudEliminacionDoc,
     PldTicketCliente,
@@ -29,6 +30,7 @@ from .ticket_utils import hash_token
 from .views import (
     PldContraparteDocViewSet,
     PldContraparteKycViewSet,
+    PldDocumentoTicketViewSet,
     PldRepresentanteLegalViewSet,
     PldSolicitudEliminacionDocViewSet,
     PldTicketClienteViewSet,
@@ -897,8 +899,9 @@ class CategoriaCumplimientoKycKybTests(TestCase):
 
 class CatalogoDocumentosPldTests(TestCase):
     """tipo_documento (04/Sep/2026, checklist de proveedores) - catalogo
-    cerrado SOLO para lo especifico de cumplimiento (la identidad generica
-    ya vive en tesoreria-service, ver docstring del campo en models.py)."""
+    cerrado completo (identidad + especifico de cumplimiento), se duplica
+    a proposito contra el catalogo de tesoreria-service ("no importa si se
+    piden lo mismo", Mariana) - ver docstring del campo en models.py."""
 
     def setUp(self):
         self.kyc = _kyc("cp000070", RFC_TIZARA)
@@ -915,6 +918,41 @@ class CatalogoDocumentosPldTests(TestCase):
             _carpeta_documento(doc),
             f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}/Cuestionario de riesgo",
         )
+
+    def test_tipos_por_categoria_identificacion_oficial_solo_kyc(self):
+        # 04/Sep/2026, pedido explicito: "que se muestre para los C
+        # unicamente los que necesite y la B solo las que necesite".
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        self.assertIn(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, kyc_tipos)
+        self.assertNotIn(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, kyb_tipos)
+
+    def test_tipos_por_categoria_acta_y_rpc_y_organigrama_solo_kyb(self):
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        for tipo in (
+            PldContraparteDoc.TIPO_ACTA_CONSTITUTIVA,
+            PldContraparteDoc.TIPO_INSCRIPCION_RPC,
+            PldContraparteDoc.TIPO_ORGANIGRAMA_ACCIONARIO,
+        ):
+            self.assertIn(tipo, kyb_tipos)
+            self.assertNotIn(tipo, kyc_tipos)
+
+    def test_tipos_compartidos_aparecen_en_ambas_categorias(self):
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        for tipo in (
+            PldContraparteDoc.TIPO_CONSTANCIA_SITUACION_FISCAL,
+            PldContraparteDoc.TIPO_INFO_BANCARIA,
+            PldContraparteDoc.TIPO_VALIDACION_TITULARIDAD_CUENTA,
+            PldContraparteDoc.TIPO_OPINION_CUMPLIMIENTO,
+            PldContraparteDoc.TIPO_COMPROBANTE_DOMICILIO,
+            PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO,
+            PldContraparteDoc.TIPO_DECLARACION_ORIGEN_FONDOS,
+            PldContraparteDoc.TIPO_EVIDENCIA_PEP,
+        ):
+            self.assertIn(tipo, kyc_tipos)
+            self.assertIn(tipo, kyb_tipos)
 
     def test_obligatorio_por_default_true(self):
         doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE")
@@ -1267,6 +1305,27 @@ class ActualizarDatosPublicoTests(TestCase):
         self.assertEqual(self.kyc.tipo_persona, "moral")
         self.assertEqual(self.kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
         self.assertFalse(self.kyc.categoria_cumplimiento_manual)
+
+    def test_email_capturado_por_el_cliente_se_guarda(self):
+        # 04/Sep/2026, hallazgo real: "como solicita documentos si no tiene
+        # correo electronico" - sin email no hay a donde avisarle al
+        # cliente de un documento faltante. Se pide como cualquier otro
+        # dato del link publico (CAMPOS_CONFIRMABLES).
+        request = self.factory.post(
+            "/api/ticket-cliente/actualizar_datos/",
+            {
+                "token": "token-datos",
+                "campos": {"email": "cliente.real@ejemplo.com"},
+                "acepta_politicas": True,
+                "declara_veracidad": True,
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch("requests.post", return_value=Mock(status_code=200)):
+            self.view(request)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.email, "cliente.real@ejemplo.com")
 
 
 class AuditoriaMotorDocumentalTests(TestCase):
@@ -1877,6 +1936,30 @@ class PermisosGestionDeArchivosTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 201)
 
+    def test_solicitar_documento_sin_archivo_queda_pendiente(self):
+        # 04/Sep/2026, checklist de documentos requeridos: "Solicitar" crea
+        # el renglon SIN archivo (estado "solicitado" en el frontend) -
+        # nada mas que tipo_documento/denominacion/status, sin drive_file_id.
+        request = self.factory.post(
+            "/api/kyc-docs/",
+            {
+                "kyc": self.kyc.id_kyc,
+                "tipo_documento": "CUESTIONARIO_RIESGO",
+                "denominacion": "Cuestionario de riesgo",
+                "status": "PENDIENTE",
+                "created_by": "usr00001",
+                "updated_by": "usr00001",
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.crear",))
+        view = PldContraparteDocViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["tipo_documento"], "CUESTIONARIO_RIESGO")
+        self.assertIsNone(response.data["drive_file_id"])
+        self.assertEqual(response.data["status"], "PENDIENTE")
+
 
 class SolicitudEliminacionDocTests(TestCase):
     """25/Ago/2026 (requerimiento real del cliente) - el analista ya no
@@ -1961,3 +2044,143 @@ class SolicitudEliminacionDocTests(TestCase):
         view = PldSolicitudEliminacionDocViewSet.as_view({"post": "rechazar"})
         response = view(request, pk=solicitud.id_solicitud)
         self.assertEqual(response.status_code, 400)
+
+
+class EnviarRecordatorioDocumentosTests(TestCase):
+    """enviar_recordatorio_documentos (04/Sep/2026, "hay que unificar la
+    solicitud de documento como en contratos") - mismo patron que
+    TesoreriaContratoViewSet.enviar_recordatorio_documentos: un
+    PldDocumentoTicket + un correo por documento seleccionado."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000090", RFC_TIZARA)
+        self.kyc.email = "cliente.kyc@ejemplo.com"
+        self.kyc.save(update_fields=["email"])
+        self.doc_pendiente = PldContraparteDoc.objects.create(
+            kyc=self.kyc,
+            tipo_documento=PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO,
+            denominacion="Cuestionario de riesgo",
+            status=PldContraparteDoc.STATUS_PENDIENTE,
+        )
+        self.view = PldContraparteKycViewSet.as_view({"post": "enviar_recordatorio_documentos"})
+
+    def _post(self, documento_ids):
+        request = self.factory.post(
+            f"/api/kyc/{self.kyc.id_kyc}/enviar_recordatorio_documentos/",
+            {"documento_ids": documento_ids, "actor_user_id": "usr00001"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        return self.view(request, pk=self.kyc.id_kyc)
+
+    def test_sin_email_en_el_expediente_rechaza(self):
+        self.kyc.email = None
+        self.kyc.save(update_fields=["email"])
+        response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 400)
+
+    def test_sin_documento_ids_rechaza(self):
+        response = self._post([])
+        self.assertEqual(response.status_code, 400)
+
+    def test_documento_que_ya_tiene_archivo_rechaza(self):
+        self.doc_pendiente.drive_file_id = "abc123"
+        self.doc_pendiente.save(update_fields=["drive_file_id"])
+        response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 400)
+
+    def test_crea_un_ticket_y_manda_un_correo_por_documento(self):
+        with patch("pld.views.requests.post", return_value=Mock(status_code=201)):
+            response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total_seleccionados"], 1)
+        self.assertEqual(PldDocumentoTicket.objects.filter(documento=self.doc_pendiente).count(), 1)
+        ticket = PldDocumentoTicket.objects.get(documento=self.doc_pendiente)
+        self.assertEqual(ticket.email, "cliente.kyc@ejemplo.com")
+        self.assertEqual(ticket.max_uses, 1)
+
+
+class PldDocumentoTicketTests(TestCase):
+    """Ticket publico de un solo documento (04/Sep/2026) - mismo patron que
+    SubirDocumentoPublicoTests, pero ligado a un PldContraparteDoc
+    especifico en vez del expediente completo."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000091", RFC_TIZARA)
+        self.doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc,
+            tipo_documento=PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO,
+            status=PldContraparteDoc.STATUS_PENDIENTE,
+        )
+        self.ticket = PldDocumentoTicket.objects.create(
+            documento=self.doc,
+            email="cliente@externo.com",
+            token_hash=hash_token("token-doc-valido"),
+            expires_at=timezone.now() + datetime.timedelta(days=7),
+            max_uses=1,
+        )
+        self.validar_view = PldDocumentoTicketViewSet.as_view({"post": "validar"})
+        self.subir_view = PldDocumentoTicketViewSet.as_view({"post": "subir"})
+
+    def test_validar_regresa_nombre_del_documento(self):
+        request = self.factory.post("/api/documento-tickets/validar/", {"token": "token-doc-valido"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        response = self.validar_view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["nombre_documento"], "Cuestionario de riesgo")
+        self.assertEqual(response.data["id_contraparte"], self.kyc.id_contraparte)
+
+    def test_validar_token_invalido_da_404(self):
+        request = self.factory.post("/api/documento-tickets/validar/", {"token": "no-existe"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        response = self.validar_view(request)
+        self.assertEqual(response.status_code, 404)
+
+    def test_validar_token_agotado_da_403(self):
+        self.ticket.uses_count = 1
+        self.ticket.save(update_fields=["uses_count"])
+        request = self.factory.post("/api/documento-tickets/validar/", {"token": "token-doc-valido"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        response = self.validar_view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def _subir(self, token="token-doc-valido", recaptcha_token="cualquier-cosa"):
+        archivo = SimpleUploadedFile("cuestionario.pdf", b"contenido-fake", content_type="application/pdf")
+        request = self.factory.post(
+            "/api/documento-tickets/subir/",
+            {"token": token, "recaptcha_token": recaptcha_token, "file": archivo},
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        return self.subir_view(request)
+
+    def test_subir_completa_el_documento_existente_sin_crear_uno_nuevo(self):
+        total_antes = PldContraparteDoc.objects.count()
+        with patch("pld.views.recaptcha.verificar", return_value=True), patch("pld.views.requests.post") as mock_post:
+            mock_post.return_value = Mock(
+                status_code=201,
+                json=lambda: {
+                    "file_id": "abc123",
+                    "web_view_link": "https://drive/abc123",
+                    "mime_type": "application/pdf",
+                    "tamano_bytes": 14,
+                },
+            )
+            response = self._subir()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(PldContraparteDoc.objects.count(), total_antes)  # nunca crea uno nuevo
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.drive_file_id, "abc123")
+        self.assertEqual(self.doc.status, PldContraparteDoc.STATUS_ENTREGADO)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.uses_count, 1)
+
+    def test_subir_recaptcha_invalido_rechaza(self):
+        with patch("pld.views.recaptcha.verificar", return_value=False):
+            response = self._subir()
+        self.assertEqual(response.status_code, 400)
+
+    def test_subir_token_invalido_da_404(self):
+        response = self._subir(token="no-existe")
+        self.assertEqual(response.status_code, 404)

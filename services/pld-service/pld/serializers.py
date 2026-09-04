@@ -220,6 +220,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "dom_corresp_dom_pais",
             "telefono_fijo",
             "telefono_sms",
+            "email",
             "estado_civil",
             "ident_fideicomiso",
             "link_carpeta",

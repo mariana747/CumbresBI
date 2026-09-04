@@ -6,25 +6,85 @@ import { GATEWAY_URL } from "./gatewayUrl";
 export type PldEstadoLlenado = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO";
 export type PldDocStatus = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO" | "APROBADO";
 
-// Catalogo cerrado SOLO para lo especifico de cumplimiento (04/Sep/2026,
-// checklist de proveedores) - la identidad generica (Acta, Constancia
-// Fiscal, RPC, comprobantes) ya vive en el checklist por contrato de
-// tesoreria-service, no se duplica aqui. Espejo de
-// PldContraparteDoc.TIPO_DOCUMENTO_CHOICES (pld-service/pld/models.py).
+// Catalogo cerrado completo (04/Sep/2026, checklist de proveedores):
+// identidad + especifico de cumplimiento - se duplica a proposito contra
+// el catalogo por contrato de tesoreria-service ("no importa si se piden
+// lo mismo", Mariana). Espejo de PldContraparteDoc.TIPO_DOCUMENTO_CHOICES
+// (pld-service/pld/models.py).
 export type PldTipoDocumento =
+  | "IDENTIFICACION_OFICIAL"
+  | "ACTA_CONSTITUTIVA"
+  | "CONSTANCIA_SITUACION_FISCAL"
+  | "INSCRIPCION_RPC"
+  | "INFO_BANCARIA"
+  | "VALIDACION_TITULARIDAD_CUENTA"
+  | "OPINION_CUMPLIMIENTO"
+  | "COMPROBANTE_DOMICILIO"
   | "CUESTIONARIO_RIESGO"
   | "DECLARACION_ORIGEN_FONDOS"
   | "EVIDENCIA_PEP"
-  | "ORGANIGRAMA_ACCIONARIO"
-  | "OTRO";
+  | "ORGANIGRAMA_ACCIONARIO";
 
 export const TIPO_DOCUMENTO_PLD_LABELS: Record<PldTipoDocumento, string> = {
+  IDENTIFICACION_OFICIAL: "Identificación oficial",
+  ACTA_CONSTITUTIVA: "Acta constitutiva",
+  CONSTANCIA_SITUACION_FISCAL: "Constancia de Situación Fiscal",
+  INSCRIPCION_RPC: "Inscripción en el Registro Público de Comercio",
+  INFO_BANCARIA: "Carátula / información bancaria",
+  VALIDACION_TITULARIDAD_CUENTA: "Validación de titularidad de la cuenta",
+  OPINION_CUMPLIMIENTO: "Opinión de Cumplimiento (SAT)",
+  COMPROBANTE_DOMICILIO: "Comprobante de domicilio",
   CUESTIONARIO_RIESGO: "Cuestionario de riesgo",
   DECLARACION_ORIGEN_FONDOS: "Declaración de origen de fondos",
   EVIDENCIA_PEP: "Evidencia de análisis PEP",
   ORGANIGRAMA_ACCIONARIO: "Organigrama accionario (KYB)",
-  OTRO: "Otro",
 };
+
+// Que opciones se ofrecen segun la categoria del expediente (04/Sep,
+// pedido explicito: "que se muestre para los C unicamente los que
+// necesite y la B solo las que necesite") - espejo de
+// PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA en el backend. Sin
+// entrada para PENDIENTE_REVISION a proposito - un expediente sin
+// clasificar todavia ve el catalogo completo (union de KYC+KYB), no se le
+// puede ocultar nada hasta saber si es fisica o moral.
+export const TIPOS_DOCUMENTO_POR_CATEGORIA: Record<"KYC" | "KYB", PldTipoDocumento[]> = {
+  KYC: [
+    "IDENTIFICACION_OFICIAL",
+    "CONSTANCIA_SITUACION_FISCAL",
+    "INFO_BANCARIA",
+    "VALIDACION_TITULARIDAD_CUENTA",
+    "OPINION_CUMPLIMIENTO",
+    "COMPROBANTE_DOMICILIO",
+    "CUESTIONARIO_RIESGO",
+    "DECLARACION_ORIGEN_FONDOS",
+    "EVIDENCIA_PEP",
+  ],
+  KYB: [
+    "ACTA_CONSTITUTIVA",
+    "CONSTANCIA_SITUACION_FISCAL",
+    "INSCRIPCION_RPC",
+    "INFO_BANCARIA",
+    "VALIDACION_TITULARIDAD_CUENTA",
+    "OPINION_CUMPLIMIENTO",
+    "COMPROBANTE_DOMICILIO",
+    "CUESTIONARIO_RIESGO",
+    "DECLARACION_ORIGEN_FONDOS",
+    "EVIDENCIA_PEP",
+    "ORGANIGRAMA_ACCIONARIO",
+  ],
+};
+
+// Opciones a mostrar en el Select segun la categoria del expediente - las
+// dos listas de arriba si es KYC/KYB, la union completa (sin duplicados)
+// si todavia esta PENDIENTE_REVISION o sin clasificar.
+export function tiposDocumentoDisponibles(
+  categoria: PldCategoriaCumplimiento | null
+): PldTipoDocumento[] {
+  if (categoria === "KYC" || categoria === "KYB") {
+    return TIPOS_DOCUMENTO_POR_CATEGORIA[categoria];
+  }
+  return Array.from(new Set([...TIPOS_DOCUMENTO_POR_CATEGORIA.KYC, ...TIPOS_DOCUMENTO_POR_CATEGORIA.KYB]));
+}
 
 export interface PldContraparteDoc {
   id_kyc_doc: string;
@@ -342,6 +402,7 @@ export const PLD_CAMPOS_CONFIRMABLES = [
   "dom_corresp_dom_pais",
   "telefono_fijo",
   "telefono_sms",
+  "email",
   "estado_civil",
   "ident_fideicomiso",
   "comentarios",
@@ -458,6 +519,34 @@ export async function crearDocumentoKyc(
     body: JSON.stringify({
       kyc: idKyc,
       denominacion,
+      created_by: createdBy,
+      updated_by: createdBy,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Checklist de documentos requeridos (04/Sep/2026, 3 estados: vacío/
+// solicitado/recibido) - crea el renglón SIN archivo todavía ("Solicitar"),
+// a diferencia de crearDocumentoKyc (que siempre acompaña un archivo real
+// en el mismo flujo). Queda en status PENDIENTE hasta que alguien suba el
+// archivo con subirArchivoDocumento sobre este mismo id_kyc_doc.
+export async function solicitarDocumentoKyc(
+  idKyc: string,
+  tipoDocumento: PldTipoDocumento,
+  createdBy?: string | null
+): Promise<PldContraparteDoc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kyc: idKyc,
+      tipo_documento: tipoDocumento,
+      denominacion: TIPO_DOCUMENTO_PLD_LABELS[tipoDocumento],
+      status: "PENDIENTE",
       created_by: createdBy,
       updated_by: createdBy,
     }),
@@ -621,6 +710,72 @@ export async function reactivarAutoEstadoKyc(idKyc: string): Promise<PldContrapa
 export async function reactivarAutoCategoriaKyc(idKyc: string): Promise<PldContraparteKyc> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/reactivar_auto_categoria/`, {
     method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Enviar recordatorio de documentos faltantes (04/Sep/2026, "hay que
+// unificar la solicitud de documento como en contratos" - mismo patron
+// exacto que enviarRecordatorioDocumentos en lib/tesoreria.ts): UN correo
+// por cada documento seleccionado, con un magic link propio
+// (PldDocumentoTicket) para que el cliente lo suba directo, sin tener que
+// elegir tipo_documento el mismo. Requiere que el expediente ya tenga
+// email capturado.
+export async function enviarRecordatorioDocumentosKyc(
+  idKyc: string,
+  documentoIds: string[],
+  actorUserId?: string | null
+): Promise<{ enviados: string[]; total_seleccionados: number }> {
+  const response = await apiFetch(
+    "PLD",
+    `${PLD_API_BASE_URL}/api/kyc/${idKyc}/enviar_recordatorio_documentos/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ documento_ids: documentoIds, actor_user_id: actorUserId }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export interface PldDocumentoTicketValidado {
+  nombre_documento: string;
+  id_contraparte: string;
+}
+
+// Consumidos por la pagina publica /pld-documento/[token] (sin sesion) -
+// mismo patron que validarTicketDocumento/subirDocumentoTicket en
+// lib/tesoreria.ts.
+export async function validarTicketDocumentoPld(token: string): Promise<PldDocumentoTicketValidado> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/documento-tickets/validar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export async function subirDocumentoTicketPld(params: {
+  token: string;
+  recaptchaToken: string;
+  file: File;
+}): Promise<{ detail: string }> {
+  const formData = new FormData();
+  formData.append("token", params.token);
+  formData.append("recaptcha_token", params.recaptchaToken);
+  formData.append("file", params.file);
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/documento-tickets/subir/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

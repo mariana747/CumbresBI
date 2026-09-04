@@ -64,20 +64,23 @@ import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora }
 import {
   AUTORIDAD_POR_TIPO_IDENTIFICACION,
   CATEGORIA_CUMPLIMIENTO_LABELS,
+  TIPO_DOCUMENTO_PLD_LABELS,
   PldCategoriaCumplimiento,
   PldContraparteDoc,
   PldContraparteKyc,
   PldDatosEditables,
   PldRepresentanteLegal,
+  PldTipoDocumento,
   PldSolicitudEliminacionDoc,
   aprobarKyc,
   aprobarSolicitudEliminacion,
   catalogoOcupacionPorTipoPersona,
   congelarKyc,
-  crearDocumentoKyc,
   crearRepresentanteLegal,
   crearSolicitudEliminacion,
+  editarDocumentoKyc,
   editarKyc,
+  enviarRecordatorioDocumentosKyc,
   editarRepresentanteLegal,
   eliminarDocumentoKyc,
   eliminarRepresentanteLegal,
@@ -92,7 +95,8 @@ import {
   reactivarCuentaKyc,
   reclasificarCategoriaCumplimiento,
   rechazarSolicitudEliminacion,
-  subirArchivoDocumento,
+  solicitarDocumentoKyc,
+  tiposDocumentoDisponibles,
   urlVerDocumento,
   verificarDocumentosKyc,
 } from "@/lib/pld";
@@ -232,6 +236,10 @@ const GRUPOS_CAMPOS_GENERAL: { titulo: string; campos: { campo: keyof PldDatosEd
     campos: [
       { campo: "telefono_fijo", label: "Teléfono fijo" },
       { campo: "telefono_sms", label: "Celular" },
+      // email (04/Sep/2026, hallazgo real: "como solicita documentos si
+      // no tiene correo electronico" - sin esto no hay a donde avisarle
+      // al cliente de un documento faltante).
+      { campo: "email", label: "Correo electrónico" },
     ],
   },
 ];
@@ -256,7 +264,6 @@ export default function PldExpedienteDetallePage() {
   const [verificarMensaje, setVerificarMensaje] = useState<string | null>(null);
   const [confirmandoEliminarDoc, setConfirmandoEliminarDoc] = useState<PldContraparteDoc | null>(null);
   const [eliminandoDoc, setEliminandoDoc] = useState(false);
-  const [subiendoDoc, setSubiendoDoc] = useState(false);
 
   // Solicitud de eliminacion (25/Ago/2026, requerimiento real del cliente):
   // el analista (puedeEditar) ya no puede borrar un archivo directo, pide
@@ -670,38 +677,39 @@ export default function PldExpedienteDetallePage() {
     }
   }
 
-  // Uploader interno (25/Ago/2026, requerimiento real del cliente: "nadie
-  // modifica en Drive, todo desde CumbresBI") - unico camino real para
-  // agregar un archivo desde ahora: crea el registro de metadata y sube el
-  // archivo real a Drive via drive-service (dos llamadas, mismo criterio
-  // que PldContraparteDocViewSet.subir en el backend). Gateado por
-  // puedeGestionarArchivos (pld-documentos.crear), no puedeCrear.
-  async function handleSubirDocumento(archivo: File) {
+
+  // Checklist de documentos requeridos (04/Sep/2026, 3 estados: vacío/
+  // solicitado/recibido) - "Solicitar" crea el renglón SIN archivo
+  // (queda en "solicitado"); subir el archivo despues sobre ESE mismo
+  // documento (no crea uno nuevo) lo pasa a "recibido".
+  const [solicitandoTipo, setSolicitandoTipo] = useState<PldTipoDocumento | null>(null);
+  async function handleSolicitarDocumento(tipo: PldTipoDocumento) {
     if (!kyc) return;
-    setSubiendoDoc(true);
-    setVerificarError(null);
-    let docCreado: PldContraparteDoc | null = null;
+    // 04/Sep/2026, "hay que unificar la solicitud de documento como en
+    // contratos" - "Solicitar" ya no solo crea el renglon: en el mismo
+    // paso crea el ticket de UN documento y le manda el correo real al
+    // cliente (mismo patron que Tesoreria/Contratos). Sin email
+    // capturado en el expediente no hay a donde mandarlo - se avisa antes
+    // de crear nada, en vez de dejar un renglon "Solicitado" sin forma de
+    // notificar a nadie.
+    if (!kyc.email) {
+      setVerificarError(
+        "Este expediente no tiene correo electrónico capturado en Información General - agrégalo antes de solicitar documentos."
+      );
+      return;
+    }
+    setSolicitandoTipo(tipo);
     try {
-      docCreado = await crearDocumentoKyc(kyc.id_kyc, archivo.name, session?.user_id);
-      await subirArchivoDocumento(docCreado.id_kyc_doc, archivo, session?.user_id);
+      const doc = await solicitarDocumentoKyc(kyc.id_kyc, tipo, session?.user_id);
+      await enviarRecordatorioDocumentosKyc(kyc.id_kyc, [doc.id_kyc_doc], session?.user_id);
       cargar();
     } catch (err) {
-      // 25/Ago/2026 (hallazgo real: si el paso de crear metadata funciona
-      // pero subir el archivo falla, quedaba un registro huerfano sin
-      // drive_file_id - "Verificar en Drive" no lo limpia porque solo
-      // revisa documentos que SI tienen drive_file_id. Un reintento
-      // entonces creaba otro con el mismo nombre, pareciendo un duplicado
-      // aunque en Drive solo existiera un archivo real). Se borra el
-      // registro a medias en vez de dejarlo tirado.
-      if (docCreado) {
-        await eliminarDocumentoKyc(docCreado.id_kyc_doc, session?.user_id).catch(() => {});
-        cargar();
-      }
-      setVerificarError(err instanceof Error ? err.message : "Error al subir el documento");
+      setVerificarError(err instanceof Error ? err.message : "Error al solicitar el documento");
     } finally {
-      setSubiendoDoc(false);
+      setSolicitandoTipo(null);
     }
   }
+
 
   async function handleCambiarEstadoCuenta(accion: "marcar_sospechoso" | "congelar" | "reactivar_cuenta") {
     setCambiandoEstadoCuenta(true);
@@ -727,7 +735,22 @@ export default function PldExpedienteDetallePage() {
   async function handleReclasificarCategoria(categoria: PldCategoriaCumplimiento) {
     setReclasificando(true);
     try {
-      await reclasificarCategoriaCumplimiento(params.idKyc, categoria, session?.user_id);
+      if (categoria === "KYC" || categoria === "KYB") {
+        // 04/Sep/2026, hallazgo real: reclasificar a mano no actualizaba
+        // tipo_persona, dejando el expediente inconsistente (categoria
+        // dice KYB pero tipo_persona sigue en "fideicomiso" o vacío). Se
+        // actualiza tipo_persona primero (editarKyc, dispara el recalculo
+        // normal de categoria_cumplimiento si no habia override previo) y
+        // luego se fuerza el recalculo automatico (reactivarAutoCategoriaKyc)
+        // por si SI habia un override manual previo que lo bloqueaba.
+        await editarKyc(params.idKyc, { tipo_persona: categoria === "KYC" ? "fisica" : "moral" }, session?.user_id);
+        await reactivarAutoCategoriaKyc(params.idKyc);
+      } else {
+        // PENDIENTE_REVISION: "caso raro" (fideicomiso, tipo_persona
+        // realmente ambiguo) - no tiene sentido forzar tipo_persona aqui,
+        // se queda como override manual puro.
+        await reclasificarCategoriaCumplimiento(params.idKyc, categoria, session?.user_id);
+      }
       cargar();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al reclasificar el expediente");
@@ -751,6 +774,26 @@ export default function PldExpedienteDetallePage() {
     }
   }
 
+  // Clasificar un documento (04/Sep/2026: tipo_documento, obligatorio,
+  // vigencia_meses) - inline en la tarjeta de cada documento. El Select de
+  // tipo_documento solo ofrece las opciones que aplican a la categoria del
+  // expediente (ver tiposDocumentoDisponibles) - "que se muestre para los
+  // C unicamente los que necesite y la B solo las que necesite".
+  const [guardandoDoc, setGuardandoDoc] = useState<string | null>(null);
+  async function handleEditarDocumento(
+    doc: PldContraparteDoc,
+    campos: Partial<Pick<PldContraparteDoc, "tipo_documento" | "obligatorio" | "vigencia_meses">>
+  ) {
+    setGuardandoDoc(doc.id_kyc_doc);
+    try {
+      await editarDocumentoKyc(doc.id_kyc_doc, campos, session?.user_id);
+      cargar();
+    } catch (err) {
+      setVerificarError(err instanceof Error ? err.message : "Error al clasificar el documento");
+    } finally {
+      setGuardandoDoc(null);
+    }
+  }
 
   return (
     <AppShell>
@@ -1341,7 +1384,7 @@ export default function PldExpedienteDetallePage() {
                         ))}
                       </Stack>
                       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {puedeGestionarArchivos && kyc.documentos.length > 0 && (
+                        {puedeGestionarArchivos && (
                           <Button
                             size="small"
                             variant="outlined"
@@ -1357,29 +1400,6 @@ export default function PldExpedienteDetallePage() {
                             sx={{ whiteSpace: "nowrap" }}
                           >
                             Verificar en Drive
-                          </Button>
-                        )}
-                        {puedeGestionarArchivos && (
-                          <Button
-                            component="label"
-                            size="small"
-                            variant="outlined"
-                            startIcon={
-                              subiendoDoc ? <CircularProgress size={16} /> : <UploadCloud size={16} strokeWidth={1.5} />
-                            }
-                            disabled={subiendoDoc}
-                            sx={{ whiteSpace: "nowrap" }}
-                          >
-                            Subir Documento
-                            <input
-                              type="file"
-                              hidden
-                              onChange={(e) => {
-                                const archivo = e.target.files?.[0];
-                                e.target.value = "";
-                                if (archivo) handleSubirDocumento(archivo);
-                              }}
-                            />
                           </Button>
                         )}
                         {puedeCrear && (
@@ -1446,6 +1466,67 @@ export default function PldExpedienteDetallePage() {
                       </Stack>
                     )}
 
+                    {/* Checklist de documentos requeridos (04/Sep/2026,
+                    pedido explicito: "poner todos los nombres de archivos
+                    solicitados y su estado") - 3 estados: vacío (nunca se
+                    pidio), solicitado (se creo el renglon, sin archivo
+                    todavia) y recibido (ya hay archivo real, aparece el
+                    ojo para verlo - "cuando ya se tenga se active el ojo,
+                    sino no aparecera"). Las opciones dependen de la
+                    categoria del expediente (kyc.categoria_cumplimiento) -
+                    un KYC no ve "Acta constitutiva", un KYB no ve
+                    "Identificación oficial" (ver tiposDocumentoDisponibles). */}
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2">Checklist de documentos requeridos</Typography>
+                      {tiposDocumentoDisponibles(kyc.categoria_cumplimiento).map((tipo) => {
+                        const doc = kyc.documentos.find((d) => d.tipo_documento === tipo);
+                        const estado = !doc ? "vacio" : !doc.drive_file_id ? "solicitado" : "recibido";
+                        return (
+                          <Paper key={tipo} variant="outlined" sx={{ p: 1.5 }}>
+                            <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                              <Stack direction="row" spacing={1.5} alignItems="center">
+                                <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
+                                <Typography variant="body2">{TIPO_DOCUMENTO_PLD_LABELS[tipo]}</Typography>
+                              </Stack>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <Chip
+                                  size="small"
+                                  label={estado === "vacio" ? "Vacío" : estado === "solicitado" ? "Solicitado" : "Recibido"}
+                                  color={estado === "vacio" ? "default" : estado === "solicitado" ? "warning" : "success"}
+                                />
+                                {estado === "recibido" && doc && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => setPreviewDoc(doc)}
+                                    aria-label="Ver documento"
+                                    title="Ver documento"
+                                  >
+                                    <Eye size={16} strokeWidth={1.5} />
+                                  </IconButton>
+                                )}
+                                {estado === "vacio" && puedeGestionarArchivos && (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={
+                                      solicitandoTipo === tipo ? <CircularProgress size={14} /> : <Plus size={14} strokeWidth={1.5} />
+                                    }
+                                    disabled={solicitandoTipo === tipo}
+                                    onClick={() => handleSolicitarDocumento(tipo)}
+                                  >
+                                    Solicitar
+                                  </Button>
+                                )}
+                              </Stack>
+                            </Stack>
+                          </Paper>
+                        );
+                      })}
+                    </Stack>
+
+                    <Typography variant="subtitle2" sx={{ mt: 1 }}>
+                      Documentos subidos
+                    </Typography>
                     {kyc.documentos.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
                         Sin documentos subidos todavía.
@@ -1536,6 +1617,77 @@ export default function PldExpedienteDetallePage() {
                                   )
                                 )}
                               </Stack>
+                            </Stack>
+                            {/* Clasificacion (04/Sep/2026, checklist de
+                            proveedores) - el Select de tipo_documento solo
+                            ofrece las opciones que aplican a la categoria
+                            de ESTE expediente (kyc.categoria_cumplimiento):
+                            un KYC no ve "Acta constitutiva", un KYB no ve
+                            "Identificación oficial". Editable en linea,
+                            gateado a puedeEditar (pld-compliance.editar,
+                            mismo permiso que update/partial_update en el
+                            backend). */}
+                            <Stack
+                              direction="row"
+                              spacing={1.5}
+                              alignItems="center"
+                              flexWrap="wrap"
+                              useFlexGap
+                              sx={{ mt: 1, pt: 1, borderTop: "1px solid", borderColor: "divider" }}
+                            >
+                              <FormControl size="small" sx={{ minWidth: 220 }} disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}>
+                                <Select
+                                  displayEmpty
+                                  value={doc.tipo_documento ?? ""}
+                                  onChange={(e) =>
+                                    handleEditarDocumento(doc, {
+                                      tipo_documento: (e.target.value || null) as PldContraparteDoc["tipo_documento"],
+                                    })
+                                  }
+                                >
+                                  <MenuItem value="">
+                                    <em>Sin tipo</em>
+                                  </MenuItem>
+                                  {tiposDocumentoDisponibles(kyc.categoria_cumplimiento).map((tipo) => (
+                                    <MenuItem key={tipo} value={tipo}>
+                                      {TIPO_DOCUMENTO_PLD_LABELS[tipo]}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                              <FormControlLabel
+                                sx={{ m: 0 }}
+                                control={
+                                  <Checkbox
+                                    size="small"
+                                    checked={doc.obligatorio}
+                                    disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}
+                                    onChange={(e) => handleEditarDocumento(doc, { obligatorio: e.target.checked })}
+                                  />
+                                }
+                                label={<Typography variant="caption">Obligatorio</Typography>}
+                              />
+                              <TextField
+                                size="small"
+                                type="number"
+                                label="Vigencia (meses)"
+                                value={doc.vigencia_meses ?? ""}
+                                disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}
+                                onChange={(e) =>
+                                  handleEditarDocumento(doc, {
+                                    vigencia_meses: e.target.value ? Number(e.target.value) : null,
+                                  })
+                                }
+                                sx={{ width: 140 }}
+                                inputProps={{ min: 1 }}
+                              />
+                              {doc.vencido && (
+                                <Chip
+                                  size="small"
+                                  color="error"
+                                  label={`Vencido${doc.fecha_vencimiento_documento ? ` (${doc.fecha_vencimiento_documento})` : ""}`}
+                                />
+                              )}
                             </Stack>
                           </Paper>
                         );
