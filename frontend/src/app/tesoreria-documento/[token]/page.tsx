@@ -85,7 +85,7 @@ export default function TesoreriaDocumentoTicketPage() {
               <Stack spacing={2} alignItems="center" textAlign="center">
                 <ShieldCheck size={32} strokeWidth={1.5} color={theme.palette.success.main} />
                 <Typography variant="subtitle1" fontWeight={600}>
-                  Acceso verificado
+                  Acceso Verificado
                 </Typography>
                 {nombreDocumento && (
                   <Typography variant="body2" color="text.secondary">
@@ -146,7 +146,7 @@ export default function TesoreriaDocumentoTicketPage() {
                   {subidaError && <Alert severity="error">{subidaError}</Alert>}
 
                   <Button type="submit" variant="contained" disabled={!archivo || !recaptchaToken || subiendo}>
-                    {subiendo ? <CircularProgress size={20} color="inherit" /> : "Subir documento"}
+                    {subiendo ? <CircularProgress size={20} color="inherit" /> : "Subir Documento"}
                   </Button>
                 </Stack>
               )}
@@ -157,7 +157,7 @@ export default function TesoreriaDocumentoTicketPage() {
             <Stack spacing={2} alignItems="center" textAlign="center">
               <ShieldAlert size={32} strokeWidth={1.5} color={theme.palette.error.dark} />
               <Typography variant="subtitle1" fontWeight={600}>
-                Enlace no disponible
+                Enlace no Disponible
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {error}

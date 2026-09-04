@@ -108,6 +108,56 @@ class RecibirCompraTests(TestCase):
         self.assertEqual(MaterialCatalogo.objects.count(), 1)
 
 
+class ActualizarPrecioCotizadoTests(TestCase):
+    """actualizar_precio_cotizado (02/Sep/2026) es el enlace con Compras al
+    confirmar una cotizacion - a diferencia de recibir_compra, NO es una
+    entrega real todavia: sincroniza precio/proveedor pero nunca toca
+    cantidad_disponible."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def _post(self, body, secreto="dev-secreto"):
+        request = self.factory.post("/api/materiales/actualizar_precio_cotizado/", body, format="json")
+        if secreto:
+            request.META["HTTP_X_INTERNAL_SECRET"] = secreto
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = MaterialCatalogoViewSet.as_view({"post": "actualizar_precio_cotizado"})
+        return view(request)
+
+    def test_sin_secreto_ni_permiso_da_403(self):
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"):
+            response = self._post({"material_nombre": "Cemento gris", "precio_unitario": "185.00"}, secreto=None)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crea_material_con_cantidad_cero_si_no_existe(self):
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"):
+            response = self._post(
+                {
+                    "material_nombre": "Cemento gris",
+                    "precio_unitario": "185.00",
+                    "unidad_medida": "saco",
+                    "proveedor": "CP0001",
+                }
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["precio_unitario"], "185.00")
+        self.assertEqual(response.data["proveedor"], "CP0001")
+        self.assertEqual(response.data["cantidad_disponible"], "0.00")
+
+    def test_no_toca_cantidad_disponible_de_material_existente(self):
+        material = MaterialCatalogo.objects.create(
+            material="Varilla 3/8", unidad_medida="pza", precio_unitario="95.00", cantidad_disponible=Decimal("5")
+        )
+        with patch.object(settings, "MATERIALES_INTERNAL_SECRET", "dev-secreto"):
+            response = self._post({"material_nombre": "varilla 3/8", "precio_unitario": "99.50"})
+        self.assertEqual(response.status_code, 200)
+        material.refresh_from_db()
+        self.assertEqual(material.precio_unitario, Decimal("99.50"))
+        self.assertEqual(material.cantidad_disponible, Decimal("5"))
+        self.assertEqual(MaterialCatalogo.objects.count(), 1)
+
+
 class SolicitudMaterialEntregarTests(TestCase):
     """`entregar` es la pieza con mas logica real: exige evidencia
     fotografica, descuenta el almacen de verdad, y no deja

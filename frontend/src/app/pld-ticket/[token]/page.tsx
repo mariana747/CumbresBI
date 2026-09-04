@@ -436,7 +436,7 @@ export default function PldTicketPage() {
               <Stack spacing={2} alignItems="center" textAlign="center">
                 <ShieldCheck size={32} strokeWidth={1.5} color={theme.palette.success.main} />
                 <Typography variant="subtitle1" fontWeight={600}>
-                  Acceso verificado
+                  Acceso Verificado
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {idContraparte
@@ -464,7 +464,7 @@ export default function PldTicketPage() {
               ) : (
                 <Stack direction={{ xs: "column", md: "row" }} spacing={3} divider={<Divider orientation="vertical" flexItem sx={{ display: { xs: "none", md: "block" } }} />}>
                   <Stack component="form" spacing={2} onSubmit={handleGuardarDatos} sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="subtitle2">Tus datos</Typography>
+                    <Typography variant="subtitle2">Tus Datos</Typography>
                     <Typography variant="caption" color="text.secondary">
                       Si ya habías capturado tus datos antes con este mismo enlace, aquí los ves y puedes
                       corregirlos. Un campo en blanco no borra lo que ya estaba guardado.
@@ -667,7 +667,7 @@ export default function PldTicketPage() {
                     {guardadoError && <Alert severity="error">{guardadoError}</Alert>}
                     {guardadoOk && (
                       <Alert severity="success" icon={<CheckCircle2 size={20} strokeWidth={1.5} />}>
-                        Tus datos se guardaron correctamente.
+                        Tus Datos se guardaron correctamente.
                       </Alert>
                     )}
 
@@ -709,7 +709,7 @@ export default function PldTicketPage() {
                       </Box>
                     )}
 
-                    <Typography variant="subtitle2">Subir documento</Typography>
+                    <Typography variant="subtitle2">Subir Documento</Typography>
                     <Typography variant="caption" color="text.secondary">
                       Máximo {MAX_ARCHIVOS_POR_LOTE} archivos por lote, {MAX_TAMANO_ARCHIVO_MB}MB cada uno.
                     </Typography>
@@ -839,7 +839,7 @@ export default function PldTicketPage() {
             <Stack spacing={2} alignItems="center" textAlign="center">
               <ShieldAlert size={32} strokeWidth={1.5} color={theme.palette.error.dark} />
               <Typography variant="subtitle1" fontWeight={600}>
-                Enlace no disponible
+                Enlace no Disponible
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {error}

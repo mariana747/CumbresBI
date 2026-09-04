@@ -568,7 +568,7 @@ function TesoreriaContratosPageContent() {
               onClick={abrirAlta}
               sx={{ flexShrink: 0 }}
             >
-              Nuevo contrato
+              Nuevo Contrato
             </Button>
           )}
         </Stack>
@@ -734,7 +734,7 @@ function TesoreriaContratosPageContent() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {soloLectura ? `Ver ${editing?.id_contrato}` : editing ? `Editar ${editing.id_contrato}` : "Nuevo contrato"}
+          {soloLectura ? `Ver ${editing?.id_contrato}` : editing ? `Editar ${editing.id_contrato}` : "Nuevo Contrato"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

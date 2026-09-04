@@ -17,14 +17,21 @@ const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ??
 export type TesoreriaTicketEstado = "PENDIENTE" | "APROBADO" | "VINCULADO" | "RECHAZADO";
 
 // Espejo de TesoreriaTicketReembolso.CATEGORIA_CHOICES (models.py,
-// 31/Ago/2026 - hallazgo de la comparacion contra Tesoreria2.pdf).
+// 31/Ago/2026 - hallazgo de la comparacion contra Tesoreria2.pdf; 4
+// categorias agregadas despues en el backend - ADMINISTRACION,
+// RECURSOSHUMANOS, LEGAL, EXTRAORDINARIOS - sin actualizar este espejo,
+// por eso no aparecian en el dropdown; "OTRO" tampoco existe en el
+// backend, se quita).
 export type TesoreriaCategoriaGasto =
   | "VIATICOS"
   | "PAPELERIA"
   | "TRANSPORTE"
   | "ALIMENTOS"
   | "HOSPEDAJE"
-  | "OTRO";
+  | "ADMINISTRACION"
+  | "RECURSOSHUMANOS"
+  | "LEGAL"
+  | "EXTRAORDINARIOS";
 
 export const CATEGORIA_GASTO_LABELS: Record<TesoreriaCategoriaGasto, string> = {
   VIATICOS: "Viáticos",
@@ -32,31 +39,34 @@ export const CATEGORIA_GASTO_LABELS: Record<TesoreriaCategoriaGasto, string> = {
   TRANSPORTE: "Transporte",
   ALIMENTOS: "Alimentos",
   HOSPEDAJE: "Hospedaje",
-  OTRO: "Otro",
-};
-
-// Espejo de TesoreriaTicketReembolso.CENTRO_CHOICES - lista cerrada (pedido
-// de Mariana 31/Ago/2026), no un catalogo real de Centro todavia.
-export type TesoreriaCentroCosto = "ADMINISTRACION" | "OBRA" | "VENTAS" | "TESORERIA" | "RRHH" | "OTRO";
-
-export const CENTRO_COSTO_LABELS: Record<TesoreriaCentroCosto, string> = {
   ADMINISTRACION: "Administración",
-  OBRA: "Obra",
-  VENTAS: "Ventas",
-  TESORERIA: "Tesorería",
-  RRHH: "RRHH",
-  OTRO: "Otro",
+  RECURSOSHUMANOS: "Recursos Humanos",
+  LEGAL: "Legal",
+  EXTRAORDINARIOS: "Extraordinarios",
 };
+
+// `centro` (lista cerrada) se elimino 03/Sep/2026 - pedido explicito de
+// Mariana en minuta ("centro de costos se elimina"), sin reemplazo aqui
+// (division por proyecto es de Solicitud de Pago, no de Reembolso).
+
+// Un gasto individual dentro del ticket (03/Sep/2026, minuta punto 1:
+// "solicitar varios conceptos") - mismo patron que CotizacionLinea en
+// compras. El ticket requiere al menos uno al crear.
+export interface TesoreriaTicketReembolsoConcepto {
+  id_concepto: string;
+  descripcion: string;
+  monto: string;
+  categoria_gasto: TesoreriaCategoriaGasto | null;
+}
 
 export interface TesoreriaTicketReembolso {
   id_ticket: string;
   id_empleado: string;
-  descripcion: string;
-  monto: string;
+  descripcion: string | null;
+  conceptos: TesoreriaTicketReembolsoConcepto[];
+  monto_total: string;
   moneda: string;
   sociedad: string | null;
-  centro: TesoreriaCentroCosto | null;
-  categoria_gasto: TesoreriaCategoriaGasto | null;
   fecha_gasto: string;
   estado: TesoreriaTicketEstado;
   link_ticket: string | null;
@@ -67,11 +77,37 @@ export interface TesoreriaTicketReembolso {
   factura_folio: string | null;
   flujo: string | null;
   flujo_id: string | null;
+  // Quien aprobo el ticket y cuando (03/Sep/2026, minuta: "se necesita
+  // autorizar antes de pagar") - se llenan solo via la accion aprobar(),
+  // nunca via PATCH libre.
+  autorizado_por: string | null;
+  fecha_autorizacion: string | null;
   comentarios: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
   updated_by: string | null;
+}
+
+// Ventana de reembolso del mes en curso (03/Sep/2026, pedido de Mariana:
+// "que se coloque el dia/mes/año de hasta cuando se aceptan"; campos
+// reemplazados 04/Sep/2026 junto con la regla - ver
+// reembolso_utils.validar_fecha_limite en el backend).
+export interface TesoreriaFechaLimiteReembolso {
+  // Los ultimos 2 dias habiles del mes, ascendente [penultimo, ultimo] -
+  // unicos dias en que aplica la regla estricta de "mismo dia".
+  dias_permitidos: string[];
+  hoy_en_dias_permitidos: boolean;
+  es_ultimo_dia_habil: boolean;
+  ventana_cerrada_por_hora: boolean;
+}
+
+export async function getFechaLimiteReembolso(): Promise<TesoreriaFechaLimiteReembolso> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/fecha_limite/`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 // El empleado dueño solo ve los suyos; quien tiene tesoreria.editar ve
@@ -90,29 +126,41 @@ export async function listTicketsReembolso(search?: string): Promise<TesoreriaTi
   return response.json();
 }
 
+// Preview embebido (04/Sep/2026, "usa lo mismo que en pld" - ver
+// DocumentoPreviewDialog y pld.ts::urlVerDocumento) en vez de mandar al
+// link crudo de Drive: sirve el archivo en streaming a traves de
+// tesoreria-service, con el mismo control de acceso que list/retrieve.
+export function urlVerTicket(idTicket: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_ticket/`;
+}
+
+export function urlVerFactura(idTicket: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_factura/`;
+}
+
 // Crea el registro del ticket (JSON, sin archivo todavia) - el empleado
 // sube la foto/comprobante despues con subirFotoTicket(), mismo patron en
 // dos pasos que TesoreriaFlujoViewSet (crear -> subir_comprobante).
 export async function crearTicketReembolso(params: {
-  descripcion: string;
-  monto: string;
+  descripcion?: string;
+  conceptos: Array<{ descripcion: string; monto: string; categoriaGasto?: TesoreriaCategoriaGasto }>;
   moneda?: string;
   fechaGasto: string;
   sociedad?: string;
-  centro?: TesoreriaCentroCosto;
-  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaTicketReembolso> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      descripcion: params.descripcion,
-      monto: params.monto,
+      descripcion: params.descripcion || null,
+      conceptos: params.conceptos.map((c) => ({
+        descripcion: c.descripcion,
+        monto: c.monto,
+        categoria_gasto: c.categoriaGasto || null,
+      })),
       moneda: params.moneda || "MXP",
       fecha_gasto: params.fechaGasto,
       sociedad: params.sociedad || null,
-      centro: params.centro || null,
-      categoria_gasto: params.categoriaGasto || null,
     }),
   });
   if (!response.ok) {

@@ -107,6 +107,10 @@ class Cotizacion(models.Model):
     )
     proveedor = models.CharField(max_length=8, blank=True, null=True)
     proveedor_nombre = models.CharField(max_length=200, blank=True, null=True)
+    # Igual que proveedor_nombre: texto tal como lo extrajo la IA del
+    # documento (prompt "compras.cotizacion" ya lo incluye), sin validar
+    # contra tesoreria_contrapartes.rfc mientras el analista no lo asigne.
+    proveedor_rfc = models.CharField(max_length=13, blank=True, null=True)
     fecha_cotizacion = models.DateField(blank=True, null=True)
     vigencia_dias = models.PositiveIntegerField(blank=True, null=True)
     moneda = models.CharField(max_length=10, blank=True, null=True)

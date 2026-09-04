@@ -71,13 +71,21 @@ class DownloadView(APIView):
     """GET /api/download/<file_id>/?carpeta=PLD/<id_contraparte> - respuesta
     en streaming (chunk por chunk, ver driveclient.iter_download) para que
     quien la consuma (ej. docint reenviando a Gemini) no tenga que esperar
-    el archivo completo en memoria antes de empezar a procesarlo."""
+    el archivo completo en memoria antes de empezar a procesarlo.
+
+    04/Sep/2026 ("usa lo mismo que en pld" para servir tickets de reembolso
+    en preview): ahora usa _autorizado (igual que UploadView) en vez de
+    exigir siempre el perm_key real - el empleado dueño de su propio ticket
+    de reembolso (MiCumbres) no tiene ningun perm_key de tesoreria.*, igual
+    que al subirlo (subir_ticket ya usaba X-Internal-Secret para eso); el
+    control de acceso real sigue viviendo en tesoreria-service
+    (get_object() solo deja ver el ticket propio o con tesoreria.editar)."""
 
     def get(self, request, file_id, *args, **kwargs):
         perm_key = request.query_params.get("perm")
         if not perm_key:
             return Response({"detail": "Falta ?perm=<perm_key> requerido por el llamador"}, status=400)
-        if not require_permission(perm_key)().has_permission(request, self):
+        if not _autorizado(request, self, perm_key):
             return Response({"detail": f"Falta el permiso '{perm_key}'"}, status=403)
 
         carpeta = request.query_params.get("carpeta")
@@ -97,7 +105,14 @@ class DownloadView(APIView):
             yield primer_chunk
             yield from chunks
 
-        return StreamingHttpResponse(generador(), content_type="application/octet-stream")
+        # 04/Sep/2026 (hallazgo real: siempre regresaba application/octet-
+        # stream sin importar el archivo, forzando descarga en vez de
+        # previsualizar en un <iframe> - ver PldContraparteDocViewSet.ver/
+        # TesoreriaTicketReembolsoViewSet.ver_ticket) - se consulta el tipo
+        # real en Drive (metadata, no el contenido) en vez de depender de
+        # que el llamador lo haya capturado bien al subir.
+        mime_type = driveclient.get_mime_type(file_id, carpeta=carpeta) or "application/octet-stream"
+        return StreamingHttpResponse(generador(), content_type=mime_type)
 
 
 class FileExistsView(APIView):

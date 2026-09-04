@@ -5,9 +5,12 @@ import requests
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
 from django.db.models import ProtectedError
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_exempt
 from cumbresbi_scope.permissions import require_permission
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import BasePermission
@@ -39,12 +42,14 @@ from .models import (
     TesoreriaContratoDocumento,
     TesoreriaCorteEdc,
     TesoreriaCuenta,
+    TesoreriaDiaFestivo,
     TesoreriaDocumentoTicket,
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    TesoreriaSolicitudPago,
     TesoreriaTicketProveedor,
     TesoreriaTicketReembolso,
 )
@@ -61,13 +66,21 @@ from .serializers import (
     TesoreriaContratoSerializer,
     TesoreriaCorteEdcSerializer,
     TesoreriaCuentaSerializer,
+    TesoreriaDiaFestivoSerializer,
     TesoreriaFacturaSerializer,
     TesoreriaFlujoSerializer,
     TesoreriaNotaCreditoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
+    TesoreriaSolicitudPagoSerializer,
     TesoreriaTicketProveedorSerializer,
     TesoreriaTicketReembolsoSerializer,
+)
+from .reembolso_utils import (
+    HORA_CORTE_ULTIMO_DIA,
+    sincronizar_festivos_mx,
+    ultimos_dos_dias_habiles,
+    validar_fecha_limite,
 )
 
 logger = logging.getLogger(__name__)
@@ -314,6 +327,42 @@ class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     serializer_class = TesoreriaCuentaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["alias", "label", "rfc_razon_social", "clabe"]
+
+
+class TesoreriaDiaFestivoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Cache de dias festivos oficiales sincronizada de Nager.Date, usada
+    por reembolso_utils para calcular los ultimos 2 dias habiles de cada
+    mes (ver docstring del modelo). Se sincroniza sola de forma perezosa;
+    esta accion sirve para forzar el refresco de un año sin esperar a que
+    se dispare solo. Mismo criterio de permisos que Contraparte/Banco/
+    Cuenta."""
+
+    queryset = TesoreriaDiaFestivo.objects.all()
+    serializer_class = TesoreriaDiaFestivoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["descripcion"]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.effective_scope.identity_user_id)
+
+    def get_permissions(self):
+        if self.action == "sincronizar":
+            return [require_permission("tesoreria.editar")()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=["post"])
+    def sincronizar(self, request):
+        anio = request.data.get("anio") or timezone.now().year
+        try:
+            anio = int(anio)
+        except (TypeError, ValueError):
+            return Response({"anio": ["Debe ser un año numérico."]}, status=400)
+        ok = sincronizar_festivos_mx(anio)
+        if not ok:
+            return Response(
+                {"detail": "No se pudo contactar a Nager.Date, intenta de nuevo más tarde."}, status=502
+            )
+        return Response({"anio": anio, "sincronizado": True})
 
 
 class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -941,12 +990,14 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
     Lectura (31/Ago/2026, corregido tras auditoria de scope - antes era un
     filtro manual "tesoreria.editar ve TODO sin importar su alcance", hueco
     real para un colaborador externo con tesoreria.editar acotado a una
-    sola sociedad/centro): ahora usa el mismo ScopedManager que el resto
-    del proyecto, via SCOPE_FIELD_IDENTITY/SOCIEDAD/CENTRO del modelo. Un
-    empleado (self-service, sin permiso, con identity_user_id) ve solo lo
-    suyo; quien tiene tesoreria.editar Y es is_global ve todo; quien tiene
-    tesoreria.editar pero esta acotado por sociedad/centro ve solo esos -
-    ya no ve todo por el simple hecho de tener el permiso."""
+    sola sociedad): ahora usa el mismo ScopedManager que el resto
+    del proyecto, via SCOPE_FIELD_IDENTITY/SOCIEDAD del modelo (SCOPE_FIELD_
+    CENTRO se elimino 03/Sep/2026 junto con el campo `centro`, ver
+    docstring del modelo). Un empleado (self-service, sin permiso, con
+    identity_user_id) ve solo lo suyo; quien tiene tesoreria.editar Y es
+    is_global ve todo; quien tiene tesoreria.editar pero esta acotado por
+    sociedad ve solo esos - ya no ve todo por el simple hecho de tener el
+    permiso."""
 
     serializer_class = TesoreriaTicketReembolsoSerializer
     filter_backends = [SearchFilter]
@@ -962,6 +1013,29 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             return [require_permission("tesoreria.editar")()]
         return super().get_permissions()
 
+    @action(detail=False, methods=["get"])
+    def fecha_limite(self, request):
+        """Ventana de reembolso del mes en curso (03/Sep/2026, pedido de
+        Mariana: "que se coloque el dia/mes/año de hasta cuando se
+        aceptan"; regla reemplazada 04/Sep/2026, ver docstring de
+        reembolso_utils). Lectura abierta a cualquier empleado autenticado -
+        la necesitan ver ANTES de intentar crear un ticket, mismo criterio
+        que create/subir_ticket."""
+        ahora = timezone.localtime(timezone.now())
+        hoy = ahora.date()
+        ultimos_dos = ultimos_dos_dias_habiles(hoy.year, hoy.month)
+        ultimo_dia_habil = ultimos_dos[-1] if ultimos_dos else None
+        return Response(
+            {
+                "dias_permitidos": [d.isoformat() for d in ultimos_dos],
+                "hoy_en_dias_permitidos": hoy in ultimos_dos,
+                "es_ultimo_dia_habil": hoy == ultimo_dia_habil,
+                "ventana_cerrada_por_hora": (
+                    hoy == ultimo_dia_habil and ahora.time() > HORA_CORTE_ULTIMO_DIA
+                ),
+            }
+        )
+
     def get_queryset(self):
         queryset = (
             TesoreriaTicketReembolso.objects.for_scope(self.request.effective_scope)
@@ -974,12 +1048,22 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
             queryset = queryset.filter(sociedad=sociedad)
-        centro = self.request.query_params.get("centro")
-        if centro:
-            queryset = queryset.filter(centro=centro)
         return queryset
 
     def perform_create(self, serializer):
+        # Ventana mensual de reembolso (ver reembolso_utils, regla
+        # reemplazada 04/Sep/2026). Se valida aqui, antes de guardar - un
+        # ticket rechazado por esto nunca llega a crearse (no queda un
+        # registro RECHAZADO, el empleado simplemente no puede enviarlo).
+        # Hora LOCAL (no timezone.now() crudo, que es UTC) - el corte de
+        # mediodia del ultimo dia habil debe evaluarse en hora de Mexico
+        # (TIME_ZONE en config/settings.py), no en UTC.
+        error = validar_fecha_limite(
+            timezone.localtime(timezone.now()), serializer.validated_data.get("fecha_gasto")
+        )
+        if error:
+            raise ValidationError({"fecha_gasto": [error]})
+
         # id_ticket = "TKT-{consecutivo global de 6 digitos}", mismo
         # criterio que TesoreriaFlujo.id_flujo (ver perform_create de
         # TesoreriaFlujoViewSet).
@@ -1008,7 +1092,8 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
         ticket.link_ticket = resultado["web_view_link"]
         ticket.drive_file_id_ticket = resultado["file_id"]
-        ticket.save(update_fields=["link_ticket", "drive_file_id_ticket"])
+        ticket.mime_type_ticket = resultado.get("mime_type")
+        ticket.save(update_fields=["link_ticket", "drive_file_id_ticket", "mime_type_ticket"])
         emitir_evento_auditoria(
             "tesoreria_tickets_reembolso.subir_ticket",
             "tesoreria_tickets_reembolso",
@@ -1034,13 +1119,20 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         Aprobar) - no hay un campo propio en el modelo para verificar esto
         del lado del backend, igual que el resto de "confirmar extraccion"
         del Motor Documental en otros modulos (PLD, Facturas). Requiere
-        tesoreria.editar."""
+        tesoreria.editar.
+
+        autorizado_por/fecha_autorizacion (03/Sep/2026, minuta: "se necesita
+        autorizar antes de pagar") se resuelven del JWT igual que
+        TesoreriaFlujoViewSet.aprobar - antes este aprobar() solo cambiaba
+        el estado sin dejar rastro de quien lo hizo."""
         ticket = self.get_object()
         if ticket.estado != TesoreriaTicketReembolso.ESTADO_PENDIENTE:
             return Response({"estado": ["Solo se puede aprobar un ticket Pendiente."]}, status=400)
         ticket.estado = TesoreriaTicketReembolso.ESTADO_APROBADO
+        ticket.autorizado_por = request.effective_scope.identity_user_id
+        ticket.fecha_autorizacion = timezone.now().date()
         ticket.comentarios = request.data.get("comentarios", ticket.comentarios)
-        ticket.save(update_fields=["estado", "comentarios"])
+        ticket.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion", "comentarios"])
         emitir_evento_auditoria(
             "tesoreria_tickets_reembolso.aprobar",
             "tesoreria_tickets_reembolso",
@@ -1091,7 +1183,8 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
         ticket.link_factura_pdf = resultado["web_view_link"]
         ticket.drive_file_id_factura = resultado["file_id"]
-        ticket.save(update_fields=["link_factura_pdf", "drive_file_id_factura"])
+        ticket.mime_type_factura = resultado.get("mime_type")
+        ticket.save(update_fields=["link_factura_pdf", "drive_file_id_factura", "mime_type_factura"])
         emitir_evento_auditoria(
             "tesoreria_tickets_reembolso.subir_factura",
             "tesoreria_tickets_reembolso",
@@ -1100,6 +1193,39 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             valores_nuevos={"nombre_archivo": archivo.name},
         )
         return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_ticket(self, request, pk=None):
+        """Preview embebido del comprobante subido por el empleado (mismo
+        patron que PldContraparteDocViewSet.ver, "usa lo mismo que en pld"
+        - 04/Sep/2026): sirve el archivo EN STREAMING a traves de
+        tesoreria-service en vez de mandar al link crudo de Drive, cuyo
+        acceso lo decidiria el ACL de Google en vez del rol de CumbresBI.
+        get_object ya aplica el mismo scope que list/retrieve (dueño o
+        tesoreria.editar)."""
+        ticket = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=ticket.drive_file_id_ticket,
+            mime_type=ticket.mime_type_ticket,
+            nombre_archivo=f"ticket-{ticket.id_ticket}",
+            carpeta=f"Tesoreria/Facturas/TicketsReembolso/{ticket.id_ticket}",
+        )
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_factura(self, request, pk=None):
+        """Preview embebido del PDF de factura en staging - mismo criterio
+        que ver_ticket."""
+        ticket = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=ticket.drive_file_id_factura,
+            mime_type=ticket.mime_type_factura,
+            nombre_archivo=f"factura-{ticket.id_ticket}",
+            carpeta=f"Tesoreria/Facturas/TicketsReembolso/{ticket.id_ticket}",
+        )
 
     @action(detail=True, methods=["post"])
     def vincular_factura(self, request, pk=None):
@@ -1151,6 +1277,259 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             valores_nuevos={"flujo": id_flujo},
         )
         return Response(self.get_serializer(ticket).data)
+
+
+class TesoreriaSolicitudPagoViewSet(ModelViewSet):
+    """Solicitud de pago de servicios/licencias/renovaciones (04/Sep/2026,
+    ver docstring del modelo). A diferencia de TesoreriaTicketReembolso
+    (abierto a cualquier empleado via _EsEmpleadoAutenticado), aqui `crear`
+    exige el permiso real `solicitud-pago.crear` - "no todos los
+    colaboradores pueden solicitar pago" (Mariana). `aprobar`/`rechazar`
+    exigen `solicitud-pago.aprobar` en vez de `.editar` (a diferencia de
+    TesoreriaTicketReembolsoViewSet) para reforzar la separacion de
+    funciones: TESORERIA_ANALISTA tiene `.crear` pero NO `.aprobar` en el
+    seed de permission_matrix.py - quien solicita no se autoriza a si
+    mismo."""
+
+    serializer_class = TesoreriaSolicitudPagoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["id_solicitud", "descripcion", "proyecto"]
+
+    def get_permissions(self):
+        if self.action in ("create", "subir_comprobante"):
+            return [require_permission("solicitud-pago.crear")()]
+        if self.action in ("aprobar", "rechazar"):
+            return [require_permission("solicitud-pago.aprobar")()]
+        if self.action in ("update", "partial_update", "destroy", "vincular_factura", "vincular_flujo"):
+            return [require_permission("solicitud-pago.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = (
+            TesoreriaSolicitudPago.objects.for_scope(self.request.effective_scope)
+            .select_related("flujo")
+            .order_by("-created_at")
+        )
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(proyecto=proyecto)
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(sociedad=sociedad)
+        return queryset
+
+    def perform_create(self, serializer):
+        # id_solicitud = "SPG-{consecutivo global de 6 digitos}", mismo
+        # criterio que TesoreriaTicketReembolso.id_ticket.
+        consecutivo = TesoreriaSolicitudPago.objects.count() + 1
+        serializer.save(
+            id_solicitud=f"SPG-{consecutivo:06d}",
+            solicitado_por=self.request.effective_scope.identity_user_id,
+            created_by=self.request.effective_scope.identity_user_id,
+        )
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_comprobante(self, request, pk=None):
+        """Comprobante OPCIONAL (recibo oficial, linea de captura pagada, o
+        CFDI si la dependencia lo emite - ver docstring del modelo). Mismo
+        patron de subida que TesoreriaTicketReembolsoViewSet.subir_ticket,
+        pero sin exigir estado ni bloquear el flujo si nunca se sube."""
+        solicitud = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        resultado, error = _subir_a_drive(
+            request, archivo, f"Tesoreria/SolicitudesPago/{solicitud.id_solicitud}"
+        )
+        if error:
+            return error
+
+        solicitud.link_comprobante = resultado["web_view_link"]
+        solicitud.drive_file_id_comprobante = resultado["file_id"]
+        solicitud.mime_type_comprobante = resultado.get("mime_type")
+        solicitud.save(update_fields=["link_comprobante", "drive_file_id_comprobante", "mime_type_comprobante"])
+        emitir_evento_auditoria(
+            "tesoreria_solicitudes_pago.subir_comprobante",
+            "tesoreria_solicitudes_pago",
+            solicitud.id_solicitud,
+            actor_user_id=solicitud.solicitado_por,
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_comprobante(self, request, pk=None):
+        """Preview embebido del comprobante (recibo/linea de captura/CFDI) -
+        mismo patron que TesoreriaTicketReembolsoViewSet.ver_ticket. get_object
+        ya aplica el scope normal (dueño o solicitud-pago.editar/aprobar via
+        for_scope), no hace falta un gate de permiso aparte aqui."""
+        solicitud = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=solicitud.drive_file_id_comprobante,
+            mime_type=solicitud.mime_type_comprobante,
+            nombre_archivo=f"comprobante-{solicitud.id_solicitud}",
+            carpeta=f"Tesoreria/SolicitudesPago/{solicitud.id_solicitud}",
+        )
+
+    @action(detail=True, methods=["post"])
+    def aprobar(self, request, pk=None):
+        """Autoriza el pago - autorizado_por/fecha_autorizacion se
+        resuelven del JWT (mismo criterio que
+        TesoreriaTicketReembolsoViewSet.aprobar). Solo desde PENDIENTE.
+        Requiere solicitud-pago.aprobar."""
+        solicitud = self.get_object()
+        if solicitud.estado != TesoreriaSolicitudPago.ESTADO_PENDIENTE:
+            return Response({"estado": ["Solo se puede aprobar una solicitud Pendiente."]}, status=400)
+        solicitud.estado = TesoreriaSolicitudPago.ESTADO_APROBADO
+        solicitud.autorizado_por = request.effective_scope.identity_user_id
+        solicitud.fecha_autorizacion = timezone.now().date()
+        solicitud.comentarios = request.data.get("comentarios", solicitud.comentarios)
+        solicitud.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion", "comentarios"])
+        emitir_evento_auditoria(
+            "tesoreria_solicitudes_pago.aprobar",
+            "tesoreria_solicitudes_pago",
+            solicitud.id_solicitud,
+            actor_user_id=request.effective_scope.identity_user_id,
+        )
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        """Contraparte de aprobar() - solo desde PENDIENTE. Requiere
+        solicitud-pago.aprobar (mismo gate que aprobar, es la contraparte
+        de la misma decision)."""
+        solicitud = self.get_object()
+        if solicitud.estado != TesoreriaSolicitudPago.ESTADO_PENDIENTE:
+            return Response({"estado": ["Solo se puede rechazar una solicitud Pendiente."]}, status=400)
+        solicitud.estado = TesoreriaSolicitudPago.ESTADO_RECHAZADO
+        solicitud.comentarios = request.data.get("comentarios", solicitud.comentarios)
+        solicitud.save(update_fields=["estado", "comentarios"])
+        emitir_evento_auditoria(
+            "tesoreria_solicitudes_pago.rechazar",
+            "tesoreria_solicitudes_pago",
+            solicitud.id_solicitud,
+            actor_user_id=request.effective_scope.identity_user_id,
+        )
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"])
+    def vincular_factura(self, request, pk=None):
+        """Liga la solicitud a una factura formal YA dada de alta - a
+        diferencia de Reembolso, es opcional y no cambia el estado (el
+        comprobante de gobierno no siempre es un CFDI, ver docstring del
+        modelo); solo desde APROBADO. Requiere solicitud-pago.editar."""
+        solicitud = self.get_object()
+        if solicitud.estado != TesoreriaSolicitudPago.ESTADO_APROBADO:
+            return Response({"estado": ["La solicitud debe estar Aprobada antes de vincular la factura."]}, status=400)
+        timbre_uuid = request.data.get("factura")
+        if not timbre_uuid:
+            return Response({"factura": ["Este campo es requerido."]}, status=400)
+        try:
+            solicitud.factura = TesoreriaFactura.objects.get(timbre_uuid=timbre_uuid)
+        except TesoreriaFactura.DoesNotExist:
+            return Response({"factura": ["No existe una factura con ese UUID."]}, status=400)
+        solicitud.save(update_fields=["factura"])
+        emitir_evento_auditoria(
+            "tesoreria_solicitudes_pago.vincular_factura",
+            "tesoreria_solicitudes_pago",
+            solicitud.id_solicitud,
+            actor_user_id=request.effective_scope.identity_user_id,
+            valores_nuevos={"factura": timbre_uuid},
+        )
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"])
+    def vincular_flujo(self, request, pk=None):
+        """Liga la solicitud al TesoreriaFlujo real del pago y la marca
+        PAGADO - solo desde APROBADO (con o sin factura ligada). Requiere
+        solicitud-pago.editar."""
+        solicitud = self.get_object()
+        if solicitud.estado != TesoreriaSolicitudPago.ESTADO_APROBADO:
+            return Response({"estado": ["La solicitud debe estar Aprobada antes de registrar el pago."]}, status=400)
+        id_flujo = request.data.get("flujo")
+        if not id_flujo:
+            return Response({"flujo": ["Este campo es requerido."]}, status=400)
+        try:
+            solicitud.flujo = TesoreriaFlujo.objects.get(id_flujo=id_flujo)
+        except TesoreriaFlujo.DoesNotExist:
+            return Response({"flujo": ["No existe un flujo con ese ID."]}, status=400)
+        solicitud.estado = TesoreriaSolicitudPago.ESTADO_PAGADO
+        solicitud.save(update_fields=["flujo", "estado"])
+        emitir_evento_auditoria(
+            "tesoreria_solicitudes_pago.vincular_flujo",
+            "tesoreria_solicitudes_pago",
+            solicitud.id_solicitud,
+            actor_user_id=request.effective_scope.identity_user_id,
+            valores_nuevos={"flujo": id_flujo},
+        )
+        return Response(self.get_serializer(solicitud).data)
+
+
+def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, carpeta):
+    """Sirve un archivo ya subido a Drive EN STREAMING a traves de este
+    servicio (mismo patron que PldContraparteDocViewSet.ver en pld-service,
+    "usa lo mismo que en pld" - 04/Sep/2026): antes el boton "Ver"
+    mandaba al link crudo de Google Drive, cuyo acceso lo decide el ACL/
+    grupo de Drive del usuario, no el permiso que tiene en CumbresBI.
+
+    ETag = drive_file_id (igual que PLD) - reabrir el mismo documento no
+    repite los 3 saltos (frontend -> tesoreria-service -> drive-service ->
+    Google Drive) en cache-hit. Content-Security-Policy frame-ancestors
+    permite embeberlo en un <iframe> del frontend, restringido a los
+    mismos origenes de CORS_ALLOWED_ORIGINS."""
+    if not drive_file_id:
+        return Response({"detail": "Este documento todavía no tiene un archivo subido."}, status=404)
+
+    # "-v2" (04/Sep/2026, hallazgo real): antes del fix de Content-Type
+    # (drive-service ahora consulta el tipo real, ver driveclient.
+    # get_mime_type) el navegador ya habia cacheado una respuesta con
+    # Content-Type incorrecto bajo el ETag viejo (solo drive_file_id); un
+    # 304 revalida sin re-enviar headers, asi que el cliente seguia
+    # reusando el Content-Type malo indefinidamente. Cambiar el ETag una
+    # sola vez invalida esa cache vieja en todos los clientes.
+    etag = f'"{drive_file_id}-v2"'
+    if request.META.get("HTTP_IF_NONE_MATCH") == etag:
+        response = HttpResponse(status=304)
+        response["ETag"] = etag
+        response["Cache-Control"] = "private, max-age=300"
+        return response
+
+    headers, cookies = forward_auth_headers(request)
+    if settings.DRIVE_INTERNAL_SECRET:
+        headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
+    try:
+        upstream = requests.get(
+            f"{settings.DRIVE_SERVICE_URL}/api/download/{drive_file_id}/",
+            params={"perm": "tesoreria.editar", "carpeta": carpeta},
+            headers=headers,
+            cookies=cookies,
+            stream=True,
+            timeout=30,
+        )
+    except requests.RequestException:
+        logger.warning("drive-service no respondio al servir el documento %s", drive_file_id, exc_info=True)
+        return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+    if upstream.status_code != 200:
+        detalle = upstream.json() if upstream.content else {"detail": "Error al obtener el archivo de Drive"}
+        return Response(detalle, status=upstream.status_code if upstream.status_code in (403, 404) else 502)
+
+    # 04/Sep/2026 (hallazgo real: tickets subidos antes de que este campo
+    # existiera tenian mime_type_ticket/factura en NULL, forzando descarga
+    # en vez de previsualizar) - drive-service ya consulta el tipo real en
+    # Drive (ver DownloadView), asi que su Content-Type manda; el
+    # guardado localmente queda solo como respaldo si esa consulta falla.
+    content_type = upstream.headers.get("Content-Type") or mime_type or "application/octet-stream"
+    response = StreamingHttpResponse(upstream.iter_content(chunk_size=8192), content_type=content_type)
+    response["Content-Disposition"] = f'inline; filename="{nombre_archivo}"'
+    response["ETag"] = etag
+    response["Cache-Control"] = "private, max-age=300"
+    origenes = " ".join(settings.CORS_ALLOWED_ORIGINS)
+    response["Content-Security-Policy"] = f"frame-ancestors 'self' {origenes}"
+    return response
 
 
 def _subir_a_drive(request, archivo, carpeta):

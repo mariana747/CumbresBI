@@ -981,7 +981,12 @@ class PldContraparteDocViewSet(ModelViewSet):
         # de un Cache-Control ciego por tiempo, esto nunca sirve una version
         # vieja despues de un reemplazo, y en un cache-hit ni siquiera se
         # llama a drive-service (el 304 se resuelve aqui mismo).
-        etag = f'"{doc.drive_file_id}"'
+        # "-v2" (04/Sep/2026, hallazgo real en tesoreria-service con el
+        # mismo esquema de ETag): un Content-Type incorrecto cacheado bajo
+        # el ETag viejo sobrevive indefinidamente a traves de 304s (que no
+        # reenvian headers) - cambiar el ETag una sola vez invalida esa
+        # cache vieja en todos los clientes.
+        etag = f'"{doc.drive_file_id}-v2"'
         if request.META.get("HTTP_IF_NONE_MATCH") == etag:
             # HttpResponse plano, no Response de DRF - un 304 no debe llevar
             # body, y el renderer de DRF le agregaria Content-Type de mas.
@@ -1009,9 +1014,13 @@ class PldContraparteDocViewSet(ModelViewSet):
             detalle = upstream.json() if upstream.content else {"detail": "Error al obtener el archivo de Drive"}
             return Response(detalle, status=upstream.status_code if upstream.status_code in (403, 404) else 502)
 
-        response = StreamingHttpResponse(
-            upstream.iter_content(chunk_size=8192), content_type=doc.mime_type or "application/octet-stream"
-        )
+        # 04/Sep/2026 (hallazgo real en tesoreria-service con el mismo
+        # patron: un documento con mime_type sin capturar bien forzaba
+        # descarga en vez de previsualizar) - drive-service ya consulta el
+        # tipo real en Drive (ver DownloadView), asi que su Content-Type
+        # manda; doc.mime_type queda solo como respaldo si esa consulta falla.
+        content_type = upstream.headers.get("Content-Type") or doc.mime_type or "application/octet-stream"
+        response = StreamingHttpResponse(upstream.iter_content(chunk_size=8192), content_type=content_type)
         response["Content-Disposition"] = f'inline; filename="{doc.denominacion or doc.id_kyc_doc}"'
         # ETag + Cache-Control - ver comentario arriba, junto al chequeo de
         # If-None-Match. "private" porque pasa por autenticacion real (no

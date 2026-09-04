@@ -77,9 +77,28 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     search_fields = ["material", "unidad_medida"]
 
     def get_permissions(self):
-        if self.action == "recibir_compra":
+        if self.action in ("recibir_compra", "actualizar_precio_cotizado"):
             return [_PermiteSecretoInternoOMaterialesEditar()]
         return super().get_permissions()
+
+    def _buscar_o_crear_material(self, material_nombre, unidad_medida=None):
+        """Busca por nombre (case-insensitive) o crea el registro con
+        cantidad_disponible=0 - compartido por recibir_compra (que ademas
+        suma cantidad) y actualizar_precio_cotizado (que NO toca cantidad,
+        solo precio/proveedor). "sistema" como actor: mismo criterio que el
+        resto de las escrituras automaticas del servicio (ej.
+        RequisicionViewSet)."""
+        material = MaterialCatalogo.objects.select_for_update().filter(material__iexact=material_nombre).first()
+        if material is None:
+            material = MaterialCatalogo.objects.create(
+                material=material_nombre,
+                unidad_medida=unidad_medida or "pza",
+                precio_unitario=0,
+                cantidad_disponible=0,
+                created_by="sistema",
+                updated_by="sistema",
+            )
+        return material
 
     @action(detail=False, methods=["post"])
     def recibir_compra(self, request):
@@ -115,17 +134,7 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
         # demas escrituras automaticas del servicio (ej. RequisicionViewSet).
         actor = "sistema"
         with transaction.atomic():
-            material = MaterialCatalogo.objects.select_for_update().filter(material__iexact=material_nombre).first()
-            if material is None:
-                material = MaterialCatalogo.objects.create(
-                    material=material_nombre,
-                    unidad_medida=request.data.get("unidad_medida") or "pza",
-                    precio_unitario=request.data.get("precio_unitario") or 0,
-                    proveedor=request.data.get("proveedor") or None,
-                    cantidad_disponible=0,
-                    created_by=actor,
-                    updated_by=actor,
-                )
+            material = self._buscar_o_crear_material(material_nombre, request.data.get("unidad_medida"))
             material.cantidad_disponible = material.cantidad_disponible + cantidad_recibida
             update_fields = ["cantidad_disponible", "updated_by", "updated_at"]
             if request.data.get("precio_unitario"):
@@ -135,6 +144,38 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
                 material.proveedor = request.data["proveedor"]
                 update_fields.append("proveedor")
             material.updated_by = actor
+            material.save(update_fields=update_fields)
+
+        return Response(MaterialCatalogoSerializer(material).data, status=200)
+
+    @action(detail=False, methods=["post"])
+    def actualizar_precio_cotizado(self, request):
+        """Sincroniza precio_unitario/proveedor cuando Compras confirma una
+        cotizacion (02/Sep/2026, pedido de Mariana - siguiente paso de la
+        conexion Compras<->Obra, ver recibir_compra arriba). A diferencia
+        de recibir_compra, esto NO es una entrega real todavia - solo
+        registra que se cotizo a tal precio con tal proveedor, sin tocar
+        cantidad_disponible (0 si el material es nuevo, sin existencia
+        hasta que de verdad se reciba).
+
+        Body: {"material_nombre": str, "precio_unitario": number,
+        "unidad_medida": str (solo si se crea nuevo),
+        "proveedor": str (opcional, id_contraparte del proveedor)}."""
+        material_nombre = (request.data.get("material_nombre") or "").strip()
+        if not material_nombre:
+            return Response({"material_nombre": ["Este campo es requerido."]}, status=400)
+        precio_unitario = request.data.get("precio_unitario")
+        if not precio_unitario:
+            return Response({"precio_unitario": ["Este campo es requerido."]}, status=400)
+
+        with transaction.atomic():
+            material = self._buscar_o_crear_material(material_nombre, request.data.get("unidad_medida"))
+            material.precio_unitario = precio_unitario
+            update_fields = ["precio_unitario", "updated_by", "updated_at"]
+            if request.data.get("proveedor"):
+                material.proveedor = request.data["proveedor"]
+                update_fields.append("proveedor")
+            material.updated_by = "sistema"
             material.save(update_fields=update_fields)
 
         return Response(MaterialCatalogoSerializer(material).data, status=200)

@@ -145,7 +145,7 @@ export default function OrganizacionPage() {
   return (
     <AppShell>
       <Typography variant="h5" gutterBottom>
-        Gestión organizacional
+        Gestión Organizacional
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Empresas (Sociedades), centros de trabajo y proyectos — catálogos usados por el alcance de roles.
@@ -176,7 +176,7 @@ export default function OrganizacionPage() {
               onClick={abrirAlta}
               sx={{ ml: "auto" }}
             >
-              Nueva sociedad
+              Nueva Sociedad
             </Button>
           )}
         </Stack>
@@ -304,7 +304,7 @@ export default function OrganizacionPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.razon_social || editing.rfc}` : "Nueva sociedad"}
+          {editing ? `Editar ${editing.razon_social || editing.rfc}` : "Nueva Sociedad"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

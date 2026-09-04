@@ -22,6 +22,7 @@ export interface Cotizacion {
   solicitud: string;
   proveedor: string | null;
   proveedor_nombre: string | null;
+  proveedor_rfc: string | null;
   fecha_cotizacion: string | null;
   vigencia_dias: number | null;
   moneda: string | null;

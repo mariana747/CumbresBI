@@ -10,6 +10,10 @@ de sociedad en el ERD real (son catalogos compartidos entre sociedades,
 mismo criterio que GeneralSociedad en iam-service); el filtro real es por
 permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
+from datetime import date, datetime
+from unittest.mock import patch
+
+import requests
 from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
@@ -26,6 +30,7 @@ from .models import (
     TesoreriaContrato,
     TesoreriaCorteEdc,
     TesoreriaCuenta,
+    TesoreriaDiaFestivo,
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaNotaCredito,
@@ -33,6 +38,7 @@ from .models import (
     TesoreriaRecNomina,
     TesoreriaSaldo,
 )
+from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
 from .reportes import calcular_reporte_diario
 from .views import (
     FacturaConceptoViewSet,
@@ -52,6 +58,7 @@ from .views import (
     TesoreriaContratoDocumentoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
+    TesoreriaSolicitudPagoViewSet,
     TesoreriaTicketProveedorViewSet,
     TesoreriaTicketReembolsoViewSet,
 )
@@ -1532,18 +1539,37 @@ class TesoreriaCorteEdcCrudTests(TestCase):
 
 class TesoreriaTicketReembolsoCrudTests(TestCase):
     """Alta del empleado (MiCumbres, pantalla provisional - ver docstring
-    del modelo). 31/Ago/2026: agrega moneda/sociedad/centro/categoria_gasto
-    (hallazgo de la comparacion contra Tesoreria2.pdf) - el empleado los
-    llena al crear, igual que descripcion/monto/fecha_gasto."""
+    del modelo). 31/Ago/2026: agrega moneda/sociedad (hallazgo de la
+    comparacion contra Tesoreria2.pdf) - el empleado los llena al crear,
+    igual que fecha_gasto. `centro` se elimino 03/Sep/2026 sin reemplazo
+    (division por proyecto es de Solicitud de Pago, no de Reembolso).
+    `monto`/`categoria_gasto`/`descripcion` por gasto se movieron a
+    `conceptos` (03/Sep/2026, minuta punto 1: "solicitar varios
+    conceptos") - un ticket ahora requiere al menos un concepto.
+
+    fecha_gasto usa date.today() (no una fecha fija) porque
+    perform_create ahora valida la fecha limite mensual
+    (reembolso_utils.validar_fecha_limite) - una fecha fija se volveria
+    invalida con el paso del tiempo salvo que caiga justo en el mes en
+    curso."""
+
+    HOY = date.today().isoformat()
+    UN_CONCEPTO = [{"descripcion": "Taxi a obra", "monto": "150.00"}]
 
     def setUp(self):
         self.factory = APIRequestFactory()
         self.scope_empleado = EffectiveScope(is_global=False, identity_user_id="empleado1")
+        # Evita que la sincronizacion perezosa de festivos (disparada por
+        # perform_create -> validar_fecha_limite) haga una llamada de red
+        # real a Nager.Date en cada test - ver TesoreriaFechaLimiteReembolsoTests.
+        parche = patch("tesoreria.reembolso_utils.requests.get", side_effect=requests.RequestException("sin red"))
+        parche.start()
+        self.addCleanup(parche.stop)
 
     def test_crear_sin_sesion_da_403(self):
         request = self.factory.post(
             "/api/tickets-reembolso/",
-            {"descripcion": "Taxi a obra", "monto": "150.00", "fecha_gasto": "2026-08-30"},
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
             format="json",
         )
         request.effective_scope = EffectiveScope(is_global=False)
@@ -1551,17 +1577,29 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 403)
 
-    def test_crear_con_sesion_guarda_los_campos_nuevos(self):
+    def test_crear_sin_conceptos_da_400(self):
+        # 03/Sep/2026: se requiere al menos un concepto.
+        request = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"conceptos": [], "fecha_gasto": self.HOY},
+            format="json",
+        )
+        request.effective_scope = self.scope_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_crear_con_varios_conceptos_suma_el_monto_total(self):
+        # 03/Sep/2026 (minuta punto 1: "solicitar varios conceptos").
         request = self.factory.post(
             "/api/tickets-reembolso/",
             {
-                "descripcion": "Taxi a obra",
-                "monto": "150.00",
+                "conceptos": [
+                    {"descripcion": "Taxi", "monto": "150.00", "categoria_gasto": "TRANSPORTE"},
+                    {"descripcion": "Comida", "monto": "200.00", "categoria_gasto": "ALIMENTOS"},
+                ],
                 "moneda": "USD",
                 "sociedad": "CIF010101AAA",
-                "centro": "OBRA",
-                "categoria_gasto": "TRANSPORTE",
-                "fecha_gasto": "2026-08-30",
+                "fecha_gasto": self.HOY,
             },
             format="json",
         )
@@ -1571,15 +1609,15 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["moneda"], "USD")
         self.assertEqual(response.data["sociedad"], "CIF010101AAA")
-        self.assertEqual(response.data["centro"], "OBRA")
-        self.assertEqual(response.data["categoria_gasto"], "TRANSPORTE")
+        self.assertEqual(len(response.data["conceptos"]), 2)
+        self.assertEqual(str(response.data["monto_total"]), "350.00")
         # id_empleado lo pone perform_create del JWT, no lo que mande el body.
         self.assertEqual(response.data["id_empleado"], "empleado1")
 
     def test_crear_sin_los_campos_nuevos_usa_moneda_mxp_por_default(self):
         request = self.factory.post(
             "/api/tickets-reembolso/",
-            {"descripcion": "Taxi a obra", "monto": "150.00", "fecha_gasto": "2026-08-30"},
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
             format="json",
         )
         request.effective_scope = self.scope_empleado
@@ -1588,8 +1626,6 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["moneda"], "MXP")
         self.assertIsNone(response.data["sociedad"])
-        self.assertIsNone(response.data["centro"])
-        self.assertIsNone(response.data["categoria_gasto"])
 
     def test_empleado_solo_ve_sus_propios_tickets(self):
         # 31/Ago/2026 (auditoria de scope): antes era un filtro manual
@@ -1598,7 +1634,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         # para este caso, pero por el mecanismo real de RLS.
         request1 = self.factory.post(
             "/api/tickets-reembolso/",
-            {"descripcion": "Taxi", "monto": "100.00", "fecha_gasto": "2026-08-30"},
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
             format="json",
         )
         request1.effective_scope = self.scope_empleado
@@ -1607,7 +1643,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         otro_empleado = EffectiveScope(is_global=False, identity_user_id="empleado2")
         request2 = self.factory.post(
             "/api/tickets-reembolso/",
-            {"descripcion": "Comida", "monto": "200.00", "fecha_gasto": "2026-08-30"},
+            {"conceptos": [{"descripcion": "Comida", "monto": "200.00"}], "fecha_gasto": self.HOY},
             format="json",
         )
         request2.effective_scope = otro_empleado
@@ -1627,7 +1663,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         # resto del proyecto.
         request1 = self.factory.post(
             "/api/tickets-reembolso/",
-            {"descripcion": "Taxi", "monto": "100.00", "fecha_gasto": "2026-08-30", "sociedad": RFC_TIZARA},
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA},
             format="json",
         )
         request1.effective_scope = self.scope_empleado
@@ -1635,7 +1671,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
 
         request2 = self.factory.post(
             "/api/tickets-reembolso/",
-            {"descripcion": "Comida", "monto": "200.00", "fecha_gasto": "2026-08-30", "sociedad": RFC_CAPITAL},
+            {"conceptos": [{"descripcion": "Comida", "monto": "200.00"}], "fecha_gasto": self.HOY, "sociedad": RFC_CAPITAL},
             format="json",
         )
         request2.effective_scope = self.scope_empleado
@@ -1651,7 +1687,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
     def test_staff_global_ve_todos_los_tickets(self):
         request1 = self.factory.post(
             "/api/tickets-reembolso/",
-            {"descripcion": "Taxi", "monto": "100.00", "fecha_gasto": "2026-08-30", "sociedad": RFC_TIZARA},
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA},
             format="json",
         )
         request1.effective_scope = self.scope_empleado
@@ -1662,6 +1698,333 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         request.effective_scope = staff_global
         response = TesoreriaTicketReembolsoViewSet.as_view({"get": "list"})(request)
         self.assertEqual(len(response.data), 1)
+
+    def test_aprobar_registra_autorizado_por_y_fecha(self):
+        # 03/Sep/2026 (minuta: "se necesita autorizar antes de pagar") -
+        # antes aprobar() solo cambiaba el estado, sin dejar rastro de quien
+        # lo hizo.
+        crear = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
+            format="json",
+        )
+        crear.effective_scope = self.scope_empleado
+        creado = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(crear)
+
+        aprobar = self.factory.post(f"/api/tickets-reembolso/{creado.data['id_ticket']}/aprobar/", {}, format="json")
+        aprobar.effective_scope = EffectiveScope(
+            is_global=True, perm_keys=("tesoreria.editar",), identity_user_id="tesorero1"
+        )
+        response = TesoreriaTicketReembolsoViewSet.as_view({"post": "aprobar"})(aprobar, pk=creado.data["id_ticket"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["autorizado_por"], "tesorero1")
+        self.assertEqual(response.data["fecha_autorizacion"], date.today().isoformat())
+
+    def test_sociedad_no_se_puede_corregir_despues_de_crear(self):
+        # Regla de minuta 03/Sep/2026: "si se equivoca de sociedad ya
+        # tampoco se acepta" - inmutable, ni Tesoreria la corrige.
+        crear = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA},
+            format="json",
+        )
+        crear.effective_scope = self.scope_empleado
+        creado = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(crear)
+
+        patch = self.factory.patch(
+            f"/api/tickets-reembolso/{creado.data['id_ticket']}/", {"sociedad": RFC_CAPITAL}, format="json"
+        )
+        patch.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+        response = TesoreriaTicketReembolsoViewSet.as_view({"patch": "partial_update"})(
+            patch, pk=creado.data["id_ticket"]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sociedad"], RFC_TIZARA)
+
+    def test_moneda_no_se_puede_corregir_despues_de_crear(self):
+        # 03/Sep/2026: Mariana amplio la regla de sociedad a moneda
+        # tambien ("cualquier error de sociedad, tipo de moneda o falta de
+        # ortografia... no se aceptara").
+        crear = self.factory.post(
+            "/api/tickets-reembolso/",
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "moneda": "USD"},
+            format="json",
+        )
+        crear.effective_scope = self.scope_empleado
+        creado = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(crear)
+
+        patch = self.factory.patch(
+            f"/api/tickets-reembolso/{creado.data['id_ticket']}/", {"moneda": "EUR"}, format="json"
+        )
+        patch.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+        response = TesoreriaTicketReembolsoViewSet.as_view({"patch": "partial_update"})(
+            patch, pk=creado.data["id_ticket"]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["moneda"], "USD")
+
+    def test_fecha_limite_expone_la_ventana_real(self):
+        # 03/Sep/2026 (pedido de Mariana: "que se coloque el dia/mes/año de
+        # hasta cuando se aceptan" en vez de solo texto generico); campos
+        # reemplazados 04/Sep/2026 junto con la regla.
+        request = self.factory.get("/api/tickets-reembolso/fecha_limite/")
+        request.effective_scope = self.scope_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "fecha_limite"})(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("dias_permitidos", response.data)
+        self.assertIn("hoy_en_dias_permitidos", response.data)
+        self.assertIn("es_ultimo_dia_habil", response.data)
+        self.assertIn("ventana_cerrada_por_hora", response.data)
+
+    def test_ver_ticket_sin_archivo_subido_da_404(self):
+        # 04/Sep/2026 ("usa lo mismo que en pld" - preview embebido en vez
+        # de link crudo de Drive) - sin drive_file_id_ticket, nada que
+        # servir, sin llamar a drive-service.
+        creado = self.factory.post(
+            "/api/tickets-reembolso/", {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY}, format="json"
+        )
+        creado.effective_scope = self.scope_empleado
+        ticket = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
+
+        request = self.factory.get(f"/api/tickets-reembolso/{ticket.data['id_ticket']}/ver_ticket/")
+        request.effective_scope = self.scope_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "ver_ticket"})(
+            request, pk=ticket.data["id_ticket"]
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_ver_ticket_de_otro_empleado_no_es_visible(self):
+        # get_object() usa el mismo scope que list - un empleado no puede
+        # ver el ticket de otro via ver_ticket.
+        creado = self.factory.post(
+            "/api/tickets-reembolso/", {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY}, format="json"
+        )
+        creado.effective_scope = self.scope_empleado
+        ticket = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
+
+        otro_empleado = EffectiveScope(is_global=False, identity_user_id="empleado2")
+        request = self.factory.get(f"/api/tickets-reembolso/{ticket.data['id_ticket']}/ver_ticket/")
+        request.effective_scope = otro_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "ver_ticket"})(
+            request, pk=ticket.data["id_ticket"]
+        )
+        self.assertEqual(response.status_code, 404)
+
+
+class TesoreriaFechaLimiteReembolsoTests(TestCase):
+    """Ventana mensual de reembolsos (minuta 03/Sep/2026, regla reemplazada
+    04/Sep/2026 - ver docstring de reembolso_utils): en cualquier dia del
+    mes se acepta fecha_gasto del mismo mes (nunca de otro, sin periodo de
+    gracia); en los ultimos 2 dias habiles del mes la regla se estrecha a
+    "solo ese mismo dia"; el ultimo dia habil ademas solo recibe hasta
+    mediodia.
+
+    Usa la funcion pura de reembolso_utils directamente - septiembre 2026
+    es el mes de referencia porque es el ejemplo real dado por Mariana:
+    29 y 30 son los ultimos 2 dias habiles (29 = penultimo, 30 = ultimo).
+
+    requests.get se mockea para toda la clase (falla siempre) - sin esto,
+    la sincronizacion perezosa de festivos (ver
+    reembolso_utils._dias_habiles_del_mes) haria una llamada de red real a
+    Nager.Date en cada test. Al fallar el mock, se ejerce el camino
+    fail-open (sigue sin festivos ese año) salvo en el test que ya
+    precarga uno a mano."""
+
+    def setUp(self):
+        parche = patch("tesoreria.reembolso_utils.requests.get", side_effect=requests.RequestException("sin red"))
+        self.mock_requests_get = parche.start()
+        self.addCleanup(parche.stop)
+
+    def test_ultimos_dos_dias_habiles_de_septiembre_2026(self):
+        ultimos_dos = ultimos_dos_dias_habiles(2026, 9)
+        self.assertEqual(ultimos_dos, [date(2026, 9, 29), date(2026, 9, 30)])
+
+    def test_festivo_oficial_se_excluye_del_calculo(self):
+        # 16 de septiembre (martes) declarado festivo -> deja de contar
+        # como habil; aqui solo se verifica que no aparezca en los ultimos
+        # 2 dias habiles de septiembre completo.
+        TesoreriaDiaFestivo.objects.create(fecha=date(2026, 9, 16), descripcion="Independencia")
+        ultimos_dos = ultimos_dos_dias_habiles(2026, 9)
+        self.assertNotIn(date(2026, 9, 16), ultimos_dos)
+
+    def test_gasto_del_mes_en_curso_se_acepta_fuera_de_los_ultimos_2_dias(self):
+        # Hoy 15, gasto del 10 - dia normal del mes, cualquier fecha del
+        # mismo mes/año se acepta (no exige "mismo dia").
+        ahora = datetime(2026, 9, 15, 10, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 10))
+        self.assertIsNone(error)
+
+    def test_gasto_de_mes_distinto_nunca_se_acepta_sin_periodo_de_gracia(self):
+        # 04/Sep/2026: "en ningun caso" - ya no hay gracia para el mes
+        # anterior, ni siquiera si la fecha cae en lo que hubieran sido los
+        # ultimos 2 dias habiles de ese mes.
+        ahora = datetime(2026, 9, 15, 10, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 8, 30))
+        self.assertIsNotNone(error)
+
+    def test_gasto_con_fecha_futura_nunca_se_acepta(self):
+        # 03/Sep/2026 (bug real reportado por Mariana): un dia futuro
+        # DENTRO del mes en curso se colaba porque el chequeo de "mismo
+        # mes que hoy" se evaluaba antes que el de futuro.
+        ahora = datetime(2026, 9, 3, 10, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNotNone(error)
+
+    def test_penultimo_dia_habil_solo_acepta_gasto_de_ese_mismo_dia(self):
+        # 04/Sep/2026, ejemplo real de Mariana: "el 29 de septiembre puede
+        # subir una factura del 29 de septiembre pero no del 28".
+        ahora = datetime(2026, 9, 29, 10, 0)
+        self.assertIsNone(validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 29)))
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 28))
+        self.assertIsNotNone(error)
+
+    def test_ultimo_dia_habil_acepta_gasto_del_mismo_dia_antes_de_mediodia(self):
+        ahora = datetime(2026, 9, 30, 11, 59)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNone(error)
+
+    def test_ultimo_dia_habil_rechaza_despues_de_mediodia(self):
+        # 04/Sep/2026: "el ultimo dia... solo hasta medio dia".
+        ahora = datetime(2026, 9, 30, 12, 1)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNotNone(error)
+
+    def test_ultimo_dia_habil_a_mediodia_exacto_ya_no_se_acepta(self):
+        # Limite inclusivo del lado de "abierto": 12:00:00 en punto ya
+        # cuenta como pasado el corte (se compara con time(12, 0), > no >=,
+        # pero 12:00:00.000000 no es > 12:00 asi que sigue aceptando - este
+        # test documenta el borde exacto: 12:00 todavia pasa.
+        ahora = datetime(2026, 9, 30, 12, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
+        self.assertIsNone(error)
+
+    def test_ultimo_dia_habil_rechaza_gasto_de_un_dia_distinto(self):
+        # El ultimo dia (30) tambien exige "mismo dia" - un gasto del 29
+        # (el otro dia de la ventana estrecha) ya no se acepta el 30.
+        ahora = datetime(2026, 9, 30, 9, 0)
+        error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 29))
+        self.assertIsNotNone(error)
+
+
+class TesoreriaSolicitudPagoCrudTests(TestCase):
+    """Solicitud de pago de servicios/licencias/renovaciones (04/Sep/2026,
+    ver docstring del modelo/ViewSet). A diferencia de Reembolso, `crear`
+    exige un permiso real (`solicitud-pago.crear`), no es self-service
+    abierto a cualquier empleado."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_solicitante = EffectiveScope(
+            is_global=True, perm_keys=("solicitud-pago.crear",), identity_user_id="analista1"
+        )
+        self.scope_aprobador = EffectiveScope(
+            is_global=True, perm_keys=("solicitud-pago.aprobar", "solicitud-pago.editar"), identity_user_id="manager1"
+        )
+
+    def _crear(self, **overrides):
+        body = {
+            "proyecto": "PRYA",
+            "tipo": "LICENCIA",
+            "descripcion": "Refrendo de licencia de uso de suelo",
+            "monto": "5000.00",
+            **overrides,
+        }
+        request = self.factory.post("/api/solicitudes-pago/", body, format="json")
+        request.effective_scope = self.scope_solicitante
+        return TesoreriaSolicitudPagoViewSet.as_view({"post": "create"})(request)
+
+    def test_crear_sin_permiso_da_403(self):
+        request = self.factory.post(
+            "/api/solicitudes-pago/",
+            {"proyecto": "PRYA", "tipo": "LICENCIA", "descripcion": "x", "monto": "100.00"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_permiso_registra_solicitado_por_del_jwt(self):
+        response = self._crear()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["solicitado_por"], "analista1")
+        self.assertEqual(response.data["estado"], "PENDIENTE")
+        self.assertIsNone(response.data["factura"])
+
+    def test_aprobar_sin_permiso_solicitud_pago_aprobar_da_403(self):
+        # TESORERIA_ANALISTA tiene .crear pero NO .aprobar (separacion de
+        # funciones, ver permission_matrix.py) - solo se solicita a si
+        # mismo, no se auto-aprueba.
+        creado = self._crear()
+        request = self.factory.post(f"/api/solicitudes-pago/{creado.data['id_solicitud']}/aprobar/", {}, format="json")
+        request.effective_scope = self.scope_solicitante
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "aprobar"})(request, pk=creado.data["id_solicitud"])
+        self.assertEqual(response.status_code, 403)
+
+    def test_aprobar_registra_autorizado_por_y_fecha(self):
+        creado = self._crear()
+        request = self.factory.post(f"/api/solicitudes-pago/{creado.data['id_solicitud']}/aprobar/", {}, format="json")
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "aprobar"})(request, pk=creado.data["id_solicitud"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "APROBADO")
+        self.assertEqual(response.data["autorizado_por"], "manager1")
+        self.assertEqual(response.data["fecha_autorizacion"], date.today().isoformat())
+
+    def test_vincular_flujo_sin_factura_pasa_a_pagado(self):
+        # Comprobante OPCIONAL (pagos a gobierno a veces sin CFDI formal) -
+        # se puede llegar a PAGADO sin haber ligado ninguna factura.
+        creado = self._crear()
+        aprobar = self.factory.post(f"/api/solicitudes-pago/{creado.data['id_solicitud']}/aprobar/", {}, format="json")
+        aprobar.effective_scope = self.scope_aprobador
+        TesoreriaSolicitudPagoViewSet.as_view({"post": "aprobar"})(aprobar, pk=creado.data["id_solicitud"])
+
+        contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Municipio de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="m@m.com"
+        )
+        contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        banco = TesoreriaBanco.objects.create(id_banxico="00003", banco="Banamex", alias="BMX")
+        cuenta = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000000003", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        flujo = TesoreriaFlujo.objects.create(id_flujo="FLU-000001", contrato=contrato, cuenta=cuenta)
+        request = self.factory.post(
+            f"/api/solicitudes-pago/{creado.data['id_solicitud']}/vincular_flujo/",
+            {"flujo": flujo.id_flujo},
+            format="json",
+        )
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "vincular_flujo"})(
+            request, pk=creado.data["id_solicitud"]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "PAGADO")
+        self.assertIsNone(response.data["factura"])
+
+    def test_sociedad_no_se_puede_corregir_despues_de_crear(self):
+        creado = self._crear(sociedad="CIF010101AAA")
+        request = self.factory.patch(
+            f"/api/solicitudes-pago/{creado.data['id_solicitud']}/", {"sociedad": "CAP010101AAA"}, format="json"
+        )
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"patch": "partial_update"})(
+            request, pk=creado.data["id_solicitud"]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sociedad"], "CIF010101AAA")
+
+    def test_filtro_por_proyecto(self):
+        self._crear(proyecto="P01")
+        self._crear(proyecto="P02")
+        request = self.factory.get("/api/solicitudes-pago/?proyecto=P01")
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["proyecto"], "P01")
 
 
 class TesoreriaContratoDocumentoScopeTests(TestCase):

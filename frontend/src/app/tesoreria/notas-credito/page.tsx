@@ -398,7 +398,7 @@ export default function TesoreriaNotasCreditoPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <FileMinus size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Notas de crédito</Typography>
+        <Typography variant="h5">Notas de Crédito</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Ajuste fiscal sobre una factura ya emitida (CFDI de egreso).
@@ -452,7 +452,7 @@ export default function TesoreriaNotasCreditoPage() {
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nueva nota de crédito
+              Nueva Nota de Crédito
             </Button>
           )}
         </Stack>
@@ -567,7 +567,7 @@ export default function TesoreriaNotasCreditoPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar nota ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva nota de crédito"}
+          {editing ? `Editar Nota ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva Nota de Crédito"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

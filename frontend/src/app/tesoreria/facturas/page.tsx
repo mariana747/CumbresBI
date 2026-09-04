@@ -373,7 +373,7 @@ function PanelTraslados({ uuidFactura, puedeEditar }: { uuidFactura: string; pue
 
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle2">Impuestos trasladados</Typography>
+      <Typography variant="subtitle2">Impuestos Trasladados</Typography>
       {error && (
         <Alert severity="error" onClose={() => setError(null)}>
           {error}
@@ -499,7 +499,7 @@ export default function TesoreriaFacturasPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFactura | null>(null);
   const [form, setForm] = useState(FORM_VACIO);
-  // Proveedor a revisar en "Nueva factura" > Motor Documental (27/Ago/2026,
+  // Proveedor a revisar en "Nueva Factura" > Motor Documental (27/Ago/2026,
   // pedido de Mariana: "proveedores se dividen dentro por su id") - los
   // PDF que sube el proveedor via ticket publico quedan en su propia
   // subcarpeta (Tesoreria/Facturas/FacturasProveedores/<id_contraparte>),
@@ -574,7 +574,7 @@ export default function TesoreriaFacturasPage() {
 
   const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
-  // Estado del proceso (marcar_estado) y confirmar_extraccion del Motor
+  // Estado del Proceso (marcar_estado) y confirmar_extraccion del Motor
   // Documental usan un permiso separado de "editar" a proposito (26/Ago/
   // 2026, ver views.py TesoreriaFacturaViewSet.get_permissions) - son
   // acciones del flujo de revision, no edicion manual del CFDI, asi que
@@ -606,7 +606,7 @@ export default function TesoreriaFacturasPage() {
   }
 
   // Fila de ticket ya usada por el proveedor (subio su PDF) - abre
-  // directo "Nueva factura" con el proveedor ya preseleccionado y el
+  // directo "Nueva Factura" con el proveedor ya preseleccionado y el
   // Motor Documental abierto, sin que el analista tenga que elegir nada
   // (pedido de Mariana 27/Ago/2026: "cuando se manda la invitacion se
   // debe de poner ya en la tabla sin poner nueva factura" - la fila ya
@@ -829,7 +829,7 @@ export default function TesoreriaFacturasPage() {
         sx={{ mb: 3 }}
       >
         <Tab label="Facturas CFDI" icon={<FileText size={16} strokeWidth={1.5} />} iconPosition="start" />
-        <Tab label="Tickets de reembolso" icon={<Receipt size={16} strokeWidth={1.5} />} iconPosition="start" />
+        <Tab label="Tickets de Reembolso" icon={<Receipt size={16} strokeWidth={1.5} />} iconPosition="start" />
       </Tabs>
 
       {tab === 1 && <TicketsReembolsoAdminPanel session={session} />}
@@ -1126,7 +1126,7 @@ export default function TesoreriaFacturasPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar factura ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva factura"}
+          {editing ? `Editar Factura ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva Factura"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -1505,7 +1505,7 @@ export default function TesoreriaFacturasPage() {
             )}
             {editing && (
               <Stack spacing={1}>
-                <Typography variant="subtitle2">Estado del proceso</Typography>
+                <Typography variant="subtitle2">Estado del Proceso</Typography>
                 {estadoError && (
                   <Alert severity="error" onClose={() => setEstadoError(null)}>
                     {estadoError}

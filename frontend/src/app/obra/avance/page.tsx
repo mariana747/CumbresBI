@@ -420,7 +420,7 @@ export default function ObraAvancePage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <HardHat size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Avance de obra</Typography>
+        <Typography variant="h5">Avance de Obra</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Avance por etapa, concepto y lote — misma vista y nomenclatura del control de avance en Excel.
@@ -880,8 +880,8 @@ export default function ObraAvancePage() {
       <Dialog open={Boolean(estimacionDialog)} onClose={() => setEstimacionDialog(null)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {estimacionDialog?.editando
-            ? `Editar estimación (folio ${estimacionDialog.editando.numero_estimacion})`
-            : "Nueva estimación"}
+            ? `Editar Estimación (folio ${estimacionDialog.editando.numero_estimacion})`
+            : "Nueva Estimación"}
           <IconButton onClick={() => setEstimacionDialog(null)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

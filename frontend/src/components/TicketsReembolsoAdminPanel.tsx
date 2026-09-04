@@ -21,13 +21,15 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { Sparkles, Upload, X as CloseIcon, XCircle } from "lucide-react";
+import { Eye, ReceiptText as TicketIcon, Sparkles, Upload, X as CloseIcon, XCircle } from "lucide-react";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import MotorDocumentalDialog, { MotorDocumentalContexto } from "@/components/MotorDocumentalDialog";
 import { SessionUser } from "@/lib/auth";
 import {
   aprobarTicket,
+  urlVerFactura,
+  urlVerTicket,
   CATEGORIA_GASTO_LABELS,
-  CENTRO_COSTO_LABELS,
   listTicketsReembolso,
   rechazarTicket,
   subirFacturaTicket,
@@ -99,6 +101,11 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
   }, []);
 
   const [ticketAbierto, setTicketAbierto] = useState<TesoreriaTicketReembolso | null>(null);
+  // Preview embebido de "Ver ticket"/"Ver factura" (04/Sep/2026, "usa lo
+  // mismo que en pld") - mismo criterio que micumbres/tickets/page.tsx.
+  const [previewDoc, setPreviewDoc] = useState<{ ticket: TesoreriaTicketReembolso; tipo: "ticket" | "factura" } | null>(
+    null
+  );
   // Dos dialogos del Motor Documental distintos (27/Ago/2026): uno para
   // verificar el comprobante del empleado ANTES de aprobar, otro para
   // validar la factura real YA aprobado - cada uno con su propio contexto
@@ -205,7 +212,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Tickets de reembolso subidos por empleados desde MiCumbres — verifica el comprobante con el Motor Documental
+        Tickets de Reembolso subidos por empleados desde MiCumbres — verifica el comprobante con el Motor Documental
         antes de aprobar (o recházalos directo si son obviamente inválidos), y factura los ya aprobados.
       </Typography>
 
@@ -225,7 +232,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
               <TableCell>Monto</TableCell>
               <TableCell>Fecha del gasto</TableCell>
               <TableCell>Estado</TableCell>
-              <TableCell>Ticket</TableCell>
+              <TableCell align="center">Ticket</TableCell>
               <TableCell>Factura</TableCell>
               <TableCell align="right">Acciones</TableCell>
             </TableRow>
@@ -250,34 +257,45 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                 <TableRow key={t.id_ticket} hover>
                   <TableCell>{t.id_ticket}</TableCell>
                   <TableCell>{t.id_empleado}</TableCell>
-                  <TableCell sx={{ maxWidth: 240 }}>{t.descripcion}</TableCell>
-                  <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>${t.monto}</TableCell>
+                  <TableCell sx={{ maxWidth: 240 }}>
+                    {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
+                  </TableCell>
+                  <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>${t.monto_total}</TableCell>
                   <TableCell>{t.fecha_gasto}</TableCell>
                   <TableCell>
                     <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell align="center">
                     {t.link_ticket ? (
-                      <MuiLink href={t.link_ticket} target="_blank" rel="noopener">
-                        Ver
-                      </MuiLink>
+                      <IconButton size="small" aria-label="Ver ticket" onClick={() => setPreviewDoc({ ticket: t, tipo: "ticket" })}>
+                        <TicketIcon size={14} strokeWidth={1.5} />
+                      </IconButton>
                     ) : (
                       "—"
                     )}
                   </TableCell>
                   <TableCell>
-                    {t.factura_folio ? `Folio ${t.factura_folio}` : t.link_factura_pdf ? "PDF subido" : "—"}
+                    {t.factura_folio
+                      ? `Folio ${t.factura_folio}`
+                      : t.link_factura_pdf
+                        ? (
+                          <MuiLink component="button" onClick={() => setPreviewDoc({ ticket: t, tipo: "factura" })}>
+                            PDF subido
+                          </MuiLink>
+                        )
+                        : "—"}
                   </TableCell>
                   <TableCell align="right">
-                    <Button
+                    <IconButton
                       size="small"
+                      aria-label="Ver"
                       onClick={() => {
                         setTicketAbierto(t);
                         setErrorDetalle(null);
                       }}
                     >
-                      Revisar
-                    </Button>
+                      <Eye size={14} strokeWidth={1.5} />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))
@@ -307,23 +325,50 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                 <Typography variant="body2">
                   <strong>Empleado:</strong> {ticketAbierto.id_empleado}
                 </Typography>
+                {ticketAbierto.descripcion && (
+                  <Typography variant="body2">
+                    <strong>Nota:</strong> {ticketAbierto.descripcion}
+                  </Typography>
+                )}
                 <Typography variant="body2">
-                  <strong>Descripción:</strong> {ticketAbierto.descripcion}
+                  <strong>Total:</strong> ${ticketAbierto.monto_total} {ticketAbierto.moneda} —{" "}
+                  {ticketAbierto.fecha_gasto}
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Monto:</strong> ${ticketAbierto.monto} {ticketAbierto.moneda} — {ticketAbierto.fecha_gasto}
+                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"}
                 </Typography>
-                <Typography variant="body2">
-                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"} ·{" "}
-                  <strong>Centro de costo:</strong>{" "}
-                  {ticketAbierto.centro ? CENTRO_COSTO_LABELS[ticketAbierto.centro] : "—"}
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Categoría de gasto:</strong>{" "}
-                  {ticketAbierto.categoria_gasto ? CATEGORIA_GASTO_LABELS[ticketAbierto.categoria_gasto] : "—"}
-                </Typography>
+                {ticketAbierto.autorizado_por && (
+                  <Typography variant="body2">
+                    <strong>Autorizado por:</strong> {ticketAbierto.autorizado_por}{" "}
+                    ({ticketAbierto.fecha_autorizacion})
+                  </Typography>
+                )}
+                {/* Conceptos (03/Sep/2026, minuta punto 1: "solicitar
+                    varios conceptos") - antes era un solo monto/categoria
+                    por ticket, ahora una tabla de N gastos. */}
+                <Typography variant="subtitle2">Conceptos</Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Descripción</TableCell>
+                        <TableCell align="right">Monto</TableCell>
+                        <TableCell>Categoría</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {ticketAbierto.conceptos.map((c) => (
+                        <TableRow key={c.id_concepto}>
+                          <TableCell>{c.descripcion}</TableCell>
+                          <TableCell align="right">${c.monto}</TableCell>
+                          <TableCell>{c.categoria_gasto ? CATEGORIA_GASTO_LABELS[c.categoria_gasto] : "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
                 {ticketAbierto.link_ticket && (
-                  <MuiLink href={ticketAbierto.link_ticket} target="_blank" rel="noopener">
+                  <MuiLink component="button" onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "ticket" })}>
                     Ver foto/comprobante subido por el empleado
                   </MuiLink>
                 )}
@@ -411,6 +456,19 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
           contexto={contextoFactura}
         />
       )}
+
+      <DocumentoPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={
+          previewDoc
+            ? previewDoc.tipo === "ticket"
+              ? urlVerTicket(previewDoc.ticket.id_ticket)
+              : urlVerFactura(previewDoc.ticket.id_ticket)
+            : null
+        }
+        titulo={previewDoc ? `${previewDoc.tipo === "ticket" ? "Ticket" : "Factura"} ${previewDoc.ticket.id_ticket}` : ""}
+      />
     </>
   );
 }

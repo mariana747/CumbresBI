@@ -75,7 +75,7 @@ export default function RequisicionesPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <ClipboardList size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Requisiciones de materiales</Typography>
+        <Typography variant="h5">Requisiciones de Materiales</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Documento formal por proyecto y etapa constructiva que jala los conceptos ya presupuestados y dispara
@@ -108,7 +108,7 @@ export default function RequisicionesPage() {
                 onClick={() => router.push("/obra/requisiciones/nueva")}
                 sx={{ ml: "auto" }}
               >
-                Nueva requisición
+                Nueva Requisición
               </Button>
             )}
           </Stack>

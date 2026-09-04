@@ -193,7 +193,7 @@ export default function AsesoresTab({
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nuevo asesor
+              Nuevo Asesor
             </Button>
           )}
         </Stack>
@@ -250,7 +250,7 @@ export default function AsesoresTab({
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.nombre}` : "Nuevo asesor"}
+          {editing ? `Editar ${editing.nombre}` : "Nuevo Asesor"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

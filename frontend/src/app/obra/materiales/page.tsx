@@ -316,7 +316,7 @@ export default function MaterialesPage() {
         <Typography variant="h5">Materiales</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Catálogo de materiales y salidas de almacén contra lo ya disponible ahí. Para pedir material que
+        Catálogo de Materiales y salidas de almacén contra lo ya disponible ahí. Para pedir material que
         implique una compra nueva, esa es la Requisición de Materiales (pantalla aparte, todavía en diseño).
       </Typography>
 
@@ -335,7 +335,7 @@ export default function MaterialesPage() {
           {/* Pestañas (02/Sep/2026, pedido de Mariana: "quiero esas tabs en
           materiales", mismo patrón que admin/reportes/page.tsx) - antes
           eran 3 tarjetas compitiendo por el mismo scroll vertical (o 2
-          lado a lado + 1 abajo). "Catálogo de materiales" y "Catálogo de
+          lado a lado + 1 abajo). "Catálogo de Materiales" y "Catálogo de
           materiales disponibles" leen la misma fuente (MaterialCatalogo);
           la segunda solo filtra a lo que sí hay en existencia ahora mismo
           (cantidad_disponible > 0) y es de solo lectura - alta/edición/
@@ -348,15 +348,15 @@ export default function MaterialesPage() {
             allowScrollButtonsMobile
             sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}
           >
-            <Tab label="Catálogo de materiales" value="catalogo" />
-            <Tab label="Catálogo de materiales disponibles" value="disponibles" />
-            <Tab icon={<Truck size={16} strokeWidth={1.5} />} iconPosition="start" label="Salida de almacén" value="salida" />
+            <Tab label="Catálogo de Materiales" value="catalogo" />
+            <Tab label="Catálogo de Materiales Disponibles" value="disponibles" />
+            <Tab icon={<Truck size={16} strokeWidth={1.5} />} iconPosition="start" label="Salida de Almacén" value="salida" />
           </Tabs>
 
           {seccion === "catalogo" && (
             <Paper variant="outlined">
               <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-                <Typography variant="subtitle1">Catálogo de materiales</Typography>
+                <Typography variant="subtitle1">Catálogo de Materiales</Typography>
                 {puedeCrear && (
                   <Button
                     size="small"
@@ -365,7 +365,7 @@ export default function MaterialesPage() {
                     onClick={abrirAltaMaterial}
                     sx={{ ml: "auto" }}
                   >
-                    Nuevo material
+                    Nuevo Material
                   </Button>
                 )}
               </Stack>
@@ -428,7 +428,7 @@ export default function MaterialesPage() {
           {seccion === "disponibles" && (
             <Paper variant="outlined">
               <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-                <Typography variant="subtitle1">Catálogo de materiales disponibles</Typography>
+                <Typography variant="subtitle1">Catálogo de Materiales Disponibles</Typography>
               </Stack>
               <TableContainer>
                 <Table size="small">
@@ -470,7 +470,7 @@ export default function MaterialesPage() {
           {seccion === "salida" && (
             <Paper variant="outlined">
               <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-                <Typography variant="subtitle1">Salida de almacén</Typography>
+                <Typography variant="subtitle1">Salida de Almacén</Typography>
                 {puedeCrear && (
                   <Button
                     size="small"
@@ -480,7 +480,7 @@ export default function MaterialesPage() {
                     disabled={materiales.length === 0}
                     sx={{ ml: "auto" }}
                   >
-                    Nueva salida
+                    Nueva Salida
                   </Button>
                 )}
               </Stack>
@@ -633,7 +633,7 @@ export default function MaterialesPage() {
 
       <Dialog open={materialDialogOpen} onClose={() => setMaterialDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editandoMaterial ? `Editar ${editandoMaterial.material}` : "Nuevo material"}
+          {editandoMaterial ? `Editar ${editandoMaterial.material}` : "Nuevo Material"}
           <IconButton onClick={() => setMaterialDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -703,7 +703,7 @@ export default function MaterialesPage() {
 
       <Dialog open={solicitudDialogOpen} onClose={() => setSolicitudDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          Nueva salida de almacén
+          Nueva Salida de Almacén
           <IconButton onClick={() => setSolicitudDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

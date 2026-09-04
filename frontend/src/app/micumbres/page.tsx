@@ -25,7 +25,7 @@ export default function MiCumbresPage() {
           "rrhh-mi-cumbres-y-modulo-pendiente". */}
       <Stack direction="row">
         <Button component={Link} href="/micumbres/tickets" variant="outlined" startIcon={<Receipt size={18} strokeWidth={1.5} />}>
-          Tickets de reembolso
+          Tickets de Reembolso
         </Button>
       </Stack>
     </AppShell>

@@ -190,7 +190,7 @@ export default function ProyectosTab({
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nuevo proyecto
+              Nuevo Proyecto
             </Button>
           )}
         </Stack>
@@ -249,7 +249,7 @@ export default function ProyectosTab({
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.denominacion}` : "Nuevo proyecto"}
+          {editing ? `Editar ${editing.denominacion}` : "Nuevo Proyecto"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

@@ -349,7 +349,7 @@ export default function ExpedientesTab({
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nuevo expediente
+              Nuevo Expediente
             </Button>
           )}
         </Stack>
@@ -406,7 +406,7 @@ export default function ExpedientesTab({
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar expediente ${editing.id_expediente}` : "Nuevo expediente"}
+          {editing ? `Editar Expediente ${editing.id_expediente}` : "Nuevo Expediente"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

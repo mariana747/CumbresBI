@@ -269,7 +269,7 @@ export default function TesoreriaSaldosPage() {
             onClick={abrirAlta}
             sx={{ flexShrink: 0 }}
           >
-            Nuevo saldo
+            Nuevo Saldo
           </Button>
         )}
       </Stack>
@@ -532,7 +532,7 @@ export default function TesoreriaSaldosPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar saldo de ${aliasCuenta(editing.cuenta)}` : "Nuevo saldo"}
+          {editing ? `Editar Saldo de ${aliasCuenta(editing.cuenta)}` : "Nuevo Saldo"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

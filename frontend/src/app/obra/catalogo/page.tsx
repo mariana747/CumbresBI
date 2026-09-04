@@ -235,7 +235,7 @@ export default function ObraCatalogoPage() {
                   onClick={abrirAltaEtapa}
                   sx={{ ml: "auto" }}
                 >
-                  Nueva etapa
+                  Nueva Etapa
                 </Button>
               )}
             </Stack>
@@ -302,7 +302,7 @@ export default function ObraCatalogoPage() {
                   disabled={etapas.length === 0}
                   sx={{ ml: "auto" }}
                 >
-                  Nuevo concepto
+                  Nuevo Concepto
                 </Button>
               )}
             </Stack>
@@ -413,7 +413,7 @@ export default function ObraCatalogoPage() {
 
       <Dialog open={etapaDialogOpen} onClose={() => setEtapaDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editandoEtapa ? `Editar etapa ${editandoEtapa.numero}` : "Nueva etapa"}
+          {editandoEtapa ? `Editar Etapa ${editandoEtapa.numero}` : "Nueva Etapa"}
           <IconButton onClick={() => setEtapaDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -459,7 +459,7 @@ export default function ObraCatalogoPage() {
 
       <Dialog open={conceptoDialogOpen} onClose={() => setConceptoDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editandoConcepto ? `Editar concepto ${editandoConcepto.numero}` : "Nuevo concepto"}
+          {editandoConcepto ? `Editar Concepto ${editandoConcepto.numero}` : "Nuevo Concepto"}
           <IconButton onClick={() => setConceptoDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

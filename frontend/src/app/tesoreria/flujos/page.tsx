@@ -640,7 +640,7 @@ export default function TesoreriaFlujosPage() {
               onClick={abrirAlta}
               sx={{ flexShrink: 0 }}
             >
-              Nuevo flujo
+              Nuevo Flujo
             </Button>
           )}
         </Stack>
@@ -836,7 +836,7 @@ export default function TesoreriaFlujosPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {soloLectura ? `Ver ${editing?.id_flujo}` : editing ? `Editar ${editing.id_flujo}` : "Nuevo flujo"}
+          {soloLectura ? `Ver ${editing?.id_flujo}` : editing ? `Editar ${editing.id_flujo}` : "Nuevo Flujo"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

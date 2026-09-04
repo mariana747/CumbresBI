@@ -45,6 +45,16 @@ SERVICIOS = [
     # PLD_APROBADOR no se toca (su rol es aprobar/rechazar el expediente,
     # no gestionar archivos - eso todavia no esta contemplado).
     "pld-documentos",
+    # Solicitud de Pago (tesoreria-service, 04/Sep/2026) - pago de
+    # servicios/licencias/renovaciones, dividido por proyecto. Servicio
+    # separado de "tesoreria" a proposito (pedido explicito de Mariana:
+    # "agregalo como servicio, como el pld-documentos") en vez de un
+    # permiso nuevo fuera del esquema L/C/E/A: a diferencia de Reembolso
+    # (abierto a cualquier empleado via _EsEmpleadoAutenticado, sin
+    # perm_key), "no todos los colaboradores pueden solicitar pago" - un
+    # servicio propio permite restringir el "C" (solicitud-pago.crear) a
+    # los roles de Tesoreria sin tocar el resto de tesoreria.*.
+    "solicitud-pago",
 ]
 
 ACCION_POR_LETRA = {"L": "leer", "C": "crear", "E": "editar", "A": "aprobar"}
@@ -55,7 +65,7 @@ ROLE_ACCESS = {
         "ventas-vivienda": "LCEA", "materiales": "LCEA", "rentas": "LCEA",
         "tesoreria": "LCEA", "facturacion-cfdi": "LCEA", "compras": "LCEA",
         "rrhh": "LCEA", "tickets": "LCEA", "audit": "L", "docint": "LC", "obra": "LCEA",
-        "pld-documentos": "LCEA",
+        "pld-documentos": "LCEA", "solicitud-pago": "LCEA",
     },
     "IAM_ADMIN": {"iam": "LCEA", "audit": "L", "facturacion-cfdi": "LCEA"},
     "AUDITOR": {s: "L" for s in SERVICIOS},
@@ -91,11 +101,15 @@ ROLE_ACCESS = {
     "FINANZAS_MANAGER": {
         "iam": "L", "contrapartes": "LCE", "ventas-vivienda": "L", "materiales": "L",
         "rentas": "LCE", "tesoreria": "LCEA", "facturacion-cfdi": "LA", "compras": "LCEA",
-        "docint": "LC",
+        "docint": "LC", "solicitud-pago": "LCEA",
     },
+    # TESORERIA_ANALISTA solicita el pago (C) pero no se autoriza a si
+    # mismo (sin "A" aqui) - separacion de funciones pedida por Mariana
+    # ("autorizado por... la persona que lo autorizo debe hacerlo
+    # manualmente"), FINANZAS_MANAGER es quien aprueba.
     "TESORERIA_ANALISTA": {
         "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "LA",
-        "docint": "LC",
+        "docint": "LC", "solicitud-pago": "LC",
     },
     "COMPRAS_ANALISTA": {
         "iam": "L", "contrapartes": "L", "materiales": "LCE", "tesoreria": "L", "compras": "LCEA",
@@ -103,6 +117,7 @@ ROLE_ACCESS = {
     "CONTRALOR": {
         "iam": "L", "contrapartes": "L", "ventas-vivienda": "L", "materiales": "L",
         "rentas": "L", "tesoreria": "L", "facturacion-cfdi": "L", "compras": "L", "audit": "L",
+        "solicitud-pago": "L",
     },
     "RRHH_SUPERVISOR_CENTRO": {"iam": "L", "rrhh": "LE"},
     "RRHH_ADMIN": {"iam": "L", "rrhh": "LCEA"},

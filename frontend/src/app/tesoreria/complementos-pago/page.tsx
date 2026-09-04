@@ -63,7 +63,7 @@ const FORM_VACIO = {
   estado: "",
 };
 
-// "Facturas PPD a liquidar" (24/Ago/2026, pedido explicito de Mariana,
+// "Facturas PPD a Liquidar" (24/Ago/2026, pedido explicito de Mariana,
 // alineado al estandar del SAT) - el nodo "DoctoRelacionado" del XML de un
 // Complemento de Pago (REP) describe QUE facturas PPD esta liquidando este
 // pago y con que parcialidad, distinto del nodo "CfdiRelacionados" de una
@@ -122,7 +122,7 @@ function PanelFacturasPpdALiquidar({ timbreUuid, puedeEditar }: { timbreUuid: st
 
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle2">Facturas PPD a liquidar</Typography>
+      <Typography variant="subtitle2">Facturas PPD a Liquidar</Typography>
       <Typography variant="caption" color="text.secondary">
         Cada renglón es una factura PPD que este pago liquida (total o parcialmente).
       </Typography>
@@ -341,7 +341,7 @@ export default function TesoreriaComplementosPagoPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <Receipt size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Complementos de pago</Typography>
+        <Typography variant="h5">Complementos de Pago</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         CFDI de tipo REP que confirma el pago de una factura a crédito.
@@ -395,7 +395,7 @@ export default function TesoreriaComplementosPagoPage() {
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nuevo complemento
+              Nuevo Complemento
             </Button>
           )}
         </Stack>
@@ -514,7 +514,7 @@ export default function TesoreriaComplementosPagoPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar complemento ${editing.folio || editing.timbre_uuid}` : "Nuevo complemento"}
+          {editing ? `Editar Complemento ${editing.folio || editing.timbre_uuid}` : "Nuevo Complemento"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
