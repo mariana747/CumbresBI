@@ -147,7 +147,7 @@ export default function HomePage() {
       {!loading && puedePld && kyc.length > 0 && (
         <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
           <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-            Expedientes KYC por estado
+            Expedientes KYC por Estado
           </Typography>
           <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
             {Object.entries(kycPorEstado).map(([estado, count]) => (
@@ -162,7 +162,7 @@ export default function HomePage() {
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
             <ScrollText size={18} strokeWidth={1.5} color={BRAND.azul} />
             <Typography variant="subtitle1" fontWeight={600}>
-              Bitácora reciente
+              Bitácora Reciente
             </Typography>
           </Stack>
           <Stack spacing={1.5} divider={<Box sx={{ borderBottom: "1px solid", borderColor: "divider" }} />}>

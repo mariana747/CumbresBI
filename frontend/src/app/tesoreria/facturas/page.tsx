@@ -373,7 +373,7 @@ function PanelTraslados({ uuidFactura, puedeEditar }: { uuidFactura: string; pue
 
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle2">Impuestos trasladados</Typography>
+      <Typography variant="subtitle2">Impuestos Trasladados</Typography>
       {error && (
         <Alert severity="error" onClose={() => setError(null)}>
           {error}
@@ -574,7 +574,7 @@ export default function TesoreriaFacturasPage() {
 
   const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
-  // Estado del proceso (marcar_estado) y confirmar_extraccion del Motor
+  // Estado del Proceso (marcar_estado) y confirmar_extraccion del Motor
   // Documental usan un permiso separado de "editar" a proposito (26/Ago/
   // 2026, ver views.py TesoreriaFacturaViewSet.get_permissions) - son
   // acciones del flujo de revision, no edicion manual del CFDI, asi que
@@ -1505,7 +1505,7 @@ export default function TesoreriaFacturasPage() {
             )}
             {editing && (
               <Stack spacing={1}>
-                <Typography variant="subtitle2">Estado del proceso</Typography>
+                <Typography variant="subtitle2">Estado del Proceso</Typography>
                 {estadoError && (
                   <Alert severity="error" onClose={() => setEstadoError(null)}>
                     {estadoError}

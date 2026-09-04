@@ -1293,7 +1293,7 @@ export default function PldExpedienteDetallePage() {
                             disabled={subiendoDoc}
                             sx={{ whiteSpace: "nowrap" }}
                           >
-                            Subir documento
+                            Subir Documento
                             <input
                               type="file"
                               hidden

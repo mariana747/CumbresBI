@@ -208,7 +208,7 @@ export default function TicketsClientePage() {
       {puedeCrear && (
         <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
           <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-            Generar ticket
+            Generar Ticket
           </Typography>
           <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleGenerar}>
             <TextField
@@ -279,7 +279,7 @@ export default function TicketsClientePage() {
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
           <Link2 size={22} strokeWidth={1.5} color={BRAND.azul} />
           <Typography variant="subtitle1" fontWeight={600}>
-            Tickets generados
+            Tickets Generados
           </Typography>
         </Stack>
 

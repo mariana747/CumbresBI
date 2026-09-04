@@ -63,7 +63,7 @@ const FORM_VACIO = {
   estado: "",
 };
 
-// "Facturas PPD a liquidar" (24/Ago/2026, pedido explicito de Mariana,
+// "Facturas PPD a Liquidar" (24/Ago/2026, pedido explicito de Mariana,
 // alineado al estandar del SAT) - el nodo "DoctoRelacionado" del XML de un
 // Complemento de Pago (REP) describe QUE facturas PPD esta liquidando este
 // pago y con que parcialidad, distinto del nodo "CfdiRelacionados" de una
@@ -122,7 +122,7 @@ function PanelFacturasPpdALiquidar({ timbreUuid, puedeEditar }: { timbreUuid: st
 
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle2">Facturas PPD a liquidar</Typography>
+      <Typography variant="subtitle2">Facturas PPD a Liquidar</Typography>
       <Typography variant="caption" color="text.secondary">
         Cada renglón es una factura PPD que este pago liquida (total o parcialmente).
       </Typography>

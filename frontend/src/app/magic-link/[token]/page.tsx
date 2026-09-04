@@ -86,7 +86,7 @@ export default function MagicLinkPage() {
           <Stack spacing={2} alignItems="center" textAlign="center">
             <ShieldCheck size={32} strokeWidth={1.5} color={theme.palette.success.main} />
             <Typography variant="subtitle1" fontWeight={600}>
-              Acceso verificado
+              Acceso Verificado
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {recursoTipo && RECURSO_TIPO_LABELS[recursoTipo]
@@ -111,7 +111,7 @@ export default function MagicLinkPage() {
           <Stack spacing={2} alignItems="center" textAlign="center">
             <ShieldAlert size={32} strokeWidth={1.5} color={theme.palette.error.dark} />
             <Typography variant="subtitle1" fontWeight={600}>
-              Enlace no disponible
+              Enlace no Disponible
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {error}

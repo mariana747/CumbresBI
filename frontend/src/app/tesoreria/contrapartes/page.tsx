@@ -1379,7 +1379,7 @@ function TesoreriaContrapartesPageContent() {
               </Stack>
 
               <Stack spacing={1}>
-                <Typography variant="subtitle2">Complementos de pago ({docComplementos.length})</Typography>
+                <Typography variant="subtitle2">Complementos de Pago ({docComplementos.length})</Typography>
                 {docComplementos.length === 0 ? (
                   <Typography variant="body2" color="text.secondary">
                     Sin complementos de pago ligados a esta contraparte.
@@ -1412,7 +1412,7 @@ function TesoreriaContrapartesPageContent() {
               </Stack>
 
               <Stack spacing={1}>
-                <Typography variant="subtitle2">Notas de crédito ({docNotasCredito.length})</Typography>
+                <Typography variant="subtitle2">Notas de Crédito ({docNotasCredito.length})</Typography>
                 {docNotasCredito.length === 0 ? (
                   <Typography variant="body2" color="text.secondary">
                     Sin notas de crédito ligadas a esta contraparte.
