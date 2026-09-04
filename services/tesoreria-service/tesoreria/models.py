@@ -1123,11 +1123,20 @@ class TesoreriaTicketReembolso(models.Model):
     # Foto/comprobante del ticket - sube el empleado al crear.
     link_ticket = models.TextField(blank=True, null=True)
     drive_file_id_ticket = models.TextField(blank=True, null=True)
+    # mime_type_* (04/Sep/2026, "usa lo mismo que en pld" - ver
+    # PldContraparteDoc.mime_type/PldContraparteDocViewSet.ver): el
+    # endpoint de descarga de drive-service siempre regresa
+    # application/octet-stream, no conoce el tipo real - se captura aqui
+    # al subir (resultado["mime_type"] de driveclient.upload_bytes) para
+    # poder servir el archivo con el Content-Type correcto y que el
+    # navegador lo previsualice en vez de forzar la descarga.
+    mime_type_ticket = models.CharField(max_length=100, blank=True, null=True)
     # Staging del PDF de la factura real, antes de darla de alta formal -
     # lo sube Tesoreria (no el empleado) para poder analizarlo con el
     # Motor Documental y prellenar el alta de TesoreriaFactura.
     link_factura_pdf = models.TextField(blank=True, null=True)
     drive_file_id_factura = models.TextField(blank=True, null=True)
+    mime_type_factura = models.CharField(max_length=100, blank=True, null=True)
     # Vinculo real a la factura formal ya dada de alta (Facturas > Nueva
     # factura) - se llena en vincular_factura(), solo si estado=APROBADO.
     factura = models.ForeignKey(
@@ -1210,6 +1219,116 @@ class TesoreriaTicketReembolsoConcepto(models.Model):
 
     def __str__(self):
         return f"{self.descripcion} (${self.monto})"
+
+
+class TesoreriaSolicitudPago(models.Model):
+    """Solicitud de pago de servicios/licencias/renovaciones (04/Sep/2026,
+    minuta: "Incluye pago de servicios, licencias, renovaciones. Se
+    dividira por proyecto"). Distinta de TesoreriaTicketReembolso a
+    proposito - "reembolso y solicitud de pago, no es lo mismo. todos los
+    colaboradores internos pueden solicitar reembolso pero no todos
+    solicitudes de pago" (Mariana, mismo dia): por eso `crear` exige el
+    permiso real `solicitud-pago.crear` (servicio propio en
+    permission_matrix.py, no abierto a cualquier empleado como Reembolso
+    via _EsEmpleadoAutenticado).
+
+    A diferencia de Reembolso, el comprobante/factura es OPCIONAL (pedido
+    explicito de Mariana: pagos a gobierno por permisos/licencias a veces
+    solo dan un recibo oficial o linea de captura pagada, sin CFDI formal)
+    - `factura` puede quedar vacio para siempre y aun asi llegar a PAGADO,
+    por eso no hay un estado intermedio tipo VINCULADO como en Reembolso.
+
+    Flujo de estados: PENDIENTE -> APROBADO/RECHAZADO (autorizado_por,
+    igual que TesoreriaTicketReembolso.aprobar) -> PAGADO al ligarse a un
+    TesoreriaFlujo real."""
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_APROBADO = "APROBADO"
+    ESTADO_RECHAZADO = "RECHAZADO"
+    ESTADO_PAGADO = "PAGADO"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_APROBADO, "Aprobado — pendiente de pago"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+        (ESTADO_PAGADO, "Pagado"),
+    ]
+
+    TIPO_SERVICIO = "SERVICIO"
+    TIPO_LICENCIA = "LICENCIA"
+    TIPO_RENOVACION = "RENOVACION"
+    TIPO_OTRO = "OTRO"
+    TIPO_CHOICES = [
+        (TIPO_SERVICIO, "Servicio"),
+        (TIPO_LICENCIA, "Licencia"),
+        (TIPO_RENOVACION, "Renovación"),
+        (TIPO_OTRO, "Otro"),
+    ]
+
+    MONEDA_CHOICES = [("MXP", "MXP"), ("USD", "USD"), ("EUR", "EUR")]
+
+    id_solicitud = models.CharField(max_length=255, primary_key=True)
+    # Referencia laxa al mismo catalogo de proyectos que usa Compras/Obra
+    # (ej. SolicitudCompra.proyecto) - "se dividira por proyecto" (minuta).
+    proyecto = models.CharField(max_length=8)
+    # A que empresa se le carga el pago - mismo criterio que
+    # TesoreriaTicketReembolso.sociedad, tambien inmutable tras crear (ver
+    # serializer) por el mismo criterio de "cualquier error... no se
+    # aceptara" aplicado ahi.
+    sociedad = models.CharField(max_length=13, blank=True, null=True)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    descripcion = models.TextField()
+    monto = models.DecimalField(max_digits=14, decimal_places=2)
+    moneda = models.CharField(max_length=5, choices=MONEDA_CHOICES, default="MXP")
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    # Quien solicita - identity_user_id del EffectiveScope, resuelto en
+    # perform_create (igual que TesoreriaTicketReembolso.id_empleado), no
+    # lo que mande el body.
+    solicitado_por = models.CharField(max_length=255)
+    # Quien autoriza y cuando - se resuelve del JWT en aprobar(), igual que
+    # TesoreriaTicketReembolso.autorizado_por ("la persona que lo autorizo
+    # debe hacerlo manualmente", minuta).
+    autorizado_por = models.CharField(max_length=255, blank=True, null=True)
+    fecha_autorizacion = models.DateField(blank=True, null=True)
+    # Comprobante OPCIONAL (ver docstring de la clase) - mismo patron de
+    # staging que TesoreriaTicketReembolso.link_factura_pdf/factura, pero
+    # aqui nunca es requisito para llegar a PAGADO.
+    link_comprobante = models.TextField(blank=True, null=True)
+    drive_file_id_comprobante = models.TextField(blank=True, null=True)
+    factura = models.ForeignKey(
+        TesoreriaFactura,
+        db_column="factura_uuid",
+        to_field="timbre_uuid",
+        on_delete=models.SET_NULL,
+        related_name="solicitudes_pago",
+        blank=True,
+        null=True,
+    )
+    # Se liga cuando Tesoreria procesa el pago real - estado pasa a PAGADO.
+    flujo = models.ForeignKey(
+        TesoreriaFlujo,
+        db_column="id_flujo",
+        on_delete=models.SET_NULL,
+        related_name="solicitudes_pago",
+        blank=True,
+        null=True,
+    )
+    comentarios = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=255, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=255, blank=True, null=True)
+
+    SCOPE_FIELD_PROYECTO = "proyecto"
+    SCOPE_FIELD_SOCIEDAD = "sociedad"
+    SCOPE_FIELD_IDENTITY = "solicitado_por"
+    objects = ScopedManager()
+
+    class Meta:
+        db_table = "tesoreria_solicitudes_pago"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.id_solicitud
 
 
 class TesoreriaSaldo(models.Model):

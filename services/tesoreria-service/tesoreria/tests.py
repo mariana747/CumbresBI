@@ -37,6 +37,7 @@ from .models import (
     TesoreriaContratoDocumento,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    TesoreriaSolicitudPago,
 )
 from .reembolso_utils import ultimos_dos_dias_habiles_y_corte, validar_fecha_limite
 from .reportes import calcular_reporte_diario
@@ -58,6 +59,7 @@ from .views import (
     TesoreriaContratoDocumentoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
+    TesoreriaSolicitudPagoViewSet,
     TesoreriaTicketProveedorViewSet,
     TesoreriaTicketReembolsoViewSet,
 )
@@ -1772,6 +1774,40 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertIn("fecha_corte", response.data)
         self.assertIn("dias_bloqueados", response.data)
 
+    def test_ver_ticket_sin_archivo_subido_da_404(self):
+        # 04/Sep/2026 ("usa lo mismo que en pld" - preview embebido en vez
+        # de link crudo de Drive) - sin drive_file_id_ticket, nada que
+        # servir, sin llamar a drive-service.
+        creado = self.factory.post(
+            "/api/tickets-reembolso/", {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY}, format="json"
+        )
+        creado.effective_scope = self.scope_empleado
+        ticket = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
+
+        request = self.factory.get(f"/api/tickets-reembolso/{ticket.data['id_ticket']}/ver_ticket/")
+        request.effective_scope = self.scope_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "ver_ticket"})(
+            request, pk=ticket.data["id_ticket"]
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_ver_ticket_de_otro_empleado_no_es_visible(self):
+        # get_object() usa el mismo scope que list - un empleado no puede
+        # ver el ticket de otro via ver_ticket.
+        creado = self.factory.post(
+            "/api/tickets-reembolso/", {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY}, format="json"
+        )
+        creado.effective_scope = self.scope_empleado
+        ticket = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
+
+        otro_empleado = EffectiveScope(is_global=False, identity_user_id="empleado2")
+        request = self.factory.get(f"/api/tickets-reembolso/{ticket.data['id_ticket']}/ver_ticket/")
+        request.effective_scope = otro_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "ver_ticket"})(
+            request, pk=ticket.data["id_ticket"]
+        )
+        self.assertEqual(response.status_code, 404)
+
 
 class TesoreriaFechaLimiteReembolsoTests(TestCase):
     """Fecha limite mensual de reembolsos (minuta 03/Sep/2026): los ultimos
@@ -1841,6 +1877,127 @@ class TesoreriaFechaLimiteReembolsoTests(TestCase):
         # mes que hoy" se evaluaba antes que el de futuro.
         error = validar_fecha_limite(date(2026, 9, 3), fecha_gasto=date(2026, 9, 30))
         self.assertIsNotNone(error)
+
+
+class TesoreriaSolicitudPagoCrudTests(TestCase):
+    """Solicitud de pago de servicios/licencias/renovaciones (04/Sep/2026,
+    ver docstring del modelo/ViewSet). A diferencia de Reembolso, `crear`
+    exige un permiso real (`solicitud-pago.crear`), no es self-service
+    abierto a cualquier empleado."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_solicitante = EffectiveScope(
+            is_global=True, perm_keys=("solicitud-pago.crear",), identity_user_id="analista1"
+        )
+        self.scope_aprobador = EffectiveScope(
+            is_global=True, perm_keys=("solicitud-pago.aprobar", "solicitud-pago.editar"), identity_user_id="manager1"
+        )
+
+    def _crear(self, **overrides):
+        body = {
+            "proyecto": "PRYA",
+            "tipo": "LICENCIA",
+            "descripcion": "Refrendo de licencia de uso de suelo",
+            "monto": "5000.00",
+            **overrides,
+        }
+        request = self.factory.post("/api/solicitudes-pago/", body, format="json")
+        request.effective_scope = self.scope_solicitante
+        return TesoreriaSolicitudPagoViewSet.as_view({"post": "create"})(request)
+
+    def test_crear_sin_permiso_da_403(self):
+        request = self.factory.post(
+            "/api/solicitudes-pago/",
+            {"proyecto": "PRYA", "tipo": "LICENCIA", "descripcion": "x", "monto": "100.00"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_crear_con_permiso_registra_solicitado_por_del_jwt(self):
+        response = self._crear()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["solicitado_por"], "analista1")
+        self.assertEqual(response.data["estado"], "PENDIENTE")
+        self.assertIsNone(response.data["factura"])
+
+    def test_aprobar_sin_permiso_solicitud_pago_aprobar_da_403(self):
+        # TESORERIA_ANALISTA tiene .crear pero NO .aprobar (separacion de
+        # funciones, ver permission_matrix.py) - solo se solicita a si
+        # mismo, no se auto-aprueba.
+        creado = self._crear()
+        request = self.factory.post(f"/api/solicitudes-pago/{creado.data['id_solicitud']}/aprobar/", {}, format="json")
+        request.effective_scope = self.scope_solicitante
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "aprobar"})(request, pk=creado.data["id_solicitud"])
+        self.assertEqual(response.status_code, 403)
+
+    def test_aprobar_registra_autorizado_por_y_fecha(self):
+        creado = self._crear()
+        request = self.factory.post(f"/api/solicitudes-pago/{creado.data['id_solicitud']}/aprobar/", {}, format="json")
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "aprobar"})(request, pk=creado.data["id_solicitud"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "APROBADO")
+        self.assertEqual(response.data["autorizado_por"], "manager1")
+        self.assertEqual(response.data["fecha_autorizacion"], date.today().isoformat())
+
+    def test_vincular_flujo_sin_factura_pasa_a_pagado(self):
+        # Comprobante OPCIONAL (pagos a gobierno a veces sin CFDI formal) -
+        # se puede llegar a PAGADO sin haber ligado ninguna factura.
+        creado = self._crear()
+        aprobar = self.factory.post(f"/api/solicitudes-pago/{creado.data['id_solicitud']}/aprobar/", {}, format="json")
+        aprobar.effective_scope = self.scope_aprobador
+        TesoreriaSolicitudPagoViewSet.as_view({"post": "aprobar"})(aprobar, pk=creado.data["id_solicitud"])
+
+        contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Municipio de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="m@m.com"
+        )
+        contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        banco = TesoreriaBanco.objects.create(id_banxico="00003", banco="Banamex", alias="BMX")
+        cuenta = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000000003", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        flujo = TesoreriaFlujo.objects.create(id_flujo="FLU-000001", contrato=contrato, cuenta=cuenta)
+        request = self.factory.post(
+            f"/api/solicitudes-pago/{creado.data['id_solicitud']}/vincular_flujo/",
+            {"flujo": flujo.id_flujo},
+            format="json",
+        )
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "vincular_flujo"})(
+            request, pk=creado.data["id_solicitud"]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "PAGADO")
+        self.assertIsNone(response.data["factura"])
+
+    def test_sociedad_no_se_puede_corregir_despues_de_crear(self):
+        creado = self._crear(sociedad="CIF010101AAA")
+        request = self.factory.patch(
+            f"/api/solicitudes-pago/{creado.data['id_solicitud']}/", {"sociedad": "CAP010101AAA"}, format="json"
+        )
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"patch": "partial_update"})(
+            request, pk=creado.data["id_solicitud"]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sociedad"], "CIF010101AAA")
+
+    def test_filtro_por_proyecto(self):
+        self._crear(proyecto="P01")
+        self._crear(proyecto="P02")
+        request = self.factory.get("/api/solicitudes-pago/?proyecto=P01")
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["proyecto"], "P01")
 
 
 class TesoreriaContratoDocumentoScopeTests(TestCase):

@@ -22,6 +22,7 @@ from tesoreria.views import (
     TesoreriaNotaCreditoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
+    TesoreriaSolicitudPagoViewSet,
     TesoreriaTicketProveedorViewSet,
     TesoreriaTicketReembolsoViewSet,
 )
@@ -46,6 +47,7 @@ router.register("nota-credito-conceptos", FacturaNotaCreditoViewSet, basename="f
 router.register("rec-nominas", TesoreriaRecNominaViewSet, basename="tesoreriarecnomina")
 router.register("cortes-edc", TesoreriaCorteEdcViewSet, basename="tesoreriacorteedc")
 router.register("saldos", TesoreriaSaldoViewSet, basename="tesoreriasaldo")
+router.register("solicitudes-pago", TesoreriaSolicitudPagoViewSet, basename="tesoreriasolicitudpago")
 router.register("tickets-reembolso", TesoreriaTicketReembolsoViewSet, basename="tesoreriaticketreembolso")
 router.register("tickets-proveedor", TesoreriaTicketProveedorViewSet, basename="tesoreriaticketproveedor")
 

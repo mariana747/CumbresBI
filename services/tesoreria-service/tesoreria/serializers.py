@@ -19,6 +19,7 @@ from .models import (
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    TesoreriaSolicitudPago,
     TesoreriaTicketProveedor,
     TesoreriaTicketReembolso,
     TesoreriaTicketReembolsoConcepto,
@@ -871,8 +872,10 @@ class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
             "estado",
             "link_ticket",
             "drive_file_id_ticket",
+            "mime_type_ticket",
             "link_factura_pdf",
             "drive_file_id_factura",
+            "mime_type_factura",
             "factura",
             "factura_folio",
             "flujo",
@@ -891,10 +894,73 @@ class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
             "estado",
             "link_factura_pdf",
             "drive_file_id_factura",
+            "mime_type_factura",
             "factura",
             "flujo",
             "autorizado_por",
             "fecha_autorizacion",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class TesoreriaSolicitudPagoSerializer(serializers.ModelSerializer):
+    """Solicitud de pago de servicios/licencias/renovaciones (ver docstring
+    del modelo). `solicitado_por`/`estado`/`factura`/`flujo` son de solo
+    lectura en el update normal - se fijan via perform_create o las
+    acciones dedicadas del ViewSet (aprobar/rechazar, subir_comprobante,
+    vincular_factura, vincular_flujo), nunca via un PATCH libre."""
+
+    flujo_id = serializers.CharField(source="flujo.id_flujo", read_only=True, default=None)
+    factura_folio = serializers.CharField(source="factura.comprobante_folio", read_only=True, default=None)
+    tipo_label = serializers.CharField(source="get_tipo_display", read_only=True)
+
+    def update(self, instance, validated_data):
+        """`sociedad`/`moneda` inmutables tras crear, mismo criterio que
+        TesoreriaTicketReembolsoSerializer.update (04/Sep/2026: "cualquier
+        error de sociedad, tipo de moneda... no se aceptara" aplica igual
+        aqui)."""
+        validated_data.pop("sociedad", None)
+        validated_data.pop("moneda", None)
+        return super().update(instance, validated_data)
+
+    class Meta:
+        model = TesoreriaSolicitudPago
+        fields = [
+            "id_solicitud",
+            "proyecto",
+            "sociedad",
+            "tipo",
+            "tipo_label",
+            "descripcion",
+            "monto",
+            "moneda",
+            "estado",
+            "solicitado_por",
+            "autorizado_por",
+            "fecha_autorizacion",
+            "link_comprobante",
+            "drive_file_id_comprobante",
+            "factura",
+            "factura_folio",
+            "flujo",
+            "flujo_id",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = [
+            "id_solicitud",
+            "solicitado_por",
+            "estado",
+            "autorizado_por",
+            "fecha_autorizacion",
+            "link_comprobante",
+            "drive_file_id_comprobante",
+            "factura",
+            "flujo",
             "created_at",
             "updated_at",
         ]
