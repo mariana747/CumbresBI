@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import Script from "next/script";
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Typography, useTheme, alpha } from "@mui/material";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from "lucide-react";
 
 // Recorte de documentos con la cámara del celular, sin ML Kit (nativo
 // Android/iOS, no aplica a un frontend web - ver conversación 28/Ago/2026
@@ -374,14 +373,12 @@ export default function EscanerDocumento({ open, archivo, onCancelar, onConfirma
   // El área de arrastre de esquinas usa touchAction:"none" (necesario
   // para poder arrastrar los círculos sin que el navegador interprete el
   // gesto como scroll) - eso tapa el swipe nativo dentro de esa misma
-  // área. Cuando la imagen es más grande que la ventana visible, en vez
-  // de depender del swipe (que ahí no funciona) se usan flechas que
-  // desplazan este visor con scroll (visorRef), reportado 31/Ago/2026.
+  // área, pero el visor (visorRef) en si mismo si hace scroll nativo
+  // (mouse wheel/trackpad/swipe fuera de los circulos) si la imagen es
+  // mas grande que la ventana visible. Las flechas explicitas de paneo se
+  // quitaron (04/Sep/2026, pedido de Mariana) ahora que el visor ampliado
+  // casi nunca las necesita.
   const visorRef = useRef<HTMLDivElement>(null);
-  const PASO_DESPLAZAMIENTO = 80;
-  function desplazar(dx: number, dy: number) {
-    visorRef.current?.scrollBy({ left: dx, top: dy, behavior: "smooth" });
-  }
 
   useEffect(() => {
     if (!open || !archivo) {
@@ -404,8 +401,14 @@ export default function EscanerDocumento({ open, archivo, onCancelar, onConfirma
       // window.innerWidth/innerHeight, con margenes estimados para ese
       // margen+padding (horizontal) y titulo+caption+acciones+padding
       // (vertical).
-      const visAncho = Math.max(200, Math.min(320, window.innerWidth - 96));
-      const visAlto = Math.max(240, Math.min(420, window.innerHeight - 280));
+      // Topes ampliados (04/Sep/2026, hallazgo real: en una ventana de
+      // escritorio mas "corta" que ancha, innerHeight-280 caia por debajo
+      // del tope viejo de 420 mucho mas seguido que en un celular en
+      // vertical, obligando a mas scroll para ver el ticket completo sin
+      // ninguna razon real de espacio - la ventana si tenia lugar de
+      // sobra). Los minimos (200/240, celulares muy chicos) no cambian.
+      const visAncho = Math.max(200, Math.min(480, window.innerWidth - 96));
+      const visAlto = Math.max(240, Math.min(600, window.innerHeight - 280));
       setVisorWidth(visAncho);
       setVisorHeight(visAlto);
 
@@ -599,22 +602,16 @@ export default function EscanerDocumento({ open, archivo, onCancelar, onConfirma
         {img && esquinas.length === 4 && (
           <>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5 }}>
-              <IconButton size="small" onClick={() => desplazar(-PASO_DESPLAZAMIENTO, 0)} aria-label="Mover a la izquierda">
-                <ArrowLeft size={18} strokeWidth={1.5} />
-              </IconButton>
               <Box>
-                <Box sx={{ display: "flex", justifyContent: "center" }}>
-                  <IconButton size="small" onClick={() => desplazar(0, -PASO_DESPLAZAMIENTO)} aria-label="Mover arriba">
-                    <ArrowUp size={18} strokeWidth={1.5} />
-                  </IconButton>
-                </Box>
                 {/* Visor: ventana visible con scroll - la imagen (dentro,
                     ref=contenedorRef) puede ser más grande que esto para
                     mejor precisión al ubicar esquinas. touchAction:"none"
                     vive en el área de arrastre de esquinas, no aquí, así
-                    que el swipe nativo SÍ funciona dentro del visor en el
-                    espacio que no sea encima de un círculo - las flechas
-                    son el respaldo explícito para cuando no. */}
+                    que el swipe/scroll nativo funciona dentro del visor en
+                    el espacio que no sea encima de un círculo - las
+                    flechas explícitas de paneo se quitaron (04/Sep/2026,
+                    pedido de Mariana) ahora que el visor ampliado
+                    (ver visAncho/visAlto) casi nunca las necesita. */}
                 <Box
                   ref={visorRef}
                   sx={{
@@ -684,15 +681,7 @@ export default function EscanerDocumento({ open, archivo, onCancelar, onConfirma
                     ))}
                   </Box>
                 </Box>
-                <Box sx={{ display: "flex", justifyContent: "center" }}>
-                  <IconButton size="small" onClick={() => desplazar(0, PASO_DESPLAZAMIENTO)} aria-label="Mover abajo">
-                    <ArrowDown size={18} strokeWidth={1.5} />
-                  </IconButton>
-                </Box>
               </Box>
-              <IconButton size="small" onClick={() => desplazar(PASO_DESPLAZAMIENTO, 0)} aria-label="Mover a la derecha">
-                <ArrowRight size={18} strokeWidth={1.5} />
-              </IconButton>
             </Box>
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1, textAlign: "center" }}>
               Ajusta los 4 puntos a tu imagen

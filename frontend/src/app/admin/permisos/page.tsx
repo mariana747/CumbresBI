@@ -93,7 +93,7 @@ const ORDEN_ACCIONES = ["leer", "crear", "editar", "aprobar"];
 const AREA_LABELS: Record<string, string> = {
   iam: "IAM",
   contrapartes: "Contrapartes",
-  "pld-compliance": "PLD / Compliance",
+  "pld-compliance": "PLD / Cumplimiento",
   "ventas-vivienda": "Ventas / Vivienda",
   materiales: "Materiales",
   rentas: "Rentas",
@@ -106,6 +106,7 @@ const AREA_LABELS: Record<string, string> = {
   docint: "Motor Documental",
   "pld-documentos": "PLD / Archivos",
   obra: "Obra",
+  "solicitud-pago": "Solicitud de Pago",
 };
 
 function friendlyAreaName(area: string): string {
@@ -202,6 +203,12 @@ export default function MatrizPermisosPage() {
   // completo (roles + permisos) ya se trae una sola vez, filtrar aqui
   // evita ir y venir al servidor por cada cambio de seleccion.
   const [areasFiltro, setAreasFiltro] = useState<string[]>([]);
+  // Filtro por rol (04/Sep/2026, pedido de Mariana: "pon un filtro por
+  // rol, como administradores, etc") - mismo patron que areasFiltro:
+  // multi-select sobre role_id, [] = sin filtro. Util para aislar, por
+  // ejemplo, solo los roles "*_ADMIN"/SUPER_ADMIN en una tabla que ya
+  // tiene muchas filas.
+  const [rolesFiltro, setRolesFiltro] = useState<string[]>([]);
 
   // Crear rol nuevo (31/Ago/2026, pedido de Mariana: "super admin debe
   // poder crear roles para colaboradores externos") - antes de esto solo
@@ -305,7 +312,14 @@ export default function MatrizPermisosPage() {
     areasFiltro.length > 0 && !editando
       ? roles.filter((role) => role.permisos.some((permKey) => areasFiltro.includes(permKey.split(".")[0])))
       : roles
-  ).filter((role) => role.tipo === tipoTab);
+  )
+    .filter((role) => role.tipo === tipoTab)
+    .filter((role) => rolesFiltro.length === 0 || rolesFiltro.includes(role.role_id));
+
+  function handleRolesChange(event: SelectChangeEvent<string[]>) {
+    const value = event.target.value;
+    setRolesFiltro(typeof value === "string" ? value.split(",") : value);
+  }
 
   function handleAreasChange(event: SelectChangeEvent<string[]>) {
     const value = event.target.value;
@@ -443,6 +457,38 @@ export default function MatrizPermisosPage() {
                   <ListItemText primary={friendlyAreaName(area)} />
                 </MenuItem>
               ))}
+            </Select>
+          </FormControl>
+
+          {/* Filtro por rol (04/Sep/2026, pedido de Mariana: "pon un filtro
+          por rol, como administradores, etc") - mismo patron que el filtro
+          de Área; las opciones son los roles de la pestaña activa
+          (Internos/Externos), asi no se puede elegir un rol que ya no se
+          esta viendo. */}
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="rol-filter-label">Rol</InputLabel>
+            <Select
+              labelId="rol-filter-label"
+              label="Rol"
+              multiple
+              value={rolesFiltro}
+              onChange={handleRolesChange}
+              renderValue={(selected) => {
+                if (selected.length === 0) return "Todos";
+                return roles
+                  .filter((r) => selected.includes(r.role_id))
+                  .map((r) => r.role_name)
+                  .join(", ");
+              }}
+            >
+              {roles
+                .filter((r) => r.tipo === tipoTab)
+                .map((role) => (
+                  <MenuItem key={role.role_id} value={role.role_id}>
+                    <Checkbox size="small" checked={rolesFiltro.includes(role.role_id)} />
+                    <ListItemText primary={role.role_name} />
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
 

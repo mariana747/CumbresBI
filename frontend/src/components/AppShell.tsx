@@ -58,6 +58,7 @@ import {
   Menu as MenuIcon,
   ShoppingCart,
   Truck,
+  CreditCard,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -264,7 +265,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
     });
   }
 
-  if (tieneAlgunPermiso(session, ["contrapartes", "tesoreria", "facturacion-cfdi"])) {
+  if (tieneAlgunPermiso(session, ["contrapartes", "tesoreria", "facturacion-cfdi", "solicitud-pago"])) {
     items.push({
       label: "Tesorería",
       href: "/tesoreria/contrapartes",
@@ -274,6 +275,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine },
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
+        { label: "Solicitudes de pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard },
         { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
         { label: "Reporte diario", href: "/tesoreria/reportes", icon: FileBarChart },
         { label: "Notas de crédito", href: "/tesoreria/notas-credito", icon: FileMinus },

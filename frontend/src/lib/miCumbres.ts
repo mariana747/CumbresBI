@@ -112,6 +112,18 @@ export async function listTicketsReembolso(search?: string): Promise<TesoreriaTi
   return response.json();
 }
 
+// Preview embebido (04/Sep/2026, "usa lo mismo que en pld" - ver
+// DocumentoPreviewDialog y pld.ts::urlVerDocumento) en vez de mandar al
+// link crudo de Drive: sirve el archivo en streaming a traves de
+// tesoreria-service, con el mismo control de acceso que list/retrieve.
+export function urlVerTicket(idTicket: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_ticket/`;
+}
+
+export function urlVerFactura(idTicket: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_factura/`;
+}
+
 // Crea el registro del ticket (JSON, sin archivo todavia) - el empleado
 // sube la foto/comprobante despues con subirFotoTicket(), mismo patron en
 // dos pasos que TesoreriaFlujoViewSet (crear -> subir_comprobante).

@@ -33,14 +33,17 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { Camera, Plus, Trash2, Upload, X as CloseIcon } from "lucide-react";
+import { Camera, Eye, Plus, ReceiptText as TicketIcon, Trash2, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import EscanerDocumento from "@/components/EscanerDocumento";
 import { getSession, SessionUser } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   crearTicketReembolso,
   getFechaLimiteReembolso,
+  urlVerFactura,
+  urlVerTicket,
   CATEGORIA_GASTO_LABELS,
   listTicketsReembolso,
   subirFotoTicket,
@@ -111,6 +114,18 @@ export default function MiCumbresTicketsPage() {
   const [tickets, setTickets] = useState<TesoreriaTicketReembolso[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Detalle de solo lectura (04/Sep/2026, pedido de Mariana: "boton de
+  // revisar datos... deberia ser icono de ojo, como en otros modulos") -
+  // mismo patron de icono que TicketsReembolsoAdminPanel/tesoreria/flujos,
+  // pero aqui sin acciones (el empleado nunca edita su propio ticket).
+  const [ticketAbierto, setTicketAbierto] = useState<TesoreriaTicketReembolso | null>(null);
+  // Preview embebido de "Ver ticket"/"Ver factura" (04/Sep/2026, "usa lo
+  // mismo que en pld") - {ticket, tipo} en vez de dos estados separados,
+  // asi un solo DocumentoPreviewDialog sirve para ambos casos.
+  const [previewDoc, setPreviewDoc] = useState<{ ticket: TesoreriaTicketReembolso; tipo: "ticket" | "factura" } | null>(
+    null
+  );
 
   // Fecha de corte real del mes (03/Sep/2026, pedido de Mariana: mostrar
   // el dia/mes/año concreto, no solo describir la regla).
@@ -314,13 +329,20 @@ export default function MiCumbresTicketsPage() {
           {tickets.map((t) => (
             <Card key={t.id_ticket} variant="outlined">
               <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                  <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
+                      {t.id_ticket}
+                    </Typography>
+                    <Typography variant="body2">
+                      {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
+                    </Typography>
+                  </Stack>
+                  <IconButton size="small" aria-label="Ver" onClick={() => setTicketAbierto(t)}>
+                    <Eye size={14} strokeWidth={1.5} />
+                  </IconButton>
+                </Stack>
                 <Stack spacing={0.5}>
-                  <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
-                    {t.id_ticket}
-                  </Typography>
-                  <Typography variant="body2">
-                    {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
-                  </Typography>
                   {/* El texto del estado es largo ("Aprobado — Tesorería
                       está facturando") - compartiendo fila con el
                       ID/descripción no cabía en pantallas de 320px y
@@ -344,12 +366,21 @@ export default function MiCumbresTicketsPage() {
                   </Typography>
                   <Stack direction="row" spacing={2}>
                     {t.link_ticket && (
-                      <MuiLink href={t.link_ticket} target="_blank" rel="noopener" variant="body2">
-                        Ver ticket
+                      <MuiLink
+                        component="button"
+                        variant="body2"
+                        onClick={() => setPreviewDoc({ ticket: t, tipo: "ticket" })}
+                        sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+                      >
+                        <TicketIcon size={14} strokeWidth={1.5} /> Ver ticket
                       </MuiLink>
                     )}
                     {t.link_factura_pdf && (
-                      <MuiLink href={t.link_factura_pdf} target="_blank" rel="noopener" variant="body2">
+                      <MuiLink
+                        component="button"
+                        variant="body2"
+                        onClick={() => setPreviewDoc({ ticket: t, tipo: "factura" })}
+                      >
                         Ver factura
                       </MuiLink>
                     )}
@@ -369,8 +400,9 @@ export default function MiCumbresTicketsPage() {
                 <TableCell>Total</TableCell>
                 <TableCell>Fecha del gasto</TableCell>
                 <TableCell>Estado</TableCell>
-                <TableCell>Ticket</TableCell>
+                <TableCell align="center">Ticket</TableCell>
                 <TableCell>Factura</TableCell>
+                <TableCell align="right">Ver</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -385,23 +417,28 @@ export default function MiCumbresTicketsPage() {
                   <TableCell>
                     <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell align="center">
                     {t.link_ticket ? (
-                      <MuiLink href={t.link_ticket} target="_blank" rel="noopener">
-                        Ver
-                      </MuiLink>
+                      <IconButton size="small" aria-label="Ver ticket" onClick={() => setPreviewDoc({ ticket: t, tipo: "ticket" })}>
+                        <TicketIcon size={14} strokeWidth={1.5} />
+                      </IconButton>
                     ) : (
                       "—"
                     )}
                   </TableCell>
                   <TableCell>
                     {t.link_factura_pdf ? (
-                      <MuiLink href={t.link_factura_pdf} target="_blank" rel="noopener">
+                      <MuiLink component="button" onClick={() => setPreviewDoc({ ticket: t, tipo: "factura" })}>
                         Ver
                       </MuiLink>
                     ) : (
                       "—"
                     )}
+                  </TableCell>
+                  <TableCell align="right">
+                    <IconButton size="small" aria-label="Ver" onClick={() => setTicketAbierto(t)}>
+                      <Eye size={14} strokeWidth={1.5} />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))}
@@ -666,6 +703,107 @@ export default function MiCumbresTicketsPage() {
           setArchivoTicket(archivo);
           setFotoParaEscanear(null);
         }}
+      />
+
+      {/* Detalle de solo lectura (04/Sep/2026, ver comentario del estado
+          ticketAbierto arriba) - el empleado solo consulta, nunca edita. */}
+      <Dialog open={!!ticketAbierto} onClose={() => setTicketAbierto(null)} fullWidth maxWidth="sm">
+        {ticketAbierto && (
+          <>
+            <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              Ticket {ticketAbierto.id_ticket}
+              <IconButton size="small" onClick={() => setTicketAbierto(null)} aria-label="Cerrar">
+                <CloseIcon size={18} strokeWidth={1.5} />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent dividers>
+              <Stack spacing={2}>
+                <Chip
+                  size="small"
+                  label={ESTADO_LABEL[ticketAbierto.estado]}
+                  color={ESTADO_COLOR[ticketAbierto.estado]}
+                  sx={{ alignSelf: "flex-start" }}
+                />
+                {ticketAbierto.descripcion && (
+                  <Typography variant="body2">
+                    <strong>Nota:</strong> {ticketAbierto.descripcion}
+                  </Typography>
+                )}
+                <Typography variant="body2">
+                  <strong>Total:</strong> ${ticketAbierto.monto_total} {ticketAbierto.moneda} —{" "}
+                  {ticketAbierto.fecha_gasto}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"}
+                </Typography>
+                {ticketAbierto.autorizado_por && (
+                  <Typography variant="body2">
+                    <strong>Autorizado por:</strong> {ticketAbierto.autorizado_por} (
+                    {ticketAbierto.fecha_autorizacion})
+                  </Typography>
+                )}
+                <Typography variant="subtitle2">Conceptos</Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Descripción</TableCell>
+                        <TableCell align="right">Monto</TableCell>
+                        <TableCell>Categoría</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {ticketAbierto.conceptos.map((c) => (
+                        <TableRow key={c.id_concepto}>
+                          <TableCell>{c.descripcion}</TableCell>
+                          <TableCell align="right">${c.monto}</TableCell>
+                          <TableCell>{c.categoria_gasto ? CATEGORIA_GASTO_LABELS[c.categoria_gasto] : "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                {ticketAbierto.comentarios && (
+                  <Typography variant="body2">
+                    <strong>Comentarios de Tesorería:</strong> {ticketAbierto.comentarios}
+                  </Typography>
+                )}
+                <Stack direction="row" spacing={2}>
+                  {ticketAbierto.link_ticket && (
+                    <MuiLink
+                      component="button"
+                      onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "ticket" })}
+                      sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+                    >
+                      <TicketIcon size={14} strokeWidth={1.5} /> Ver ticket
+                    </MuiLink>
+                  )}
+                  {ticketAbierto.link_factura_pdf && (
+                    <MuiLink component="button" onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "factura" })}>
+                      Ver factura
+                    </MuiLink>
+                  )}
+                </Stack>
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setTicketAbierto(null)}>Cerrar</Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
+
+      <DocumentoPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={
+          previewDoc
+            ? previewDoc.tipo === "ticket"
+              ? urlVerTicket(previewDoc.ticket.id_ticket)
+              : urlVerFactura(previewDoc.ticket.id_ticket)
+            : null
+        }
+        titulo={previewDoc ? `${previewDoc.tipo === "ticket" ? "Ticket" : "Factura"} ${previewDoc.ticket.id_ticket}` : ""}
       />
     </AppShell>
   );
