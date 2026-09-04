@@ -222,7 +222,7 @@ export default function MatrizPermisosPage() {
   const [errorNuevoRol, setErrorNuevoRol] = useState<string | null>(null);
 
   // tipo preseleccionado (31/Ago/2026): cada tarjeta (Internos/Externos)
-  // tiene su propio boton "Nuevo rol", ya viene con el tipo correcto - no
+  // tiene su propio boton "Nuevo Rol", ya viene con el tipo correcto - no
   // hace falta elegirlo a mano dentro del dialogo.
   function abrirNuevoRol(tipo: IamRoleTipo) {
     setNuevoRoleTipo(tipo);
@@ -400,7 +400,7 @@ export default function MatrizPermisosPage() {
   return (
     <AppShell>
       {/* 31/Ago/2026 (pedido de Mariana: "quiero que se vea asi") - titulo
-      solo a la izquierda; TODO lo demas (caja, Área, Nuevo rol, Modo
+      solo a la izquierda; TODO lo demas (caja, Área, Nuevo Rol, Modo
       edicion) agrupado en un solo bloque que envuelve junto como unidad -
       antes cada uno envolvia por separado y quedaba chueco. */}
       <Stack
@@ -409,7 +409,7 @@ export default function MatrizPermisosPage() {
         spacing={2}
         sx={{ mb: 2 }}
       >
-        <Typography variant="h5">Matriz de permisos</Typography>
+        <Typography variant="h5">Matriz de Permisos</Typography>
 
         {/* flex:1 + justifyContent center (31/Ago/2026, pedido de Mariana:
         "no esta centrado") - antes esto quedaba pegado a la derecha por
@@ -503,7 +503,7 @@ export default function MatrizPermisosPage() {
               onClick={() => abrirNuevoRol(tipoTab)}
               sx={{ whiteSpace: "nowrap" }}
             >
-              Nuevo rol {tipoTab === "EXTERNO" ? "externo" : "interno"}
+              Nuevo Rol {tipoTab === "EXTERNO" ? "externo" : "interno"}
             </Button>
           )}
           {/* A diferencia del resto de la app (boton visible pero
@@ -698,7 +698,7 @@ export default function MatrizPermisosPage() {
       </Menu>
 
       <Dialog open={openNuevoRol} onClose={cerrarNuevoRol} fullWidth maxWidth="xs">
-        <DialogTitle>Nuevo rol</DialogTitle>
+        <DialogTitle>Nuevo Rol</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">

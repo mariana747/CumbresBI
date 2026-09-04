@@ -341,7 +341,7 @@ export default function TesoreriaComplementosPagoPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <Receipt size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Complementos de pago</Typography>
+        <Typography variant="h5">Complementos de Pago</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         CFDI de tipo REP que confirma el pago de una factura a crédito.
@@ -395,7 +395,7 @@ export default function TesoreriaComplementosPagoPage() {
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nuevo complemento
+              Nuevo Complemento
             </Button>
           )}
         </Stack>
@@ -514,7 +514,7 @@ export default function TesoreriaComplementosPagoPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar complemento ${editing.folio || editing.timbre_uuid}` : "Nuevo complemento"}
+          {editing ? `Editar Complemento ${editing.folio || editing.timbre_uuid}` : "Nuevo Complemento"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

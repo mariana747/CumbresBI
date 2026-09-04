@@ -499,7 +499,7 @@ export default function TesoreriaFacturasPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFactura | null>(null);
   const [form, setForm] = useState(FORM_VACIO);
-  // Proveedor a revisar en "Nueva factura" > Motor Documental (27/Ago/2026,
+  // Proveedor a revisar en "Nueva Factura" > Motor Documental (27/Ago/2026,
   // pedido de Mariana: "proveedores se dividen dentro por su id") - los
   // PDF que sube el proveedor via ticket publico quedan en su propia
   // subcarpeta (Tesoreria/Facturas/FacturasProveedores/<id_contraparte>),
@@ -606,7 +606,7 @@ export default function TesoreriaFacturasPage() {
   }
 
   // Fila de ticket ya usada por el proveedor (subio su PDF) - abre
-  // directo "Nueva factura" con el proveedor ya preseleccionado y el
+  // directo "Nueva Factura" con el proveedor ya preseleccionado y el
   // Motor Documental abierto, sin que el analista tenga que elegir nada
   // (pedido de Mariana 27/Ago/2026: "cuando se manda la invitacion se
   // debe de poner ya en la tabla sin poner nueva factura" - la fila ya
@@ -1126,7 +1126,7 @@ export default function TesoreriaFacturasPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar factura ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva factura"}
+          {editing ? `Editar Factura ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva Factura"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

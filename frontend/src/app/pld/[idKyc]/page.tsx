@@ -1684,7 +1684,7 @@ export default function PldExpedienteDetallePage() {
 
       <Dialog open={dialogRepAbierto} onClose={() => setDialogRepAbierto(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editandoRep ? `Editar representante` : "Nuevo representante legal"}
+          {editandoRep ? `Editar Representante` : "Nuevo Representante Legal"}
           <IconButton onClick={() => setDialogRepAbierto(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

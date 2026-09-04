@@ -341,7 +341,7 @@ export default function TesoreriaCuentasPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <Wallet size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Cuentas bancarias</Typography>
+        <Typography variant="h5">Cuentas Bancarias</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Cuentas y catálogo de bancos (Banxico) — base para registrar saldos y flujos de Tesorería.
@@ -367,7 +367,7 @@ export default function TesoreriaCuentasPage() {
               onClick={abrirAltaCuenta}
               sx={{ ml: "auto" }}
             >
-              Nueva cuenta
+              Nueva Cuenta
             </Button>
           )}
         </Stack>
@@ -509,7 +509,7 @@ export default function TesoreriaCuentasPage() {
               onClick={abrirAltaBanco}
               sx={{ ml: "auto" }}
             >
-              Nuevo banco
+              Nuevo Banco
             </Button>
           )}
         </Stack>
@@ -606,7 +606,7 @@ export default function TesoreriaCuentasPage() {
       {/* Alta/edicion de cuenta */}
       <Dialog open={cuentaDialogOpen} onClose={() => setCuentaDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editingCuenta ? `Editar ${editingCuenta.alias || editingCuenta.id_cuenta_bancaria}` : "Nueva cuenta"}
+          {editingCuenta ? `Editar ${editingCuenta.alias || editingCuenta.id_cuenta_bancaria}` : "Nueva Cuenta"}
           <IconButton onClick={() => setCuentaDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -766,7 +766,7 @@ export default function TesoreriaCuentasPage() {
       {/* Alta/edicion de banco */}
       <Dialog open={bancoDialogOpen} onClose={() => setBancoDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editingBanco ? `Editar ${editingBanco.banco || editingBanco.id_banxico}` : "Nuevo banco"}
+          {editingBanco ? `Editar ${editingBanco.banco || editingBanco.id_banxico}` : "Nuevo Banco"}
           <IconButton onClick={() => setBancoDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -836,7 +836,7 @@ export default function TesoreriaCuentasPage() {
               }}
               sx={{ mb: 2 }}
             >
-              Nuevo corte/EDC
+              Nuevo Corte/EDC
             </Button>
           )}
           {corteFormOpen && (

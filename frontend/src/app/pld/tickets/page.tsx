@@ -42,7 +42,7 @@ const ESTADO_LLENADO_LABELS: Record<string, string> = {
   ENTREGADO: "Entregado",
 };
 
-// Tickets de cliente externo para KYC (Fase 2, Semana 9 - "Workflow de
+// Tickets de Cliente externo para KYC (Fase 2, Semana 9 - "Workflow de
 // expediente y formularios públicos"). Mismo patrón de pantalla que
 // /admin/invitaciones (pestaña "Temporales") (iam-service) pero simplificado - sin carga masiva
 // por CSV, no la pidió el negocio para este flujo todavía. Modo dev: sin
@@ -186,7 +186,7 @@ export default function TicketsClientePage() {
   return (
     <AppShell>
       <Typography variant="h5" gutterBottom>
-        Tickets de cliente
+        Tickets de Cliente
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Acceso de un solo uso para un cliente externo, para llenar o consultar su expediente KYC sin

@@ -215,7 +215,7 @@ export default function ViviendasTab({
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nueva unidad
+              Nueva Unidad
             </Button>
           )}
         </Stack>
@@ -274,7 +274,7 @@ export default function ViviendasTab({
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.denominacion || editing.id_vivienda}` : "Nueva unidad"}
+          {editing ? `Editar ${editing.denominacion || editing.id_vivienda}` : "Nueva Unidad"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

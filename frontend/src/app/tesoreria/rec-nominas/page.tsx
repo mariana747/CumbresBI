@@ -139,7 +139,7 @@ export default function TesoreriaRecNominasPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <Wallet2 size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Recibos de nómina</Typography>
+        <Typography variant="h5">Recibos de Nómina</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         CFDI de nómina — encabezado/resumen; el detalle de percepciones y deducciones vive en el PDF/XML del recibo.
@@ -175,7 +175,7 @@ export default function TesoreriaRecNominasPage() {
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nuevo recibo
+              Nuevo Recibo
             </Button>
           )}
         </Stack>
@@ -290,7 +290,7 @@ export default function TesoreriaRecNominasPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar recibo ${editing.folio || editing.timbre_uuid}` : "Nuevo recibo"}
+          {editing ? `Editar Recibo ${editing.folio || editing.timbre_uuid}` : "Nuevo Recibo"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

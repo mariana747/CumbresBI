@@ -94,7 +94,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // 31/Ago/2026 (pedido de Mariana: "en el filtro de sociedades solo
   // deben aparecer las activas para ese rol - en global o super admin asi
   // esta bien") - el filtro de la lista (a diferencia del selector del
-  // dialogo "Nuevo expediente", que se queda con el catalogo completo)
+  // dialogo "Nuevo Expediente", que se queda con el catalogo completo)
   // solo debe ofrecer sociedades a las que el usuario de verdad tiene
   // acceso. GLOBAL sigue viendo el catalogo entero.
   const sociedadesDelFiltro =
@@ -182,7 +182,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
               setDialogoAbierto(true);
             }}
           >
-            Nuevo expediente
+            Nuevo Expediente
           </Button>
         )}
       </Stack>
@@ -196,7 +196,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>Nuevo expediente KYC</DialogTitle>
+        <DialogTitle>Nuevo Expediente KYC</DialogTitle>
         <Stack component="form" onSubmit={handleCrearExpediente}>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

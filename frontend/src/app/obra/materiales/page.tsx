@@ -365,7 +365,7 @@ export default function MaterialesPage() {
                     onClick={abrirAltaMaterial}
                     sx={{ ml: "auto" }}
                   >
-                    Nuevo material
+                    Nuevo Material
                   </Button>
                 )}
               </Stack>
@@ -480,7 +480,7 @@ export default function MaterialesPage() {
                     disabled={materiales.length === 0}
                     sx={{ ml: "auto" }}
                   >
-                    Nueva salida
+                    Nueva Salida
                   </Button>
                 )}
               </Stack>
@@ -633,7 +633,7 @@ export default function MaterialesPage() {
 
       <Dialog open={materialDialogOpen} onClose={() => setMaterialDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editandoMaterial ? `Editar ${editandoMaterial.material}` : "Nuevo material"}
+          {editandoMaterial ? `Editar ${editandoMaterial.material}` : "Nuevo Material"}
           <IconButton onClick={() => setMaterialDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -703,7 +703,7 @@ export default function MaterialesPage() {
 
       <Dialog open={solicitudDialogOpen} onClose={() => setSolicitudDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          Nueva salida de almacén
+          Nueva Salida de Almacén
           <IconButton onClick={() => setSolicitudDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

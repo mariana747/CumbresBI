@@ -142,7 +142,7 @@ export default function NuevaRequisicionPage() {
           <Typography sx={{ fontSize: 11, letterSpacing: 1, color: DOC.textFaint, textTransform: "uppercase" }}>
             Admin de obra · Requisición de materiales
           </Typography>
-          <Typography sx={{ fontSize: 22, fontWeight: 700, color: DOC.text }}>Nueva requisición</Typography>
+          <Typography sx={{ fontSize: 22, fontWeight: 700, color: DOC.text }}>Nueva Requisición</Typography>
           <Typography sx={{ fontSize: 12, color: DOC.textFaint }}>
             El folio se genera al guardar. Mientras tanto, esta es una vista previa en vivo.
           </Typography>

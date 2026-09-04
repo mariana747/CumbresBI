@@ -208,7 +208,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
     // la misma etiqueta se veia identico al menu completo y confundia a
     // quien solo puede ver (hallazgo 11/Ago/2026, PLD_ANALISTA).
     items.push({
-      label: "Administración (solo lectura)",
+      label: "Administración (Solo Lectura)",
       href: "/admin/usuarios",
       icon: ShieldCheck,
       enabled: true,
@@ -229,7 +229,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       enabled: true,
       children: [
         { label: "Expedientes KYC", href: "/pld", icon: FileSearch },
-        { label: "Tickets de cliente", href: "/pld/tickets", icon: Link2 },
+        { label: "Tickets de Cliente", href: "/pld/tickets", icon: Link2 },
       ],
     });
   }
@@ -275,14 +275,14 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine },
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
-        { label: "Solicitudes de pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard },
+        { label: "Solicitudes de Pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard },
         { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
-        { label: "Reporte diario", href: "/tesoreria/reportes", icon: FileBarChart },
-        { label: "Notas de crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
-        { label: "Cuentas bancarias", href: "/tesoreria/cuentas", icon: Wallet },
+        { label: "Reporte Diario", href: "/tesoreria/reportes", icon: FileBarChart },
+        { label: "Notas de Crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
+        { label: "Cuentas Bancarias", href: "/tesoreria/cuentas", icon: Wallet },
         { label: "Facturas", href: "/tesoreria/facturas", icon: FileText },
-        { label: "Complementos de pago", href: "/tesoreria/complementos-pago", icon: Receipt },
-        { label: "Recibos de nómina", href: "/tesoreria/rec-nominas", icon: Wallet2 },
+        { label: "Complementos de Pago", href: "/tesoreria/complementos-pago", icon: Receipt },
+        { label: "Recibos de Nómina", href: "/tesoreria/rec-nominas", icon: Wallet2 },
       ],
     });
   }
@@ -297,8 +297,8 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       enabled: true,
       children: [
         { label: "Avance", href: "/obra/avance", icon: HardHat },
-        { label: "Cortes semanales", href: "/obra/cortes", icon: CalendarCheck },
-        { label: "Catálogo (etapas/conceptos)", href: "/obra/catalogo", icon: ListTree },
+        { label: "Cortes Semanales", href: "/obra/cortes", icon: CalendarCheck },
+        { label: "Catálogo (Etapas/Conceptos)", href: "/obra/catalogo", icon: ListTree },
         // Materiales vive aqui desde 21/Ago/2026 (pedido de Mariana:
         // "materiales debe estar en obra") - antes colgaba de Ventas/
         // Vivienda; el backend (materiales-service) no cambio, solo el
@@ -327,7 +327,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       children: [
         { label: "Solicitudes", href: "/compras/solicitudes", icon: ClipboardList },
         { label: "Cotizaciones", href: "/compras/cotizaciones", icon: FileSearch },
-        { label: "Órdenes de compra", href: "/compras/ordenes", icon: FileText },
+        { label: "Órdenes de Compra", href: "/compras/ordenes", icon: FileText },
         { label: "Recepciones", href: "/compras/recepciones", icon: Truck },
       ],
     });
@@ -347,7 +347,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // mismo criterio que el resto de MiCumbres) mientras no exista el
   // portal MiCumbres/RRHH real (Fase 5, sin arrancar).
   items.push({
-    label: "MiCumbres (portal empleado)",
+    label: "MiCumbres (Portal Empleado)",
     href: "/micumbres",
     icon: UserRound,
     enabled: true,

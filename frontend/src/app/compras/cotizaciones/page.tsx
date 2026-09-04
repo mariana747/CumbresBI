@@ -244,7 +244,7 @@ function CotizacionesPageInner() {
               onClick={() => setDialogOpen(true)}
               sx={{ alignSelf: "flex-start" }}
             >
-              Nueva cotización
+              Nueva Cotización
             </Button>
           )}
 
@@ -423,7 +423,7 @@ function CotizacionesPageInner() {
       )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Nueva cotización</DialogTitle>
+        <DialogTitle>Nueva Cotización</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <ContraparteSelector

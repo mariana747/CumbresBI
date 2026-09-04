@@ -61,7 +61,7 @@ function OrdenesPageInner() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <FileText size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Órdenes de compra</Typography>
+        <Typography variant="h5">Órdenes de Compra</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Generadas desde la cotización ganadora de cada solicitud. Para registrar lo que llegó de una orden, ve a

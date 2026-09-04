@@ -266,7 +266,7 @@ export default function SolicitudesPagoPage() {
         <Box>
           <Stack direction="row" alignItems="center" spacing={1.5}>
             <CreditCard size={22} strokeWidth={1.5} />
-            <Typography variant={esMovil ? "h6" : "h5"}>Solicitudes de pago</Typography>
+            <Typography variant={esMovil ? "h6" : "h5"}>Solicitudes de Pago</Typography>
           </Stack>
           <Typography variant="body2" color="text.secondary">
             Pago de servicios, licencias y renovaciones, dividido por proyecto.
@@ -279,7 +279,7 @@ export default function SolicitudesPagoPage() {
             startIcon={<Plus size={18} strokeWidth={1.5} />}
             onClick={() => setOpenNuevo(true)}
           >
-            Nueva solicitud
+            Nueva Solicitud
           </Button>
         )}
       </Stack>
@@ -470,7 +470,7 @@ export default function SolicitudesPagoPage() {
 
       <Dialog open={openNuevo} onClose={cerrarNuevo} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          Nueva solicitud de pago
+          Nueva Solicitud de Pago
           <IconButton size="small" onClick={cerrarNuevo} aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

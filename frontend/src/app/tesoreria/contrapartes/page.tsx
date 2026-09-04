@@ -573,7 +573,7 @@ function TesoreriaContrapartesPageContent() {
               onClick={abrirAlta}
               sx={{ ml: { sm: "auto" } }}
             >
-              Nueva contraparte
+              Nueva Contraparte
             </Button>
           )}
         </Stack>
@@ -819,7 +819,7 @@ function TesoreriaContrapartesPageContent() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {soloLectura ? `Ver ${editing?.razon_social}` : editing ? `Editar ${editing.razon_social}` : "Nueva contraparte"}
+          {soloLectura ? `Ver ${editing?.razon_social}` : editing ? `Editar ${editing.razon_social}` : "Nueva Contraparte"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -1155,7 +1155,7 @@ function TesoreriaContrapartesPageContent() {
               }}
               sx={{ mb: 2 }}
             >
-              Nueva relación
+              Nueva Relación
             </Button>
           )}
           {relacionFormOpen && (

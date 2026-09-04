@@ -197,7 +197,7 @@ export default function ObraCortesPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <CalendarCheck size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Cortes semanales</Typography>
+        <Typography variant="h5">Cortes Semanales</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Snapshot del avance cada viernes. El avance se actualiza a diario en tiempo real — el corte no se
@@ -220,7 +220,7 @@ export default function ObraCortesPage() {
               onClick={abrirAlta}
               sx={{ ml: "auto" }}
             >
-              Nuevo corte
+              Nuevo Corte
             </Button>
           )}
         </Stack>
@@ -350,7 +350,7 @@ export default function ObraCortesPage() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          Nuevo corte semanal
+          Nuevo Corte Semanal
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

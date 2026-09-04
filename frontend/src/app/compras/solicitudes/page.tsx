@@ -101,7 +101,7 @@ export default function SolicitudesCompraPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <ClipboardList size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Solicitudes de compra</Typography>
+        <Typography variant="h5">Solicitudes de Compra</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Punto de partida del proceso de Compras: solicitud → cotizaciones → orden de compra → recepción. Puede
@@ -130,7 +130,7 @@ export default function SolicitudesCompraPage() {
                 onClick={() => setDialogOpen(true)}
                 sx={{ ml: "auto" }}
               >
-                Nueva solicitud
+                Nueva Solicitud
               </Button>
             )}
           </Stack>
@@ -224,7 +224,7 @@ export default function SolicitudesCompraPage() {
       )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Nueva solicitud de compra</DialogTitle>
+        <DialogTitle>Nueva Solicitud de Compra</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField

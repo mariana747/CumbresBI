@@ -187,18 +187,19 @@ describe("buildNavItems - Tesorería", () => {
       // Orden real de AppShell.tsx (31/Ago/2026): Contrapartes ahora va
       // primero, seguida de Contratos y Flujos (Contrato -> genera Flujos,
       // ver memoria "tesoreria-alcance-real"), el resto sigue igual desde
-      // el 26/Ago/2026.
+      // el 26/Ago/2026; "Solicitudes de Pago" agregada 04/Sep/2026.
       expect(labels).toEqual([
         "Contrapartes",
         "Contratos",
         "Flujos",
+        "Solicitudes de Pago",
         "Saldos",
-        "Reporte diario",
-        "Notas de crédito",
-        "Cuentas bancarias",
+        "Reporte Diario",
+        "Notas de Crédito",
+        "Cuentas Bancarias",
         "Facturas",
-        "Complementos de pago",
-        "Recibos de nómina",
+        "Complementos de Pago",
+        "Recibos de Nómina",
       ]);
     }
   });

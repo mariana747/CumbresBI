@@ -183,7 +183,7 @@ export default function TesoreriaReporteDiarioPage() {
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <FileBarChart size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Reporte diario de saldos</Typography>
+        <Typography variant="h5">Reporte Diario de Saldos</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Por empresa — compara las transacciones del día contra el cambio de saldo de cada cuenta.
