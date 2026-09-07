@@ -203,5 +203,8 @@ RECAPTCHA_SECRET_KEY = env("RECAPTCHA_SECRET_KEY", default="")
 REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "pld-ticket-subir": "10/hour",
+        # PldDocumentoTicketViewSet.subir (04/Sep/2026) - mismo criterio
+        # que pld-ticket-subir arriba, ticket de un solo documento.
+        "pld-documento-ticket-subir": "10/hour",
     },
 }

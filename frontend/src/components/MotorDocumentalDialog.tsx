@@ -44,6 +44,7 @@ import {
   PLD_CAMPOS_CONFIRMABLES,
   PldContraparteKyc,
   PldDatosEditables,
+  TIPO_DOCUMENTO_PLD_LABELS,
   confirmarExtraccionKyc,
 } from "@/lib/pld";
 import { getSession } from "@/lib/auth";
@@ -308,6 +309,33 @@ export default function MotorDocumentalDialog({
   const [driveError, setDriveError] = useState<string | null>(null);
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
 
+  // 07/Sep/2026: "en lugar de esperar hay que ponerlo como lo tenemos en el
+  // expediente" - en modo expediente KYC (kycPreseleccionado/kycSeleccionado,
+  // sin `contexto`) ya NO se pide una lista cruda de Drive con "Ver archivos
+  // en Drive" (esperaba una llamada extra a la API de Drive); se usa
+  // directamente el checklist que ya se cargo con el expediente
+  // (kycActual.documentos, con drive_file_id real) - mismo dato que ya se ve
+  // en la pestaña "Documentos KYC", sin loading ni carpeta que listar.
+  useEffect(() => {
+    if (contexto) return;
+    if (!kycActual) {
+      setDriveFiles([]);
+      return;
+    }
+    setDriveFiles(
+      kycActual.documentos
+        .filter((doc) => doc.drive_file_id)
+        .map((doc) => ({
+          file_id: doc.drive_file_id as string,
+          nombre:
+            (doc.tipo_documento && TIPO_DOCUMENTO_PLD_LABELS[doc.tipo_documento]) ||
+            doc.denominacion ||
+            "Documento sin nombre",
+          web_view_link: doc.link_documento,
+        }))
+    );
+  }, [contexto, kycActual]);
+
   const [documents, setDocuments] = useState<DocumentResult[]>([]);
 
   // Actor real de "confirmar_extraccion" para la auditoria del Motor
@@ -351,6 +379,74 @@ export default function MotorDocumentalDialog({
     });
   }
 
+  // Normaliza para comparar sin falsos positivos por acentos/mayusculas
+  // (07/Sep/2026, "se marca como diferente sin serlo").
+  function normalizar(valor: string): string {
+    return valor
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
+  // "Nombre completo / Razón social": el documento y el cliente casi nunca
+  // escriben el nombre en el mismo orden (paterno-materno-nombres vs.
+  // nombres-paterno-materno) - comparar como conjunto de palabras, no como
+  // cadena exacta, para no marcar como conflicto lo que es el mismo nombre.
+  function coincideNombre(valorDocumento: string, valorActual: string): boolean {
+    const palabrasDoc = normalizar(valorDocumento).split(" ").filter(Boolean).sort();
+    const palabrasActual = normalizar(valorActual).split(" ").filter(Boolean).sort();
+    return palabrasDoc.length > 0 && palabrasDoc.join(" ") === palabrasActual.join(" ");
+  }
+
+  // "Tipo de identificación": el catalogo real que ve el cliente
+  // (lib/paises.ts::TIPOS_IDENTIFICACION) usa "INE / Credencial para
+  // votar", pero Gemini puede describirlo distinto ("Identificación
+  // oficial", "INE", "INE/IFE"...) - un match por substring de la sigla
+  // evita marcarlo como conflicto cuando es el mismo tipo de documento.
+  function coincideTipoIdentificacion(valorDocumento: string, valorActual: string): boolean {
+    const doc = normalizar(valorDocumento);
+    const actual = normalizar(valorActual);
+    if (doc === actual) return true;
+    const sinonimosIne = ["ine", "ife", "identificacion oficial", "credencial para votar"];
+    const esIneDoc = sinonimosIne.some((s) => doc.includes(s));
+    const esIneActual = sinonimosIne.some((s) => actual.includes(s));
+    return esIneDoc && esIneActual;
+  }
+
+  // Distancia de edicion (Levenshtein) - tolera errores de dedo/OCR del
+  // tipo "Cuauhtemoc" vs "Cuauhtenoc" (07/Sep/2026, "esto tambien hay que
+  // normalizarlo") sin dejar de detectar diferencias reales (otra calle,
+  // otro numero). Implementacion clasica de programacion dinamica.
+  function distanciaEdicion(a: string, b: string): number {
+    const filas = a.length + 1;
+    const columnas = b.length + 1;
+    const dp: number[][] = Array.from({ length: filas }, (_, i) => [i, ...Array(columnas - 1).fill(0)]);
+    for (let j = 0; j < columnas; j++) dp[0][j] = j;
+    for (let i = 1; i < filas; i++) {
+      for (let j = 1; j < columnas; j++) {
+        dp[i][j] =
+          a[i - 1] === b[j - 1]
+            ? dp[i - 1][j - 1]
+            : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[filas - 1][columnas - 1];
+  }
+
+  // Tolerancia general a errores menores de captura/OCR para cualquier
+  // campo (no solo Calle) - un texto casi identico (1-2 caracteres de
+  // diferencia, proporcional al largo) no deberia marcarse como conflicto
+  // real. Umbral conservador: 1 caracter cada ~8, minimo 1.
+  function sonSimilares(valorDocumento: string, valorActual: string): boolean {
+    const doc = normalizar(valorDocumento);
+    const actual = normalizar(valorActual);
+    if (!doc || !actual) return false;
+    const tolerancia = Math.max(1, Math.floor(Math.max(doc.length, actual.length) / 8));
+    return distanciaEdicion(doc, actual) <= tolerancia;
+  }
+
   // Compara los datos que salieron del documento contra lo que el cliente
   // ya tiene guardado en el expediente (25/Ago/2026, requerimiento real:
   // "vamos a comparar con la informacion que da el usuario") - solo aviso
@@ -368,12 +464,25 @@ export default function MotorDocumentalDialog({
       .map(([campo, value]) => {
         const valorDocumento = String(value);
         const valorActual = (kycActual[campo as keyof PldDatosEditables] as string | null | undefined) ?? null;
+        let coincide = !valorActual || normalizar(valorActual) === normalizar(valorDocumento);
+        if (valorActual && !coincide && campo === "nombre_completo") {
+          coincide = coincideNombre(valorDocumento, valorActual);
+        }
+        if (valorActual && !coincide && campo === "tipo_identificacion") {
+          coincide = coincideTipoIdentificacion(valorDocumento, valorActual);
+        }
+        // Fallback general (07/Sep/2026): un typo/error de OCR de 1-2
+        // caracteres en cualquier campo de texto libre (calle, colonia,
+        // municipio...) no deberia marcarse como conflicto real.
+        if (valorActual && !coincide) {
+          coincide = sonSimilares(valorDocumento, valorActual);
+        }
         return {
           campo,
           label: LABELS_CAMPOS[campo] ?? campo,
           valorDocumento,
           valorActual,
-          coincide: !valorActual || valorActual.trim().toLowerCase() === valorDocumento.trim().toLowerCase(),
+          coincide,
         };
       });
   }
@@ -607,17 +716,24 @@ export default function MotorDocumentalDialog({
                 </FormControl>
               )}
 
-              <Button
-                variant="outlined"
-                startIcon={
-                  loadingDriveFiles ? <CircularProgress size={18} /> : <FolderSearch size={18} strokeWidth={1.5} />
-                }
-                disabled={!destinoListo || loadingDriveFiles}
-                onClick={handleVerArchivosDrive}
-                sx={{ justifyContent: "flex-start" }}
-              >
-                Ver archivos en Drive
-              </Button>
+              {/* 07/Sep/2026: en modo expediente KYC (sin `contexto`) ya no
+              hace falta este boton - driveFiles se puebla solo desde
+              kycActual.documentos (ver useEffect de arriba). Se queda solo
+              para el modo `contexto` generico (otros servicios sin un
+              checklist propio que reusar). */}
+              {contexto && (
+                <Button
+                  variant="outlined"
+                  startIcon={
+                    loadingDriveFiles ? <CircularProgress size={18} /> : <FolderSearch size={18} strokeWidth={1.5} />
+                  }
+                  disabled={!destinoListo || loadingDriveFiles}
+                  onClick={handleVerArchivosDrive}
+                  sx={{ justifyContent: "flex-start" }}
+                >
+                  Ver archivos en Drive
+                </Button>
+              )}
 
               {driveError && <Alert severity="error">{driveError}</Alert>}
 
@@ -668,8 +784,9 @@ export default function MotorDocumentalDialog({
 
               {driveFiles.length === 0 && !loadingDriveFiles && destinoListo && (
                 <Typography variant="caption" color="text.secondary">
-                  Sin archivos listados todavía — clic en "Ver archivos en
-                  Drive" (o la carpeta está vacía).
+                  {contexto
+                    ? 'Sin archivos listados todavía — clic en "Ver archivos en Drive" (o la carpeta está vacía).'
+                    : "Este expediente todavía no tiene documentos recibidos en el checklist."}
                 </Typography>
               )}
 

@@ -6,12 +6,114 @@ import { GATEWAY_URL } from "./gatewayUrl";
 export type PldEstadoLlenado = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO";
 export type PldDocStatus = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO" | "APROBADO";
 
+// Color de Chip por status de documento (07/Sep/2026, "en los estados
+// agrégale los colores") - default (gris) para PENDIENTE (nada ha pasado
+// todavia), warning para INCOMPLETO, info para ENTREGADO (ya llego el
+// archivo, falta revisar), success para APROBADO (estado final bueno).
+export const DOC_STATUS_COLORS: Record<PldDocStatus, "default" | "warning" | "info" | "success"> = {
+  PENDIENTE: "default",
+  INCOMPLETO: "warning",
+  ENTREGADO: "info",
+  APROBADO: "success",
+};
+
+// Catalogo cerrado completo (04/Sep/2026, checklist de proveedores):
+// identidad + especifico de cumplimiento - se duplica a proposito contra
+// el catalogo por contrato de tesoreria-service ("no importa si se piden
+// lo mismo", Mariana). Espejo de PldContraparteDoc.TIPO_DOCUMENTO_CHOICES
+// (pld-service/pld/models.py).
+export type PldTipoDocumento =
+  | "IDENTIFICACION_OFICIAL"
+  | "CURP"
+  | "ACTA_CONSTITUTIVA"
+  | "CONSTANCIA_SITUACION_FISCAL"
+  | "INSCRIPCION_RPC"
+  | "INFO_BANCARIA"
+  | "VALIDACION_TITULARIDAD_CUENTA"
+  | "OPINION_CUMPLIMIENTO"
+  | "COMPROBANTE_DOMICILIO"
+  | "CUESTIONARIO_RIESGO"
+  | "DECLARACION_ORIGEN_FONDOS"
+  | "EVIDENCIA_PEP"
+  | "ORGANIGRAMA_ACCIONARIO";
+
+export const TIPO_DOCUMENTO_PLD_LABELS: Record<PldTipoDocumento, string> = {
+  IDENTIFICACION_OFICIAL: "Identificación oficial",
+  CURP: "CURP",
+  ACTA_CONSTITUTIVA: "Acta constitutiva",
+  CONSTANCIA_SITUACION_FISCAL: "Constancia de Situación Fiscal",
+  INSCRIPCION_RPC: "Inscripción en el Registro Público de Comercio",
+  INFO_BANCARIA: "Carátula / información bancaria",
+  VALIDACION_TITULARIDAD_CUENTA: "Validación de titularidad de la cuenta",
+  OPINION_CUMPLIMIENTO: "Opinión de Cumplimiento (SAT)",
+  COMPROBANTE_DOMICILIO: "Comprobante de domicilio",
+  CUESTIONARIO_RIESGO: "Cuestionario de riesgo",
+  DECLARACION_ORIGEN_FONDOS: "Declaración de origen de fondos",
+  EVIDENCIA_PEP: "Evidencia de análisis PEP",
+  ORGANIGRAMA_ACCIONARIO: "Organigrama accionario (KYB)",
+};
+
+// Que opciones se ofrecen segun la categoria del expediente (04/Sep,
+// pedido explicito: "que se muestre para los C unicamente los que
+// necesite y la B solo las que necesite") - espejo de
+// PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA en el backend. Sin
+// entrada para PENDIENTE_REVISION a proposito - un expediente sin
+// clasificar todavia ve el catalogo completo (union de KYC+KYB), no se le
+// puede ocultar nada hasta saber si es fisica o moral.
+export const TIPOS_DOCUMENTO_POR_CATEGORIA: Record<"KYC" | "KYB", PldTipoDocumento[]> = {
+  KYC: [
+    "IDENTIFICACION_OFICIAL",
+    "CURP",
+    "CONSTANCIA_SITUACION_FISCAL",
+    "INFO_BANCARIA",
+    "VALIDACION_TITULARIDAD_CUENTA",
+    "OPINION_CUMPLIMIENTO",
+    "COMPROBANTE_DOMICILIO",
+    "CUESTIONARIO_RIESGO",
+    "DECLARACION_ORIGEN_FONDOS",
+    "EVIDENCIA_PEP",
+  ],
+  KYB: [
+    "ACTA_CONSTITUTIVA",
+    "CONSTANCIA_SITUACION_FISCAL",
+    "INSCRIPCION_RPC",
+    "INFO_BANCARIA",
+    "VALIDACION_TITULARIDAD_CUENTA",
+    "OPINION_CUMPLIMIENTO",
+    "COMPROBANTE_DOMICILIO",
+    "CUESTIONARIO_RIESGO",
+    "DECLARACION_ORIGEN_FONDOS",
+    "EVIDENCIA_PEP",
+    "ORGANIGRAMA_ACCIONARIO",
+  ],
+};
+
+// Opciones a mostrar en el Select segun la categoria del expediente - las
+// dos listas de arriba si es KYC/KYB, la union completa (sin duplicados)
+// si todavia esta PENDIENTE_REVISION o sin clasificar.
+export function tiposDocumentoDisponibles(
+  categoria: PldCategoriaCumplimiento | null
+): PldTipoDocumento[] {
+  if (categoria === "KYC" || categoria === "KYB") {
+    return TIPOS_DOCUMENTO_POR_CATEGORIA[categoria];
+  }
+  return Array.from(new Set([...TIPOS_DOCUMENTO_POR_CATEGORIA.KYC, ...TIPOS_DOCUMENTO_POR_CATEGORIA.KYB]));
+}
+
 export interface PldContraparteDoc {
   id_kyc_doc: string;
   kyc: string;
+  tipo_documento: PldTipoDocumento | null;
   denominacion: string | null;
   detalles_adicionales: string | null;
   status: PldDocStatus | null;
+  // obligatorio/vigencia_meses (04/Sep/2026, pendiente desde la peticion
+  // del 18/Ago) - fecha_vencimiento_documento/vencido son de solo lectura,
+  // calculados en el backend a partir de fecha_entrega + vigencia_meses.
+  obligatorio: boolean;
+  vigencia_meses: number | null;
+  fecha_vencimiento_documento: string | null;
+  vencido: boolean;
   link_documento: string | null;
   drive_file_id: string | null;
   fecha_solicitud: string | null;
@@ -23,18 +125,34 @@ export interface PldContraparteDoc {
   updated_at: string;
 }
 
+// KYC/KYB (04/Sep/2026, decision de Mariana: "vamos a tener KYC y KYB") -
+// se deriva sola de tipo_persona salvo override manual, mismo patron
+// hibrido que estado_llenado_manual. PENDIENTE_REVISION es el "caso raro"
+// (fideicomiso, tipo_persona vacio) que un analista debe clasificar a mano.
+export type PldCategoriaCumplimiento = "KYC" | "KYB" | "PENDIENTE_REVISION";
+
+export const CATEGORIA_CUMPLIMIENTO_LABELS: Record<PldCategoriaCumplimiento, string> = {
+  KYC: "KYC",
+  KYB: "KYB",
+  PENDIENTE_REVISION: "Pendiente de revisión",
+};
+
 // Superset del tipo minimo usado en admin/invitaciones/page.tsx (pestaña "Temporales") - mismo
 // contrato de API, aqui se listan todos los campos que la tabla de
 // expedientes necesita mostrar.
 export interface PldContraparteKyc {
   id_kyc: string;
   id_contraparte: string;
-  // Snapshot de solo lectura (25/Ago/2026) - ver
-  // services/pld-service/pld/models.py::sociedad_nombre.
+  // sociedad_rfc si es editable (a diferencia de sociedad_nombre, el
+  // snapshot de solo lectura que se resincroniza solo al cambiarlo - ver
+  // PldContraparteKycViewSet.update).
+  sociedad_rfc: string | null;
   sociedad_nombre: string | null;
   nombre_completo: string | null;
   curp: string | null;
   nacionalidad: string | null;
+  categoria_cumplimiento: PldCategoriaCumplimiento | null;
+  categoria_cumplimiento_manual: boolean;
   estado_cuenta: "ACTIVA" | "SOSPECHOSA" | "CONGELADA";
   estado_llenado: PldEstadoLlenado;
   // Workflow hibrido (pld/signals.py): true si el analista edito
@@ -172,12 +290,17 @@ export async function listKyc(params?: {
   // filtro acota la vista sin tocar el scope real de la sesion.
   sociedadRfc?: string;
   proyecto?: string;
+  // categoria_cumplimiento (04/Sep/2026, pedido de Mariana: "en pld hay
+  // que tener tabs de KYC y KYB") - filtra la lista por KYC/KYB/
+  // PENDIENTE_REVISION, mismo criterio que los demas filtros de arriba.
+  categoriaCumplimiento?: PldCategoriaCumplimiento;
 }): Promise<(PldContraparteKyc & PldDatosEditables)[]> {
   const query = new URLSearchParams();
   if (params?.estadoLlenado) query.set("estado_llenado", params.estadoLlenado);
   if (params?.search) query.set("search", params.search);
   if (params?.sociedadRfc) query.set("sociedad", params.sociedadRfc);
   if (params?.proyecto) query.set("proyecto", params.proyecto);
+  if (params?.categoriaCumplimiento) query.set("categoria_cumplimiento", params.categoriaCumplimiento);
   const qs = query.toString();
 
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${qs ? `?${qs}` : ""}`);
@@ -295,6 +418,7 @@ export const PLD_CAMPOS_CONFIRMABLES = [
   "dom_corresp_dom_pais",
   "telefono_fijo",
   "telefono_sms",
+  "email",
   "estado_civil",
   "ident_fideicomiso",
   "comentarios",
@@ -349,6 +473,49 @@ export async function editarKyc(
   return response.json();
 }
 
+// Reclasificar KYC/KYB a mano (04/Sep/2026) - solo tiene caso de uso real
+// para los "casos raros" que quedan en PENDIENTE_REVISION (fideicomiso,
+// tipo_persona vacio); el backend prende categoria_cumplimiento_manual
+// solo al detectar este campo en el PATCH (ver
+// PldContraparteKycSerializer.update), a partir de ahi deja de
+// recalcularse solo si tipo_persona cambia despues.
+export async function reclasificarCategoriaCumplimiento(
+  idKyc: string,
+  categoria: PldCategoriaCumplimiento,
+  updatedBy?: string | null
+): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ categoria_cumplimiento: categoria, updated_by: updatedBy }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Reasignar sociedad_rfc (07/Sep/2026, "donde puedo asignar una sociedad?")
+// - mismo patron que reclasificarCategoriaCumplimiento arriba (campo
+// administrativo propio, no parte de PldDatosEditables que tambien llena el
+// cliente via el link publico). El backend valida contra el catalogo real
+// de iam-service y resincroniza el snapshot sociedad_nombre.
+export async function reasignarSociedadKyc(
+  idKyc: string,
+  sociedadRfc: string,
+  updatedBy?: string | null
+): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sociedad_rfc: sociedadRfc, updated_by: updatedBy }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
 // Solo BORRA los documentos cuyo archivo ya no existe en Drive
 // (hallazgo real, 18/Ago/2026: si alguien borra un archivo directo en
 // drive.google.com, la app se quedaba mostrandolo como si siguiera ahi).
@@ -389,6 +556,34 @@ export async function crearDocumentoKyc(
     body: JSON.stringify({
       kyc: idKyc,
       denominacion,
+      created_by: createdBy,
+      updated_by: createdBy,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Checklist de documentos requeridos (04/Sep/2026, 3 estados: vacío/
+// solicitado/recibido) - crea el renglón SIN archivo todavía ("Solicitar"),
+// a diferencia de crearDocumentoKyc (que siempre acompaña un archivo real
+// en el mismo flujo). Queda en status PENDIENTE hasta que alguien suba el
+// archivo con subirArchivoDocumento sobre este mismo id_kyc_doc.
+export async function solicitarDocumentoKyc(
+  idKyc: string,
+  tipoDocumento: PldTipoDocumento,
+  createdBy?: string | null
+): Promise<PldContraparteDoc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kyc: idKyc,
+      tipo_documento: tipoDocumento,
+      denominacion: TIPO_DOCUMENTO_PLD_LABELS[tipoDocumento],
+      status: "PENDIENTE",
       created_by: createdBy,
       updated_by: createdBy,
     }),
@@ -518,6 +713,85 @@ export async function eliminarRepresentanteLegal(idRepresentante: string): Promi
 export async function reactivarAutoEstadoKyc(idKyc: string): Promise<PldContraparteKyc> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/reactivar_auto_estado/`, {
     method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// "Se debe poner en auto" (Mariana, 04/Sep/2026) - apaga
+// categoria_cumplimiento_manual y recalcula de inmediato segun
+// tipo_persona, mismo patron que reactivarAutoEstadoKyc arriba.
+export async function reactivarAutoCategoriaKyc(idKyc: string): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/reactivar_auto_categoria/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Enviar recordatorio de documentos faltantes (04/Sep/2026, "hay que
+// unificar la solicitud de documento como en contratos" - mismo patron
+// exacto que enviarRecordatorioDocumentos en lib/tesoreria.ts): UN correo
+// por cada documento seleccionado, con un magic link propio
+// (PldDocumentoTicket) para que el cliente lo suba directo, sin tener que
+// elegir tipo_documento el mismo. Requiere que el expediente ya tenga
+// email capturado.
+export async function enviarRecordatorioDocumentosKyc(
+  idKyc: string,
+  documentoIds: string[],
+  actorUserId?: string | null
+): Promise<{ enviados: string[]; total_seleccionados: number }> {
+  const response = await apiFetch(
+    "PLD",
+    `${PLD_API_BASE_URL}/api/kyc/${idKyc}/enviar_recordatorio_documentos/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ documento_ids: documentoIds, actor_user_id: actorUserId }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export interface PldDocumentoTicketValidado {
+  nombre_documento: string;
+  id_contraparte: string;
+}
+
+// Consumidos por la pagina publica /pld-documento/[token] (sin sesion) -
+// mismo patron que validarTicketDocumento/subirDocumentoTicket en
+// lib/tesoreria.ts.
+export async function validarTicketDocumentoPld(token: string): Promise<PldDocumentoTicketValidado> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/documento-tickets/validar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+export async function subirDocumentoTicketPld(params: {
+  token: string;
+  recaptchaToken: string;
+  file: File;
+}): Promise<{ detail: string }> {
+  const formData = new FormData();
+  formData.append("token", params.token);
+  formData.append("recaptcha_token", params.recaptchaToken);
+  formData.append("file", params.file);
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/documento-tickets/subir/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

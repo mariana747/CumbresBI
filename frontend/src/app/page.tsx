@@ -136,7 +136,7 @@ export default function HomePage() {
           {puedePld && (
             <StatCard
               icon={<FileSearch size={20} strokeWidth={1.5} color={BRAND.azul} />}
-              label="Expedientes KYC"
+              label="Expedientes"
               value={kyc.length}
               onClick={() => router.push("/pld")}
             />
@@ -147,7 +147,7 @@ export default function HomePage() {
       {!loading && puedePld && kyc.length > 0 && (
         <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
           <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-            Expedientes KYC por Estado
+            Expedientes por Estado
           </Typography>
           <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
             {Object.entries(kycPorEstado).map(([estado, count]) => (

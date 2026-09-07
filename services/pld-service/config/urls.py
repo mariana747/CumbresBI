@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 from pld.views import (
     PldContraparteDocViewSet,
     PldContraparteKycViewSet,
+    PldDocumentoTicketViewSet,
     PldRepresentanteLegalViewSet,
     PldSolicitudEliminacionDocViewSet,
     PldTicketClienteViewSet,
@@ -16,6 +17,10 @@ router.register("kyc-docs", PldContraparteDocViewSet, basename="pldcontrapartedo
 router.register("representantes-legales", PldRepresentanteLegalViewSet, basename="pldrepresentantelegal")
 router.register("solicitudes-eliminacion-doc", PldSolicitudEliminacionDocViewSet, basename="pldsolicitudeliminaciondoc")
 router.register("ticket-cliente", PldTicketClienteViewSet, basename="pldticketcliente")
+# basename requerido (04/Sep/2026): PldDocumentoTicketViewSet es un ViewSet
+# plano sin queryset, DefaultRouter no puede inferirlo solo. "documento-
+# tickets" (plural) mismo criterio que tesoreria-service/config/urls.py.
+router.register("documento-tickets", PldDocumentoTicketViewSet, basename="plddocumentoticket")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

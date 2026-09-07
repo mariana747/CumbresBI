@@ -23,7 +23,11 @@ _TIMEOUT_SEGUNDOS = 20
 # respondio" (DOCINT-502) por ReadTimeout a los 20s con el timeout generico,
 # aunque docint seguia procesando de fondo. Los demas servicios se quedan en
 # el default - no hay motivo para darles mas margen todavia.
-_TIMEOUT_SEGUNDOS_POR_PREFIJO = {"docint": 90}
+# pld sube archivos reales a Drive (subir de PldContraparteDoc y el subir del
+# ticket unificado por documento) - mismo tipo de llamada lenta que docint,
+# detectado 07/Sep/2026 con el mismo sintoma ("PLD-502") al subir un
+# documento desde el link publico del cliente.
+_TIMEOUT_SEGUNDOS_POR_PREFIJO = {"docint": 90, "pld": 90}
 
 
 @csrf_exempt

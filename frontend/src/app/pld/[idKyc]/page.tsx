@@ -60,22 +60,28 @@ import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession, puedeVerBitacora } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora } from "@/lib/audit";
 import {
   AUTORIDAD_POR_TIPO_IDENTIFICACION,
+  CATEGORIA_CUMPLIMIENTO_LABELS,
+  DOC_STATUS_COLORS,
+  TIPO_DOCUMENTO_PLD_LABELS,
+  PldCategoriaCumplimiento,
   PldContraparteDoc,
   PldContraparteKyc,
   PldDatosEditables,
   PldRepresentanteLegal,
+  PldTipoDocumento,
   PldSolicitudEliminacionDoc,
   aprobarKyc,
   aprobarSolicitudEliminacion,
   catalogoOcupacionPorTipoPersona,
   congelarKyc,
-  crearDocumentoKyc,
   crearRepresentanteLegal,
   crearSolicitudEliminacion,
   editarKyc,
+  enviarRecordatorioDocumentosKyc,
   editarRepresentanteLegal,
   eliminarDocumentoKyc,
   eliminarRepresentanteLegal,
@@ -86,9 +92,13 @@ import {
   listSolicitudesEliminacion,
   marcarSospechosoKyc,
   nombreParaMostrar,
+  reactivarAutoCategoriaKyc,
   reactivarCuentaKyc,
+  reasignarSociedadKyc,
+  reclasificarCategoriaCumplimiento,
   rechazarSolicitudEliminacion,
-  subirArchivoDocumento,
+  solicitarDocumentoKyc,
+  tiposDocumentoDisponibles,
   urlVerDocumento,
   verificarDocumentosKyc,
 } from "@/lib/pld";
@@ -228,6 +238,10 @@ const GRUPOS_CAMPOS_GENERAL: { titulo: string; campos: { campo: keyof PldDatosEd
     campos: [
       { campo: "telefono_fijo", label: "Teléfono fijo" },
       { campo: "telefono_sms", label: "Celular" },
+      // email (04/Sep/2026, hallazgo real: "como solicita documentos si
+      // no tiene correo electronico" - sin esto no hay a donde avisarle
+      // al cliente de un documento faltante).
+      { campo: "email", label: "Correo electrónico" },
     ],
   },
 ];
@@ -252,7 +266,6 @@ export default function PldExpedienteDetallePage() {
   const [verificarMensaje, setVerificarMensaje] = useState<string | null>(null);
   const [confirmandoEliminarDoc, setConfirmandoEliminarDoc] = useState<PldContraparteDoc | null>(null);
   const [eliminandoDoc, setEliminandoDoc] = useState(false);
-  const [subiendoDoc, setSubiendoDoc] = useState(false);
 
   // Solicitud de eliminacion (25/Ago/2026, requerimiento real del cliente):
   // el analista (puedeEditar) ya no puede borrar un archivo directo, pide
@@ -320,6 +333,33 @@ export default function PldExpedienteDetallePage() {
   const puedeAprobar = session?.perm_keys.includes("pld-compliance.aprobar") ?? false;
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("pld-compliance.editar") ?? false;
+
+  // Catalogo de sociedades para reasignar (07/Sep/2026, "donde puedo
+  // asignar una sociedad?") - mismo filtro por alcance que /pld (un usuario
+  // no-GLOBAL solo puede reasignar dentro de las sociedades que ya ve).
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  useEffect(() => {
+    if (!puedeEditar) return;
+    listSociedades()
+      .then(setSociedades)
+      .catch(() => setSociedades([]));
+  }, [puedeEditar]);
+  const sociedadesDisponibles =
+    session?.is_global || !session ? sociedades : sociedades.filter((s) => session.sociedad_rfcs.includes(s.rfc));
+
+  const [reasignandoSociedad, setReasignandoSociedad] = useState(false);
+  async function handleReasignarSociedad(sociedadRfc: string) {
+    if (!kyc) return;
+    setReasignandoSociedad(true);
+    try {
+      await reasignarSociedadKyc(kyc.id_kyc, sociedadRfc, session?.user_id);
+      cargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reasignar la sociedad");
+    } finally {
+      setReasignandoSociedad(false);
+    }
+  }
 
   // Verificacion automatica contra Drive al abrir el expediente (25/Ago/2026,
   // hallazgo real: un documento puede desaparecer de Drive sin que nadie
@@ -666,38 +706,76 @@ export default function PldExpedienteDetallePage() {
     }
   }
 
-  // Uploader interno (25/Ago/2026, requerimiento real del cliente: "nadie
-  // modifica en Drive, todo desde CumbresBI") - unico camino real para
-  // agregar un archivo desde ahora: crea el registro de metadata y sube el
-  // archivo real a Drive via drive-service (dos llamadas, mismo criterio
-  // que PldContraparteDocViewSet.subir en el backend). Gateado por
-  // puedeGestionarArchivos (pld-documentos.crear), no puedeCrear.
-  async function handleSubirDocumento(archivo: File) {
+
+  // Checklist de documentos requeridos (04/Sep/2026, 3 estados: vacío/
+  // solicitado/recibido) - "Solicitar" crea el renglón SIN archivo
+  // (queda en "solicitado"); subir el archivo despues sobre ESE mismo
+  // documento (no crea uno nuevo) lo pasa a "recibido".
+  const [solicitandoTipo, setSolicitandoTipo] = useState<PldTipoDocumento | null>(null);
+  // 07/Sep/2026: "se agrega a la lista de documentos pero debe tener
+  // todavia el boton de solicitar no es automatico" - elegir un tipo en el
+  // desplegable solo lo agrega a la lista de abajo (estado local, nada se
+  // crea en el backend todavia); la solicitud real (crear el renglon +
+  // mandar el correo) sigue requiriendo el boton "Solicitar" por renglon.
+  const [tiposAgregados, setTiposAgregados] = useState<PldTipoDocumento[]>([]);
+  async function handleSolicitarDocumento(tipo: PldTipoDocumento) {
     if (!kyc) return;
-    setSubiendoDoc(true);
-    setVerificarError(null);
-    let docCreado: PldContraparteDoc | null = null;
+    // 04/Sep/2026, "hay que unificar la solicitud de documento como en
+    // contratos" - "Solicitar" ya no solo crea el renglon: en el mismo
+    // paso crea el ticket de UN documento y le manda el correo real al
+    // cliente (mismo patron que Tesoreria/Contratos). Sin email
+    // capturado en el expediente no hay a donde mandarlo - se avisa antes
+    // de crear nada, en vez de dejar un renglon "Solicitado" sin forma de
+    // notificar a nadie.
+    if (!kyc.email) {
+      setVerificarError(
+        "Este expediente no tiene correo electrónico capturado en Información General - agrégalo antes de solicitar documentos."
+      );
+      return;
+    }
+    setSolicitandoTipo(tipo);
     try {
-      docCreado = await crearDocumentoKyc(kyc.id_kyc, archivo.name, session?.user_id);
-      await subirArchivoDocumento(docCreado.id_kyc_doc, archivo, session?.user_id);
+      const doc = await solicitarDocumentoKyc(kyc.id_kyc, tipo, session?.user_id);
+      const resultado = await enviarRecordatorioDocumentosKyc(kyc.id_kyc, [doc.id_kyc_doc], session?.user_id);
+      // 07/Sep/2026 ("no llego el correo de solicitud del curp") - el
+      // backend puede regresar 200 sin haber mandado el correo de verdad
+      // (mail-service no respondio o lo rechazo, ver mail_utils.py); el
+      // documento SI queda creado, pero hay que avisar que el aviso al
+      // cliente no salio, en vez de que se vea como si hubiera funcionado.
+      if (resultado.enviados.length === 0) {
+        setVerificarError(
+          "El documento se solicitó, pero el correo al cliente no se pudo enviar. Usa \"Reenviar correo\" en Documentos subidos."
+        );
+      }
+      setTiposAgregados((prev) => prev.filter((t) => t !== tipo));
       cargar();
     } catch (err) {
-      // 25/Ago/2026 (hallazgo real: si el paso de crear metadata funciona
-      // pero subir el archivo falla, quedaba un registro huerfano sin
-      // drive_file_id - "Verificar en Drive" no lo limpia porque solo
-      // revisa documentos que SI tienen drive_file_id. Un reintento
-      // entonces creaba otro con el mismo nombre, pareciendo un duplicado
-      // aunque en Drive solo existiera un archivo real). Se borra el
-      // registro a medias en vez de dejarlo tirado.
-      if (docCreado) {
-        await eliminarDocumentoKyc(docCreado.id_kyc_doc, session?.user_id).catch(() => {});
-        cargar();
-      }
-      setVerificarError(err instanceof Error ? err.message : "Error al subir el documento");
+      setVerificarError(err instanceof Error ? err.message : "Error al solicitar el documento");
     } finally {
-      setSubiendoDoc(false);
+      setSolicitandoTipo(null);
     }
   }
+
+  // Reenviar el correo de un documento ya solicitado pero sin archivo
+  // todavia (07/Sep/2026, "no llego el correo de solicitud del curp" - el
+  // primer intento pudo fallar por un 403/timeout real de mail-service sin
+  // que el documento dejara de crearse).
+  const [reenviandoDoc, setReenviandoDoc] = useState<string | null>(null);
+  async function handleReenviarRecordatorio(doc: PldContraparteDoc) {
+    if (!kyc) return;
+    setReenviandoDoc(doc.id_kyc_doc);
+    try {
+      const resultado = await enviarRecordatorioDocumentosKyc(kyc.id_kyc, [doc.id_kyc_doc], session?.user_id);
+      setVerificarError(
+        resultado.enviados.length === 0 ? "El correo no se pudo enviar. Intenta de nuevo en unos minutos." : null
+      );
+    } catch (err) {
+      setVerificarError(err instanceof Error ? err.message : "Error al reenviar el correo");
+    } finally {
+      setReenviandoDoc(null);
+    }
+  }
+
 
   async function handleCambiarEstadoCuenta(accion: "marcar_sospechoso" | "congelar" | "reactivar_cuenta") {
     setCambiandoEstadoCuenta(true);
@@ -711,6 +789,54 @@ export default function PldExpedienteDetallePage() {
       setError(err instanceof Error ? err.message : "Error al actualizar el estado de la cuenta");
     } finally {
       setCambiandoEstadoCuenta(false);
+    }
+  }
+
+  // Reclasificar KYC/KYB a mano (04/Sep/2026) - se deriva sola de
+  // tipo_persona, esto es solo para los "casos raros" (fideicomiso,
+  // tipo_persona vacio) que quedan en PENDIENTE_REVISION. Prende
+  // categoria_cumplimiento_manual en el backend - a partir de ahi deja de
+  // recalcularse solo si tipo_persona cambia despues.
+  const [reclasificando, setReclasificando] = useState(false);
+  async function handleReclasificarCategoria(categoria: PldCategoriaCumplimiento) {
+    setReclasificando(true);
+    try {
+      if (categoria === "KYC" || categoria === "KYB") {
+        // 04/Sep/2026, hallazgo real: reclasificar a mano no actualizaba
+        // tipo_persona, dejando el expediente inconsistente (categoria
+        // dice KYB pero tipo_persona sigue en "fideicomiso" o vacío). Se
+        // actualiza tipo_persona primero (editarKyc, dispara el recalculo
+        // normal de categoria_cumplimiento si no habia override previo) y
+        // luego se fuerza el recalculo automatico (reactivarAutoCategoriaKyc)
+        // por si SI habia un override manual previo que lo bloqueaba.
+        await editarKyc(params.idKyc, { tipo_persona: categoria === "KYC" ? "fisica" : "moral" }, session?.user_id);
+        await reactivarAutoCategoriaKyc(params.idKyc);
+      } else {
+        // PENDIENTE_REVISION: "caso raro" (fideicomiso, tipo_persona
+        // realmente ambiguo) - no tiene sentido forzar tipo_persona aqui,
+        // se queda como override manual puro.
+        await reclasificarCategoriaCumplimiento(params.idKyc, categoria, session?.user_id);
+      }
+      cargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reclasificar el expediente");
+    } finally {
+      setReclasificando(false);
+    }
+  }
+
+  // "Se debe poner en auto" (04/Sep/2026) - opcion aparte en el mismo
+  // Select (valor especial "AUTO", no es una categoria real) para volver
+  // a dejar que categoria_cumplimiento se derive sola de tipo_persona.
+  async function handleVolverACategoriaAutomatica() {
+    setReclasificando(true);
+    try {
+      await reactivarAutoCategoriaKyc(params.idKyc);
+      cargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reactivar la clasificación automática");
+    } finally {
+      setReclasificando(false);
     }
   }
 
@@ -766,9 +892,102 @@ export default function PldExpedienteDetallePage() {
               <Typography variant="caption" color="text.secondary" display="block">
                 {nombreParaMostrar(kyc) ? `Contraparte ${kyc.id_contraparte}` : "Nombre sin capturar todavía"}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                {/* 07/Sep/2026: le faltaba display="block" - sin eso se
+                queda en la misma linea que el Select de categoria (inline-
+                flex de ancho fijo) y el texto del CURP se corta justo donde
+                empieza esa caja ("se encima con otro elemento"). */}
                 {kyc.curp ? `CURP: ${kyc.curp}` : "Sin CURP capturado todavía"}
               </Typography>
+              {/* Sociedad (07/Sep/2026, "agrega en esta ficha a que
+              sociedades esta asociado" + "donde puedo asignar una
+              sociedad?") - antes solo se mostraba como texto de solo
+              lectura (sociedad_nombre, snapshot de sociedad_rfc al crear el
+              expediente); ahora es un Select real contra el catalogo de
+              iam-service (mismo patron que RoleAssignmentDialog), gateado a
+              puedeEditar - un expediente vive en una sola sociedad, no
+              varias. El backend resincroniza sociedad_nombre al cambiar
+              (ver PldContraparteKycViewSet.update). */}
+              {puedeEditar ? (
+                <FormControl size="small" fullWidth sx={{ mb: 1.5 }} disabled={reasignandoSociedad}>
+                  <InputLabel id="sociedad-kyc-label">Sociedad</InputLabel>
+                  <Select
+                    labelId="sociedad-kyc-label"
+                    label="Sociedad"
+                    value={kyc.sociedad_rfc ?? ""}
+                    onChange={(e) => handleReasignarSociedad(e.target.value)}
+                  >
+                    {!kyc.sociedad_rfc && (
+                      <MenuItem value="">
+                        <em>Sin sociedad asociada</em>
+                      </MenuItem>
+                    )}
+                    {sociedadesDisponibles.map((s) => (
+                      <MenuItem key={s.rfc} value={s.rfc}>
+                        {s.razon_social || s.alias_sociedad || s.rfc}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              ) : (
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                  {kyc.sociedad_nombre ? `Sociedad: ${kyc.sociedad_nombre}` : "Sin sociedad asociada"}
+                </Typography>
+              )}
+              {/* Categoria KYC/KYB (04/Sep/2026) - se deriva sola de
+              tipo_persona; el Select solo tiene efecto real cuando queda
+              en PENDIENTE_REVISION (fideicomiso/tipo_persona vacio, "casos
+              raros" que un analista debe clasificar a mano). "AUTO" es un
+              valor especial (no una categoria real, ver
+              handleVolverACategoriaAutomatica) para volver a dejar que se
+              derive sola - "se debe poner en auto" (Mariana). */}
+              <FormControl size="small" sx={{ mt: 1, minWidth: 220 }}>
+                <Select
+                  value={kyc.categoria_cumplimiento ?? ""}
+                  disabled={reclasificando}
+                  onChange={(e) =>
+                    e.target.value === "AUTO"
+                      ? handleVolverACategoriaAutomatica()
+                      : handleReclasificarCategoria(e.target.value as PldCategoriaCumplimiento)
+                  }
+                  // 07/Sep/2026: "el chip no se ve bien" - el padding por
+                  // defecto del Select asume texto plano, no Chips; sin
+                  // esto se ven aplastados y el icono de flecha se les
+                  // encima. minWidth mas ancho arriba + flex/gap/padding
+                  // aqui para que respiren.
+                  sx={{
+                    "& .MuiSelect-select": {
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      flexWrap: "wrap",
+                      py: 0.75,
+                      pr: 4,
+                    },
+                  }}
+                  renderValue={(valor) => (
+                    <>
+                      <Chip
+                        size="small"
+                        color={valor === "PENDIENTE_REVISION" ? "warning" : "default"}
+                        label={
+                          valor
+                            ? CATEGORIA_CUMPLIMIENTO_LABELS[valor as PldCategoriaCumplimiento]
+                            : "Sin clasificar"
+                        }
+                      />
+                      {kyc.categoria_cumplimiento_manual && (
+                        <Chip size="small" variant="outlined" label="Manual" />
+                      )}
+                    </>
+                  )}
+                >
+                  <MenuItem value="KYC">{CATEGORIA_CUMPLIMIENTO_LABELS.KYC}</MenuItem>
+                  <MenuItem value="KYB">{CATEGORIA_CUMPLIMIENTO_LABELS.KYB}</MenuItem>
+                  {kyc.categoria_cumplimiento_manual && <MenuItem value="AUTO">Automático (según tipo de persona)</MenuItem>}
+                  <MenuItem value="PENDIENTE_REVISION">{CATEGORIA_CUMPLIMIENTO_LABELS.PENDIENTE_REVISION}</MenuItem>
+                </Select>
+              </FormControl>
               <Box sx={{ mt: 1.5, mb: 2.5 }}>
                 <Chip
                   size="small"
@@ -933,7 +1152,10 @@ export default function PldExpedienteDetallePage() {
                 {esPersonaMoral && <Tab value={5} label="Representantes legales" />}
               </Tabs>
 
-              <Box sx={{ p: 2.5, pt: 2 }}>
+              {/* 07/Sep/2026: "esta muy junto" - pt insuficiente dejaba el
+              boton Cancelar/Guardar casi pegado a la barra de tabs
+              (scrollable, con flechas cuando no caben todos). */}
+              <Box sx={{ p: 2.5, pt: 3 }}>
                 {tab === 0 && (
                   <Stack spacing={2}>
                     {errorEdicion && <Alert severity="error">{errorEdicion}</Alert>}
@@ -1264,7 +1486,7 @@ export default function PldExpedienteDetallePage() {
                         ))}
                       </Stack>
                       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {puedeGestionarArchivos && kyc.documentos.length > 0 && (
+                        {puedeGestionarArchivos && (
                           <Button
                             size="small"
                             variant="outlined"
@@ -1280,29 +1502,6 @@ export default function PldExpedienteDetallePage() {
                             sx={{ whiteSpace: "nowrap" }}
                           >
                             Verificar en Drive
-                          </Button>
-                        )}
-                        {puedeGestionarArchivos && (
-                          <Button
-                            component="label"
-                            size="small"
-                            variant="outlined"
-                            startIcon={
-                              subiendoDoc ? <CircularProgress size={16} /> : <UploadCloud size={16} strokeWidth={1.5} />
-                            }
-                            disabled={subiendoDoc}
-                            sx={{ whiteSpace: "nowrap" }}
-                          >
-                            Subir Documento
-                            <input
-                              type="file"
-                              hidden
-                              onChange={(e) => {
-                                const archivo = e.target.files?.[0];
-                                e.target.value = "";
-                                if (archivo) handleSubirDocumento(archivo);
-                              }}
-                            />
                           </Button>
                         )}
                         {puedeCrear && (
@@ -1369,6 +1568,104 @@ export default function PldExpedienteDetallePage() {
                       </Stack>
                     )}
 
+                    {/* Checklist de documentos requeridos (04/Sep/2026, 2
+                    estados visibles: solicitado/recibido - "cuando ya se
+                    tenga se active el ojo, sino no aparecera"). 07/Sep/2026:
+                    "la checklist debe ser una lista desplegable y se agrega
+                    a la lista... y en la lista se quita lo ya agregado" -
+                    ya no se listan los 9-10 tipos completos con estado
+                    "Vacío"; el desplegable solo ofrece los tipos que TODAVÍA
+                    no se han solicitado (se van quitando conforme se
+                    agregan) y elegir uno ya dispara la solicitud (mismo
+                    handleSolicitarDocumento: crea el renglón + manda el
+                    correo). Abajo solo se listan los ya solicitados/
+                    recibidos. Las opciones dependen de la categoria del
+                    expediente (kyc.categoria_cumplimiento) - un KYC no ve
+                    "Acta constitutiva", un KYB no ve "Identificación
+                    oficial" (ver tiposDocumentoDisponibles). */}
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2">Checklist de documentos requeridos</Typography>
+                      {(() => {
+                        const yaSolicitados = new Set(
+                          kyc.documentos.map((d) => d.tipo_documento).filter((t): t is PldTipoDocumento => Boolean(t))
+                        );
+                        const disponibles = tiposDocumentoDisponibles(kyc.categoria_cumplimiento).filter(
+                          (tipo) => !yaSolicitados.has(tipo) && !tiposAgregados.includes(tipo)
+                        );
+                        return (
+                          puedeGestionarArchivos &&
+                          disponibles.length > 0 && (
+                            <FormControl size="small" fullWidth>
+                              <InputLabel id="agregar-checklist-label">Agregar a la lista…</InputLabel>
+                              <Select
+                                labelId="agregar-checklist-label"
+                                label="Agregar a la lista…"
+                                value=""
+                                onChange={(e) =>
+                                  setTiposAgregados((prev) => [...prev, e.target.value as PldTipoDocumento])
+                                }
+                              >
+                                {disponibles.map((tipo) => (
+                                  <MenuItem key={tipo} value={tipo}>
+                                    {TIPO_DOCUMENTO_PLD_LABELS[tipo]}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          )
+                        );
+                      })()}
+                      {/* Agregados a la lista pero todavia sin solicitar
+                      (solo estado local, nada creado en el backend todavia) -
+                      necesitan su propio boton "Solicitar" por renglon, no
+                      se dispara solo al elegirlos del desplegable. */}
+                      {tiposAgregados.map((tipo) => (
+                        <Paper key={tipo} variant="outlined" sx={{ p: 1.5 }}>
+                          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                            <Stack direction="row" spacing={1.5} alignItems="center">
+                              <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
+                              <Typography variant="body2">{TIPO_DOCUMENTO_PLD_LABELS[tipo]}</Typography>
+                            </Stack>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Chip size="small" label="Agregado" />
+                              {puedeGestionarArchivos && (
+                                <>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={
+                                      solicitandoTipo === tipo ? <CircularProgress size={14} /> : <Plus size={14} strokeWidth={1.5} />
+                                    }
+                                    disabled={solicitandoTipo === tipo}
+                                    onClick={() => handleSolicitarDocumento(tipo)}
+                                  >
+                                    Solicitar
+                                  </Button>
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    aria-label="Quitar de la lista"
+                                    title="Quitar de la lista"
+                                    disabled={solicitandoTipo === tipo}
+                                    onClick={() => setTiposAgregados((prev) => prev.filter((t) => t !== tipo))}
+                                  >
+                                    <Trash2 size={16} strokeWidth={1.5} />
+                                  </IconButton>
+                                </>
+                              )}
+                            </Stack>
+                          </Stack>
+                        </Paper>
+                      ))}
+                      {/* 07/Sep/2026: se quita la lista de solicitado/
+                      recibido de aqui (duplicaba "Documentos subidos" de
+                      abajo) - una vez solicitado, el documento ya solo vive
+                      en esa lista con su status real. */}
+                    </Stack>
+
+                    <Typography variant="subtitle2" sx={{ mt: 1 }}>
+                      Documentos subidos
+                    </Typography>
                     {kyc.documentos.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
                         Sin documentos subidos todavía.
@@ -1389,7 +1686,15 @@ export default function PldExpedienteDetallePage() {
                             <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
                               <Stack direction="row" spacing={1.5} alignItems="center">
                                 <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
-                                <Typography variant="body2">{doc.denominacion || "Documento sin nombre"}</Typography>
+                                <Typography variant="body2">
+                                  {/* 07/Sep/2026: los documentos creados desde el
+                                  checklist (Solicitar) no traen denominacion libre -
+                                  su nombre real es el tipo_documento del catalogo, no
+                                  "Documento sin nombre". */}
+                                  {doc.denominacion ||
+                                    (doc.tipo_documento && TIPO_DOCUMENTO_PLD_LABELS[doc.tipo_documento]) ||
+                                    "Documento sin nombre"}
+                                </Typography>
                               </Stack>
                               <Stack direction="row" spacing={1} alignItems="center">
                                 {/* 25/Ago/2026 (requerimiento real del cliente: "en
@@ -1426,15 +1731,53 @@ export default function PldExpedienteDetallePage() {
                                     label={esDuplicadoViejo ? "Duplicado (no vigente)" : "Vigente"}
                                   />
                                 )}
-                                <Chip size="small" label={doc.status ?? "Sin estado"} />
+                                <Chip
+                                  size="small"
+                                  color={doc.status ? DOC_STATUS_COLORS[doc.status] : "default"}
+                                  label={doc.status ?? "Sin estado"}
+                                />
+                                {/* 07/Sep/2026 ("no llego el correo de
+                                solicitud del curp") - reenviar el correo de
+                                un documento ya solicitado (tipo_documento
+                                fijo) pero que todavia no tiene archivo; el
+                                primer intento pudo fallar en mail-service
+                                sin que el documento dejara de crearse. */}
+                                {puedeEditar && doc.tipo_documento && !doc.drive_file_id && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleReenviarRecordatorio(doc)}
+                                    disabled={reenviandoDoc === doc.id_kyc_doc}
+                                    aria-label="Reenviar correo"
+                                    title="Reenviar correo"
+                                  >
+                                    {reenviandoDoc === doc.id_kyc_doc ? (
+                                      <CircularProgress size={14} />
+                                    ) : (
+                                      <RefreshCw size={16} strokeWidth={1.5} />
+                                    )}
+                                  </IconButton>
+                                )}
                                 {solicitudPendiente && (
                                   <Chip size="small" color="info" label="Eliminación solicitada" />
                                 )}
                                 {puedeEliminarArchivos ? (
+                                  // 07/Sep/2026: "si ya esta entregado no se
+                                  // puede borrar" - un documento ya entregado/
+                                  // aprobado es evidencia real, no se borra
+                                  // directo ni el Admin; para ese caso sigue
+                                  // existiendo la via de "Solicitar
+                                  // eliminación" con aprobacion (ver el flujo
+                                  // de duplicados mas abajo).
                                   <IconButton
                                     size="small"
                                     color="error"
                                     aria-label="Eliminar documento"
+                                    title={
+                                      doc.status === "ENTREGADO" || doc.status === "APROBADO"
+                                        ? "Ya entregado - no se puede borrar directo"
+                                        : "Eliminar documento"
+                                    }
+                                    disabled={doc.status === "ENTREGADO" || doc.status === "APROBADO"}
                                     onClick={() => setConfirmandoEliminarDoc(doc)}
                                   >
                                     <Trash2 size={16} strokeWidth={1.5} />
@@ -1459,6 +1802,11 @@ export default function PldExpedienteDetallePage() {
                                   )
                                 )}
                               </Stack>
+                              {/* 07/Sep/2026: se quita la sub-fila de
+                              clasificacion en linea (Select tipo_documento +
+                              Obligatorio + Vigencia) - ya no se edita aqui;
+                              el tipo_documento lo fija el checklist de
+                              arriba al solicitar, no se reclasifica despues. */}
                             </Stack>
                           </Paper>
                         );

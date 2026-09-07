@@ -1,3 +1,4 @@
+import datetime
 import logging
 from urllib.parse import quote
 
@@ -5,6 +6,7 @@ import requests
 from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
+from django.db.models import Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_exempt
@@ -14,12 +16,13 @@ from rest_framework.filters import SearchFilter
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from .audit_utils import contexto_kyc, emitir_evento_auditoria
 from .models import (
     PldContraparteDoc,
     PldContraparteKyc,
+    PldDocumentoTicket,
     PldRepresentanteLegal,
     PldSolicitudEliminacionDoc,
     PldTicketCliente,
@@ -32,11 +35,39 @@ from .serializers import (
     PldTicketClienteSerializer,
 )
 from . import recaptcha
-from .mail_utils import enviar_correo_ticket_cliente
+from .mail_utils import enviar_correo_documento_faltante, enviar_correo_ticket_cliente
 from .signals import recalcular_estado_llenado
 from .ticket_utils import generate_token, hash_token
 
 logger = logging.getLogger(__name__)
+
+
+def _carpeta_documento(doc) -> str:
+    """Carpeta real en Drive para `doc` - una sola carpeta plana por
+    contraparte, sin subcarpeta por tipo de documento (07/Sep/2026, revierte
+    la subcarpeta por tipo_documento del 04/Sep: "no debe haber carpeta por
+    documento"; el tipo_documento se queda solo como clasificacion/checklist
+    en la base de datos, no como estructura de carpetas)."""
+    return f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
+
+
+def _nombre_archivo_drive(tipo_documento, nombre_original: str) -> str:
+    """Nombre real con el que se guarda el archivo en Drive - generalizado
+    (07/Sep/2026, "que sea por nombre de documento solicitado", revierte la
+    excepcion puntual de INE del mismo dia): se renombra al label completo
+    del catalogo (get_tipo_documento_display) para CUALQUIER tipo_documento
+    solicitado, conservando la extension del archivo original. Sin
+    tipo_documento (el cliente subio por el link generico, sin elegir tipo)
+    se conserva el nombre original tal cual."""
+    if not tipo_documento:
+        return nombre_original
+    nombre_base = dict(PldContraparteDoc.TIPO_DOCUMENTO_CHOICES).get(tipo_documento)
+    if not nombre_base:
+        return nombre_original
+    if "." not in nombre_original:
+        return nombre_base
+    extension = nombre_original.rsplit(".", 1)[1]
+    return f"{nombre_base}.{extension}"
 
 
 def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
@@ -61,14 +92,13 @@ def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
     borrados (para avisar en pantalla) - no lanza si drive-service no
     responde, ese documento simplemente se deja como estaba (fail-safe: un
     problema de red no debe borrar evidencia real por error)."""
-    carpeta = f"PLD/Nuevos Clientes/{kyc.id_contraparte}"
     eliminados = []
 
     for doc in kyc.documentos.exclude(drive_file_id__isnull=True).exclude(drive_file_id=""):
         try:
             upstream = requests.get(
                 f"{settings.DRIVE_SERVICE_URL}/api/existe/{doc.drive_file_id}/",
-                params={"perm": "pld-compliance.leer", "carpeta": carpeta},
+                params={"perm": "pld-compliance.leer", "carpeta": _carpeta_documento(doc)},
                 headers=headers,
                 cookies=cookies,
                 timeout=15,
@@ -423,7 +453,9 @@ class PldContraparteKycViewSet(ModelViewSet):
             "partial_update",
             "confirmar_extraccion",
             "reactivar_auto_estado",
+            "reactivar_auto_categoria",
             "verificar_documentos",
+            "enviar_recordatorio_documentos",
         ):
             return [require_permission("pld-compliance.editar")()]
         if self.action in ("aprobar", "marcar_sospechoso", "congelar", "reactivar_cuenta"):
@@ -449,6 +481,26 @@ class PldContraparteKycViewSet(ModelViewSet):
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
+        # categoria_cumplimiento (04/Sep/2026, pedido de Mariana: "en pld
+        # hay que tener tabs de KYC y KYB, divide los expedientes segun el
+        # KYC/KYB... se vera los pendientes a revision" - solo 2 tabs, sin
+        # tab propio para PENDIENTE_REVISION). Al filtrar por KYC o KYB
+        # tambien se incluyen los "casos raros" en PENDIENTE_REVISION -
+        # deben verse en ambos tabs para que un analista los reclasifique,
+        # no quedar escondidos sin tab que los muestre. Se distinguen por
+        # el color del chip en la columna Categoria del frontend. Filtrar
+        # explicito por PENDIENTE_REVISION (fuera del uso de los tabs,
+        # ej. debug) sigue siendo un match exacto, sin este OR.
+        categoria = self.request.query_params.get("categoria_cumplimiento")
+        if categoria:
+            categoria = categoria.upper()
+            if categoria in (PldContraparteKyc.CATEGORIA_KYC, PldContraparteKyc.CATEGORIA_KYB):
+                queryset = queryset.filter(
+                    Q(categoria_cumplimiento=categoria)
+                    | Q(categoria_cumplimiento=PldContraparteKyc.CATEGORIA_PENDIENTE)
+                )
+            else:
+                queryset = queryset.filter(categoria_cumplimiento=categoria)
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -559,8 +611,27 @@ class PldContraparteKycViewSet(ModelViewSet):
         campos_tocados = [campo for campo in request.data if campo in campos_escribibles]
         valores_previos = {campo: _valor_serializable(getattr(instance, campo)) for campo in campos_tocados}
 
+        # 07/Sep/2026, "donde puedo asignar una sociedad" - reasignar
+        # sociedad_rfc despues de creado el expediente no actualizaba el
+        # snapshot de solo lectura sociedad_nombre (solo create() lo hacia),
+        # dejando el nombre mostrado desincronizado del RFC real. Mismo
+        # criterio de validacion que create(): debe existir en el catalogo
+        # real de iam-service.
+        nuevo_sociedad_rfc = request.data.get("sociedad_rfc")
+        sociedad_nombre_nueva = None
+        if nuevo_sociedad_rfc and nuevo_sociedad_rfc != instance.sociedad_rfc:
+            headers, cookies = forward_auth_headers(request)
+            existe, sociedad_nombre_nueva = _obtener_sociedad_en_iam(nuevo_sociedad_rfc, headers, cookies)
+            if not existe:
+                return Response(
+                    {"sociedad_rfc": "No existe esa sociedad en el catálogo."}, status=status.HTTP_400_BAD_REQUEST
+                )
+
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        if sociedad_nombre_nueva is not None:
+            instance.sociedad_nombre = sociedad_nombre_nueva
+            instance.save(update_fields=["sociedad_nombre"])
         instance.refresh_from_db()
 
         cambios = {
@@ -634,6 +705,7 @@ class PldContraparteKycViewSet(ModelViewSet):
         "dom_corresp_dom_pais",
         "telefono_fijo",
         "telefono_sms",
+        "email",
         "estado_civil",
         "ident_fideicomiso",
         "comentarios",
@@ -739,6 +811,86 @@ class PldContraparteKycViewSet(ModelViewSet):
         recalcular_estado_llenado(kyc)
         kyc.refresh_from_db()
         return Response(self.get_serializer(kyc).data)
+
+    @action(detail=True, methods=["post"])
+    def reactivar_auto_categoria(self, request, pk=None):
+        """Apaga categoria_cumplimiento_manual y recalcula de inmediato
+        segun tipo_persona (04/Sep/2026, "se debe poner en auto" - mismo
+        patron que reactivar_auto_estado arriba) - para cuando el analista
+        reclasifico un expediente a mano y quiere devolverle el control
+        automatico. Mismo permiso que editar el expediente."""
+        kyc = self.get_object()
+        kyc.categoria_cumplimiento_manual = False
+        kyc.categoria_cumplimiento = PldContraparteKyc.categoria_por_tipo_persona(kyc.tipo_persona)
+        kyc.save(update_fields=["categoria_cumplimiento_manual", "categoria_cumplimiento"])
+        return Response(self.get_serializer(kyc).data)
+
+    @action(detail=True, methods=["post"])
+    def enviar_recordatorio_documentos(self, request, pk=None):
+        """Avisa al cliente de los documentos del checklist que el
+        analista SELECCIONO (04/Sep/2026, "hay que unificar la solicitud
+        de documento como en contratos" - mismo patron exacto que
+        TesoreriaContratoViewSet.enviar_recordatorio_documentos). UN
+        correo por cada documento seleccionado, nunca uno solo agrupando
+        varios (ver enviar_correo_documento_faltante).
+
+        Recibe `documento_ids` (lista de ids de PldContraparteDoc, ya
+        creados via "Solicitar" en el checklist) en el body - 400 si viene
+        vacia, si el expediente no tiene email capturado, o si algun id
+        seleccionado ya tiene archivo (drive_file_id) o no pertenece a
+        este expediente."""
+        kyc = self.get_object()
+        email = kyc.email
+        if not email:
+            return Response(
+                {"detail": "Este expediente no tiene correo electrónico registrado."}, status=400
+            )
+
+        documento_ids = request.data.get("documento_ids") or []
+        if not documento_ids:
+            return Response(
+                {"detail": "Selecciona al menos un documento pendiente para avisar."}, status=400
+            )
+
+        faltantes = list(
+            kyc.documentos.filter(Q(drive_file_id__isnull=True) | Q(drive_file_id=""))
+            .filter(id_kyc_doc__in=documento_ids)
+        )
+        if len(faltantes) != len(set(documento_ids)):
+            return Response(
+                {"detail": "Alguno de los documentos seleccionados ya no está pendiente o no existe."},
+                status=400,
+            )
+
+        # Un PldDocumentoTicket nuevo por documento (mismo criterio que
+        # TesoreriaDocumentoTicket) - nunca se reusa el token de un
+        # documento para otro.
+        enviados = []
+        for documento in faltantes:
+            token, token_hash = generate_token()
+            PldDocumentoTicket.objects.create(
+                documento=documento,
+                email=email,
+                token_hash=token_hash,
+                issued_by=request.data.get("actor_user_id"),
+                expires_at=timezone.now() + datetime.timedelta(days=7),
+                max_uses=1,
+            )
+            nombre_documento = (
+                documento.get_tipo_documento_display() if documento.tipo_documento else documento.denominacion
+            ) or "documento pendiente"
+            ok = enviar_correo_documento_faltante(request, email, kyc.id_contraparte, nombre_documento, token)
+            if ok:
+                enviados.append(nombre_documento)
+
+        emitir_evento_auditoria(
+            "pld_contrapartes_kyc.enviar_recordatorio_documentos",
+            "pld_contrapartes_kyc",
+            kyc.id_kyc,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={**contexto_kyc(kyc), "documentos_enviados": enviados},
+        )
+        return Response({"enviados": enviados, "total_seleccionados": len(faltantes)})
 
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
@@ -910,14 +1062,14 @@ class PldContraparteDocViewSet(ModelViewSet):
         headers, cookies = forward_auth_headers(request)
         # "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): subcarpeta fija
         # dentro de la Unidad compartida PLD_CumbresBI - antes se creaba la
-        # carpeta del cliente directo en la raiz.
-        carpeta = f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
+        # carpeta del cliente directo en la raiz. Subcarpeta por
+        # tipo_documento (04/Sep/2026) - ver _carpeta_documento.
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
                 params={"perm": "pld-documentos.crear"},
                 files={"file": (archivo.name, archivo.read(), archivo.content_type)},
-                data={"carpeta": carpeta},
+                data={"carpeta": _carpeta_documento(doc)},
                 headers=headers,
                 cookies=cookies,
                 timeout=30,
@@ -996,11 +1148,10 @@ class PldContraparteDocViewSet(ModelViewSet):
             return response
 
         headers, cookies = forward_auth_headers(request)
-        carpeta = f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
         try:
             upstream = requests.get(
                 f"{settings.DRIVE_SERVICE_URL}/api/download/{doc.drive_file_id}/",
-                params={"perm": "pld-compliance.leer", "carpeta": carpeta},
+                params={"perm": "pld-compliance.leer", "carpeta": _carpeta_documento(doc)},
                 headers=headers,
                 cookies=cookies,
                 stream=True,
@@ -1524,3 +1675,140 @@ class PldTicketClienteViewSet(ModelViewSet):
             ticket.revoked_at = timezone.now()
             ticket.save(update_fields=["revoked_at"])
         return Response(self.get_serializer(ticket).data)
+
+
+class PldDocumentoTicketViewSet(ViewSet):
+    """Ticket publico de UN documento del checklist (04/Sep/2026, "hay que
+    unificar la solicitud de documento como en contratos" - mismo patron
+    exacto que tesoreria-service/tesoreria/views.py::
+    TesoreriaDocumentoTicketViewSet). Solo expone "validar"/"subir", ambos
+    publicos (sin sesion, sin ningun perm_key) - los tickets en si solo se
+    generan desde PldContraparteKycViewSet.enviar_recordatorio_documentos,
+    no hay list/create/update/destroy manual expuesto para este recurso."""
+
+    def get_permissions(self):
+        return []
+
+    def get_throttles(self):
+        if self.action == "subir":
+            self.throttle_scope = "pld-documento-ticket-subir"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
+    @staticmethod
+    def _resolver_ticket(token):
+        """Mismo criterio que PldTicketClienteViewSet._resolver_ticket -
+        compartido entre validar() y subir() para no repetir las 3
+        validaciones (revocado/expirado/agotado) en cada endpoint publico."""
+        if not token:
+            return None, Response({"token": ["Este campo es requerido."]}, status=400)
+
+        try:
+            ticket = PldDocumentoTicket.objects.select_related("documento", "documento__kyc").get(
+                token_hash=hash_token(token)
+            )
+        except PldDocumentoTicket.DoesNotExist:
+            return None, Response({"detail": "Token inválido."}, status=404)
+
+        now = timezone.now()
+        if ticket.revoked_at is not None:
+            return None, Response({"detail": "Este link fue revocado."}, status=403)
+        if ticket.expires_at < now:
+            return None, Response({"detail": "Este link expiró."}, status=403)
+        if ticket.uses_count >= ticket.max_uses:
+            return None, Response({"detail": "Este link ya alcanzó su límite de usos."}, status=403)
+
+        return ticket, None
+
+    @action(detail=False, methods=["post"])
+    def validar(self, request):
+        """Valida el token en claro del link (NO marca uso todavia, eso lo
+        hace subir() - para no gastar el uso solo por abrir la pagina).
+        Regresa el nombre del documento y el id_contraparte del
+        expediente, para que la pagina publica salude al cliente con
+        contexto."""
+        ticket, error = self._resolver_ticket(request.data.get("token"))
+        if error:
+            return error
+        documento = ticket.documento
+        nombre_documento = (
+            documento.get_tipo_documento_display() if documento.tipo_documento else documento.denominacion
+        ) or "documento pendiente"
+        return Response(
+            {
+                "nombre_documento": nombre_documento,
+                "id_contraparte": documento.kyc.id_contraparte,
+            }
+        )
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def subir(self, request):
+        """Formulario publico del cliente: sube el documento que falta, sin
+        sesion, canjeando el token del link. Protegido por reCAPTCHA, mismo
+        patron que PldTicketClienteViewSet.subir_documento."""
+        ticket, error = self._resolver_ticket(request.data.get("token"))
+        if error:
+            return error
+
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+        if archivo.size > MAX_TAMANO_ARCHIVO_BYTES:
+            return Response(
+                {"detail": f"El archivo supera el límite de {MAX_TAMANO_ARCHIVO_MB}MB."}, status=400
+            )
+
+        if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
+            return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
+
+        documento = ticket.documento
+        nombre_archivo = _nombre_archivo_drive(documento.tipo_documento, archivo.name)
+        headers = {}
+        if settings.DRIVE_INTERNAL_SECRET:
+            headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "pld-compliance.crear"},
+                files={"file": (nombre_archivo, archivo.read(), archivo.content_type)},
+                data={"carpeta": _carpeta_documento(documento)},
+                headers=headers,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning(
+                "drive-service no respondio a la subida publica del documento %s", documento.id_kyc_doc, exc_info=True
+            )
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(upstream.json() if upstream.content else {"detail": "Error al subir a Drive"}, status=upstream.status_code)
+
+        resultado = upstream.json()
+        documento.drive_file_id = resultado["file_id"]
+        documento.link_documento = resultado["web_view_link"]
+        documento.mime_type = resultado["mime_type"]
+        documento.tamano_bytes = resultado["tamano_bytes"]
+        documento.subido_en = timezone.now()
+        documento.status = PldContraparteDoc.STATUS_ENTREGADO
+        documento.save(
+            update_fields=[
+                "drive_file_id", "link_documento", "mime_type", "tamano_bytes", "subido_en", "status",
+            ]
+        )
+
+        now = timezone.now()
+        ticket.uses_count += 1
+        ticket.last_used_at = now
+        if ticket.first_used_at is None:
+            ticket.first_used_at = now
+        ticket.save(update_fields=["uses_count", "last_used_at", "first_used_at"])
+
+        emitir_evento_auditoria(
+            "pld_contrapartes_docs.subir",
+            "pld_contrapartes_docs",
+            str(documento.id_kyc_doc),
+            actor_user_id="externo",
+            valores_nuevos={**contexto_kyc(documento.kyc), "nombre_archivo": archivo.name},
+        )
+        return Response({"detail": "Documento subido correctamente. Se va a procesar en breve."})

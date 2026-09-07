@@ -11,28 +11,39 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  IconButton,
   InputAdornment,
   InputLabel,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { FilePlus2, FolderOpen, Search } from "lucide-react";
+import { Eye, FilePlus2, FolderOpen, Search } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import ContraparteSelector from "@/components/ContraparteSelector";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
-import { PldContraparteKyc, PldDatosEditables, createKyc, listKyc, nombreParaMostrar } from "@/lib/pld";
+import {
+  CATEGORIA_CUMPLIMIENTO_LABELS,
+  PldCategoriaCumplimiento,
+  PldContraparteKyc,
+  PldDatosEditables,
+  createKyc,
+  listKyc,
+  nombreParaMostrar,
+} from "@/lib/pld";
 import { TesoreriaContraparte } from "@/lib/tesoreria";
 
 const ESTADO_OPTIONS = [
@@ -107,6 +118,14 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // alcance real de la sesion.
   const [filtroSociedad, setFiltroSociedad] = useState("");
 
+  // Tabs KYC/KYB (04/Sep/2026, pedido de Mariana: "en pld hay que tener
+  // tabs de KYC y KYB, divide los expedientes segun el KYC/KYB... se
+  // vera los pendientes a revision" - solo 2 tabs, sin "Todos" ni tab
+  // propio para pendientes: PENDIENTE_REVISION aparece en los dos (ver
+  // get_queryset en el backend), distinguido por el color del chip en la
+  // columna Categoria. Default KYC - no hay "Todos" que sea el default.
+  const [tabCategoria, setTabCategoria] = useState<Extract<PldCategoriaCumplimiento, "KYC" | "KYB">>("KYC");
+
   function cargar() {
     setLoading(true);
     setError(null);
@@ -114,6 +133,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       estadoLlenado: estadoLlenado || undefined,
       search: search || undefined,
       sociedadRfc: filtroSociedad || undefined,
+      categoriaCumplimiento: tabCategoria,
     })
       .then(setExpedientes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
@@ -124,7 +144,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
     const timeout = setTimeout(cargar, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, estadoLlenado, filtroSociedad]);
+  }, [search, estadoLlenado, filtroSociedad, tabCategoria]);
 
   // Aprobar/reactivar se movieron a la vista de detalle (/pld/[idKyc],
   // 17/Ago/2026) - la lista ya solo tiene "Ver", igual que se acordo con
@@ -168,7 +188,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         <Stack direction="row" spacing={1.5} alignItems="center">
           <FolderOpen size={22} strokeWidth={1.5} color={BRAND.azul} />
           <Typography variant="subtitle1" fontWeight={600}>
-            Expedientes KYC
+            Expedientes
           </Typography>
         </Stack>
         {puedeCrear && (
@@ -265,6 +285,15 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         </Stack>
       </Dialog>
 
+      <Tabs
+        value={tabCategoria}
+        onChange={(_, valor) => setTabCategoria(valor)}
+        sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}
+      >
+        <Tab value="KYC" label={CATEGORIA_CUMPLIMIENTO_LABELS.KYC} />
+        <Tab value="KYB" label={CATEGORIA_CUMPLIMIENTO_LABELS.KYB} />
+      </Tabs>
+
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
         <TextField
           size="small"
@@ -334,6 +363,10 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
               expediente (sociedad_nombre, snapshot de sociedad_rfc al
               crear, ver models.py), no hay que derivarla de nada mas. */}
               <TableCell>Sociedad</TableCell>
+              {/* Categoría (04/Sep/2026, decision de Mariana: "vamos a
+              tener KYC y KYB") - se deriva sola de tipo_persona, ver
+              PldContraparteKyc.save() en el backend. */}
+              <TableCell>Categoría</TableCell>
               <TableCell>Estado</TableCell>
               <TableCell>Documentos</TableCell>
               <TableCell>Aprobación</TableCell>
@@ -344,13 +377,13 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
                   <CircularProgress size={24} />
                 </TableCell>
               </TableRow>
             ) : expedientes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     Sin expedientes todavía.
                   </Typography>
@@ -363,6 +396,18 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   <TableCell>{nombreParaMostrar(kyc) || "—"}</TableCell>
                   <TableCell>{kyc.curp || "—"}</TableCell>
                   <TableCell>{kyc.sociedad_nombre || "—"}</TableCell>
+                  <TableCell>
+                    {kyc.categoria_cumplimiento ? (
+                      <Chip
+                        size="small"
+                        variant={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "outlined" : "filled"}
+                        color={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "warning" : "default"}
+                        label={CATEGORIA_CUMPLIMIENTO_LABELS[kyc.categoria_cumplimiento]}
+                      />
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Chip
@@ -394,9 +439,9 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   </TableCell>
                   <TableCell>{new Date(kyc.created_at).toLocaleDateString("es-MX")}</TableCell>
                   <TableCell align="right">
-                    <Button size="small" variant="text" href={`/pld/${kyc.id_kyc}`}>
-                      Ver
-                    </Button>
+                    <IconButton size="small" href={`/pld/${kyc.id_kyc}`} aria-label="Ver expediente" title="Ver expediente">
+                      <Eye size={18} strokeWidth={1.5} />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))
@@ -427,7 +472,7 @@ export default function PldPage() {
         PLD / Cumplimiento
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Expedientes KYC y documentos. El Motor Documental se usa desde dentro de cada expediente
+        Expedientes y documentos. El Motor Documental se usa desde dentro de cada expediente
         (pestaña &quot;Documentos KYC&quot;), ya sin tener que volver a elegir a qué cliente pertenece.
       </Typography>
 

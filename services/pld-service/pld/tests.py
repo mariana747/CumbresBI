@@ -21,6 +21,7 @@ from .audit_utils import emitir_evento_auditoria
 from .models import (
     PldContraparteDoc,
     PldContraparteKyc,
+    PldDocumentoTicket,
     PldRepresentanteLegal,
     PldSolicitudEliminacionDoc,
     PldTicketCliente,
@@ -29,9 +30,12 @@ from .ticket_utils import hash_token
 from .views import (
     PldContraparteDocViewSet,
     PldContraparteKycViewSet,
+    PldDocumentoTicketViewSet,
     PldRepresentanteLegalViewSet,
     PldSolicitudEliminacionDocViewSet,
     PldTicketClienteViewSet,
+    _carpeta_documento,
+    _nombre_archivo_drive,
 )
 
 RFC_TIZARA = "#####1"
@@ -342,6 +346,53 @@ class ValidacionSociedadAlCrearTests(TestCase):
             response = self._crear(RFC_TIZARA)
         self.assertEqual(response.status_code, 201)
         self.assertIsNone(response.data["sociedad_nombre"])
+
+
+class ReasignarSociedadTests(TestCase):
+    """07/Sep/2026, "donde puedo asignar una sociedad" - reasignar
+    sociedad_rfc via PATCH despues de creado el expediente debe resincronizar
+    el snapshot de solo lectura sociedad_nombre (antes solo create() lo
+    hacia, un PATCH dejaba el nombre mostrado desactualizado)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        self.kyc = _kyc("cp000095", RFC_TIZARA)
+        self.kyc.sociedad_nombre = "Tizara SA de CV"
+        self.kyc.save(update_fields=["sociedad_nombre"])
+        self.view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+
+    def _patch(self, sociedad_rfc):
+        request = self.factory.patch(
+            f"/api/kyc/{self.kyc.id_kyc}/", {"sociedad_rfc": sociedad_rfc}, format="json"
+        )
+        request.effective_scope = self.scope
+        return self.view(request, pk=self.kyc.id_kyc)
+
+    def test_reasignar_a_sociedad_real_actualiza_el_nombre(self):
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara Capital SA de CV"}),
+        ):
+            response = self._patch(RFC_CAPITAL)
+        self.assertEqual(response.status_code, 200)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.sociedad_rfc, RFC_CAPITAL)
+        self.assertEqual(self.kyc.sociedad_nombre, "Tizara Capital SA de CV")
+
+    def test_reasignar_a_sociedad_inexistente_da_400_y_no_cambia_nada(self):
+        with patch("pld.views.requests.get", return_value=Mock(status_code=404)):
+            response = self._patch(RFC_CAPITAL)
+        self.assertEqual(response.status_code, 400)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.sociedad_rfc, RFC_TIZARA)
+        self.assertEqual(self.kyc.sociedad_nombre, "Tizara SA de CV")
+
+    def test_mandar_la_misma_sociedad_no_llama_a_iam_service(self):
+        with patch("pld.views.requests.get") as mock_get:
+            response = self._patch(RFC_TIZARA)
+        self.assertEqual(response.status_code, 200)
+        mock_get.assert_not_called()
 
 
 class ContraparteMaestraAltaAutonomaTests(TestCase):
@@ -780,6 +831,236 @@ class WorkflowEstadoLlenadoTests(TestCase):
         self.assertEqual(response.data["estado_llenado"], PldContraparteKyc.ESTADO_INCOMPLETO)
 
 
+class CategoriaCumplimientoKycKybTests(TestCase):
+    """KYC/KYB (04/Sep/2026, decision de Mariana: "vamos a tener KYC y
+    KYB") - categoria_cumplimiento se deriva sola de tipo_persona salvo
+    override manual, mismo patron hibrido que estado_llenado_manual."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def test_persona_fisica_se_clasifica_kyc(self):
+        kyc = _kyc("cp000060", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYC)
+
+    def test_persona_moral_se_clasifica_kyb(self):
+        kyc = _kyc("cp000061", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_MORAL
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
+
+    def test_fideicomiso_y_tipo_persona_vacio_quedan_pendientes_de_revision(self):
+        # "casos raros se revisan a mano" (Mariana, 04/Sep/2026) - nunca se
+        # fuerzan a KYC o KYB por default.
+        fideicomiso = _kyc("cp000062", RFC_TIZARA)
+        fideicomiso.tipo_persona = PldContraparteKyc.TIPO_FIDEICOMISO
+        fideicomiso.save()
+        self.assertEqual(fideicomiso.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+
+        sin_tipo = _kyc("cp000063", RFC_TIZARA)  # _kyc() no fija tipo_persona
+        self.assertEqual(sin_tipo.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+
+    def test_cambiar_tipo_persona_reclasifica_automatico(self):
+        kyc = _kyc("cp000064", RFC_TIZARA)
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYC)
+
+    def test_override_manual_por_patch_detiene_el_recalculo_automatico(self):
+        """Un analista reclasifica a mano un caso raro (fideicomiso) - a
+        partir de ahi, cambiar tipo_persona NO debe pisar esa decision."""
+        kyc = _kyc("cp000065", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FIDEICOMISO
+        kyc.save()
+
+        request = self.factory.patch(
+            f"/api/kyc/{kyc.id_kyc}/", {"categoria_cumplimiento": "KYB"}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+        response = view(request, pk=kyc.id_kyc)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["categoria_cumplimiento"], "KYB")
+        self.assertTrue(response.data["categoria_cumplimiento_manual"])
+
+        # Cambiar tipo_persona despues NO debe recalcular encima del override.
+        kyc.refresh_from_db()
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
+
+    def test_reactivar_auto_categoria_apaga_el_override_y_recalcula(self):
+        # "se debe poner en auto" (Mariana, 04/Sep/2026) - mismo patron que
+        # reactivar_auto_estado.
+        kyc = _kyc("cp000069", RFC_TIZARA)
+        kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        kyc.categoria_cumplimiento = PldContraparteKyc.CATEGORIA_KYB
+        kyc.categoria_cumplimiento_manual = True
+        kyc.save()
+        self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)  # override respetado
+
+        request = self.factory.post(f"/api/kyc/{kyc.id_kyc}/reactivar_auto_categoria/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        view = PldContraparteKycViewSet.as_view({"post": "reactivar_auto_categoria"})
+        response = view(request, pk=kyc.id_kyc)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["categoria_cumplimiento_manual"])
+        self.assertEqual(response.data["categoria_cumplimiento"], PldContraparteKyc.CATEGORIA_KYC)
+
+    def test_filtro_categoria_cumplimiento_en_la_lista(self):
+        # 04/Sep/2026, pedido de Mariana: "en pld hay que tener tabs de
+        # KYC y KYB" - mismo criterio de filtro server-side que
+        # estado_llenado/sociedad.
+        fisica = _kyc("cp000066", RFC_TIZARA)
+        fisica.tipo_persona = PldContraparteKyc.TIPO_FISICA
+        fisica.save()
+        moral = _kyc("cp000067", RFC_TIZARA)
+        moral.tipo_persona = PldContraparteKyc.TIPO_MORAL
+        moral.save()
+
+        request = self.factory.get("/api/kyc/?categoria_cumplimiento=KYC")
+        request.effective_scope = EffectiveScope(is_global=True)
+        response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
+        ids = [r["id_kyc"] for r in response.data]
+        self.assertIn(fisica.id_kyc, ids)
+        self.assertNotIn(moral.id_kyc, ids)
+
+    def test_pendiente_de_revision_se_ve_en_ambos_tabs_kyc_y_kyb(self):
+        # 04/Sep/2026, pedido de Mariana: "se veran los pendientes a
+        # revision" - solo 2 tabs (KYC/KYB), sin tab propio para
+        # PENDIENTE_REVISION; los casos raros deben verse en los dos para
+        # que un analista los reclasifique, no quedar escondidos.
+        pendiente = _kyc("cp000068", RFC_TIZARA)  # tipo_persona vacio
+        self.assertEqual(pendiente.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)
+
+        for valor in ("KYC", "KYB"):
+            request = self.factory.get(f"/api/kyc/?categoria_cumplimiento={valor}")
+            request.effective_scope = EffectiveScope(is_global=True)
+            response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
+            ids = [r["id_kyc"] for r in response.data]
+            self.assertIn(pendiente.id_kyc, ids, f"debería verse en el tab {valor}")
+
+
+class CatalogoDocumentosPldTests(TestCase):
+    """tipo_documento (04/Sep/2026, checklist de proveedores) - catalogo
+    cerrado completo (identidad + especifico de cumplimiento), se duplica
+    a proposito contra el catalogo de tesoreria-service ("no importa si se
+    piden lo mismo", Mariana) - ver docstring del campo en models.py."""
+
+    def setUp(self):
+        self.kyc = _kyc("cp000070", RFC_TIZARA)
+
+    def test_carpeta_documento_es_plana_sin_subcarpeta_por_tipo(self):
+        # 07/Sep/2026, pedido explicito: "no debe haber carpeta por
+        # documento" - revierte la subcarpeta por tipo_documento del 04/Sep;
+        # tipo_documento se queda solo como clasificacion en la base de
+        # datos, no como estructura de carpetas en Drive.
+        sin_tipo = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="Poder notarial")
+        con_tipo = PldContraparteDoc.objects.create(
+            kyc=self.kyc, tipo_documento=PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO
+        )
+        self.assertEqual(_carpeta_documento(sin_tipo), f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}")
+        self.assertEqual(_carpeta_documento(con_tipo), f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}")
+
+    def test_archivo_se_renombra_al_label_completo_del_tipo_solicitado(self):
+        # 07/Sep/2026, generalizado: "que sea por nombre de documento
+        # solicitado" - cualquier tipo_documento renombra el archivo a su
+        # label completo del catalogo (ya no solo la excepcion de INE),
+        # conservando la extension original.
+        self.assertEqual(
+            _nombre_archivo_drive(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, "foto_credencial.JPG"),
+            "Identificación oficial.JPG",
+        )
+        self.assertEqual(
+            _nombre_archivo_drive(PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO, "riesgo.pdf"),
+            "Cuestionario de riesgo.pdf",
+        )
+        self.assertEqual(
+            _nombre_archivo_drive(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, "sinextension"),
+            "Identificación oficial",
+        )
+
+    def test_sin_tipo_documento_conserva_el_nombre_original(self):
+        self.assertEqual(_nombre_archivo_drive(None, "documento.pdf"), "documento.pdf")
+
+    def test_tipos_por_categoria_identificacion_oficial_solo_kyc(self):
+        # 04/Sep/2026, pedido explicito: "que se muestre para los C
+        # unicamente los que necesite y la B solo las que necesite".
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        self.assertIn(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, kyc_tipos)
+        self.assertNotIn(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, kyb_tipos)
+
+    def test_curp_solicitable_solo_en_kyc(self):
+        # 07/Sep/2026, "falta algun alias para curp... para solicitarlo" -
+        # antes CURP solo existia como palabra clave del clasificador de
+        # Motor Documental, sin tipo_documento propio en el checklist.
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        self.assertIn(PldContraparteDoc.TIPO_CURP, kyc_tipos)
+        self.assertNotIn(PldContraparteDoc.TIPO_CURP, kyb_tipos)
+
+    def test_tipos_por_categoria_acta_y_rpc_y_organigrama_solo_kyb(self):
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        for tipo in (
+            PldContraparteDoc.TIPO_ACTA_CONSTITUTIVA,
+            PldContraparteDoc.TIPO_INSCRIPCION_RPC,
+            PldContraparteDoc.TIPO_ORGANIGRAMA_ACCIONARIO,
+        ):
+            self.assertIn(tipo, kyb_tipos)
+            self.assertNotIn(tipo, kyc_tipos)
+
+    def test_tipos_compartidos_aparecen_en_ambas_categorias(self):
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        for tipo in (
+            PldContraparteDoc.TIPO_CONSTANCIA_SITUACION_FISCAL,
+            PldContraparteDoc.TIPO_INFO_BANCARIA,
+            PldContraparteDoc.TIPO_VALIDACION_TITULARIDAD_CUENTA,
+            PldContraparteDoc.TIPO_OPINION_CUMPLIMIENTO,
+            PldContraparteDoc.TIPO_COMPROBANTE_DOMICILIO,
+            PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO,
+            PldContraparteDoc.TIPO_DECLARACION_ORIGEN_FONDOS,
+            PldContraparteDoc.TIPO_EVIDENCIA_PEP,
+        ):
+            self.assertIn(tipo, kyc_tipos)
+            self.assertIn(tipo, kyb_tipos)
+
+    def test_obligatorio_por_default_true(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="INE")
+        self.assertTrue(doc.obligatorio)
+
+    def test_documento_sin_vigencia_nunca_vence(self):
+        doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc, fecha_entrega=datetime.date(2020, 1, 1)
+        )
+        self.assertIsNone(doc.fecha_vencimiento_documento)
+        self.assertFalse(doc.vencido)
+
+    def test_documento_sin_fecha_entrega_no_calcula_vencimiento(self):
+        doc = PldContraparteDoc.objects.create(kyc=self.kyc, vigencia_meses=12)
+        self.assertIsNone(doc.fecha_vencimiento_documento)
+
+    def test_documento_con_vigencia_vencida(self):
+        doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc, fecha_entrega=datetime.date(2020, 1, 15), vigencia_meses=12
+        )
+        self.assertEqual(doc.fecha_vencimiento_documento, datetime.date(2021, 1, 15))
+        self.assertTrue(doc.vencido)
+
+    def test_documento_con_vigencia_todavia_valida(self):
+        manana = timezone.now().date() + datetime.timedelta(days=1)
+        doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc, fecha_entrega=manana, vigencia_meses=120
+        )
+        self.assertFalse(doc.vencido)
+
+
 class ConfirmarExtraccionTests(TestCase):
     """confirmar_extraccion (docs/architecture/pld-fase2-alcance.md sec. 1,
     memoria de sesion "pld-flujo-extraccion-vs-archivo"): guarda en el
@@ -1074,6 +1355,54 @@ class ActualizarDatosPublicoTests(TestCase):
         self.kyc.refresh_from_db()
         self.assertIsNotNone(self.kyc.politicas_aceptadas_en)
         self.assertIsNotNone(self.kyc.veracidad_declarada_en)
+
+    def test_tipo_persona_capturado_por_el_cliente_reclasifica_solo_a_kyc_kyb(self):
+        # 04/Sep/2026, pregunta real de Mariana: "si el usuario cuando dio
+        # sus datos coloco es persona fisica o si es moral, porque no se
+        # coloca automaticamente" - SI se coloca automatico: tipo_persona
+        # ya esta en CAMPOS_CONFIRMABLES (whitelist publica) y
+        # actualizar_datos guarda via el serializer normal, que llama a
+        # PldContraparteKyc.save() - mismo recalculo automatico que si lo
+        # editara un analista desde el panel interno.
+        self.assertEqual(self.kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_PENDIENTE)  # _kyc() no fija tipo_persona
+        request = self.factory.post(
+            "/api/ticket-cliente/actualizar_datos/",
+            {
+                "token": "token-datos",
+                "campos": {"tipo_persona": "moral"},
+                "acepta_politicas": True,
+                "declara_veracidad": True,
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch("requests.post", return_value=Mock(status_code=200)):
+            self.view(request)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.tipo_persona, "moral")
+        self.assertEqual(self.kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
+        self.assertFalse(self.kyc.categoria_cumplimiento_manual)
+
+    def test_email_capturado_por_el_cliente_se_guarda(self):
+        # 04/Sep/2026, hallazgo real: "como solicita documentos si no tiene
+        # correo electronico" - sin email no hay a donde avisarle al
+        # cliente de un documento faltante. Se pide como cualquier otro
+        # dato del link publico (CAMPOS_CONFIRMABLES).
+        request = self.factory.post(
+            "/api/ticket-cliente/actualizar_datos/",
+            {
+                "token": "token-datos",
+                "campos": {"email": "cliente.real@ejemplo.com"},
+                "acepta_politicas": True,
+                "declara_veracidad": True,
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch("requests.post", return_value=Mock(status_code=200)):
+            self.view(request)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.email, "cliente.real@ejemplo.com")
 
 
 class AuditoriaMotorDocumentalTests(TestCase):
@@ -1684,6 +2013,30 @@ class PermisosGestionDeArchivosTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 201)
 
+    def test_solicitar_documento_sin_archivo_queda_pendiente(self):
+        # 04/Sep/2026, checklist de documentos requeridos: "Solicitar" crea
+        # el renglon SIN archivo (estado "solicitado" en el frontend) -
+        # nada mas que tipo_documento/denominacion/status, sin drive_file_id.
+        request = self.factory.post(
+            "/api/kyc-docs/",
+            {
+                "kyc": self.kyc.id_kyc,
+                "tipo_documento": "CUESTIONARIO_RIESGO",
+                "denominacion": "Cuestionario de riesgo",
+                "status": "PENDIENTE",
+                "created_by": "usr00001",
+                "updated_by": "usr00001",
+            },
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-documentos.crear",))
+        view = PldContraparteDocViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["tipo_documento"], "CUESTIONARIO_RIESGO")
+        self.assertIsNone(response.data["drive_file_id"])
+        self.assertEqual(response.data["status"], "PENDIENTE")
+
 
 class SolicitudEliminacionDocTests(TestCase):
     """25/Ago/2026 (requerimiento real del cliente) - el analista ya no
@@ -1768,3 +2121,159 @@ class SolicitudEliminacionDocTests(TestCase):
         view = PldSolicitudEliminacionDocViewSet.as_view({"post": "rechazar"})
         response = view(request, pk=solicitud.id_solicitud)
         self.assertEqual(response.status_code, 400)
+
+
+class EnviarRecordatorioDocumentosTests(TestCase):
+    """enviar_recordatorio_documentos (04/Sep/2026, "hay que unificar la
+    solicitud de documento como en contratos") - mismo patron que
+    TesoreriaContratoViewSet.enviar_recordatorio_documentos: un
+    PldDocumentoTicket + un correo por documento seleccionado."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000090", RFC_TIZARA)
+        self.kyc.email = "cliente.kyc@ejemplo.com"
+        self.kyc.save(update_fields=["email"])
+        self.doc_pendiente = PldContraparteDoc.objects.create(
+            kyc=self.kyc,
+            tipo_documento=PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO,
+            denominacion="Cuestionario de riesgo",
+            status=PldContraparteDoc.STATUS_PENDIENTE,
+        )
+        self.view = PldContraparteKycViewSet.as_view({"post": "enviar_recordatorio_documentos"})
+
+    def _post(self, documento_ids):
+        request = self.factory.post(
+            f"/api/kyc/{self.kyc.id_kyc}/enviar_recordatorio_documentos/",
+            {"documento_ids": documento_ids, "actor_user_id": "usr00001"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        return self.view(request, pk=self.kyc.id_kyc)
+
+    def test_sin_email_en_el_expediente_rechaza(self):
+        self.kyc.email = None
+        self.kyc.save(update_fields=["email"])
+        response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 400)
+
+    def test_sin_documento_ids_rechaza(self):
+        response = self._post([])
+        self.assertEqual(response.status_code, 400)
+
+    def test_documento_que_ya_tiene_archivo_rechaza(self):
+        self.doc_pendiente.drive_file_id = "abc123"
+        self.doc_pendiente.save(update_fields=["drive_file_id"])
+        response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 400)
+
+    def test_crea_un_ticket_y_manda_un_correo_por_documento(self):
+        with patch("pld.views.requests.post", return_value=Mock(status_code=201)):
+            response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total_seleccionados"], 1)
+        self.assertEqual(PldDocumentoTicket.objects.filter(documento=self.doc_pendiente).count(), 1)
+        ticket = PldDocumentoTicket.objects.get(documento=self.doc_pendiente)
+        self.assertEqual(ticket.email, "cliente.kyc@ejemplo.com")
+        self.assertEqual(ticket.max_uses, 1)
+
+    def test_manda_el_correo_con_el_mismo_perm_que_exige_la_accion(self):
+        # 07/Sep/2026, bug real encontrado ("no llego el correo de solicitud
+        # del curp"): mail_utils.enviar_correo_documento_faltante pedia
+        # "pld-compliance.crear" a mail-service, distinto del
+        # "pld-compliance.editar" que esta accion misma exige - cualquier
+        # analista sin ese permiso extra recibia 403 y el correo nunca
+        # salia, aunque el documento si se creara.
+        with patch("pld.mail_utils.requests.post", return_value=Mock(status_code=201)) as mock_post:
+            response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 200)
+        # mock_post tambien intercepta la llamada de emitir_evento_auditoria
+        # (mismo modulo `requests` global) - se busca especificamente la
+        # llamada a mail-service, no la ultima del historial.
+        llamada_mail = next(c for c in mock_post.call_args_list if str(settings.MAIL_SERVICE_URL) in c.args[0])
+        self.assertEqual(llamada_mail.kwargs["params"]["perm"], "pld-compliance.editar")
+
+
+class PldDocumentoTicketTests(TestCase):
+    """Ticket publico de un solo documento (04/Sep/2026) - mismo patron que
+    SubirDocumentoPublicoTests, pero ligado a un PldContraparteDoc
+    especifico en vez del expediente completo."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp000091", RFC_TIZARA)
+        self.doc = PldContraparteDoc.objects.create(
+            kyc=self.kyc,
+            tipo_documento=PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO,
+            status=PldContraparteDoc.STATUS_PENDIENTE,
+        )
+        self.ticket = PldDocumentoTicket.objects.create(
+            documento=self.doc,
+            email="cliente@externo.com",
+            token_hash=hash_token("token-doc-valido"),
+            expires_at=timezone.now() + datetime.timedelta(days=7),
+            max_uses=1,
+        )
+        self.validar_view = PldDocumentoTicketViewSet.as_view({"post": "validar"})
+        self.subir_view = PldDocumentoTicketViewSet.as_view({"post": "subir"})
+
+    def test_validar_regresa_nombre_del_documento(self):
+        request = self.factory.post("/api/documento-tickets/validar/", {"token": "token-doc-valido"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        response = self.validar_view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["nombre_documento"], "Cuestionario de riesgo")
+        self.assertEqual(response.data["id_contraparte"], self.kyc.id_contraparte)
+
+    def test_validar_token_invalido_da_404(self):
+        request = self.factory.post("/api/documento-tickets/validar/", {"token": "no-existe"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        response = self.validar_view(request)
+        self.assertEqual(response.status_code, 404)
+
+    def test_validar_token_agotado_da_403(self):
+        self.ticket.uses_count = 1
+        self.ticket.save(update_fields=["uses_count"])
+        request = self.factory.post("/api/documento-tickets/validar/", {"token": "token-doc-valido"}, format="json")
+        request.effective_scope = EffectiveScope.anonymous()
+        response = self.validar_view(request)
+        self.assertEqual(response.status_code, 403)
+
+    def _subir(self, token="token-doc-valido", recaptcha_token="cualquier-cosa"):
+        archivo = SimpleUploadedFile("cuestionario.pdf", b"contenido-fake", content_type="application/pdf")
+        request = self.factory.post(
+            "/api/documento-tickets/subir/",
+            {"token": token, "recaptcha_token": recaptcha_token, "file": archivo},
+        )
+        request.effective_scope = EffectiveScope.anonymous()
+        return self.subir_view(request)
+
+    def test_subir_completa_el_documento_existente_sin_crear_uno_nuevo(self):
+        total_antes = PldContraparteDoc.objects.count()
+        with patch("pld.views.recaptcha.verificar", return_value=True), patch("pld.views.requests.post") as mock_post:
+            mock_post.return_value = Mock(
+                status_code=201,
+                json=lambda: {
+                    "file_id": "abc123",
+                    "web_view_link": "https://drive/abc123",
+                    "mime_type": "application/pdf",
+                    "tamano_bytes": 14,
+                },
+            )
+            response = self._subir()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(PldContraparteDoc.objects.count(), total_antes)  # nunca crea uno nuevo
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.drive_file_id, "abc123")
+        self.assertEqual(self.doc.status, PldContraparteDoc.STATUS_ENTREGADO)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.uses_count, 1)
+
+    def test_subir_recaptcha_invalido_rechaza(self):
+        with patch("pld.views.recaptcha.verificar", return_value=False):
+            response = self._subir()
+        self.assertEqual(response.status_code, 400)
+
+    def test_subir_token_invalido_da_404(self):
+        response = self._subir(token="no-existe")
+        self.assertEqual(response.status_code, 404)
