@@ -1024,6 +1024,24 @@ export async function vincularFactura(
   return response.json();
 }
 
+// Sentido inverso a vincularFactura (07/Sep/2026, "vinculacion
+// factura<->flujo bidireccional") - se inicia desde la pantalla de
+// Facturas en vez de Flujos, pero liga el mismo campo real
+// (TesoreriaFlujo.factura). Ver
+// tesoreria/views.py::TesoreriaFacturaViewSet.vincular_flujo. Regresa el
+// Flujo actualizado (el lado que de verdad cambio), no la Factura.
+export async function vincularFlujoAFactura(idFactura: number, idFlujo: string): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${idFactura}/vincular_flujo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ flujo: idFlujo }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function updateContrato(
   idContrato: string,
   params: Partial<{

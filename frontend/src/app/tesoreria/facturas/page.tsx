@@ -80,6 +80,7 @@ import {
   updateFactura,
   listContrapartes,
   listTicketsProveedor,
+  vincularFlujoAFactura,
   TesoreriaContraparte,
   TesoreriaTicketProveedor,
 } from "@/lib/tesoreria";
@@ -546,6 +547,28 @@ export default function TesoreriaFacturasPage() {
   const [motorAbierto, setMotorAbierto] = useState(false);
   const [cambiandoEstado, setCambiandoEstado] = useState(false);
   const [estadoError, setEstadoError] = useState<string | null>(null);
+  // Vinculacion factura<->flujo bidireccional (07/Sep/2026) - antes solo se
+  // podia ligar desde la pantalla de Flujos; este es el sentido inverso,
+  // se manda el id_flujo y el backend liga el mismo campo real
+  // (TesoreriaFlujo.factura).
+  const [idFlujoParaVincular, setIdFlujoParaVincular] = useState("");
+  const [vinculandoFlujo, setVinculandoFlujo] = useState(false);
+  const [errorVincularFlujo, setErrorVincularFlujo] = useState<string | null>(null);
+
+  async function handleVincularFlujo() {
+    if (!editing || !idFlujoParaVincular.trim()) return;
+    setVinculandoFlujo(true);
+    setErrorVincularFlujo(null);
+    try {
+      await vincularFlujoAFactura(editing.id, idFlujoParaVincular.trim());
+      setIdFlujoParaVincular("");
+      refresh();
+    } catch (err) {
+      setErrorVincularFlujo(err instanceof Error ? err.message : "Error al vincular el flujo");
+    } finally {
+      setVinculandoFlujo(false);
+    }
+  }
 
   // Envio masivo por correo (26/Ago/2026, finanzas.md: "Multiple invoices
   // can be selected to send massively (separately)") - seleccion en la
@@ -705,6 +728,8 @@ export default function TesoreriaFacturasPage() {
     setForm(formDesdeFactura(f));
     setFormError(null);
     setTabFactura("Comprobante");
+    setIdFlujoParaVincular("");
+    setErrorVincularFlujo(null);
     setDialogOpen(true);
   }
 
@@ -1598,6 +1623,31 @@ export default function TesoreriaFacturasPage() {
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
                 <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
+              </Stack>
+            )}
+            {/* Vinculacion factura->flujo (07/Sep/2026, "vinculacion
+                factura<->flujo bidireccional") - antes solo se podia
+                iniciar desde Flujos; este es el sentido inverso. */}
+            {editing && puedeEditar && (
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Vincular a un Flujo</Typography>
+                {errorVincularFlujo && <Alert severity="error">{errorVincularFlujo}</Alert>}
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  <TextField
+                    size="small"
+                    label="ID de flujo (ej. FLJ-000123)"
+                    value={idFlujoParaVincular}
+                    onChange={(e) => setIdFlujoParaVincular(e.target.value)}
+                    fullWidth
+                  />
+                  <Button
+                    variant="outlined"
+                    onClick={handleVincularFlujo}
+                    disabled={vinculandoFlujo || !idFlujoParaVincular.trim()}
+                  >
+                    {vinculandoFlujo ? <CircularProgress size={16} /> : "Vincular"}
+                  </Button>
+                </Stack>
               </Stack>
             )}
             {editing && (
