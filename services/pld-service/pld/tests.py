@@ -7,6 +7,7 @@ datos del otro").
 """
 
 import datetime
+import io
 from unittest.mock import Mock, patch
 
 import requests
@@ -15,6 +16,7 @@ from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
+from openpyxl import load_workbook
 from rest_framework.test import APIRequestFactory
 
 from .audit_utils import emitir_evento_auditoria
@@ -2277,3 +2279,175 @@ class PldDocumentoTicketTests(TestCase):
     def test_subir_token_invalido_da_404(self):
         response = self._subir(token="no-existe")
         self.assertEqual(response.status_code, 404)
+
+
+class ReportesCumplimientoTests(TestCase):
+    """Dashboard interno de cumplimiento PLD/AML (07/Sep/2026, v1 con los
+    datos que ya existen - sin proveedor externo de KYC/AML)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=())
+        self.view = PldContraparteKycViewSet.as_view({"get": "reportes"})
+
+    def _get(self, dias=None):
+        params = f"?dias={dias}" if dias is not None else ""
+        request = self.factory.get(f"/api/kyc/reportes/{params}")
+        request.effective_scope = self.scope
+        return self.view(request)
+
+    def test_sin_permiso_extra_cualquiera_con_sesion_lo_ve(self):
+        # Mismo criterio que "list" - no hay gate propio, solo el scope real.
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+
+    def test_resumen_por_categoria_estado_cuenta_bien(self):
+        # categoria_cumplimiento_manual=True para que save() no la
+        # recalcule sola desde tipo_persona (blank en el fixture _kyc) -
+        # estado_llenado se queda tal cual queda por default (sin
+        # documentos = PENDIENTE, ver signals.py), no hace falta forzarlo.
+        kyc1 = _kyc("cp000100", RFC_TIZARA)
+        kyc1.categoria_cumplimiento = PldContraparteKyc.CATEGORIA_KYC
+        kyc1.categoria_cumplimiento_manual = True
+        kyc1.save(update_fields=["categoria_cumplimiento", "categoria_cumplimiento_manual"])
+        kyc2 = _kyc("cp000101", RFC_TIZARA)
+        kyc2.categoria_cumplimiento = PldContraparteKyc.CATEGORIA_KYC
+        kyc2.categoria_cumplimiento_manual = True
+        kyc2.save(update_fields=["categoria_cumplimiento", "categoria_cumplimiento_manual"])
+        response = self._get()
+        fila = next(
+            f
+            for f in response.data["resumen_por_categoria_estado"]
+            if f["categoria_cumplimiento"] == "KYC" and f["estado_llenado"] == "PENDIENTE"
+        )
+        self.assertEqual(fila["total"], 2)
+
+    def test_documento_obligatorio_sin_archivo_aparece_pendiente(self):
+        kyc = _kyc("cp000102", RFC_TIZARA)
+        PldContraparteDoc.objects.create(
+            kyc=kyc, tipo_documento=PldContraparteDoc.TIPO_CURP, obligatorio=True
+        )
+        response = self._get()
+        self.assertEqual(len(response.data["documentos_pendientes"]), 1)
+        self.assertEqual(response.data["documentos_pendientes"][0]["id_contraparte"], "cp000102")
+
+    def test_documento_no_obligatorio_sin_archivo_no_aparece(self):
+        kyc = _kyc("cp000103", RFC_TIZARA)
+        PldContraparteDoc.objects.create(
+            kyc=kyc, tipo_documento=PldContraparteDoc.TIPO_CURP, obligatorio=False
+        )
+        response = self._get()
+        ids = [d["id_contraparte"] for d in response.data["documentos_pendientes"]]
+        self.assertNotIn("cp000103", ids)
+
+    def test_cuenta_sospechosa_aparece_en_riesgo(self):
+        kyc = _kyc("cp000104", RFC_TIZARA)
+        kyc.estado_cuenta = PldContraparteKyc.CUENTA_SOSPECHOSA
+        kyc.save(update_fields=["estado_cuenta"])
+        response = self._get()
+        ids = [c["id_contraparte"] for c in response.data["cuentas_en_riesgo"]]
+        self.assertIn("cp000104", ids)
+
+    def test_cuenta_activa_no_aparece_en_riesgo(self):
+        _kyc("cp000105", RFC_TIZARA)
+        response = self._get()
+        ids = [c["id_contraparte"] for c in response.data["cuentas_en_riesgo"]]
+        self.assertNotIn("cp000105", ids)
+
+    def test_expediente_viejo_sin_aprobar_aparece_con_dias_default(self):
+        kyc = _kyc("cp000106", RFC_TIZARA)
+        PldContraparteKyc.objects.filter(pk=kyc.pk).update(
+            created_at=timezone.now() - datetime.timedelta(days=45), aprobado_en=None
+        )
+        response = self._get()
+        ids = [e["id_contraparte"] for e in response.data["expedientes_sin_aprobar"]]
+        self.assertIn("cp000106", ids)
+
+    def test_expediente_reciente_sin_aprobar_no_aparece_con_dias_default(self):
+        _kyc("cp000107", RFC_TIZARA)
+        response = self._get()
+        ids = [e["id_contraparte"] for e in response.data["expedientes_sin_aprobar"]]
+        self.assertNotIn("cp000107", ids)
+
+    def test_parametro_dias_ajusta_el_umbral(self):
+        kyc = _kyc("cp000108", RFC_TIZARA)
+        PldContraparteKyc.objects.filter(pk=kyc.pk).update(
+            created_at=timezone.now() - datetime.timedelta(days=10), aprobado_en=None
+        )
+        ids_default = [e["id_contraparte"] for e in self._get().data["expedientes_sin_aprobar"]]
+        self.assertNotIn("cp000108", ids_default)
+        ids_5_dias = [e["id_contraparte"] for e in self._get(dias=5).data["expedientes_sin_aprobar"]]
+        self.assertIn("cp000108", ids_5_dias)
+
+
+class ExportarExcelCumplimientoTests(TestCase):
+    """Export de 3 pestañas (07/Sep/2026, diseño propuesto por Mariana,
+    adaptado a datos reales) - lo mas importante a probar en duro: la
+    pestaña de screening y el nivel de riesgo NUNCA dicen "limpio"/un
+    numero inventado, siempre "Sin evaluar"/"Sin verificar" mientras no
+    haya proveedor externo de KYC/AML conectado."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=())
+        self.view = PldContraparteKycViewSet.as_view({"get": "exportar_excel"})
+
+    def _get(self):
+        request = self.factory.get("/api/kyc/exportar-excel/")
+        request.effective_scope = self.scope
+        response = self.view(request)
+        return load_workbook(io.BytesIO(response.content))
+
+    def test_content_type_es_xlsx(self):
+        request = self.factory.get("/api/kyc/exportar-excel/")
+        request.effective_scope = self.scope
+        response = self.view(request)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def test_tres_pestanas_con_los_nombres_correctos(self):
+        libro = self._get()
+        self.assertEqual(libro.sheetnames, ["Resumen_KYC", "Detalle_Screening", "Beneficiarios_Finales"])
+
+    def test_nivel_de_riesgo_nunca_se_inventa(self):
+        _kyc("cp000110", RFC_TIZARA)
+        libro = self._get()
+        hoja = libro["Resumen_KYC"]
+        encabezados = [c.value for c in hoja[1]]
+        col_riesgo = encabezados.index("Nivel_Riesgo") + 1
+        valores = [hoja.cell(row=r, column=col_riesgo).value for r in range(2, hoja.max_row + 1)]
+        self.assertTrue(all(v == "Sin evaluar" for v in valores))
+
+    def test_screening_nunca_dice_limpio_sin_verificar_de_verdad(self):
+        _kyc("cp000111", RFC_TIZARA)
+        libro = self._get()
+        hoja = libro["Detalle_Screening"]
+        fila = [hoja.cell(row=2, column=c).value for c in range(1, hoja.max_column + 1)]
+        self.assertIn("Sin verificar", fila)
+        self.assertNotIn("NO", fila)
+        self.assertNotIn("SI", fila)
+
+    def test_beneficiario_final_con_porcentaje_nativo(self):
+        kyc = _kyc("cp000112", RFC_TIZARA)
+        PldRepresentanteLegal.objects.create(
+            kyc=kyc,
+            nombre_completo="Roberto Alfa Ruiz",
+            rfc="ARUR700215M12",
+            es_beneficiario_controlador=True,
+            porcentaje_participacion=60,
+        )
+        libro = self._get()
+        hoja = libro["Beneficiarios_Finales"]
+        encabezados = [c.value for c in hoja[1]]
+        col_pct = encabezados.index("%_Participacion") + 1
+        celda = hoja.cell(row=2, column=col_pct)
+        self.assertAlmostEqual(celda.value, 0.6)
+        self.assertEqual(celda.number_format, "0.00%")
+
+    def test_expediente_sin_representantes_no_aporta_filas_en_beneficiarios(self):
+        _kyc("cp000113", RFC_TIZARA)
+        libro = self._get()
+        hoja = libro["Beneficiarios_Finales"]
+        self.assertEqual(hoja.max_row, 1)  # solo el encabezado
