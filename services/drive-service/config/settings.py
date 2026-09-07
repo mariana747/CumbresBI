@@ -1,6 +1,27 @@
+import socket
 from pathlib import Path
 
 import environ
+
+# 07/Sep/2026 (hallazgo real, no era un blip de red): este entorno resuelve
+# oauth2.googleapis.com/googleapis.com a una direccion IPv6 sin ruta valida
+# ("Network is unreachable") ademas de la IPv4 que si funciona - un socket
+# normal cae solo a IPv4 al fallar IPv6, pero httplib2 (que usa
+# google-auth/googleapiclient para pedir el token OAuth y hablar con la API
+# de Drive) no reintenta con la siguiente direccion, se queda atorado en la
+# primera que le dio getaddrinfo. Forzar IPv4 primero aqui evita que
+# cualquier llamada real a Drive falle intermitentemente segun el orden en
+# que el DNS haya regresado las direcciones ese momento.
+_getaddrinfo_original = socket.getaddrinfo
+
+
+def _getaddrinfo_ipv4_primero(host, port, family=0, type=0, proto=0, flags=0):
+    resultados = _getaddrinfo_original(host, port, family, type, proto, flags)
+    ipv4 = [r for r in resultados if r[0] == socket.AF_INET]
+    return ipv4 or resultados
+
+
+socket.getaddrinfo = _getaddrinfo_ipv4_primero
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
