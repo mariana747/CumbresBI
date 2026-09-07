@@ -1826,7 +1826,7 @@ class _PermisosFacturacionCfdiMixin:
     def get_permissions(self):
         if self.action == "create":
             return [require_permission("facturacion-cfdi.crear")()]
-        if self.action in ("update", "partial_update", "destroy"):
+        if self.action in ("update", "partial_update", "destroy", "vincular_flujo"):
             return [require_permission("facturacion-cfdi.editar")()]
         return super().get_permissions()
 
@@ -2080,6 +2080,34 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             valores_nuevos={"campos": datos_validos, "archivo_vinculado": archivo_vinculado},
         )
         return Response(self.get_serializer(factura).data)
+
+    @action(detail=True, methods=["post"])
+    def vincular_flujo(self, request, pk=None):
+        """Liga esta factura a un TesoreriaFlujo ya existente - sentido
+        inverso a TesoreriaFlujoViewSet.vincular_factura (07/Sep/2026,
+        "vinculacion factura<->flujo bidireccional": antes solo se podia
+        iniciar desde el lado del flujo/ticket/solicitud de pago, nunca
+        desde la factura misma). Escribe el mismo campo real
+        (TesoreriaFlujo.factura), solo cambia el punto de entrada -
+        no crea una relacion paralela. Requiere facturacion-cfdi.editar."""
+        factura = self.get_object()
+        id_flujo = request.data.get("flujo")
+        if not id_flujo:
+            return Response({"flujo": ["Este campo es requerido."]}, status=400)
+        try:
+            flujo = TesoreriaFlujo.objects.get(id_flujo=id_flujo)
+        except TesoreriaFlujo.DoesNotExist:
+            return Response({"flujo": ["No existe un flujo con ese ID."]}, status=400)
+        flujo.factura = factura
+        flujo.save(update_fields=["factura"])
+        emitir_evento_auditoria(
+            "tesoreria_facturas.vincular_flujo",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"flujo": id_flujo},
+        )
+        return Response(TesoreriaFlujoSerializer(flujo).data)
 
 
 class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):

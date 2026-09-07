@@ -1277,6 +1277,69 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         self.assertEqual(response.data["contraparte"], self.proveedor.id_contraparte)
 
 
+class TesoreriaFacturaVincularFlujoTests(TestCase):
+    """vincular_flujo() en TesoreriaFacturaViewSet (07/Sep/2026,
+    "vinculacion factura<->flujo bidireccional") - sentido inverso a
+    TesoreriaFlujoViewSet.vincular_factura: mismo campo real
+    (TesoreriaFlujo.factura), solo que ahora tambien se puede iniciar
+    desde la pantalla de Facturas."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Constructora de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        banco = TesoreriaBanco.objects.create(id_banxico="00003", banco="Banamex", alias="BMX")
+        cuenta = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000000002", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        self.flujo = TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000901", contrato=self.contrato, cuenta=cuenta, total_mxp="500.00"
+        )
+        self.factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-vinc-flujo-1", comprobante_folio="F-VF1")
+        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.editar",))
+
+    def test_vincular_flujo_inexistente_da_400(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/vincular_flujo/", {"flujo": "no-existe"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFacturaViewSet.as_view({"post": "vincular_flujo"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 400)
+
+    def test_vincular_flujo_sin_permiso_da_403(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/vincular_flujo/", {"flujo": self.flujo.id_flujo}, format="json"
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        view = TesoreriaFacturaViewSet.as_view({"post": "vincular_flujo"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 403)
+
+    def test_vincular_flujo_real_liga_el_mismo_campo_que_el_lado_flujo(self):
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/vincular_flujo/", {"flujo": self.flujo.id_flujo}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFacturaViewSet.as_view({"post": "vincular_flujo"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 200)
+        # La respuesta es el Flujo actualizado (no la Factura) - mismo
+        # criterio que el lado espejo, se ve el resultado del lado que
+        # de verdad cambio.
+        self.assertEqual(response.data["id_flujo"], self.flujo.id_flujo)
+        self.assertEqual(response.data["factura"], self.factura.timbre_uuid)
+        self.flujo.refresh_from_db()
+        self.assertEqual(self.flujo.factura_id, self.factura.timbre_uuid)
+
+
 class TesoreriaComplementoPagoCrudTests(TestCase):
     """CRUD real de encabezado - mismo permiso facturacion-cfdi.* que
     Factura/NotaCredito, sin tests dedicados hasta ahora."""
