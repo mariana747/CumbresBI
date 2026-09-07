@@ -299,7 +299,24 @@ class TesoreriaContrato(models.Model):
     STATUS_INACTIVO = "INACTIVO"
     STATUS_CHOICES = [(STATUS_ACTIVO, "Activo"), (STATUS_INACTIVO, "Inactivo")]
 
+    # Categoria (07/Sep/2026, pedido explicito de Mariana: "definamos que
+    # contratos tendremos") - distinto de TIPO_CHOICES (interno/externo, no
+    # dice nada de la naturaleza del gasto). Nullable/opcional a proposito:
+    # solo aplica a contratos nuevos, los que ya existian se quedan sin
+    # categoria (no se hizo backfill, decision explicita).
+    CATEGORIA_FORMAL_RECURRENTE = "FORMAL_RECURRENTE"
+    CATEGORIA_GASTO_SUELTO = "GASTO_SUELTO"
+    CATEGORIA_REEMBOLSO_EMPLEADO = "REEMBOLSO_EMPLEADO"
+    CATEGORIA_COMPRA_ADQUISICION = "COMPRA_ADQUISICION"
+    CATEGORIA_CHOICES = [
+        (CATEGORIA_FORMAL_RECURRENTE, "Formal / recurrente"),
+        (CATEGORIA_GASTO_SUELTO, "Gasto suelto / consumo único"),
+        (CATEGORIA_REEMBOLSO_EMPLEADO, "Reembolso de empleado"),
+        (CATEGORIA_COMPRA_ADQUISICION, "Compra / adquisición"),
+    ]
+
     id_contrato = models.CharField(max_length=255, primary_key=True)
+    categoria = models.CharField(max_length=20, choices=CATEGORIA_CHOICES, blank=True, null=True)
     fecha_generacion = models.DateField(blank=True, null=True)
     fecha_vencimiento = models.DateField(blank=True, null=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, blank=True, null=True)
@@ -571,12 +588,27 @@ class TesoreriaFactura(models.Model):
         db_column="Timbre_NoCertificadoSAT", max_length=30, blank=True, null=True
     )
     tipo_factura = models.CharField(max_length=50, blank=True, null=True)
+    # link_pdf/link_xml (07/Sep/2026, hueco real cerrado): antes eran solo
+    # texto libre pegado a mano, sin ningun camino que los llenara solo -
+    # ni el ticket publico del proveedor ni el Motor Documental los
+    # escribian nunca (ver TesoreriaFacturaViewSet.CAMPOS_CONFIRMABLES,
+    # nunca los incluyo). Ahora drive_file_id_pdf/xml son la fuente real
+    # cuando el archivo se selecciono via Motor Documental (carpeta
+    # Tesoreria/Facturas/<uuid> o FacturasProveedores/<contraparte>) -
+    # confirmar_extraccion los llena con el archivo que de verdad se
+    # analizo. link_pdf/link_xml se quedan (compatibilidad con lo pegado a
+    # mano historicamente) pero ahora TAMBIEN se llenan solos con el
+    # web_view_link de Drive cuando hay drive_file_id, para que el boton
+    # "Abrir en pestaña nueva" del frontend siga funcionando igual.
     link_pdf = models.TextField(blank=True, null=True)
+    drive_file_id_pdf = models.TextField(blank=True, null=True)
+    mime_type_pdf = models.CharField(max_length=100, blank=True, null=True)
     # Vista previa (PDF) y comprobante fiscal digital (XML) son los dos
     # archivos esenciales que se piden para poder aceptar la factura (ver
-    # ESTADO_CHOICES arriba) - se pegan a mano igual que link_pdf mientras
-    # no exista una integracion real de subida de archivo para este flujo.
+    # ESTADO_CHOICES arriba).
     link_xml = models.TextField(blank=True, null=True)
+    drive_file_id_xml = models.TextField(blank=True, null=True)
+    mime_type_xml = models.CharField(max_length=100, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)

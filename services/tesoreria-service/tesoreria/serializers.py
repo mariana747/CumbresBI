@@ -193,7 +193,11 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
     en TesoreriaFlujoSerializer. `label` (etiqueta compuesta que se ve en
     el AppSheet original) y un supuesto `autorizado_por` NO son columnas
     reales de esta tabla (confirmado contra el detalle real del AppSheet,
-    25/Ago/2026) - no se agregan aqui."""
+    25/Ago/2026) - no se agregan aqui.
+
+    `categoria` (07/Sep/2026) distingue la naturaleza del gasto/relacion -
+    ver TesoreriaContrato.CATEGORIA_CHOICES. Opcional a proposito: solo
+    aplica a contratos nuevos, no se hizo backfill de los que ya existian."""
 
     contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
 
@@ -204,6 +208,7 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "sociedad",
             "contraparte",
             "contraparte_nombre",
+            "categoria",
             "tipo",
             "fecha_generacion",
             "fecha_vencimiento",
@@ -446,7 +451,11 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "timbre_no_certificado_sat",
             "tipo_factura",
             "link_pdf",
+            "drive_file_id_pdf",
+            "mime_type_pdf",
             "link_xml",
+            "drive_file_id_xml",
+            "mime_type_xml",
             "estado",
             "conceptos",
             "created_at",
@@ -454,7 +463,19 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "contraparte", "estado", "created_at", "updated_at"]
+        # drive_file_id_*/mime_type_* son de solo lectura aqui (07/Sep/2026)
+        # - solo los llena confirmar_extraccion() cuando el archivo
+        # realmente se analizo con el Motor Documental, nunca un PATCH
+        # libre (evitaria que alguien apunte la factura a un archivo de
+        # Drive que nunca reviso). link_pdf/link_xml SI siguen escribibles
+        # via PATCH normal (alta manual historica, ver docstring del
+        # modelo) - confirmar_extraccion tambien los sobreescribe cuando
+        # hay drive_file_id, para que "Abrir en pestaña nueva" siga
+        # funcionando igual sin importar el origen.
+        read_only_fields = [
+            "id", "contraparte", "estado", "created_at", "updated_at",
+            "drive_file_id_pdf", "mime_type_pdf", "drive_file_id_xml", "mime_type_xml",
+        ]
 
     def get_conceptos(self, obj):
         conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)

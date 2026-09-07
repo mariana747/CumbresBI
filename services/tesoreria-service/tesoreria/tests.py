@@ -10,12 +10,15 @@ de sociedad en el ERD real (son catalogos compartidos entre sociedades,
 mismo criterio que GeneralSociedad en iam-service); el filtro real es por
 permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
+import json
 from datetime import date, datetime
 from unittest.mock import patch
 
 import requests
 from cumbresbi_scope.scope import EffectiveScope
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
 
 from .models import (
@@ -35,9 +38,11 @@ from .models import (
     TesoreriaFlujo,
     TesoreriaNotaCredito,
     TesoreriaContratoDocumento,
+    TesoreriaTicketReembolso,
     TesoreriaRecNomina,
     TesoreriaSaldo,
 )
+from . import mail_utils
 from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
 from .reportes import calcular_reporte_diario
 from .views import (
@@ -214,6 +219,28 @@ class TesoreriaContratoTests(TestCase):
         # Segundo contrato para la misma sociedad+contraparte -> consecutivo 002.
         response2 = self._crear_contrato(RFC_TIZARA)
         self.assertEqual(response2.data["id_contrato"], f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-002")
+
+    def test_categoria_es_opcional_y_se_guarda(self):
+        # 07/Sep/2026 - categoria distingue la naturaleza del gasto/relacion
+        # (formal/recurrente, gasto suelto, reembolso, compra), opcional a
+        # proposito (contratos viejos se quedan sin categoria, sin backfill).
+        request = self.factory.post(
+            "/api/contratos/",
+            {
+                "sociedad": RFC_TIZARA,
+                "contraparte": self.contraparte.id_contraparte,
+                "categoria": "GASTO_SUELTO",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        response = TesoreriaContratoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["categoria"], "GASTO_SUELTO")
+
+    def test_categoria_default_es_null_si_no_se_manda(self):
+        response = self._crear_contrato(RFC_TIZARA)
+        self.assertIsNone(response.data["categoria"])
 
     def test_consecutivo_es_independiente_por_sociedad(self):
         self._crear_contrato(RFC_TIZARA)
@@ -1106,6 +1133,93 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         factura.refresh_from_db()
         self.assertEqual(factura.contraparte_id, self.proveedor.id_contraparte)
 
+    def test_confirmar_extraccion_con_archivo_pdf_liga_drive_file_id(self):
+        # 07/Sep/2026 - cierra el hueco real: antes ni confirmar_extraccion
+        # ni create() ligaban el archivo de Drive que de verdad se
+        # analizo, link_pdf/link_xml se quedaban vacios para siempre.
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-1", comprobante_folio="F-A1")
+        request = self.factory.post(
+            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
+            {
+                "campos": {"comprobante_folio": "F-A1"},
+                "archivo": {
+                    "file_id": "drive-123",
+                    "nombre": "factura.pdf",
+                    "mime_type": "application/pdf",
+                    "web_view_link": "https://drive.example/view/drive-123",
+                },
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 200)
+        factura.refresh_from_db()
+        self.assertEqual(factura.drive_file_id_pdf, "drive-123")
+        self.assertEqual(factura.mime_type_pdf, "application/pdf")
+        self.assertEqual(factura.link_pdf, "https://drive.example/view/drive-123")
+        self.assertIsNone(factura.drive_file_id_xml)
+
+    def test_confirmar_extraccion_con_archivo_xml_liga_drive_file_id(self):
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-2", comprobante_folio="F-A2")
+        request = self.factory.post(
+            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
+            {
+                "campos": {"comprobante_folio": "F-A2"},
+                "archivo": {"file_id": "drive-456", "nombre": "factura.xml", "mime_type": "application/xml"},
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 200)
+        factura.refresh_from_db()
+        self.assertEqual(factura.drive_file_id_xml, "drive-456")
+        self.assertIsNone(factura.drive_file_id_pdf)
+
+    def test_confirmar_extraccion_archivo_no_reconocido_se_ignora(self):
+        # Ni pdf ni xml (ej. el analista selecciono una imagen suelta) - no
+        # debe tronar ni ligar nada.
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-3", comprobante_folio="F-A3")
+        request = self.factory.post(
+            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
+            {
+                "campos": {"comprobante_folio": "F-A3"},
+                "archivo": {"file_id": "drive-789", "nombre": "foto.jpg", "mime_type": "image/jpeg"},
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 200)
+        factura.refresh_from_db()
+        self.assertIsNone(factura.drive_file_id_pdf)
+        self.assertIsNone(factura.drive_file_id_xml)
+
+    def test_crear_factura_con_archivo_liga_drive_file_id(self):
+        # Caso mas comun en la practica: el proveedor ya subio su PDF via
+        # ticket publico, el Motor Documental lo analizo ANTES de que la
+        # factura existiera - create() tambien debe ligarlo, no solo
+        # confirmar_extraccion (ver handleAutorellenarNuevaFactura en el
+        # frontend).
+        request = self.factory.post(
+            "/api/facturas/",
+            {
+                "timbre_uuid": "uuid-archivo-4",
+                "comprobante_folio": "F-A4",
+                "archivo": {"file_id": "drive-999", "nombre": "factura.pdf", "mime_type": "application/pdf"},
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["drive_file_id_pdf"], "drive-999")
+
     def test_filtro_por_contraparte_en_facturas(self):
         TesoreriaFactura.objects.create(
             timbre_uuid="uuid-vinc-5", comprobante_folio="F-5", emisor_rfc="PVI900101ABC", contraparte=self.proveedor
@@ -1565,13 +1679,30 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         parche = patch("tesoreria.reembolso_utils.requests.get", side_effect=requests.RequestException("sin red"))
         parche.start()
         self.addCleanup(parche.stop)
+        # 07/Sep/2026: create() ahora exige "file" y lo sube a Drive en el
+        # mismo paso (ver TesoreriaTicketReembolsoViewSet.create) - se
+        # mockea _subir_a_drive en vez de pegarle de verdad a drive-service,
+        # mismo criterio que el resto de las pruebas de este archivo con
+        # llamadas de red externas.
+        parche_drive = patch(
+            "tesoreria.views._subir_a_drive",
+            return_value=({"web_view_link": "https://drive.example/x", "file_id": "fake123", "mime_type": "image/png"}, None),
+        )
+        parche_drive.start()
+        self.addCleanup(parche_drive.stop)
+
+    def _post_crear(self, campos):
+        """Arma un POST multipart valido para create() - conceptos va como
+        JSON serializado (asi lo manda el frontend real, ver
+        crearTicketReembolso en lib/miCumbres.ts) y siempre incluye un
+        archivo falso, ya que el endpoint ahora lo exige."""
+        data = dict(campos)
+        data["conceptos"] = json.dumps(data.get("conceptos", []))
+        data["file"] = SimpleUploadedFile("comprobante.png", b"contenido-fake", content_type="image/png")
+        return self.factory.post("/api/tickets-reembolso/", data, format="multipart")
 
     def test_crear_sin_sesion_da_403(self):
-        request = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
-            format="json",
-        )
+        request = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
         request.effective_scope = EffectiveScope(is_global=False)
         view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
         response = view(request)
@@ -1579,19 +1710,28 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
 
     def test_crear_sin_conceptos_da_400(self):
         # 03/Sep/2026: se requiere al menos un concepto.
-        request = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": [], "fecha_gasto": self.HOY},
-            format="json",
-        )
+        request = self._post_crear({"conceptos": [], "fecha_gasto": self.HOY})
         request.effective_scope = self.scope_empleado
         response = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request)
         self.assertEqual(response.status_code, 400)
 
-    def test_crear_con_varios_conceptos_suma_el_monto_total(self):
-        # 03/Sep/2026 (minuta punto 1: "solicitar varios conceptos").
+    def test_crear_sin_archivo_da_400(self):
+        # 07/Sep/2026 (bug real de tickets duplicados): el comprobante ya
+        # es obligatorio para crear el ticket - no puede existir un ticket
+        # sin imagen.
         request = self.factory.post(
             "/api/tickets-reembolso/",
+            {"conceptos": json.dumps(self.UN_CONCEPTO), "fecha_gasto": self.HOY},
+            format="multipart",
+        )
+        request.effective_scope = self.scope_empleado
+        response = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(TesoreriaTicketReembolso.objects.count(), 0)
+
+    def test_crear_con_varios_conceptos_suma_el_monto_total(self):
+        # 03/Sep/2026 (minuta punto 1: "solicitar varios conceptos").
+        request = self._post_crear(
             {
                 "conceptos": [
                     {"descripcion": "Taxi", "monto": "150.00", "categoria_gasto": "TRANSPORTE"},
@@ -1600,8 +1740,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
                 "moneda": "USD",
                 "sociedad": "CIF010101AAA",
                 "fecha_gasto": self.HOY,
-            },
-            format="json",
+            }
         )
         request.effective_scope = self.scope_empleado
         view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
@@ -1613,13 +1752,10 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(str(response.data["monto_total"]), "350.00")
         # id_empleado lo pone perform_create del JWT, no lo que mande el body.
         self.assertEqual(response.data["id_empleado"], "empleado1")
+        self.assertEqual(response.data["link_ticket"], "https://drive.example/x")
 
     def test_crear_sin_los_campos_nuevos_usa_moneda_mxp_por_default(self):
-        request = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
-            format="json",
-        )
+        request = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
         request.effective_scope = self.scope_empleado
         view = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})
         response = view(request)
@@ -1627,24 +1763,30 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(response.data["moneda"], "MXP")
         self.assertIsNone(response.data["sociedad"])
 
+    def test_si_falla_la_subida_a_drive_no_deja_ticket_huerfano(self):
+        # 07/Sep/2026 (bug real de tickets duplicados): si Drive no
+        # responde, el ticket recien creado se borra en vez de quedar sin
+        # imagen - asi un reintento del empleado nunca produce un
+        # duplicado.
+        with patch("tesoreria.views._subir_a_drive", return_value=(None, Response({"detail": "Drive no respondio"}, status=502))):
+            request = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
+            request.effective_scope = self.scope_empleado
+            response = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(TesoreriaTicketReembolso.objects.count(), 0)
+
     def test_empleado_solo_ve_sus_propios_tickets(self):
         # 31/Ago/2026 (auditoria de scope): antes era un filtro manual
         # ("tiene tesoreria.editar? ve todo : filtra por id_empleado");
         # ahora es SCOPE_FIELD_IDENTITY del ScopedManager - mismo resultado
         # para este caso, pero por el mecanismo real de RLS.
-        request1 = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
-            format="json",
-        )
+        request1 = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
         request1.effective_scope = self.scope_empleado
         TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request1)
 
         otro_empleado = EffectiveScope(is_global=False, identity_user_id="empleado2")
-        request2 = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": [{"descripcion": "Comida", "monto": "200.00"}], "fecha_gasto": self.HOY},
-            format="json",
+        request2 = self._post_crear(
+            {"conceptos": [{"descripcion": "Comida", "monto": "200.00"}], "fecha_gasto": self.HOY}
         )
         request2.effective_scope = otro_empleado
         TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request2)
@@ -1661,18 +1803,14 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         # antes CUALQUIERA con tesoreria.editar veia TODOS los tickets sin
         # importar su alcance; ahora respeta sociedad/centro igual que el
         # resto del proyecto.
-        request1 = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA},
-            format="json",
+        request1 = self._post_crear(
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA}
         )
         request1.effective_scope = self.scope_empleado
         TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request1)
 
-        request2 = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": [{"descripcion": "Comida", "monto": "200.00"}], "fecha_gasto": self.HOY, "sociedad": RFC_CAPITAL},
-            format="json",
+        request2 = self._post_crear(
+            {"conceptos": [{"descripcion": "Comida", "monto": "200.00"}], "fecha_gasto": self.HOY, "sociedad": RFC_CAPITAL}
         )
         request2.effective_scope = self.scope_empleado
         TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request2)
@@ -1685,10 +1823,8 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
 
     def test_staff_global_ve_todos_los_tickets(self):
-        request1 = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA},
-            format="json",
+        request1 = self._post_crear(
+            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA}
         )
         request1.effective_scope = self.scope_empleado
         TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(request1)
@@ -1703,11 +1839,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         # 03/Sep/2026 (minuta: "se necesita autorizar antes de pagar") -
         # antes aprobar() solo cambiaba el estado, sin dejar rastro de quien
         # lo hizo.
-        crear = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY},
-            format="json",
-        )
+        crear = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
         crear.effective_scope = self.scope_empleado
         creado = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(crear)
 
@@ -1723,11 +1855,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
     def test_sociedad_no_se_puede_corregir_despues_de_crear(self):
         # Regla de minuta 03/Sep/2026: "si se equivoca de sociedad ya
         # tampoco se acepta" - inmutable, ni Tesoreria la corrige.
-        crear = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA},
-            format="json",
-        )
+        crear = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "sociedad": RFC_TIZARA})
         crear.effective_scope = self.scope_empleado
         creado = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(crear)
 
@@ -1745,11 +1873,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         # 03/Sep/2026: Mariana amplio la regla de sociedad a moneda
         # tambien ("cualquier error de sociedad, tipo de moneda o falta de
         # ortografia... no se aceptara").
-        crear = self.factory.post(
-            "/api/tickets-reembolso/",
-            {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "moneda": "USD"},
-            format="json",
-        )
+        crear = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "moneda": "USD"})
         crear.effective_scope = self.scope_empleado
         creado = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(crear)
 
@@ -1776,29 +1900,10 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertIn("es_ultimo_dia_habil", response.data)
         self.assertIn("ventana_cerrada_por_hora", response.data)
 
-    def test_ver_ticket_sin_archivo_subido_da_404(self):
-        # 04/Sep/2026 ("usa lo mismo que en pld" - preview embebido en vez
-        # de link crudo de Drive) - sin drive_file_id_ticket, nada que
-        # servir, sin llamar a drive-service.
-        creado = self.factory.post(
-            "/api/tickets-reembolso/", {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY}, format="json"
-        )
-        creado.effective_scope = self.scope_empleado
-        ticket = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
-
-        request = self.factory.get(f"/api/tickets-reembolso/{ticket.data['id_ticket']}/ver_ticket/")
-        request.effective_scope = self.scope_empleado
-        response = TesoreriaTicketReembolsoViewSet.as_view({"get": "ver_ticket"})(
-            request, pk=ticket.data["id_ticket"]
-        )
-        self.assertEqual(response.status_code, 404)
-
     def test_ver_ticket_de_otro_empleado_no_es_visible(self):
         # get_object() usa el mismo scope que list - un empleado no puede
         # ver el ticket de otro via ver_ticket.
-        creado = self.factory.post(
-            "/api/tickets-reembolso/", {"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY}, format="json"
-        )
+        creado = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
         creado.effective_scope = self.scope_empleado
         ticket = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
 
@@ -2166,3 +2271,120 @@ class TesoreriaTicketProveedorScopeTests(TestCase):
         view = TesoreriaTicketProveedorViewSet.as_view({"post": "validar"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
+
+
+class _RespuestaFalsa:
+    """Doble minimo de requests.Response para mockear requests.get/post sin
+    levantar servidores reales (drive-service/mail-service)."""
+
+    def __init__(self, status_code, content=b"", headers=None, text=""):
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers or {}
+        self.text = text
+
+
+class TesoreriaEnviarFacturaAdjuntosTests(TestCase):
+    """Adjuntar PDF/XML real en el envio de facturas (07/Sep/2026) - antes
+    enviar_factura solo ponia los links en el cuerpo del correo. link_pdf/
+    link_xml son URLs pegadas a mano (sin drive_file_id, no hay Drive de
+    por medio para Facturas), asi que _descargar_adjunto le pega
+    directo a esa URL con requests.get."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.factura = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-adjuntos-1",
+            comprobante_folio="F-1",
+            comprobante_total=100,
+            link_pdf="https://proveedor.example/factura.pdf",
+            link_xml="https://proveedor.example/factura.xml",
+        )
+
+    def test_adjunta_pdf_y_xml_cuando_la_descarga_funciona(self):
+        request = self.factory.get("/")
+        with patch(
+            "tesoreria.mail_utils.requests.get",
+            return_value=_RespuestaFalsa(200, content=b"contenido-pdf", headers={"Content-Type": "application/pdf"}),
+        ), patch(
+            "tesoreria.mail_utils.requests.post", return_value=_RespuestaFalsa(201)
+        ) as mock_post:
+            resultado = mail_utils.enviar_factura(request, "cliente@ejemplo.com", self.factura)
+
+        self.assertTrue(resultado)
+        payload_enviado = mock_post.call_args.kwargs["json"]
+        self.assertEqual(len(payload_enviado["adjuntos"]), 2)
+        self.assertEqual(payload_enviado["adjuntos"][0]["filename"], "F-1.pdf")
+        self.assertEqual(payload_enviado["adjuntos"][1]["filename"], "F-1.xml")
+
+    def test_si_falla_la_descarga_se_manda_sin_adjuntos_sin_bloquear_el_envio(self):
+        # fail-open: un PDF/XML que no se pudo descargar no debe tumbar el
+        # envio completo - el correo ya trae los links de respaldo en el
+        # cuerpo (_renderizar_factura).
+        request = self.factory.get("/")
+        with patch(
+            "tesoreria.mail_utils.requests.get", side_effect=requests.RequestException("sin red")
+        ), patch(
+            "tesoreria.mail_utils.requests.post", return_value=_RespuestaFalsa(201)
+        ) as mock_post:
+            resultado = mail_utils.enviar_factura(request, "cliente@ejemplo.com", self.factura)
+
+        self.assertTrue(resultado)
+        payload_enviado = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload_enviado["adjuntos"], [])
+
+    def test_adjunto_que_excede_el_tamano_maximo_se_descarta(self):
+        contenido_grande = b"x" * (mail_utils._TAMANO_MAXIMO_ADJUNTO_BYTES + 1)
+        request = self.factory.get("/")
+        with patch(
+            "tesoreria.mail_utils.requests.get",
+            return_value=_RespuestaFalsa(200, content=contenido_grande, headers={"Content-Type": "application/pdf"}),
+        ), patch(
+            "tesoreria.mail_utils.requests.post", return_value=_RespuestaFalsa(201)
+        ) as mock_post:
+            resultado = mail_utils.enviar_factura(request, "cliente@ejemplo.com", self.factura)
+
+        self.assertTrue(resultado)
+        payload_enviado = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload_enviado["adjuntos"], [])
+
+    def test_prefiere_drive_file_id_sobre_link_externo(self):
+        # 07/Sep/2026 - cuando la factura ya tiene drive_file_id_pdf (Motor
+        # Documental la ligo, ver TesoreriaFacturaViewSet.confirmar_extraccion),
+        # debe descargarse via drive-service autenticado, NO via el link
+        # externo aunque tambien exista (compatibilidad historica).
+        self.factura.drive_file_id_pdf = "drive-real-1"
+        self.factura.mime_type_pdf = "application/pdf"
+        self.factura.save(update_fields=["drive_file_id_pdf", "mime_type_pdf"])
+
+        request = self.factory.get("/")
+        with patch(
+            "tesoreria.mail_utils.requests.get",
+            return_value=_RespuestaFalsa(200, content=b"contenido-real-de-drive", headers={"Content-Type": "application/pdf"}),
+        ) as mock_get, patch(
+            "tesoreria.mail_utils.requests.post", return_value=_RespuestaFalsa(201)
+        ) as mock_post:
+            resultado = mail_utils.enviar_factura(request, "cliente@ejemplo.com", self.factura)
+
+        self.assertTrue(resultado)
+        # El PDF se pidio a drive-service por file_id (no a la URL externa
+        # de link_pdf, que ni siquiera se toca) - el XML sigue via link
+        # externo porque esta factura no tiene drive_file_id_xml.
+        urls_llamadas = [llamada.args[0] for llamada in mock_get.call_args_list]
+        self.assertTrue(any("drive-real-1" in u for u in urls_llamadas))
+        self.assertFalse(any("proveedor.example/factura.pdf" in u for u in urls_llamadas))
+        payload_enviado = mock_post.call_args.kwargs["json"]
+        self.assertEqual(len(payload_enviado["adjuntos"]), 2)  # pdf via drive + xml via link externo
+
+    def test_sin_link_pdf_ni_xml_no_intenta_descargar_nada(self):
+        factura_sin_archivos = TesoreriaFactura.objects.create(timbre_uuid="uuid-sin-archivos")
+        request = self.factory.get("/")
+        with patch("tesoreria.mail_utils.requests.get") as mock_get, patch(
+            "tesoreria.mail_utils.requests.post", return_value=_RespuestaFalsa(201)
+        ) as mock_post:
+            resultado = mail_utils.enviar_factura(request, "cliente@ejemplo.com", factura_sin_archivos)
+
+        mock_get.assert_not_called()
+        self.assertTrue(resultado)
+        payload_enviado = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload_enviado["adjuntos"], [])
