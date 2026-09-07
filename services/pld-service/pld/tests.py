@@ -348,6 +348,53 @@ class ValidacionSociedadAlCrearTests(TestCase):
         self.assertIsNone(response.data["sociedad_nombre"])
 
 
+class ReasignarSociedadTests(TestCase):
+    """07/Sep/2026, "donde puedo asignar una sociedad" - reasignar
+    sociedad_rfc via PATCH despues de creado el expediente debe resincronizar
+    el snapshot de solo lectura sociedad_nombre (antes solo create() lo
+    hacia, un PATCH dejaba el nombre mostrado desactualizado)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("pld-compliance.editar",))
+        self.kyc = _kyc("cp000095", RFC_TIZARA)
+        self.kyc.sociedad_nombre = "Tizara SA de CV"
+        self.kyc.save(update_fields=["sociedad_nombre"])
+        self.view = PldContraparteKycViewSet.as_view({"patch": "partial_update"})
+
+    def _patch(self, sociedad_rfc):
+        request = self.factory.patch(
+            f"/api/kyc/{self.kyc.id_kyc}/", {"sociedad_rfc": sociedad_rfc}, format="json"
+        )
+        request.effective_scope = self.scope
+        return self.view(request, pk=self.kyc.id_kyc)
+
+    def test_reasignar_a_sociedad_real_actualiza_el_nombre(self):
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Tizara Capital SA de CV"}),
+        ):
+            response = self._patch(RFC_CAPITAL)
+        self.assertEqual(response.status_code, 200)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.sociedad_rfc, RFC_CAPITAL)
+        self.assertEqual(self.kyc.sociedad_nombre, "Tizara Capital SA de CV")
+
+    def test_reasignar_a_sociedad_inexistente_da_400_y_no_cambia_nada(self):
+        with patch("pld.views.requests.get", return_value=Mock(status_code=404)):
+            response = self._patch(RFC_CAPITAL)
+        self.assertEqual(response.status_code, 400)
+        self.kyc.refresh_from_db()
+        self.assertEqual(self.kyc.sociedad_rfc, RFC_TIZARA)
+        self.assertEqual(self.kyc.sociedad_nombre, "Tizara SA de CV")
+
+    def test_mandar_la_misma_sociedad_no_llama_a_iam_service(self):
+        with patch("pld.views.requests.get") as mock_get:
+            response = self._patch(RFC_TIZARA)
+        self.assertEqual(response.status_code, 200)
+        mock_get.assert_not_called()
+
+
 class ContraparteMaestraAltaAutonomaTests(TestCase):
     """02/Sep/2026, cierre real de la reconciliacion contraparte maestra:
     el alta autonoma de un expediente KYC (Opcion B, sin id_contraparte en

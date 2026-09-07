@@ -611,8 +611,27 @@ class PldContraparteKycViewSet(ModelViewSet):
         campos_tocados = [campo for campo in request.data if campo in campos_escribibles]
         valores_previos = {campo: _valor_serializable(getattr(instance, campo)) for campo in campos_tocados}
 
+        # 07/Sep/2026, "donde puedo asignar una sociedad" - reasignar
+        # sociedad_rfc despues de creado el expediente no actualizaba el
+        # snapshot de solo lectura sociedad_nombre (solo create() lo hacia),
+        # dejando el nombre mostrado desincronizado del RFC real. Mismo
+        # criterio de validacion que create(): debe existir en el catalogo
+        # real de iam-service.
+        nuevo_sociedad_rfc = request.data.get("sociedad_rfc")
+        sociedad_nombre_nueva = None
+        if nuevo_sociedad_rfc and nuevo_sociedad_rfc != instance.sociedad_rfc:
+            headers, cookies = forward_auth_headers(request)
+            existe, sociedad_nombre_nueva = _obtener_sociedad_en_iam(nuevo_sociedad_rfc, headers, cookies)
+            if not existe:
+                return Response(
+                    {"sociedad_rfc": "No existe esa sociedad en el catálogo."}, status=status.HTTP_400_BAD_REQUEST
+                )
+
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        if sociedad_nombre_nueva is not None:
+            instance.sociedad_nombre = sociedad_nombre_nueva
+            instance.save(update_fields=["sociedad_nombre"])
         instance.refresh_from_db()
 
         cambios = {
