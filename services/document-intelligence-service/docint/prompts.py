@@ -39,7 +39,11 @@ PROMPTS = {
         "dom_cp, clave_elector, numero_identificacion (el CIC/numero de "
         "identificacion del ciudadano impreso junto a la fotografia, NO la "
         "clave de elector), vigencia (YYYY-MM-DD), tipo_identificacion "
-        "('INE'). " + _REGLA_COMUN
+        # 07/Sep/2026: valor generico ("Identificacion oficial", el mismo
+        # label del catalogo tipo_documento en pld-service), ya no la sigla
+        # 'INE' - consistencia con el nombre que ve el analista en el
+        # checklist y con el que se renombra el archivo en Drive.
+        "('Identificación oficial'). " + _REGLA_COMUN
     ),
     "pld.curp": (
         "El documento es una constancia de CURP (Clave Unica de Registro de "
