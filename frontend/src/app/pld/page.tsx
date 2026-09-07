@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  IconButton,
   InputAdornment,
   InputLabel,
   MenuItem,
@@ -28,7 +29,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FilePlus2, FolderOpen, Search } from "lucide-react";
+import { Eye, FilePlus2, FolderOpen, Search } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import ContraparteSelector from "@/components/ContraparteSelector";
 import { BRAND } from "@/theme/theme";
@@ -438,9 +439,9 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   </TableCell>
                   <TableCell>{new Date(kyc.created_at).toLocaleDateString("es-MX")}</TableCell>
                   <TableCell align="right">
-                    <Button size="small" variant="text" href={`/pld/${kyc.id_kyc}`}>
-                      Ver
-                    </Button>
+                    <IconButton size="small" href={`/pld/${kyc.id_kyc}`} aria-label="Ver expediente" title="Ver expediente">
+                      <Eye size={18} strokeWidth={1.5} />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))

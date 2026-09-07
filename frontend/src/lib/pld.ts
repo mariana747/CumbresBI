@@ -143,8 +143,10 @@ export const CATEGORIA_CUMPLIMIENTO_LABELS: Record<PldCategoriaCumplimiento, str
 export interface PldContraparteKyc {
   id_kyc: string;
   id_contraparte: string;
-  // Snapshot de solo lectura (25/Ago/2026) - ver
-  // services/pld-service/pld/models.py::sociedad_nombre.
+  // sociedad_rfc si es editable (a diferencia de sociedad_nombre, el
+  // snapshot de solo lectura que se resincroniza solo al cambiarlo - ver
+  // PldContraparteKycViewSet.update).
+  sociedad_rfc: string | null;
   sociedad_nombre: string | null;
   nombre_completo: string | null;
   curp: string | null;
@@ -486,6 +488,27 @@ export async function reclasificarCategoriaCumplimiento(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ categoria_cumplimiento: categoria, updated_by: updatedBy }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Reasignar sociedad_rfc (07/Sep/2026, "donde puedo asignar una sociedad?")
+// - mismo patron que reclasificarCategoriaCumplimiento arriba (campo
+// administrativo propio, no parte de PldDatosEditables que tambien llena el
+// cliente via el link publico). El backend valida contra el catalogo real
+// de iam-service y resincroniza el snapshot sociedad_nombre.
+export async function reasignarSociedadKyc(
+  idKyc: string,
+  sociedadRfc: string,
+  updatedBy?: string | null
+): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sociedad_rfc: sociedadRfc, updated_by: updatedBy }),
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

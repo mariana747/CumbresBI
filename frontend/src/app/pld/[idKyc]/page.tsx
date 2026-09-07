@@ -60,6 +60,7 @@ import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession, puedeVerBitacora } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora } from "@/lib/audit";
 import {
   AUTORIDAD_POR_TIPO_IDENTIFICACION,
@@ -93,6 +94,7 @@ import {
   nombreParaMostrar,
   reactivarAutoCategoriaKyc,
   reactivarCuentaKyc,
+  reasignarSociedadKyc,
   reclasificarCategoriaCumplimiento,
   rechazarSolicitudEliminacion,
   solicitarDocumentoKyc,
@@ -331,6 +333,33 @@ export default function PldExpedienteDetallePage() {
   const puedeAprobar = session?.perm_keys.includes("pld-compliance.aprobar") ?? false;
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("pld-compliance.editar") ?? false;
+
+  // Catalogo de sociedades para reasignar (07/Sep/2026, "donde puedo
+  // asignar una sociedad?") - mismo filtro por alcance que /pld (un usuario
+  // no-GLOBAL solo puede reasignar dentro de las sociedades que ya ve).
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  useEffect(() => {
+    if (!puedeEditar) return;
+    listSociedades()
+      .then(setSociedades)
+      .catch(() => setSociedades([]));
+  }, [puedeEditar]);
+  const sociedadesDisponibles =
+    session?.is_global || !session ? sociedades : sociedades.filter((s) => session.sociedad_rfcs.includes(s.rfc));
+
+  const [reasignandoSociedad, setReasignandoSociedad] = useState(false);
+  async function handleReasignarSociedad(sociedadRfc: string) {
+    if (!kyc) return;
+    setReasignandoSociedad(true);
+    try {
+      await reasignarSociedadKyc(kyc.id_kyc, sociedadRfc, session?.user_id);
+      cargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al reasignar la sociedad");
+    } finally {
+      setReasignandoSociedad(false);
+    }
+  }
 
   // Verificacion automatica contra Drive al abrir el expediente (25/Ago/2026,
   // hallazgo real: un documento puede desaparecer de Drive sin que nadie
@@ -863,9 +892,48 @@ export default function PldExpedienteDetallePage() {
               <Typography variant="caption" color="text.secondary" display="block">
                 {nombreParaMostrar(kyc) ? `Contraparte ${kyc.id_contraparte}` : "Nombre sin capturar todavía"}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                {/* 07/Sep/2026: le faltaba display="block" - sin eso se
+                queda en la misma linea que el Select de categoria (inline-
+                flex de ancho fijo) y el texto del CURP se corta justo donde
+                empieza esa caja ("se encima con otro elemento"). */}
                 {kyc.curp ? `CURP: ${kyc.curp}` : "Sin CURP capturado todavía"}
               </Typography>
+              {/* Sociedad (07/Sep/2026, "agrega en esta ficha a que
+              sociedades esta asociado" + "donde puedo asignar una
+              sociedad?") - antes solo se mostraba como texto de solo
+              lectura (sociedad_nombre, snapshot de sociedad_rfc al crear el
+              expediente); ahora es un Select real contra el catalogo de
+              iam-service (mismo patron que RoleAssignmentDialog), gateado a
+              puedeEditar - un expediente vive en una sola sociedad, no
+              varias. El backend resincroniza sociedad_nombre al cambiar
+              (ver PldContraparteKycViewSet.update). */}
+              {puedeEditar ? (
+                <FormControl size="small" fullWidth sx={{ mb: 1.5 }} disabled={reasignandoSociedad}>
+                  <InputLabel id="sociedad-kyc-label">Sociedad</InputLabel>
+                  <Select
+                    labelId="sociedad-kyc-label"
+                    label="Sociedad"
+                    value={kyc.sociedad_rfc ?? ""}
+                    onChange={(e) => handleReasignarSociedad(e.target.value)}
+                  >
+                    {!kyc.sociedad_rfc && (
+                      <MenuItem value="">
+                        <em>Sin sociedad asociada</em>
+                      </MenuItem>
+                    )}
+                    {sociedadesDisponibles.map((s) => (
+                      <MenuItem key={s.rfc} value={s.rfc}>
+                        {s.razon_social || s.alias_sociedad || s.rfc}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              ) : (
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                  {kyc.sociedad_nombre ? `Sociedad: ${kyc.sociedad_nombre}` : "Sin sociedad asociada"}
+                </Typography>
+              )}
               {/* Categoria KYC/KYB (04/Sep/2026) - se deriva sola de
               tipo_persona; el Select solo tiene efecto real cuando queda
               en PENDIENTE_REVISION (fideicomiso/tipo_persona vacio, "casos
@@ -1084,7 +1152,10 @@ export default function PldExpedienteDetallePage() {
                 {esPersonaMoral && <Tab value={5} label="Representantes legales" />}
               </Tabs>
 
-              <Box sx={{ p: 2.5, pt: 2 }}>
+              {/* 07/Sep/2026: "esta muy junto" - pt insuficiente dejaba el
+              boton Cancelar/Guardar casi pegado a la barra de tabs
+              (scrollable, con flechas cuando no caben todos). */}
+              <Box sx={{ p: 2.5, pt: 3 }}>
                 {tab === 0 && (
                   <Stack spacing={2}>
                     {errorEdicion && <Alert severity="error">{errorEdicion}</Alert>}
