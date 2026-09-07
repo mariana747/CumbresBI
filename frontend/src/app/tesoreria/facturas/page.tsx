@@ -56,6 +56,7 @@ import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import TicketsReembolsoAdminPanel from "@/components/TicketsReembolsoAdminPanel";
 import { SessionUser, getSession } from "@/lib/auth";
+import { DriveArchivo } from "@/lib/drive";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   EnvioMasivoResultado,
@@ -145,6 +146,13 @@ const ESTADO_COLOR: Record<TesoreriaFacturaEstado, "default" | "info" | "success
   ACEPTADA: "success",
   RECHAZADA: "error",
 };
+
+// Pestañas del formulario de factura (07/Sep/2026, "dividir por tabs para
+// tener mayor espacio vertical") - mismo patron que TABS_CONTRATO en
+// tesoreria/contratos/page.tsx, agrupando los 25+ campos del CFDI segun a
+// que parte del comprobante le sirven.
+const TABS_FACTURA = ["Comprobante", "Montos", "Emisor y Receptor", "Timbrado y Enlaces"] as const;
+type TabFactura = (typeof TABS_FACTURA)[number];
 
 // snake_case (nombres de columna, tal como los pide el prompt
 // "tesoreria.cfdi_factura" en docint/prompts.py) -> camelCase (llaves de
@@ -602,6 +610,9 @@ export default function TesoreriaFacturasPage() {
     setForm(FORM_VACIO);
     setFormError(null);
     setProveedorBandeja("");
+    setArchivoNuevaFactura(undefined);
+    setMotorEjecutadoNuevaFactura(false);
+    setTabFactura("Comprobante");
     setDialogOpen(true);
   }
 
@@ -612,9 +623,12 @@ export default function TesoreriaFacturasPage() {
   // debe de poner ya en la tabla sin poner nueva factura" - la fila ya
   // esta en la tabla, "Revisar" solo evita repetir los 2 clics extra).
   function abrirRevisionTicket(ticket: TesoreriaTicketProveedor) {
+    // 07/Sep/2026, "que solo abra nueva factura, no motor documental" -
+    // antes tambien disparaba setMotorAbierto(true) automatico; ahora solo
+    // precarga el proveedor y deja que el analista de clic en "Motor
+    // Documental" el mismo cuando este listo.
     abrirAlta();
     setProveedorBandeja(ticket.contraparte);
-    setMotorAbierto(true);
   }
 
   // Clasificacion de un ticket de proveedor (27/Ago/2026) - separa los que
@@ -624,7 +638,17 @@ export default function TesoreriaFacturasPage() {
   function estadoTicketFactura(t: TesoreriaTicketProveedor) {
     const recibida = t.uses_count >= t.max_uses;
     const revocado = !!t.revoked_at;
-    const expirado = !revocado && new Date(t.expires_at) < new Date();
+    // 07/Sep/2026 (bug real, "la factura no expira, solo el link para
+    // subirla"): antes "expirado" solo miraba la fecha, sin importar si el
+    // proveedor ya subio el archivo - un ticket usado con exito se movia
+    // igual a "vencidos" en cuanto pasaban los 30 min del link, aunque el
+    // PDF ya estuviera esperando en Drive listo para el Motor Documental.
+    // Ahora la vigencia del link SOLO aplica mientras sigue "esperando al
+    // proveedor" - una vez recibida, el archivo no tiene fecha de caducidad
+    // propia, sigue como trabajo pendiente de capturar hasta que Tesoreria
+    // lo procese. Revocar si sigue siendo terminal aunque ya este recibida
+    // (accion explicita del admin, no un artefacto de tiempo).
+    const expirado = !revocado && !recibida && new Date(t.expires_at) < new Date();
     const vencido = revocado || expirado;
     const label = revocado ? "Revocado" : recibida ? "Recibida, falta capturar" : expirado ? "Expirado" : "Esperando al proveedor";
     const color: "default" | "error" | "warning" = vencido ? "error" : recibida ? "warning" : "default";
@@ -680,6 +704,7 @@ export default function TesoreriaFacturasPage() {
     setEditing(f);
     setForm(formDesdeFactura(f));
     setFormError(null);
+    setTabFactura("Comprobante");
     setDialogOpen(true);
   }
 
@@ -707,13 +732,27 @@ export default function TesoreriaFacturasPage() {
   // TesoreriaFacturaViewSet.confirmar_extraccion). Actualiza `editing`/`form`
   // con la respuesta real del backend en vez de solo confiar en los datos
   // que el analista vio en pantalla (ej. si el backend ignoro algun campo).
-  async function handleConfirmarExtraccionFactura(campos: Record<string, unknown>) {
+  async function handleConfirmarExtraccionFactura(campos: Record<string, unknown>, archivo?: DriveArchivo) {
     if (!editing) return;
-    const actualizada = await confirmarExtraccionFactura(editing.id, campos);
+    const actualizada = await confirmarExtraccionFactura(editing.id, campos, archivo);
     setEditing(actualizada);
     setForm(formDesdeFactura(actualizada));
     refresh();
   }
+
+  // Archivo real analizado antes de que la factura exista (07/Sep/2026,
+  // cierra el hueco de link_pdf/link_xml) - se guarda aparte del form
+  // porque no es un campo de texto editable, se manda tal cual a
+  // createFactura() cuando el analista confirme el alta.
+  const [archivoNuevaFactura, setArchivoNuevaFactura] = useState<DriveArchivo | undefined>(undefined);
+  // Bloquea los campos del CFDI hasta que el Motor Documental ya corrio
+  // una vez (07/Sep/2026, "solo asi podra editar de forma manual") - cierra
+  // el atajo de teclear una factura desde cero saltandose la IA, que
+  // finanzas.md prohibe ("the user cannot create... invoices"): el unico
+  // camino real sigue siendo Motor Documental -> revisar/corregir -> Guardar,
+  // nunca Nueva Factura -> teclear todo -> Guardar directo.
+  const [motorEjecutadoNuevaFactura, setMotorEjecutadoNuevaFactura] = useState(false);
+  const [tabFactura, setTabFactura] = useState<TabFactura>("Comprobante");
 
   // Caso de uso real (24/Ago/2026): alguien sube el escaneo/foto de la
   // factura a Drive ANTES de que exista el registro (a futuro desde
@@ -722,7 +761,9 @@ export default function TesoreriaFacturasPage() {
   // analista revisa/corrige y da "Guardar" como si lo hubiera tecleado el
   // mismo. Sin llamada al backend - createFactura() ya se encarga de
   // validar/guardar cuando el usuario confirme el formulario.
-  async function handleAutorellenarNuevaFactura(campos: Record<string, unknown>) {
+  async function handleAutorellenarNuevaFactura(campos: Record<string, unknown>, archivo?: DriveArchivo) {
+    setArchivoNuevaFactura(archivo);
+    setMotorEjecutadoNuevaFactura(true);
     setForm((prev) => {
       const siguiente = { ...prev };
       for (const [key, value] of Object.entries(campos)) {
@@ -746,7 +787,8 @@ export default function TesoreriaFacturasPage() {
       if (editing) {
         await updateFactura(editing.id, form);
       } else {
-        await createFactura(form);
+        await createFactura(form, archivoNuevaFactura);
+        setArchivoNuevaFactura(undefined);
         if (proveedorBandeja) {
           const ticket = ticketsProveedor.find((t) => t.contraparte === proveedorBandeja);
           if (ticket) setTicketsOcultos((prev) => new Set(prev).add(ticket.id_ticket));
@@ -929,7 +971,13 @@ export default function TesoreriaFacturasPage() {
                   return (
                     <TableRow key={`ticket-${t.id_ticket}`} hover>
                       {puedeEditar && <TableCell padding="checkbox" />}
-                      <TableCell colSpan={3} sx={{ color: "text.secondary" }}>
+                      {/* colSpan=4 (07/Sep/2026, "no esta alineado bien") -
+                          cubre UUID+Folio+Emisor+Receptor, las 4 columnas
+                          que este resumen no tiene todavia; con colSpan=3
+                          "Receptor" quedaba fuera y todo lo de la derecha
+                          (fecha/total/estado/acciones) se corria una
+                          columna. */}
+                      <TableCell colSpan={4} sx={{ color: "text.secondary" }}>
                         Ticket de proveedor — {t.contraparte_nombre} ({t.email})
                       </TableCell>
                       <TableCell>{new Date(t.issued_at).toLocaleDateString("es-MX")}</TableCell>
@@ -1001,8 +1049,7 @@ export default function TesoreriaFacturasPage() {
         </TableContainer>
         </Box>
 
-        {/* Tickets vencidos/revocados (27/Ago/2026, pedido de Mariana: "dejar
-        visible pero que se vaya a una sub tabla de expirado") - separados
+        {/* Tickets vencidos/revocados separados
         de los activos para no ensuciar la tabla principal con tickets que
         ya no van a ninguna parte, sin perder el registro de que se pidieron. */}
         {ticketsVencidos.length > 0 && (
@@ -1131,35 +1178,38 @@ export default function TesoreriaFacturasPage() {
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
         </DialogTitle>
-        <DialogContent dividers>
+        <DialogContent dividers sx={{ py: 3 }}>
           {formError && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {formError}
             </Alert>
           )}
-          <Stack spacing={2}>
+          {/* 07/Sep/2026, "hay que darle mas espaciado" - spacing 2 -> 3
+              entre grupos de campos, mas padding vertical del dialogo. */}
+          <Stack spacing={3}>
             {(editing ? puedeEditar : puedeCrear) && (
               <>
                 <Stack direction="row" spacing={2} alignItems="center">
+                  {/* 07/Sep/2026, "quita la pantalla de motor y solo deja el
+                      boton" + "el proveedor debe quedarse solo que no es
+                      editable" - ya no es un selector manual, solo muestra
+                      de donde va a leer el Motor Documental (precargado si
+                      se abrio desde "Revisar" en un ticket de proveedor,
+                      ver abrirRevisionTicket; si no, bandeja general -
+                      mismo fallback de siempre, ver el contexto del Motor
+                      Documental mas abajo). */}
                   {!editing && (
-                    <FormControl size="small" sx={{ minWidth: 280 }}>
-                      <InputLabel id="proveedor-bandeja-label">Proveedor (factura subida por ticket)</InputLabel>
-                      <Select
-                        labelId="proveedor-bandeja-label"
-                        label="Proveedor (factura subida por ticket)"
-                        value={proveedorBandeja}
-                        onChange={(e) => setProveedorBandeja(e.target.value)}
-                      >
-                        <MenuItem value="">
-                          <em>Ninguno (bandeja general)</em>
-                        </MenuItem>
-                        {proveedores.map((p) => (
-                          <MenuItem key={p.id_contraparte} value={p.id_contraparte}>
-                            {p.razon_social}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
+                    <TextField
+                      size="small"
+                      label="Proveedor (factura subida por ticket)"
+                      value={
+                        proveedorBandeja
+                          ? proveedores.find((p) => p.id_contraparte === proveedorBandeja)?.razon_social ?? proveedorBandeja
+                          : "Ninguno (bandeja general)"
+                      }
+                      disabled
+                      sx={{ minWidth: 280 }}
+                    />
                   )}
                   <Button
                     size="small"
@@ -1177,11 +1227,43 @@ export default function TesoreriaFacturasPage() {
                 excepcion operativa por si el Motor Documental o la captura
                 inicial fallan). El fieldset deshabilita en bloque todo el
                 grupo de inputs para quien solo tiene facturacion-cfdi.leer/
-                .aprobar, sin tocar los 40+ TextField uno por uno. */}
+                .aprobar, sin tocar los 40+ TextField uno por uno.
+
+                07/Sep/2026: en "Nueva Factura" ademas se bloquea hasta que
+                el Motor Documental ya corrio una vez - la edicion manual
+                solo se habilita para REVISAR/CORREGIR lo que la IA propuso,
+                nunca para teclear una factura desde cero saltandose la IA. */}
+            {!editing && !motorEjecutadoNuevaFactura && puedeCrear && (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                Usa el Motor Documental para llenar la factura — la edición manual se habilita después,
+                solo para revisar/corregir lo que la IA extrajo.
+              </Alert>
+            )}
+            <Tabs
+              value={tabFactura}
+              onChange={(_, v) => setTabFactura(v)}
+              variant="scrollable"
+              scrollButtons="auto"
+              allowScrollButtonsMobile
+            >
+              {TABS_FACTURA.map((t) => (
+                <Tab key={t} label={t} value={t} />
+              ))}
+            </Tabs>
             <fieldset
-              disabled={!(editing ? puedeEditar : puedeCrear)}
+              disabled={editing ? !puedeEditar : !puedeCrear || !motorEjecutadoNuevaFactura}
               style={{ border: 0, margin: 0, padding: 0, display: "contents" }}
             >
+            {/* 07/Sep/2026, "sigue sin espaciado" - el fieldset de arriba es
+                display:contents (necesario para que "disabled" deshabilite
+                todo en bloque), pero eso hace que no tenga caja propia:
+                el spacing del Stack exterior (que solo ve al fieldset como
+                su unico hijo real) nunca llegaba a los TextField de
+                adentro. Este Stack interno si es hijo real de cada
+                TextField/Stack de fila, asi que el spacing si aplica. */}
+            <Stack spacing={2}>
+            {tabFactura === "Comprobante" && (
+            <>
             <TextField
               size="small"
               label="UUID de timbrado"
@@ -1300,6 +1382,10 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
+            </>
+            )}
+            {tabFactura === "Montos" && (
+            <>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
@@ -1323,6 +1409,10 @@ export default function TesoreriaFacturasPage() {
               onChange={(e) => setForm({ ...form, comprobanteTotal: e.target.value })}
               fullWidth
             />
+            </>
+            )}
+            {tabFactura === "Emisor y Receptor" && (
+            <>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
@@ -1385,6 +1475,10 @@ export default function TesoreriaFacturasPage() {
                 fullWidth
               />
             </Stack>
+            </>
+            )}
+            {tabFactura === "Timbrado y Enlaces" && (
+            <>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
@@ -1496,6 +1590,9 @@ export default function TesoreriaFacturasPage() {
                 }}
               />
             </Stack>
+            </>
+            )}
+            </Stack>
             </fieldset>
             {editing && (
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
@@ -1563,7 +1660,11 @@ export default function TesoreriaFacturasPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={handleGuardar} disabled={saving}>
+          <Button
+            variant="contained"
+            onClick={handleGuardar}
+            disabled={saving || (!editing && !motorEjecutadoNuevaFactura)}
+          >
             {saving ? <CircularProgress size={16} /> : "Guardar"}
           </Button>
         </DialogActions>

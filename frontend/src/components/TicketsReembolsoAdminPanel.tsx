@@ -3,12 +3,16 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
   DialogContent,
   DialogTitle,
+  Divider,
   IconButton,
   Link as MuiLink,
   Paper,
@@ -20,11 +24,14 @@ import {
   TableHead,
   TableRow,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
-import { Eye, ReceiptText as TicketIcon, Sparkles, Upload, X as CloseIcon, XCircle } from "lucide-react";
+import { CheckCircle2, Eye, ReceiptText as TicketIcon, Sparkles, Upload, X as CloseIcon, XCircle } from "lucide-react";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import MotorDocumentalDialog, { MotorDocumentalContexto } from "@/components/MotorDocumentalDialog";
 import { SessionUser } from "@/lib/auth";
+import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import {
   aprobarTicket,
   urlVerFactura,
@@ -81,6 +88,12 @@ function snakeACamel(campo: string): string {
 }
 
 export default function TicketsReembolsoAdminPanel({ session }: { session: SessionUser | null }) {
+  // 07/Sep/2026, "hay que hacerlo responsivo" - mismo patron ya usado en
+  // micumbres/tickets/page.tsx: el dialogo de detalle pasa a pantalla
+  // completa en celular y los botones se apilan en vez de desbordar.
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
+
   const [tickets, setTickets] = useState<TesoreriaTicketReembolso[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +113,32 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
     cargar();
   }, []);
 
+  // El ticket solo guarda el RFC de la sociedad (referencia laxa, mismo
+  // criterio que TesoreriaContrato.sociedad) - mostrarlo crudo no le dice
+  // nada al analista, necesita ver la razon social (07/Sep/2026).
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  useEffect(() => {
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
+  }, []);
+  function nombreSociedad(rfc: string | null): string {
+    if (!rfc) return "—";
+    return sociedades.find((s) => s.rfc === rfc)?.razon_social || rfc;
+  }
+
+  // id_empleado es el identity_user_id crudo (CharField plano, no FK real
+  // a rrhh_empleados - ver docstring de TesoreriaTicketReembolso, todavia
+  // no existe RRHH) - pero SI coincide con IamUser.user_id porque sale del
+  // mismo JWT, asi que se puede resolver a un nombre real via el
+  // directorio de iam-service (07/Sep/2026, "debe ser el nombre real").
+  const [empleados, setEmpleados] = useState<IamUser[]>([]);
+  useEffect(() => {
+    listUsers().then(setEmpleados).catch(() => setEmpleados([]));
+  }, []);
+  function nombreEmpleado(idEmpleado: string): string {
+    const usuario = empleados.find((u) => u.user_id === idEmpleado);
+    return usuario?.display_name || usuario?.primary_email || idEmpleado;
+  }
+
   const [ticketAbierto, setTicketAbierto] = useState<TesoreriaTicketReembolso | null>(null);
   // Preview embebido de "Ver ticket"/"Ver factura" (04/Sep/2026, "usa lo
   // mismo que en pld") - mismo criterio que micumbres/tickets/page.tsx.
@@ -115,6 +154,15 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
   const [motorFacturaAbierto, setMotorFacturaAbierto] = useState(false);
   const [errorDetalle, setErrorDetalle] = useState<string | null>(null);
   const [procesando, setProcesando] = useState(false);
+  // Campos ya confirmados por el Motor Documental para el ticket abierto
+  // (07/Sep/2026) - null hasta que el analista confirma la extraccion; a
+  // partir de ahi habilita el boton "Aprobar" (antes se aprobaba solo al
+  // confirmar, ahora el analista decide aparte, ya con la comparacion a la
+  // vista). Se reinicia cada vez que se abre un ticket distinto.
+  const [verificacionCampos, setVerificacionCampos] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    setVerificacionCampos(null);
+  }, [ticketAbierto?.id_ticket]);
 
   async function handleRechazar() {
     if (!ticketAbierto) return;
@@ -145,17 +193,37 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
 
   // Al confirmar la verificacion del comprobante del empleado: no hay nada
   // que guardar de esos campos (comercio_nombre/monto_total/etc. no tienen
-  // columna propia, solo sirven para que el analista los compare a ojo
-  // contra descripcion/monto/fecha_gasto ya declarados) - "Confirmar" aqui
-  // significa "ya lo revise, el gasto procede", asi que directo aprueba el
-  // ticket. Se deja el resumen de lo extraido en comentarios, para que
-  // quede trazado que se reviso y con que datos.
+  // columna propia, solo sirven para que la IA los compare contra
+  // descripcion/monto/fecha_gasto ya declarados por el empleado - ver
+  // registroActual en contextoVerificacion). El Motor Documental ya marco
+  // ahi mismo cualquier discrepancia (07/Sep/2026, "si hay algun error lo
+  // marcaremos") antes de que el analista llegue a este punto; "Confirmar"
+  // ya NO aprueba solo - el analista vio el comparativo y decide Aprobar o
+  // Rechazar por separado en el detalle del ticket (mismos dos botones de
+  // siempre). Aqui solo se guarda el resumen de lo extraido/comparado en
+  // comentarios, para que quede trazado que se reviso y con que datos.
   async function handleConfirmarVerificacion(campos: Record<string, unknown>) {
     if (!ticketAbierto) return;
-    const comentarios = `Verificado con Motor Documental: ${JSON.stringify(campos)}`;
-    const actualizado = await aprobarTicket(ticketAbierto.id_ticket, comentarios, session?.user_id);
-    setTicketAbierto(actualizado);
-    await cargar();
+    setVerificacionCampos(campos);
+    setMotorVerificacionAbierto(false);
+  }
+
+  async function handleAprobar() {
+    if (!ticketAbierto) return;
+    setProcesando(true);
+    setErrorDetalle(null);
+    try {
+      const comentarios = verificacionCampos
+        ? `Verificado con Motor Documental: ${JSON.stringify(verificacionCampos)}`
+        : undefined;
+      const actualizado = await aprobarTicket(ticketAbierto.id_ticket, comentarios, session?.user_id);
+      setTicketAbierto(actualizado);
+      await cargar();
+    } catch (err) {
+      setErrorDetalle(err instanceof Error ? err.message : "Error al aprobar el ticket");
+    } finally {
+      setProcesando(false);
+    }
   }
 
   // Al confirmar la extraccion de la factura real (ya APROBADO): crea la
@@ -186,6 +254,18 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
         permKey: "tesoreria.editar",
         expectedDocumentType: "tesoreria.ticket_gasto",
         camposConfirmables: ["comercio_nombre", "fecha_gasto", "monto_total", "moneda", "concepto"],
+        // Lo que el empleado ya declaro al subir el ticket (07/Sep/2026) -
+        // el Motor Documental compara contra esto y marca discrepancias
+        // (tolerante a formato de monto/fecha y typos menores, ver
+        // MotorDocumentalDialog::compararConExpediente). "comercio_nombre"
+        // se queda fuera a proposito: el empleado nunca lo declara, no hay
+        // con que comparar.
+        registroActual: {
+          fecha_gasto: ticketAbierto.fecha_gasto,
+          monto_total: ticketAbierto.monto_total,
+          moneda: ticketAbierto.moneda,
+          concepto: ticketAbierto.descripcion || ticketAbierto.conceptos.map((c) => c.descripcion).join(", "),
+        },
         onConfirmar: handleConfirmarVerificacion,
       }
     : null;
@@ -222,41 +302,106 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
         </Alert>
       )}
 
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>ID</TableCell>
-              <TableCell>Empleado</TableCell>
-              <TableCell>Descripción</TableCell>
-              <TableCell>Monto</TableCell>
-              <TableCell>Fecha del gasto</TableCell>
-              <TableCell>Estado</TableCell>
-              <TableCell align="center">Ticket</TableCell>
-              <TableCell>Factura</TableCell>
-              <TableCell align="right">Acciones</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={9} align="center">
-                  <CircularProgress size={24} />
-                </TableCell>
-              </TableRow>
-            ) : tickets.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} align="center">
-                  <Typography variant="body2" color="text.secondary">
-                    Sin tickets todavía.
+      {loading ? (
+        <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+          <CircularProgress size={24} />
+        </Box>
+      ) : tickets.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
+          Sin tickets todavía.
+        </Typography>
+      ) : esMovil ? (
+        // Tarjetas apiladas en celular (07/Sep/2026, "no esta en tarjetas
+        // apiladas") - mismo patron que micumbres/tickets/page.tsx: la
+        // tabla de 9 columnas no cabe comoda en una pantalla angosta.
+        <Stack spacing={1.5}>
+          {tickets.map((t) => (
+            <Card key={t.id_ticket} variant="outlined">
+              <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                  <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
+                      {t.id_ticket}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {nombreEmpleado(t.id_empleado)}
+                    </Typography>
+                    <Typography variant="body2">
+                      {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
+                    </Typography>
+                  </Stack>
+                  <IconButton
+                    size="small"
+                    aria-label="Ver"
+                    onClick={() => {
+                      setTicketAbierto(t);
+                      setErrorDetalle(null);
+                    }}
+                  >
+                    <Eye size={14} strokeWidth={1.5} />
+                  </IconButton>
+                </Stack>
+                <Chip
+                  size="small"
+                  label={ESTADO_LABEL[t.estado]}
+                  color={ESTADO_COLOR[t.estado]}
+                  sx={{ alignSelf: "flex-start", mt: 0.5 }}
+                />
+                <Divider sx={{ my: 1 }} />
+                <Stack spacing={0.5}>
+                  <Typography variant="body2">
+                    <strong>Monto:</strong> ${t.monto_total}
                   </Typography>
-                </TableCell>
+                  <Typography variant="body2">
+                    <strong>Fecha del gasto:</strong> {t.fecha_gasto}
+                  </Typography>
+                  <Stack direction="row" spacing={2}>
+                    {t.link_ticket && (
+                      <MuiLink
+                        component="button"
+                        variant="body2"
+                        onClick={() => setPreviewDoc({ ticket: t, tipo: "ticket" })}
+                        sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+                      >
+                        <TicketIcon size={14} strokeWidth={1.5} /> Ver ticket
+                      </MuiLink>
+                    )}
+                    {(t.factura_folio || t.link_factura_pdf) && (
+                      <MuiLink
+                        component="button"
+                        variant="body2"
+                        onClick={() => setPreviewDoc({ ticket: t, tipo: "factura" })}
+                      >
+                        {t.factura_folio ? `Folio ${t.factura_folio}` : "Ver factura"}
+                      </MuiLink>
+                    )}
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          ))}
+        </Stack>
+      ) : (
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>ID</TableCell>
+                <TableCell>Empleado</TableCell>
+                <TableCell>Descripción</TableCell>
+                <TableCell>Monto</TableCell>
+                <TableCell>Fecha del gasto</TableCell>
+                <TableCell>Estado</TableCell>
+                <TableCell align="center">Ticket</TableCell>
+                <TableCell>Factura</TableCell>
+                <TableCell align="right">Acciones</TableCell>
               </TableRow>
-            ) : (
-              tickets.map((t) => (
+            </TableHead>
+            <TableBody>
+              {tickets.map((t) => (
                 <TableRow key={t.id_ticket} hover>
                   <TableCell>{t.id_ticket}</TableCell>
-                  <TableCell>{t.id_empleado}</TableCell>
+                  <TableCell>{nombreEmpleado(t.id_empleado)}</TableCell>
                   <TableCell sx={{ maxWidth: 240 }}>
                     {t.descripcion || t.conceptos.map((c) => c.descripcion).join(", ")}
                   </TableCell>
@@ -298,13 +443,19 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                     </IconButton>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
-      <Dialog open={!!ticketAbierto} onClose={() => setTicketAbierto(null)} fullWidth maxWidth="sm">
+      <Dialog
+        open={!!ticketAbierto}
+        onClose={() => setTicketAbierto(null)}
+        fullWidth
+        maxWidth="sm"
+        fullScreen={esMovil}
+      >
         {ticketAbierto && (
           <>
             <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -323,7 +474,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                   sx={{ alignSelf: "flex-start" }}
                 />
                 <Typography variant="body2">
-                  <strong>Empleado:</strong> {ticketAbierto.id_empleado}
+                  <strong>Empleado:</strong> {nombreEmpleado(ticketAbierto.id_empleado)}
                 </Typography>
                 {ticketAbierto.descripcion && (
                   <Typography variant="body2">
@@ -335,7 +486,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                   {ticketAbierto.fecha_gasto}
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"}
+                  <strong>Sociedad:</strong> {nombreSociedad(ticketAbierto.sociedad)}
                 </Typography>
                 {ticketAbierto.autorizado_por && (
                   <Typography variant="body2">
@@ -343,9 +494,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                     ({ticketAbierto.fecha_autorizacion})
                   </Typography>
                 )}
-                {/* Conceptos (03/Sep/2026, minuta punto 1: "solicitar
-                    varios conceptos") - antes era un solo monto/categoria
-                    por ticket, ahora una tabla de N gastos. */}
+           
                 <Typography variant="subtitle2">Conceptos</Typography>
                 <TableContainer component={Paper} variant="outlined">
                   <Table size="small">
@@ -367,44 +516,83 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                     </TableBody>
                   </Table>
                 </TableContainer>
-                {ticketAbierto.link_ticket && (
-                  <MuiLink component="button" onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "ticket" })}>
-                    Ver foto/comprobante subido por el empleado
-                  </MuiLink>
-                )}
+      
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  {ticketAbierto.link_ticket && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth={esMovil}
+                      startIcon={<TicketIcon size={14} strokeWidth={1.5} />}
+                      onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "ticket" })}
+                    >
+                      Ver ticket
+                    </Button>
+                  )}
+                  {ticketAbierto.link_factura_pdf && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth={esMovil}
+                      onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "factura" })}
+                    >
+                      Ver factura
+                    </Button>
+                  )}
+                </Stack>
 
                 {ticketAbierto.estado === "PENDIENTE" && (
                   <>
                     <Typography variant="caption" color="text.secondary">
-                      No se puede aprobar hasta que el Motor Documental verifique el comprobante subido por el
-                      empleado.
+                      {verificacionCampos
+                        ? "Ya se verificó con el Motor Documental — revisa el comparativo arriba y decide."
+                        : "No se puede aprobar hasta que el Motor Documental verifique el comprobante subido por el empleado."}
                     </Typography>
-                    <Button
-                      variant="contained"
-                      startIcon={<Sparkles size={16} strokeWidth={1.5} />}
-                      onClick={() => setMotorVerificacionAbierto(true)}
-                      disabled={!ticketAbierto.link_ticket}
-                      sx={{ alignSelf: "flex-start" }}
-                    >
-                      Verificar con el Motor Documental y aprobar
-                    </Button>
 
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      startIcon={<XCircle size={16} strokeWidth={1.5} />}
-                      disabled={procesando}
-                      onClick={handleRechazar}
-                      sx={{ alignSelf: "flex-start" }}
-                    >
-                      Rechazar
-                    </Button>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                      <Button
+                        variant={verificacionCampos ? "outlined" : "contained"}
+                        fullWidth={esMovil}
+                        startIcon={<Sparkles size={16} strokeWidth={1.5} />}
+                        onClick={() => setMotorVerificacionAbierto(true)}
+                        disabled={!ticketAbierto.link_ticket}
+                      >
+                        {verificacionCampos ? "Ver verificación de nuevo" : "Verificar con el Motor Documental"}
+                      </Button>
+                      {verificacionCampos && (
+                        <Button
+                          variant="contained"
+                          color="success"
+                          fullWidth={esMovil}
+                          startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
+                          disabled={procesando}
+                          onClick={handleAprobar}
+                        >
+                          Aprobar
+                        </Button>
+                      )}
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        fullWidth={esMovil}
+                        startIcon={<XCircle size={16} strokeWidth={1.5} />}
+                        disabled={procesando}
+                        onClick={handleRechazar}
+                      >
+                        Rechazar
+                      </Button>
+                    </Stack>
                   </>
                 )}
 
                 {ticketAbierto.estado === "APROBADO" && (
-                  <>
-                    <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} flexWrap="wrap">
+                    <Button
+                      component="label"
+                      variant="outlined"
+                      fullWidth={esMovil}
+                      startIcon={<Upload size={16} strokeWidth={1.5} />}
+                    >
                       {ticketAbierto.link_factura_pdf ? "Reemplazar factura (PDF)" : "1. Subir factura (PDF)"}
                       <input
                         type="file"
@@ -420,14 +608,14 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                     {ticketAbierto.link_factura_pdf && (
                       <Button
                         variant="contained"
+                        fullWidth={esMovil}
                         startIcon={<Sparkles size={16} strokeWidth={1.5} />}
                         onClick={() => setMotorFacturaAbierto(true)}
-                        sx={{ alignSelf: "flex-start" }}
                       >
                         2. Validar y extraer con el Motor Documental
                       </Button>
                     )}
-                  </>
+                  </Stack>
                 )}
 
                 {ticketAbierto.estado === "VINCULADO" && (

@@ -53,9 +53,11 @@ import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
+  CONTRATO_CATEGORIA_LABELS,
   CONTRATO_DOCUMENTO_NOMBRE_OPCIONES,
   TesoreriaContraparte,
   TesoreriaContrato,
+  TesoreriaContratoCategoria,
   TesoreriaContratoDocumento,
   TesoreriaContratoDocumentoNombre,
   TesoreriaContratoStatus,
@@ -76,6 +78,7 @@ import {
 const FORM_VACIO = {
   sociedad: "",
   contraparte: "",
+  categoria: "" as TesoreriaContratoCategoria | "",
   tipo: "INTERNO" as TesoreriaContratoTipo,
   fechaGeneracion: new Date().toISOString().slice(0, 10),
   fechaVencimiento: "",
@@ -168,6 +171,16 @@ function TesoreriaContratosPageContent() {
   // deshabilitado y sin boton de Guardar cuando soloLectura es true.
   const [soloLectura, setSoloLectura] = useState(false);
   const [form, setForm] = useState(FORM_VACIO);
+  // 07/Sep/2026: solo FORMAL_RECURRENTE usa el modelo completo (vigencia,
+  // periodicidad, contrato firmado, autorizacion interna) - las otras 3
+  // categorias (GASTO_SUELTO, REEMBOLSO_EMPLEADO, COMPRA_ADQUISICION) son
+  // todas variantes de "sin vigencia, sin contrato firmado, pago unico o
+  // por evento" - mismo criterio que "no hay ni pago recurrente, ni
+  // contrato firmado, ni vigencia" que observo Mariana con el caso real de
+  // Restaurant Izel (GASTO_SUELTO). Sin categoria elegida no se oculta
+  // nada (mismo comportamiento de siempre, contratos viejos sin categoria
+  // incluidos).
+  const ocultaCamposFormales = form.categoria !== "" && form.categoria !== "FORMAL_RECURRENTE";
   const [tab, setTab] = useState<TabContrato>("Detalles");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -365,6 +378,7 @@ function TesoreriaContratosPageContent() {
     setForm({
       sociedad: c.sociedad,
       contraparte: c.contraparte,
+      categoria: c.categoria || "",
       tipo: c.tipo || "INTERNO",
       fechaGeneracion: c.fecha_generacion || "",
       fechaVencimiento: c.fecha_vencimiento || "",
@@ -401,6 +415,7 @@ function TesoreriaContratosPageContent() {
     try {
       if (editing) {
         await updateContrato(editing.id_contrato, {
+          categoria: form.categoria || undefined,
           tipo: form.tipo,
           fechaGeneracion: form.fechaGeneracion || undefined,
           fechaVencimiento: form.fechaVencimiento || undefined,
@@ -427,6 +442,7 @@ function TesoreriaContratosPageContent() {
         await createContrato({
           sociedad: form.sociedad,
           contraparte: form.contraparte,
+          categoria: form.categoria || undefined,
           tipo: form.tipo,
           fechaGeneracion: form.fechaGeneracion || undefined,
           fechaVencimiento: form.fechaVencimiento || undefined,
@@ -771,6 +787,31 @@ function TesoreriaContratosPageContent() {
                 disabled
                 fullWidth
               />
+              {/* Categoria (07/Sep/2026) - distingue la naturaleza del
+                  gasto/relacion; opcional, sin default forzado (a
+                  diferencia de Tipo) porque los contratos viejos no la
+                  tienen y no se les hizo backfill. Elegir GASTO_SUELTO
+                  oculta abajo los campos que no aplican (vigencia,
+                  periodicidad, link de contrato firmado, autorizacion). */}
+              <FormControl size="small" fullWidth>
+                <InputLabel id="categoria-label">Categoría (opcional)</InputLabel>
+                <Select
+                  labelId="categoria-label"
+                  label="Categoría (opcional)"
+                  value={form.categoria}
+                  onChange={(e) => setForm({ ...form, categoria: e.target.value as TesoreriaContratoCategoria | "" })}
+                  disabled={soloLectura}
+                >
+                  <MenuItem value="">
+                    <em>Sin especificar</em>
+                  </MenuItem>
+                  {Object.entries(CONTRATO_CATEGORIA_LABELS).map(([valor, label]) => (
+                    <MenuItem key={valor} value={valor}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
                   size="small"
@@ -781,15 +822,17 @@ function TesoreriaContratosPageContent() {
                   InputLabelProps={{ shrink: true }}
                   fullWidth
                 />
-                <TextField
-                  size="small"
-                  type="date"
-                  label="Fecha de vencimiento"
-                  value={form.fechaVencimiento}
-                  onChange={(e) => setForm({ ...form, fechaVencimiento: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                  fullWidth
-                />
+                {!ocultaCamposFormales && (
+                  <TextField
+                    size="small"
+                    type="date"
+                    label="Fecha de vencimiento"
+                    value={form.fechaVencimiento}
+                    onChange={(e) => setForm({ ...form, fechaVencimiento: e.target.value })}
+                    InputLabelProps={{ shrink: true }}
+                    fullWidth
+                  />
+                )}
               </Stack>
               <FormControl size="small" fullWidth>
                 <InputLabel id="tipo-label">Tipo</InputLabel>
@@ -838,27 +881,36 @@ function TesoreriaContratosPageContent() {
                   </FormControl>
                 </>
               )}
-              <TextField
-                size="small"
-                label="Proyecto"
-                value={form.proyecto}
-                onChange={(e) => setForm({ ...form, proyecto: e.target.value })}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label="Propiedad"
-                value={form.propiedad}
-                onChange={(e) => setForm({ ...form, propiedad: e.target.value })}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label="Centro"
-                value={form.centro}
-                onChange={(e) => setForm({ ...form, centro: e.target.value })}
-                fullWidth
-              />
+              {/* Proyecto/Propiedad/Centro no aplican a un gasto suelto
+                  (07/Sep/2026) - son forma de ligar un contrato formal a
+                  una obra/inmueble/area de costo especifica; un consumo
+                  unico como Restaurant Izel no se asigna a ninguno de los
+                  3. */}
+              {!ocultaCamposFormales && (
+                <>
+                  <TextField
+                    size="small"
+                    label="Proyecto"
+                    value={form.proyecto}
+                    onChange={(e) => setForm({ ...form, proyecto: e.target.value })}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Propiedad"
+                    value={form.propiedad}
+                    onChange={(e) => setForm({ ...form, propiedad: e.target.value })}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Centro"
+                    value={form.centro}
+                    onChange={(e) => setForm({ ...form, centro: e.target.value })}
+                    fullWidth
+                  />
+                </>
+              )}
             </Stack>
           )}
 
@@ -881,50 +933,57 @@ function TesoreriaContratosPageContent() {
                   <MenuItem value="UNICO">Único</MenuItem>
                 </Select>
               </FormControl>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="frecuencia-label">Periodicidad</InputLabel>
-                <Select
-                  labelId="frecuencia-label"
-                  label="Periodicidad"
-                  value={form.frecuencia}
-                  onChange={(e) => setForm({ ...form, frecuencia: e.target.value as TesoreriaFrecuencia })}
-                  disabled={soloLectura}
-                >
-                  <MenuItem value="">
-                    <em>Sin especificar</em>
-                  </MenuItem>
-                  {["MENSUAL", "BIMESTRAL", "TRIMESTRAL", "SEMESTRAL", "ANUAL", "SEMANAL", "OTRA"].map((f) => (
-                    <MenuItem key={f} value={f}>
-                      {f}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  size="small"
-                  label="Duración (periodos)"
-                  value={form.duracion}
-                  onChange={(e) => {
-                    const duracion = e.target.value;
-                    setForm({
-                      ...form,
-                      duracion,
-                      montoTotalIvaMxp: calcularMontoTotal(form.montoPeriodoIvaMxp, duracion),
-                    });
-                  }}
-                  fullWidth
-                />
-                <TextField
-                  size="small"
-                  type="date"
-                  label="Fecha proyectada"
-                  value={form.fechaProyectada}
-                  onChange={(e) => setForm({ ...form, fechaProyectada: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                  fullWidth
-                />
-              </Stack>
+              {/* Periodicidad/Duracion/Fecha proyectada no aplican a un
+                  gasto suelto (07/Sep/2026) - un consumo unico no se repite
+                  ni tiene una siguiente ocurrencia que proyectar. */}
+              {!ocultaCamposFormales && (
+                <>
+                  <FormControl size="small" fullWidth>
+                    <InputLabel id="frecuencia-label">Periodicidad</InputLabel>
+                    <Select
+                      labelId="frecuencia-label"
+                      label="Periodicidad"
+                      value={form.frecuencia}
+                      onChange={(e) => setForm({ ...form, frecuencia: e.target.value as TesoreriaFrecuencia })}
+                      disabled={soloLectura}
+                    >
+                      <MenuItem value="">
+                        <em>Sin especificar</em>
+                      </MenuItem>
+                      {["MENSUAL", "BIMESTRAL", "TRIMESTRAL", "SEMESTRAL", "ANUAL", "SEMANAL", "OTRA"].map((f) => (
+                        <MenuItem key={f} value={f}>
+                          {f}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <TextField
+                      size="small"
+                      label="Duración (periodos)"
+                      value={form.duracion}
+                      onChange={(e) => {
+                        const duracion = e.target.value;
+                        setForm({
+                          ...form,
+                          duracion,
+                          montoTotalIvaMxp: calcularMontoTotal(form.montoPeriodoIvaMxp, duracion),
+                        });
+                      }}
+                      fullWidth
+                    />
+                    <TextField
+                      size="small"
+                      type="date"
+                      label="Fecha proyectada"
+                      value={form.fechaProyectada}
+                      onChange={(e) => setForm({ ...form, fechaProyectada: e.target.value })}
+                      InputLabelProps={{ shrink: true }}
+                      fullWidth
+                    />
+                  </Stack>
+                </>
+              )}
               <FormControl size="small" fullWidth>
                 <InputLabel id="moneda-label">Moneda</InputLabel>
                 <Select
@@ -988,13 +1047,17 @@ function TesoreriaContratosPageContent() {
                 onChange={(e) => setForm({ ...form, linkCarpeta: e.target.value })}
                 fullWidth
               />
-              <TextField
-                size="small"
-                label="Link contrato"
-                value={form.linkContrato}
-                onChange={(e) => setForm({ ...form, linkContrato: e.target.value })}
-                fullWidth
-              />
+              {/* Link contrato no aplica a un gasto suelto (07/Sep/2026) -
+                  no hay documento firmado de por medio. */}
+              {!ocultaCamposFormales && (
+                <TextField
+                  size="small"
+                  label="Link contrato"
+                  value={form.linkContrato}
+                  onChange={(e) => setForm({ ...form, linkContrato: e.target.value })}
+                  fullWidth
+                />
+              )}
               <TextField
                 size="small"
                 label="Comentarios"
@@ -1029,14 +1092,18 @@ function TesoreriaContratosPageContent() {
                 onChange={(e) => setForm({ ...form, permiso: e.target.value })}
                 fullWidth
               />
-              <ToggleCard
-                icon={ShieldCheck}
-                title="Autorización"
-                description="El contrato ya fue autorizado internamente"
-                checked={form.autorizacion}
-                onChange={(checked) => setForm({ ...form, autorizacion: checked })}
-                disabled={soloLectura}
-              />
+              {/* Autorizacion no aplica a un gasto suelto (07/Sep/2026) -
+                  no hay un contrato formal que autorizar internamente. */}
+              {!ocultaCamposFormales && (
+                <ToggleCard
+                  icon={ShieldCheck}
+                  title="Autorización"
+                  description="El contrato ya fue autorizado internamente"
+                  checked={form.autorizacion}
+                  onChange={(checked) => setForm({ ...form, autorizacion: checked })}
+                  disabled={soloLectura}
+                />
+              )}
               {editing && (
                 <>
                   <Divider sx={{ my: 1 }} />

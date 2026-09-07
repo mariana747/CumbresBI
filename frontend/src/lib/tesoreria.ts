@@ -6,6 +6,7 @@
 // criterio que GeneralSociedad en iam-service: CRUD real gateado por
 // permiso (tesoreria.crear/.editar), no por ScopedManager.
 import { apiFetch, friendlyApiError } from "./apiError";
+import { DriveArchivo } from "./drive";
 import { GATEWAY_URL } from "./gatewayUrl";
 
 const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
@@ -512,6 +513,22 @@ export async function deleteCorteEdc(id: string): Promise<void> {
 }
 
 export type TesoreriaContratoTipo = "INTERNO" | "EXTERNO";
+// Categoria (07/Sep/2026) - distingue la naturaleza del gasto/relacion,
+// distinto de TesoreriaContratoTipo (interno/externo). Opcional a
+// proposito: solo aplica a contratos nuevos, sin backfill de los que ya
+// existian (ver docstring de TesoreriaContrato.CATEGORIA_CHOICES).
+export type TesoreriaContratoCategoria =
+  | "FORMAL_RECURRENTE"
+  | "GASTO_SUELTO"
+  | "REEMBOLSO_EMPLEADO"
+  | "COMPRA_ADQUISICION";
+
+export const CONTRATO_CATEGORIA_LABELS: Record<TesoreriaContratoCategoria, string> = {
+  FORMAL_RECURRENTE: "Formal / recurrente",
+  GASTO_SUELTO: "Gasto suelto / consumo único",
+  REEMBOLSO_EMPLEADO: "Reembolso de empleado",
+  COMPRA_ADQUISICION: "Compra / adquisición",
+};
 export type TesoreriaTipoPago = "REGULAR" | "IRREGULAR" | "UNICO";
 export type TesoreriaFrecuencia = "MENSUAL" | "BIMESTRAL" | "TRIMESTRAL" | "SEMESTRAL" | "ANUAL" | "OTRA" | "SEMANAL";
 export type TesoreriaMoneda = "MXP" | "USD" | "EUR";
@@ -526,6 +543,7 @@ export interface TesoreriaContrato {
   sociedad: string;
   contraparte: string;
   contraparte_nombre: string;
+  categoria: TesoreriaContratoCategoria | null;
   tipo: TesoreriaContratoTipo | null;
   fecha_generacion: string | null;
   fecha_vencimiento: string | null;
@@ -567,6 +585,7 @@ export async function listContratos(search?: string, contraparteId?: string): Pr
 export async function createContrato(params: {
   sociedad: string;
   contraparte: string;
+  categoria?: TesoreriaContratoCategoria;
   tipo?: TesoreriaContratoTipo;
   fechaGeneracion?: string;
   fechaVencimiento?: string;
@@ -595,6 +614,7 @@ export async function createContrato(params: {
     body: JSON.stringify({
       sociedad: params.sociedad,
       contraparte: params.contraparte,
+      categoria: params.categoria || null,
       tipo: params.tipo || null,
       fecha_generacion: params.fechaGeneracion || null,
       fecha_vencimiento: params.fechaVencimiento || null,
@@ -1007,6 +1027,7 @@ export async function vincularFactura(
 export async function updateContrato(
   idContrato: string,
   params: Partial<{
+    categoria: TesoreriaContratoCategoria;
     tipo: TesoreriaContratoTipo;
     fechaGeneracion: string;
     fechaVencimiento: string;
@@ -1036,6 +1057,7 @@ export async function updateContrato(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      categoria: params.categoria,
       tipo: params.tipo,
       fecha_generacion: params.fechaGeneracion,
       fecha_vencimiento: params.fechaVencimiento,
@@ -1575,11 +1597,16 @@ function facturaBody(params: FacturaInput) {
   };
 }
 
-export async function createFactura(params: FacturaInput): Promise<TesoreriaFactura> {
+// `archivo` (07/Sep/2026) - mismo criterio que confirmarExtraccionFactura,
+// cubre el caso mas comun en la practica: el proveedor ya subio su PDF/XML
+// via ticket publico, el Motor Documental lo analizo ANTES de que la
+// factura existiera (handleAutorellenarNuevaFactura solo prellena el
+// formulario) - sin esto, ese camino nunca ligaria el archivo real.
+export async function createFactura(params: FacturaInput, archivo?: DriveArchivo): Promise<TesoreriaFactura> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(facturaBody(params)),
+    body: JSON.stringify({ ...facturaBody(params), archivo }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1693,14 +1720,19 @@ export const TESORERIA_CAMPOS_CONFIRMABLES_NUEVA = [...TESORERIA_CAMPOS_CONFIRMA
 // Guarda en la factura los datos ya revisados por el analista (Motor
 // Documental -> docint/analyze -> correccion en pantalla -> este endpoint).
 // Ver services/tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet.confirmar_extraccion.
+// `archivo` (07/Sep/2026, cierra el hueco real de link_pdf/link_xml que
+// nunca se llenaban solos) - el DriveArchivo que de verdad se analizo con
+// el Motor Documental; el backend decide PDF vs XML por mime_type/nombre
+// y fija drive_file_id_pdf/xml (ver TesoreriaFacturaViewSet._vincular_archivo_drive).
 export async function confirmarExtraccionFactura(
   id: number,
-  campos: Record<string, unknown>
+  campos: Record<string, unknown>,
+  archivo?: DriveArchivo
 ): Promise<TesoreriaFactura> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/confirmar_extraccion/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campos }),
+    body: JSON.stringify({ campos, archivo }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
