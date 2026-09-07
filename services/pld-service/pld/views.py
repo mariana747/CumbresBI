@@ -43,15 +43,31 @@ logger = logging.getLogger(__name__)
 
 
 def _carpeta_documento(doc) -> str:
-    """Subcarpeta real en Drive para `doc` (04/Sep/2026, checklist de
-    proveedores - pendiente desde la peticion del 18/Ago: "si la Unidad
-    compartida de Drive necesita subcarpetas por tipo de documento").
-    `tipo_documento` es NULL para documentos de identidad generica (esos ya
-    viven en Tesoreria, ver docstring del campo en models.py) y para
-    documentos subidos por el cliente via el link publico (nunca elige
-    tipo_documento) - esos caen en "Generales", sin que eso bloquee nada."""
-    subcarpeta = doc.get_tipo_documento_display() if doc.tipo_documento else "Generales"
-    return f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}/{subcarpeta}"
+    """Carpeta real en Drive para `doc` - una sola carpeta plana por
+    contraparte, sin subcarpeta por tipo de documento (07/Sep/2026, revierte
+    la subcarpeta por tipo_documento del 04/Sep: "no debe haber carpeta por
+    documento"; el tipo_documento se queda solo como clasificacion/checklist
+    en la base de datos, no como estructura de carpetas)."""
+    return f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
+
+
+def _nombre_archivo_drive(tipo_documento, nombre_original: str) -> str:
+    """Nombre real con el que se guarda el archivo en Drive - generalizado
+    (07/Sep/2026, "que sea por nombre de documento solicitado", revierte la
+    excepcion puntual de INE del mismo dia): se renombra al label completo
+    del catalogo (get_tipo_documento_display) para CUALQUIER tipo_documento
+    solicitado, conservando la extension del archivo original. Sin
+    tipo_documento (el cliente subio por el link generico, sin elegir tipo)
+    se conserva el nombre original tal cual."""
+    if not tipo_documento:
+        return nombre_original
+    nombre_base = dict(PldContraparteDoc.TIPO_DOCUMENTO_CHOICES).get(tipo_documento)
+    if not nombre_base:
+        return nombre_original
+    if "." not in nombre_original:
+        return nombre_base
+    extension = nombre_original.rsplit(".", 1)[1]
+    return f"{nombre_base}.{extension}"
 
 
 def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
@@ -1497,10 +1513,7 @@ class PldTicketClienteViewSet(ModelViewSet):
         if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
             return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
 
-        # Sin tipo_documento a proposito (el cliente nunca elige uno) - cae
-        # en "Generales", mismo criterio que _carpeta_documento cuando
-        # tipo_documento es NULL.
-        carpeta = f"PLD/Nuevos Clientes/{ticket.kyc.id_contraparte}/Generales"
+        carpeta = f"PLD/Nuevos Clientes/{ticket.kyc.id_contraparte}"
         headers = {}
         if settings.DRIVE_INTERNAL_SECRET:
             headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
@@ -1730,6 +1743,7 @@ class PldDocumentoTicketViewSet(ViewSet):
             return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
 
         documento = ticket.documento
+        nombre_archivo = _nombre_archivo_drive(documento.tipo_documento, archivo.name)
         headers = {}
         if settings.DRIVE_INTERNAL_SECRET:
             headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
@@ -1737,7 +1751,7 @@ class PldDocumentoTicketViewSet(ViewSet):
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
                 params={"perm": "pld-compliance.crear"},
-                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                files={"file": (nombre_archivo, archivo.read(), archivo.content_type)},
                 data={"carpeta": _carpeta_documento(documento)},
                 headers=headers,
                 timeout=30,

@@ -334,6 +334,7 @@ class PldContraparteDoc(models.Model):
     # para lo que no encaje en el catalogo/legado - blank/null, nunca se
     # fuerza a elegir un tipo_documento en documentos ya existentes.
     TIPO_IDENTIFICACION_OFICIAL = "IDENTIFICACION_OFICIAL"
+    TIPO_CURP = "CURP"
     TIPO_ACTA_CONSTITUTIVA = "ACTA_CONSTITUTIVA"
     TIPO_CONSTANCIA_SITUACION_FISCAL = "CONSTANCIA_SITUACION_FISCAL"
     TIPO_INSCRIPCION_RPC = "INSCRIPCION_RPC"
@@ -347,6 +348,7 @@ class PldContraparteDoc(models.Model):
     TIPO_ORGANIGRAMA_ACCIONARIO = "ORGANIGRAMA_ACCIONARIO"
     TIPO_DOCUMENTO_CHOICES = [
         (TIPO_IDENTIFICACION_OFICIAL, "Identificación oficial"),
+        (TIPO_CURP, "CURP"),
         (TIPO_ACTA_CONSTITUTIVA, "Acta constitutiva"),
         (TIPO_CONSTANCIA_SITUACION_FISCAL, "Constancia de Situación Fiscal"),
         (TIPO_INSCRIPCION_RPC, "Inscripción en el Registro Público de Comercio"),
@@ -366,11 +368,16 @@ class PldContraparteDoc(models.Model):
     # compartidos (Constancia Fiscal, info bancaria, validacion de
     # titularidad, Opinion de Cumplimiento, comprobante de domicilio,
     # cuestionario de riesgo, declaracion de origen de fondos, evidencia
-    # PEP) aplican a ambos; Identificacion Oficial es SOLO fisica,
-    # Acta/RPC/Organigrama accionario son SOLO moral.
+    # PEP) aplican a ambos; Identificacion Oficial/CURP son SOLO fisica,
+    # Acta/RPC/Organigrama accionario son SOLO moral. CURP (07/Sep/2026,
+    # "falta algun alias para curp... para solicitarlo") - antes solo existia
+    # como palabra clave del clasificador de Motor Documental
+    # (docint/classifier.py, prompt "pld.curp"), sin tipo_documento propio
+    # para poder solicitarlo desde el checklist.
     TIPOS_DOCUMENTO_POR_CATEGORIA = {
         PldContraparteKyc.CATEGORIA_KYC: [
             TIPO_IDENTIFICACION_OFICIAL,
+            TIPO_CURP,
             TIPO_CONSTANCIA_SITUACION_FISCAL,
             TIPO_INFO_BANCARIA,
             TIPO_VALIDACION_TITULARIDAD_CUENTA,

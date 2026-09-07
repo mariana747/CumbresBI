@@ -144,7 +144,16 @@ def enviar_correo_documento_faltante(
     try:
         respuesta = requests.post(
             f"{settings.MAIL_SERVICE_URL}/api/send/",
-            params={"perm": "pld-compliance.crear"},
+            # 07/Sep/2026: bug real encontrado ("no llego el correo de
+            # solicitud del curp") - este perm_key debe coincidir con el
+            # que exige la accion que llama a esta funcion
+            # (enviar_recordatorio_documentos, gateada a
+            # pld-compliance.editar en views.py); pedia "pld-compliance.crear"
+            # aqui, un permiso distinto - mail-service rechazaba con 403 a
+            # cualquier analista sin ese permiso extra. Mismo criterio que
+            # tesoreria-service/tesoreria/mail_utils.py::enviar_correo_documento_faltante
+            # (usa "tesoreria.editar", el mismo que su accion).
+            params={"perm": "pld-compliance.editar"},
             json={"to": email, "subject": "Documento pendiente de tu expediente - CumbresBI", "html_body": html_body},
             headers=headers,
             cookies=cookies,

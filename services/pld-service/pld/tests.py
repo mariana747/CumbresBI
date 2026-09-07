@@ -35,6 +35,7 @@ from .views import (
     PldSolicitudEliminacionDocViewSet,
     PldTicketClienteViewSet,
     _carpeta_documento,
+    _nombre_archivo_drive,
 )
 
 RFC_TIZARA = "#####1"
@@ -906,18 +907,38 @@ class CatalogoDocumentosPldTests(TestCase):
     def setUp(self):
         self.kyc = _kyc("cp000070", RFC_TIZARA)
 
-    def test_documento_sin_tipo_documento_cae_en_carpeta_generales(self):
-        doc = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="Poder notarial")
-        self.assertEqual(_carpeta_documento(doc), f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}/Generales")
-
-    def test_documento_con_tipo_documento_usa_su_propia_subcarpeta(self):
-        doc = PldContraparteDoc.objects.create(
+    def test_carpeta_documento_es_plana_sin_subcarpeta_por_tipo(self):
+        # 07/Sep/2026, pedido explicito: "no debe haber carpeta por
+        # documento" - revierte la subcarpeta por tipo_documento del 04/Sep;
+        # tipo_documento se queda solo como clasificacion en la base de
+        # datos, no como estructura de carpetas en Drive.
+        sin_tipo = PldContraparteDoc.objects.create(kyc=self.kyc, denominacion="Poder notarial")
+        con_tipo = PldContraparteDoc.objects.create(
             kyc=self.kyc, tipo_documento=PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO
         )
+        self.assertEqual(_carpeta_documento(sin_tipo), f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}")
+        self.assertEqual(_carpeta_documento(con_tipo), f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}")
+
+    def test_archivo_se_renombra_al_label_completo_del_tipo_solicitado(self):
+        # 07/Sep/2026, generalizado: "que sea por nombre de documento
+        # solicitado" - cualquier tipo_documento renombra el archivo a su
+        # label completo del catalogo (ya no solo la excepcion de INE),
+        # conservando la extension original.
         self.assertEqual(
-            _carpeta_documento(doc),
-            f"PLD/Nuevos Clientes/{self.kyc.id_contraparte}/Cuestionario de riesgo",
+            _nombre_archivo_drive(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, "foto_credencial.JPG"),
+            "Identificación oficial.JPG",
         )
+        self.assertEqual(
+            _nombre_archivo_drive(PldContraparteDoc.TIPO_CUESTIONARIO_RIESGO, "riesgo.pdf"),
+            "Cuestionario de riesgo.pdf",
+        )
+        self.assertEqual(
+            _nombre_archivo_drive(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, "sinextension"),
+            "Identificación oficial",
+        )
+
+    def test_sin_tipo_documento_conserva_el_nombre_original(self):
+        self.assertEqual(_nombre_archivo_drive(None, "documento.pdf"), "documento.pdf")
 
     def test_tipos_por_categoria_identificacion_oficial_solo_kyc(self):
         # 04/Sep/2026, pedido explicito: "que se muestre para los C
@@ -926,6 +947,15 @@ class CatalogoDocumentosPldTests(TestCase):
         kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
         self.assertIn(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, kyc_tipos)
         self.assertNotIn(PldContraparteDoc.TIPO_IDENTIFICACION_OFICIAL, kyb_tipos)
+
+    def test_curp_solicitable_solo_en_kyc(self):
+        # 07/Sep/2026, "falta algun alias para curp... para solicitarlo" -
+        # antes CURP solo existia como palabra clave del clasificador de
+        # Motor Documental, sin tipo_documento propio en el checklist.
+        kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
+        kyb_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYB]
+        self.assertIn(PldContraparteDoc.TIPO_CURP, kyc_tipos)
+        self.assertNotIn(PldContraparteDoc.TIPO_CURP, kyb_tipos)
 
     def test_tipos_por_categoria_acta_y_rpc_y_organigrama_solo_kyb(self):
         kyc_tipos = PldContraparteDoc.TIPOS_DOCUMENTO_POR_CATEGORIA[PldContraparteKyc.CATEGORIA_KYC]
@@ -2099,6 +2129,22 @@ class EnviarRecordatorioDocumentosTests(TestCase):
         ticket = PldDocumentoTicket.objects.get(documento=self.doc_pendiente)
         self.assertEqual(ticket.email, "cliente.kyc@ejemplo.com")
         self.assertEqual(ticket.max_uses, 1)
+
+    def test_manda_el_correo_con_el_mismo_perm_que_exige_la_accion(self):
+        # 07/Sep/2026, bug real encontrado ("no llego el correo de solicitud
+        # del curp"): mail_utils.enviar_correo_documento_faltante pedia
+        # "pld-compliance.crear" a mail-service, distinto del
+        # "pld-compliance.editar" que esta accion misma exige - cualquier
+        # analista sin ese permiso extra recibia 403 y el correo nunca
+        # salia, aunque el documento si se creara.
+        with patch("pld.mail_utils.requests.post", return_value=Mock(status_code=201)) as mock_post:
+            response = self._post([self.doc_pendiente.id_kyc_doc])
+        self.assertEqual(response.status_code, 200)
+        # mock_post tambien intercepta la llamada de emitir_evento_auditoria
+        # (mismo modulo `requests` global) - se busca especificamente la
+        # llamada a mail-service, no la ultima del historial.
+        llamada_mail = next(c for c in mock_post.call_args_list if str(settings.MAIL_SERVICE_URL) in c.args[0])
+        self.assertEqual(llamada_mail.kwargs["params"]["perm"], "pld-compliance.editar")
 
 
 class PldDocumentoTicketTests(TestCase):
