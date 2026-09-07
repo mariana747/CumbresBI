@@ -18,6 +18,8 @@ identica en ambos modos.
 
 import base64
 import logging
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from django.conf import settings
@@ -54,24 +56,45 @@ def _servicio_real():
     return build("gmail", "v1", credentials=credentials, cache_discovery=False)
 
 
-def send_email(to: str, subject: str, html_body: str) -> dict:
-    """Manda un correo HTML simple (sin adjuntos - no hace falta todavia,
-    Magic Links/tickets de cliente solo mandan un link). Regresa
-    {"message_id": ...} (real o simulado)."""
+def send_email(to: str, subject: str, html_body: str, adjuntos: list[dict] | None = None) -> dict:
+    """Manda un correo HTML, opcionalmente con adjuntos reales (07/Sep/2026 -
+    antes solo mandaba texto, Magic Links/tickets de cliente solo mandaban un
+    link). `adjuntos` es una lista de {"filename", "content_type", "data_b64"}
+    - el llamador ya trae el archivo descargado y codificado en base64 (mismo
+    criterio que drive-service: este servicio no descarga nada por su cuenta,
+    solo envia lo que le pasan). Regresa {"message_id": ...} (real o
+    simulado)."""
     if not _modo_real():
         logger.warning(
             "GMAIL_SERVICE_ACCOUNT_JSON vacio - modo simulado, correo NO enviado de verdad: "
-            "to=%s subject=%s",
+            "to=%s subject=%s adjuntos=%d",
             to,
             subject,
+            len(adjuntos or []),
         )
         return {"message_id": "sim-no-enviado"}
 
-    mensaje = MIMEText(html_body, "html", "utf-8")
-    mensaje["to"] = to
-    mensaje["subject"] = subject
-    if settings.GMAIL_SENDER_SUBJECT:
-        mensaje["from"] = settings.GMAIL_SENDER_SUBJECT
+    if adjuntos:
+        mensaje = MIMEMultipart()
+        mensaje["to"] = to
+        mensaje["subject"] = subject
+        if settings.GMAIL_SENDER_SUBJECT:
+            mensaje["from"] = settings.GMAIL_SENDER_SUBJECT
+        mensaje.attach(MIMEText(html_body, "html", "utf-8"))
+        for adjunto in adjuntos:
+            parte = MIMEApplication(base64.b64decode(adjunto["data_b64"]))
+            parte.add_header(
+                "Content-Disposition", "attachment", filename=adjunto["filename"]
+            )
+            if adjunto.get("content_type"):
+                parte.set_type(adjunto["content_type"])
+            mensaje.attach(parte)
+    else:
+        mensaje = MIMEText(html_body, "html", "utf-8")
+        mensaje["to"] = to
+        mensaje["subject"] = subject
+        if settings.GMAIL_SENDER_SUBJECT:
+            mensaje["from"] = settings.GMAIL_SENDER_SUBJECT
     raw = base64.urlsafe_b64encode(mensaje.as_bytes()).decode("ascii")
 
     servicio = _servicio_real()
