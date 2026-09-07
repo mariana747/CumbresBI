@@ -6,6 +6,17 @@ import { GATEWAY_URL } from "./gatewayUrl";
 export type PldEstadoLlenado = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO";
 export type PldDocStatus = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO" | "APROBADO";
 
+// Color de Chip por status de documento (07/Sep/2026, "en los estados
+// agrégale los colores") - default (gris) para PENDIENTE (nada ha pasado
+// todavia), warning para INCOMPLETO, info para ENTREGADO (ya llego el
+// archivo, falta revisar), success para APROBADO (estado final bueno).
+export const DOC_STATUS_COLORS: Record<PldDocStatus, "default" | "warning" | "info" | "success"> = {
+  PENDIENTE: "default",
+  INCOMPLETO: "warning",
+  ENTREGADO: "info",
+  APROBADO: "success",
+};
+
 // Catalogo cerrado completo (04/Sep/2026, checklist de proveedores):
 // identidad + especifico de cumplimiento - se duplica a proposito contra
 // el catalogo por contrato de tesoreria-service ("no importa si se piden
@@ -13,6 +24,7 @@ export type PldDocStatus = "PENDIENTE" | "INCOMPLETO" | "ENTREGADO" | "APROBADO"
 // (pld-service/pld/models.py).
 export type PldTipoDocumento =
   | "IDENTIFICACION_OFICIAL"
+  | "CURP"
   | "ACTA_CONSTITUTIVA"
   | "CONSTANCIA_SITUACION_FISCAL"
   | "INSCRIPCION_RPC"
@@ -27,6 +39,7 @@ export type PldTipoDocumento =
 
 export const TIPO_DOCUMENTO_PLD_LABELS: Record<PldTipoDocumento, string> = {
   IDENTIFICACION_OFICIAL: "Identificación oficial",
+  CURP: "CURP",
   ACTA_CONSTITUTIVA: "Acta constitutiva",
   CONSTANCIA_SITUACION_FISCAL: "Constancia de Situación Fiscal",
   INSCRIPCION_RPC: "Inscripción en el Registro Público de Comercio",
@@ -50,6 +63,7 @@ export const TIPO_DOCUMENTO_PLD_LABELS: Record<PldTipoDocumento, string> = {
 export const TIPOS_DOCUMENTO_POR_CATEGORIA: Record<"KYC" | "KYB", PldTipoDocumento[]> = {
   KYC: [
     "IDENTIFICACION_OFICIAL",
+    "CURP",
     "CONSTANCIA_SITUACION_FISCAL",
     "INFO_BANCARIA",
     "VALIDACION_TITULARIDAD_CUENTA",
@@ -550,27 +564,6 @@ export async function solicitarDocumentoKyc(
       created_by: createdBy,
       updated_by: createdBy,
     }),
-  });
-  if (!response.ok) {
-    throw await friendlyApiError("PLD", response);
-  }
-  return response.json();
-}
-
-// Clasificar un documento ya subido (04/Sep/2026: tipo_documento del
-// catalogo cerrado, obligatorio, vigencia_meses) - el uploader sigue
-// creando el documento con solo el nombre del archivo (ver
-// handleSubirDocumento en la pantalla), esto se llena despues inline en la
-// tabla. Requiere pld-compliance.editar (mismo permiso que editarKyc).
-export async function editarDocumentoKyc(
-  idKycDoc: string,
-  campos: Partial<Pick<PldContraparteDoc, "tipo_documento" | "obligatorio" | "vigencia_meses">>,
-  updatedBy?: string | null
-): Promise<PldContraparteDoc> {
-  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...campos, updated_by: updatedBy }),
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

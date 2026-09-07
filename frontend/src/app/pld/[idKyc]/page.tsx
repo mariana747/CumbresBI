@@ -64,6 +64,7 @@ import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora }
 import {
   AUTORIDAD_POR_TIPO_IDENTIFICACION,
   CATEGORIA_CUMPLIMIENTO_LABELS,
+  DOC_STATUS_COLORS,
   TIPO_DOCUMENTO_PLD_LABELS,
   PldCategoriaCumplimiento,
   PldContraparteDoc,
@@ -78,7 +79,6 @@ import {
   congelarKyc,
   crearRepresentanteLegal,
   crearSolicitudEliminacion,
-  editarDocumentoKyc,
   editarKyc,
   enviarRecordatorioDocumentosKyc,
   editarRepresentanteLegal,
@@ -683,6 +683,12 @@ export default function PldExpedienteDetallePage() {
   // (queda en "solicitado"); subir el archivo despues sobre ESE mismo
   // documento (no crea uno nuevo) lo pasa a "recibido".
   const [solicitandoTipo, setSolicitandoTipo] = useState<PldTipoDocumento | null>(null);
+  // 07/Sep/2026: "se agrega a la lista de documentos pero debe tener
+  // todavia el boton de solicitar no es automatico" - elegir un tipo en el
+  // desplegable solo lo agrega a la lista de abajo (estado local, nada se
+  // crea en el backend todavia); la solicitud real (crear el renglon +
+  // mandar el correo) sigue requiriendo el boton "Solicitar" por renglon.
+  const [tiposAgregados, setTiposAgregados] = useState<PldTipoDocumento[]>([]);
   async function handleSolicitarDocumento(tipo: PldTipoDocumento) {
     if (!kyc) return;
     // 04/Sep/2026, "hay que unificar la solicitud de documento como en
@@ -701,12 +707,43 @@ export default function PldExpedienteDetallePage() {
     setSolicitandoTipo(tipo);
     try {
       const doc = await solicitarDocumentoKyc(kyc.id_kyc, tipo, session?.user_id);
-      await enviarRecordatorioDocumentosKyc(kyc.id_kyc, [doc.id_kyc_doc], session?.user_id);
+      const resultado = await enviarRecordatorioDocumentosKyc(kyc.id_kyc, [doc.id_kyc_doc], session?.user_id);
+      // 07/Sep/2026 ("no llego el correo de solicitud del curp") - el
+      // backend puede regresar 200 sin haber mandado el correo de verdad
+      // (mail-service no respondio o lo rechazo, ver mail_utils.py); el
+      // documento SI queda creado, pero hay que avisar que el aviso al
+      // cliente no salio, en vez de que se vea como si hubiera funcionado.
+      if (resultado.enviados.length === 0) {
+        setVerificarError(
+          "El documento se solicitó, pero el correo al cliente no se pudo enviar. Usa \"Reenviar correo\" en Documentos subidos."
+        );
+      }
+      setTiposAgregados((prev) => prev.filter((t) => t !== tipo));
       cargar();
     } catch (err) {
       setVerificarError(err instanceof Error ? err.message : "Error al solicitar el documento");
     } finally {
       setSolicitandoTipo(null);
+    }
+  }
+
+  // Reenviar el correo de un documento ya solicitado pero sin archivo
+  // todavia (07/Sep/2026, "no llego el correo de solicitud del curp" - el
+  // primer intento pudo fallar por un 403/timeout real de mail-service sin
+  // que el documento dejara de crearse).
+  const [reenviandoDoc, setReenviandoDoc] = useState<string | null>(null);
+  async function handleReenviarRecordatorio(doc: PldContraparteDoc) {
+    if (!kyc) return;
+    setReenviandoDoc(doc.id_kyc_doc);
+    try {
+      const resultado = await enviarRecordatorioDocumentosKyc(kyc.id_kyc, [doc.id_kyc_doc], session?.user_id);
+      setVerificarError(
+        resultado.enviados.length === 0 ? "El correo no se pudo enviar. Intenta de nuevo en unos minutos." : null
+      );
+    } catch (err) {
+      setVerificarError(err instanceof Error ? err.message : "Error al reenviar el correo");
+    } finally {
+      setReenviandoDoc(null);
     }
   }
 
@@ -774,27 +811,6 @@ export default function PldExpedienteDetallePage() {
     }
   }
 
-  // Clasificar un documento (04/Sep/2026: tipo_documento, obligatorio,
-  // vigencia_meses) - inline en la tarjeta de cada documento. El Select de
-  // tipo_documento solo ofrece las opciones que aplican a la categoria del
-  // expediente (ver tiposDocumentoDisponibles) - "que se muestre para los
-  // C unicamente los que necesite y la B solo las que necesite".
-  const [guardandoDoc, setGuardandoDoc] = useState<string | null>(null);
-  async function handleEditarDocumento(
-    doc: PldContraparteDoc,
-    campos: Partial<Pick<PldContraparteDoc, "tipo_documento" | "obligatorio" | "vigencia_meses">>
-  ) {
-    setGuardandoDoc(doc.id_kyc_doc);
-    try {
-      await editarDocumentoKyc(doc.id_kyc_doc, campos, session?.user_id);
-      cargar();
-    } catch (err) {
-      setVerificarError(err instanceof Error ? err.message : "Error al clasificar el documento");
-    } finally {
-      setGuardandoDoc(null);
-    }
-  }
-
   return (
     <AppShell>
       <Button
@@ -857,7 +873,7 @@ export default function PldExpedienteDetallePage() {
               valor especial (no una categoria real, ver
               handleVolverACategoriaAutomatica) para volver a dejar que se
               derive sola - "se debe poner en auto" (Mariana). */}
-              <FormControl size="small" sx={{ mt: 1, minWidth: 160 }}>
+              <FormControl size="small" sx={{ mt: 1, minWidth: 220 }}>
                 <Select
                   value={kyc.categoria_cumplimiento ?? ""}
                   disabled={reclasificando}
@@ -866,8 +882,23 @@ export default function PldExpedienteDetallePage() {
                       ? handleVolverACategoriaAutomatica()
                       : handleReclasificarCategoria(e.target.value as PldCategoriaCumplimiento)
                   }
+                  // 07/Sep/2026: "el chip no se ve bien" - el padding por
+                  // defecto del Select asume texto plano, no Chips; sin
+                  // esto se ven aplastados y el icono de flecha se les
+                  // encima. minWidth mas ancho arriba + flex/gap/padding
+                  // aqui para que respiren.
+                  sx={{
+                    "& .MuiSelect-select": {
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      flexWrap: "wrap",
+                      py: 0.75,
+                      pr: 4,
+                    },
+                  }}
                   renderValue={(valor) => (
-                    <Stack direction="row" spacing={0.5} alignItems="center">
+                    <>
                       <Chip
                         size="small"
                         color={valor === "PENDIENTE_REVISION" ? "warning" : "default"}
@@ -880,7 +911,7 @@ export default function PldExpedienteDetallePage() {
                       {kyc.categoria_cumplimiento_manual && (
                         <Chip size="small" variant="outlined" label="Manual" />
                       )}
-                    </Stack>
+                    </>
                   )}
                 >
                   <MenuItem value="KYC">{CATEGORIA_CUMPLIMIENTO_LABELS.KYC}</MenuItem>
@@ -1466,45 +1497,68 @@ export default function PldExpedienteDetallePage() {
                       </Stack>
                     )}
 
-                    {/* Checklist de documentos requeridos (04/Sep/2026,
-                    pedido explicito: "poner todos los nombres de archivos
-                    solicitados y su estado") - 3 estados: vacío (nunca se
-                    pidio), solicitado (se creo el renglon, sin archivo
-                    todavia) y recibido (ya hay archivo real, aparece el
-                    ojo para verlo - "cuando ya se tenga se active el ojo,
-                    sino no aparecera"). Las opciones dependen de la
-                    categoria del expediente (kyc.categoria_cumplimiento) -
-                    un KYC no ve "Acta constitutiva", un KYB no ve
-                    "Identificación oficial" (ver tiposDocumentoDisponibles). */}
+                    {/* Checklist de documentos requeridos (04/Sep/2026, 2
+                    estados visibles: solicitado/recibido - "cuando ya se
+                    tenga se active el ojo, sino no aparecera"). 07/Sep/2026:
+                    "la checklist debe ser una lista desplegable y se agrega
+                    a la lista... y en la lista se quita lo ya agregado" -
+                    ya no se listan los 9-10 tipos completos con estado
+                    "Vacío"; el desplegable solo ofrece los tipos que TODAVÍA
+                    no se han solicitado (se van quitando conforme se
+                    agregan) y elegir uno ya dispara la solicitud (mismo
+                    handleSolicitarDocumento: crea el renglón + manda el
+                    correo). Abajo solo se listan los ya solicitados/
+                    recibidos. Las opciones dependen de la categoria del
+                    expediente (kyc.categoria_cumplimiento) - un KYC no ve
+                    "Acta constitutiva", un KYB no ve "Identificación
+                    oficial" (ver tiposDocumentoDisponibles). */}
                     <Stack spacing={1}>
                       <Typography variant="subtitle2">Checklist de documentos requeridos</Typography>
-                      {tiposDocumentoDisponibles(kyc.categoria_cumplimiento).map((tipo) => {
-                        const doc = kyc.documentos.find((d) => d.tipo_documento === tipo);
-                        const estado = !doc ? "vacio" : !doc.drive_file_id ? "solicitado" : "recibido";
+                      {(() => {
+                        const yaSolicitados = new Set(
+                          kyc.documentos.map((d) => d.tipo_documento).filter((t): t is PldTipoDocumento => Boolean(t))
+                        );
+                        const disponibles = tiposDocumentoDisponibles(kyc.categoria_cumplimiento).filter(
+                          (tipo) => !yaSolicitados.has(tipo) && !tiposAgregados.includes(tipo)
+                        );
                         return (
-                          <Paper key={tipo} variant="outlined" sx={{ p: 1.5 }}>
-                            <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
-                              <Stack direction="row" spacing={1.5} alignItems="center">
-                                <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
-                                <Typography variant="body2">{TIPO_DOCUMENTO_PLD_LABELS[tipo]}</Typography>
-                              </Stack>
-                              <Stack direction="row" spacing={1} alignItems="center">
-                                <Chip
-                                  size="small"
-                                  label={estado === "vacio" ? "Vacío" : estado === "solicitado" ? "Solicitado" : "Recibido"}
-                                  color={estado === "vacio" ? "default" : estado === "solicitado" ? "warning" : "success"}
-                                />
-                                {estado === "recibido" && doc && (
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => setPreviewDoc(doc)}
-                                    aria-label="Ver documento"
-                                    title="Ver documento"
-                                  >
-                                    <Eye size={16} strokeWidth={1.5} />
-                                  </IconButton>
-                                )}
-                                {estado === "vacio" && puedeGestionarArchivos && (
+                          puedeGestionarArchivos &&
+                          disponibles.length > 0 && (
+                            <FormControl size="small" fullWidth>
+                              <InputLabel id="agregar-checklist-label">Agregar a la lista…</InputLabel>
+                              <Select
+                                labelId="agregar-checklist-label"
+                                label="Agregar a la lista…"
+                                value=""
+                                onChange={(e) =>
+                                  setTiposAgregados((prev) => [...prev, e.target.value as PldTipoDocumento])
+                                }
+                              >
+                                {disponibles.map((tipo) => (
+                                  <MenuItem key={tipo} value={tipo}>
+                                    {TIPO_DOCUMENTO_PLD_LABELS[tipo]}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          )
+                        );
+                      })()}
+                      {/* Agregados a la lista pero todavia sin solicitar
+                      (solo estado local, nada creado en el backend todavia) -
+                      necesitan su propio boton "Solicitar" por renglon, no
+                      se dispara solo al elegirlos del desplegable. */}
+                      {tiposAgregados.map((tipo) => (
+                        <Paper key={tipo} variant="outlined" sx={{ p: 1.5 }}>
+                          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                            <Stack direction="row" spacing={1.5} alignItems="center">
+                              <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
+                              <Typography variant="body2">{TIPO_DOCUMENTO_PLD_LABELS[tipo]}</Typography>
+                            </Stack>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Chip size="small" label="Agregado" />
+                              {puedeGestionarArchivos && (
+                                <>
                                   <Button
                                     size="small"
                                     variant="outlined"
@@ -1516,12 +1570,26 @@ export default function PldExpedienteDetallePage() {
                                   >
                                     Solicitar
                                   </Button>
-                                )}
-                              </Stack>
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    aria-label="Quitar de la lista"
+                                    title="Quitar de la lista"
+                                    disabled={solicitandoTipo === tipo}
+                                    onClick={() => setTiposAgregados((prev) => prev.filter((t) => t !== tipo))}
+                                  >
+                                    <Trash2 size={16} strokeWidth={1.5} />
+                                  </IconButton>
+                                </>
+                              )}
                             </Stack>
-                          </Paper>
-                        );
-                      })}
+                          </Stack>
+                        </Paper>
+                      ))}
+                      {/* 07/Sep/2026: se quita la lista de solicitado/
+                      recibido de aqui (duplicaba "Documentos subidos" de
+                      abajo) - una vez solicitado, el documento ya solo vive
+                      en esa lista con su status real. */}
                     </Stack>
 
                     <Typography variant="subtitle2" sx={{ mt: 1 }}>
@@ -1547,7 +1615,15 @@ export default function PldExpedienteDetallePage() {
                             <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
                               <Stack direction="row" spacing={1.5} alignItems="center">
                                 <FileText size={18} strokeWidth={1.5} color={BRAND.azul} />
-                                <Typography variant="body2">{doc.denominacion || "Documento sin nombre"}</Typography>
+                                <Typography variant="body2">
+                                  {/* 07/Sep/2026: los documentos creados desde el
+                                  checklist (Solicitar) no traen denominacion libre -
+                                  su nombre real es el tipo_documento del catalogo, no
+                                  "Documento sin nombre". */}
+                                  {doc.denominacion ||
+                                    (doc.tipo_documento && TIPO_DOCUMENTO_PLD_LABELS[doc.tipo_documento]) ||
+                                    "Documento sin nombre"}
+                                </Typography>
                               </Stack>
                               <Stack direction="row" spacing={1} alignItems="center">
                                 {/* 25/Ago/2026 (requerimiento real del cliente: "en
@@ -1584,15 +1660,53 @@ export default function PldExpedienteDetallePage() {
                                     label={esDuplicadoViejo ? "Duplicado (no vigente)" : "Vigente"}
                                   />
                                 )}
-                                <Chip size="small" label={doc.status ?? "Sin estado"} />
+                                <Chip
+                                  size="small"
+                                  color={doc.status ? DOC_STATUS_COLORS[doc.status] : "default"}
+                                  label={doc.status ?? "Sin estado"}
+                                />
+                                {/* 07/Sep/2026 ("no llego el correo de
+                                solicitud del curp") - reenviar el correo de
+                                un documento ya solicitado (tipo_documento
+                                fijo) pero que todavia no tiene archivo; el
+                                primer intento pudo fallar en mail-service
+                                sin que el documento dejara de crearse. */}
+                                {puedeEditar && doc.tipo_documento && !doc.drive_file_id && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleReenviarRecordatorio(doc)}
+                                    disabled={reenviandoDoc === doc.id_kyc_doc}
+                                    aria-label="Reenviar correo"
+                                    title="Reenviar correo"
+                                  >
+                                    {reenviandoDoc === doc.id_kyc_doc ? (
+                                      <CircularProgress size={14} />
+                                    ) : (
+                                      <RefreshCw size={16} strokeWidth={1.5} />
+                                    )}
+                                  </IconButton>
+                                )}
                                 {solicitudPendiente && (
                                   <Chip size="small" color="info" label="Eliminación solicitada" />
                                 )}
                                 {puedeEliminarArchivos ? (
+                                  // 07/Sep/2026: "si ya esta entregado no se
+                                  // puede borrar" - un documento ya entregado/
+                                  // aprobado es evidencia real, no se borra
+                                  // directo ni el Admin; para ese caso sigue
+                                  // existiendo la via de "Solicitar
+                                  // eliminación" con aprobacion (ver el flujo
+                                  // de duplicados mas abajo).
                                   <IconButton
                                     size="small"
                                     color="error"
                                     aria-label="Eliminar documento"
+                                    title={
+                                      doc.status === "ENTREGADO" || doc.status === "APROBADO"
+                                        ? "Ya entregado - no se puede borrar directo"
+                                        : "Eliminar documento"
+                                    }
+                                    disabled={doc.status === "ENTREGADO" || doc.status === "APROBADO"}
                                     onClick={() => setConfirmandoEliminarDoc(doc)}
                                   >
                                     <Trash2 size={16} strokeWidth={1.5} />
@@ -1617,77 +1731,11 @@ export default function PldExpedienteDetallePage() {
                                   )
                                 )}
                               </Stack>
-                            </Stack>
-                            {/* Clasificacion (04/Sep/2026, checklist de
-                            proveedores) - el Select de tipo_documento solo
-                            ofrece las opciones que aplican a la categoria
-                            de ESTE expediente (kyc.categoria_cumplimiento):
-                            un KYC no ve "Acta constitutiva", un KYB no ve
-                            "Identificación oficial". Editable en linea,
-                            gateado a puedeEditar (pld-compliance.editar,
-                            mismo permiso que update/partial_update en el
-                            backend). */}
-                            <Stack
-                              direction="row"
-                              spacing={1.5}
-                              alignItems="center"
-                              flexWrap="wrap"
-                              useFlexGap
-                              sx={{ mt: 1, pt: 1, borderTop: "1px solid", borderColor: "divider" }}
-                            >
-                              <FormControl size="small" sx={{ minWidth: 220 }} disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}>
-                                <Select
-                                  displayEmpty
-                                  value={doc.tipo_documento ?? ""}
-                                  onChange={(e) =>
-                                    handleEditarDocumento(doc, {
-                                      tipo_documento: (e.target.value || null) as PldContraparteDoc["tipo_documento"],
-                                    })
-                                  }
-                                >
-                                  <MenuItem value="">
-                                    <em>Sin tipo</em>
-                                  </MenuItem>
-                                  {tiposDocumentoDisponibles(kyc.categoria_cumplimiento).map((tipo) => (
-                                    <MenuItem key={tipo} value={tipo}>
-                                      {TIPO_DOCUMENTO_PLD_LABELS[tipo]}
-                                    </MenuItem>
-                                  ))}
-                                </Select>
-                              </FormControl>
-                              <FormControlLabel
-                                sx={{ m: 0 }}
-                                control={
-                                  <Checkbox
-                                    size="small"
-                                    checked={doc.obligatorio}
-                                    disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}
-                                    onChange={(e) => handleEditarDocumento(doc, { obligatorio: e.target.checked })}
-                                  />
-                                }
-                                label={<Typography variant="caption">Obligatorio</Typography>}
-                              />
-                              <TextField
-                                size="small"
-                                type="number"
-                                label="Vigencia (meses)"
-                                value={doc.vigencia_meses ?? ""}
-                                disabled={!puedeEditar || guardandoDoc === doc.id_kyc_doc}
-                                onChange={(e) =>
-                                  handleEditarDocumento(doc, {
-                                    vigencia_meses: e.target.value ? Number(e.target.value) : null,
-                                  })
-                                }
-                                sx={{ width: 140 }}
-                                inputProps={{ min: 1 }}
-                              />
-                              {doc.vencido && (
-                                <Chip
-                                  size="small"
-                                  color="error"
-                                  label={`Vencido${doc.fecha_vencimiento_documento ? ` (${doc.fecha_vencimiento_documento})` : ""}`}
-                                />
-                              )}
+                              {/* 07/Sep/2026: se quita la sub-fila de
+                              clasificacion en linea (Select tipo_documento +
+                              Obligatorio + Vigencia) - ya no se edita aqui;
+                              el tipo_documento lo fija el checklist de
+                              arriba al solicitar, no se reclasifica despues. */}
                             </Stack>
                           </Paper>
                         );
