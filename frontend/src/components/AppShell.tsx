@@ -230,6 +230,9 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       children: [
         { label: "Expedientes", href: "/pld", icon: FileSearch },
         { label: "Tickets de Cliente", href: "/pld/tickets", icon: Link2 },
+        // Dashboard interno de cumplimiento (07/Sep/2026, v1 con los datos
+        // que ya existen - ver PldContraparteKycViewSet.reportes).
+        { label: "Reportes", href: "/pld/reportes", icon: FileSearch },
       ],
     });
   }

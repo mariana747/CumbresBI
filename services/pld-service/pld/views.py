@@ -3,10 +3,13 @@ import logging
 from urllib.parse import quote
 
 import requests
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_exempt
@@ -891,6 +894,205 @@ class PldContraparteKycViewSet(ModelViewSet):
             valores_nuevos={**contexto_kyc(kyc), "documentos_enviados": enviados},
         )
         return Response({"enviados": enviados, "total_seleccionados": len(faltantes)})
+
+    @action(detail=False, methods=["get"])
+    def reportes(self, request):
+        """Dashboard interno de cumplimiento PLD/AML (07/Sep/2026) - v1 con
+        los datos que YA existen en pld-service, sin depender de un
+        proveedor externo de KYC/AML (ver docs/architecture/pld-fase2-alcance.md
+        sec. 7, todavia sin elegir). Respeta el mismo alcance por
+        sociedad/proyecto que la lista de expedientes (self.get_queryset()).
+        Mismo permiso que "list" (sin gate extra) - quien puede ver
+        expedientes puede ver el resumen agregado de lo que ya ve.
+
+        4 bloques:
+        - resumen_por_categoria_estado: conteo cruzado categoria x estado_llenado
+        - documentos_pendientes: obligatorios sin archivo o ya vencidos
+        - cuentas_en_riesgo: SOSPECHOSA/CONGELADA
+        - expedientes_sin_aprobar: sin aprobado_en, mas viejos que ?dias= (default 30)
+        """
+        queryset = self.get_queryset()
+
+        resumen = (
+            queryset.values("categoria_cumplimiento", "estado_llenado")
+            .annotate(total=Count("id_kyc"))
+            .order_by("categoria_cumplimiento", "estado_llenado")
+        )
+
+        documentos_pendientes = []
+        for doc in PldContraparteDoc.objects.filter(kyc__in=queryset).select_related("kyc"):
+            if doc.vencido or (doc.obligatorio and not doc.drive_file_id):
+                documentos_pendientes.append(
+                    {
+                        "id_contraparte": doc.kyc.id_contraparte,
+                        "id_kyc": doc.kyc.id_kyc,
+                        "tipo_documento": doc.get_tipo_documento_display() if doc.tipo_documento else doc.denominacion,
+                        "vencido": doc.vencido,
+                        "fecha_vencimiento": doc.fecha_vencimiento_documento,
+                        "tiene_archivo": bool(doc.drive_file_id),
+                    }
+                )
+
+        cuentas_en_riesgo = [
+            {
+                "id_contraparte": kyc.id_contraparte,
+                "id_kyc": kyc.id_kyc,
+                "nombre_completo": kyc.nombre_completo,
+                "estado_cuenta": kyc.estado_cuenta,
+                "actualizado_en": kyc.updated_at,
+            }
+            for kyc in queryset.exclude(estado_cuenta=PldContraparteKyc.CUENTA_ACTIVA)
+        ]
+
+        try:
+            dias = int(request.query_params.get("dias", 30))
+        except ValueError:
+            dias = 30
+        limite = timezone.now() - datetime.timedelta(days=dias)
+        expedientes_sin_aprobar = [
+            {
+                "id_contraparte": kyc.id_contraparte,
+                "id_kyc": kyc.id_kyc,
+                "nombre_completo": kyc.nombre_completo,
+                "sociedad_nombre": kyc.sociedad_nombre,
+                "creado_en": kyc.created_at,
+                "dias_sin_aprobar": (timezone.now() - kyc.created_at).days,
+            }
+            for kyc in queryset.filter(aprobado_en__isnull=True, created_at__lt=limite)
+        ]
+
+        return Response(
+            {
+                "resumen_por_categoria_estado": list(resumen),
+                "documentos_pendientes": documentos_pendientes,
+                "cuentas_en_riesgo": cuentas_en_riesgo,
+                "expedientes_sin_aprobar": expedientes_sin_aprobar,
+            }
+        )
+
+    @action(detail=False, methods=["get"], url_path="exportar-excel")
+    def exportar_excel(self, request):
+        """Export estructurado para auditores/desarrolladores (07/Sep/2026,
+        diseño propuesto por Mariana con formato de 3 pestañas, adaptado a
+        los datos reales de este sistema - no se inventa nada que no
+        exista):
+
+        - Resumen_KYC: una fila por expediente. "Nivel_Riesgo" y el
+          screening real (pestaña 2) van como "Sin evaluar"/"Sin
+          verificar" a proposito - no hay proveedor externo de KYC/AML
+          conectado todavia (ver docs/architecture/pld-fase2-alcance.md
+          sec. 7), y poner "NO"/limpio ahi seria fabricar una diligencia
+          que nunca paso - un riesgo real de integridad para un auditor.
+        - Detalle_Screening: misma razon, todo "Sin verificar".
+        - Beneficiarios_Finales: PldRepresentanteLegal real (solo aplica a
+          Moral en la practica, aunque no se filtra por tipo_persona a
+          proposito - un expediente sin representantes simplemente no
+          aporta filas aqui).
+
+        Formatos nativos (no texto): fechas como datetime real (Excel las
+        reconoce y filtra), porcentaje como numero 0-1 con number_format
+        '0.00%' (no "60.00%" como texto)."""
+        queryset = self.get_queryset()
+
+        libro = Workbook()
+        negrita = Font(bold=True)
+
+        # --- Pestaña 1: Resumen_KYC ---
+        hoja1 = libro.active
+        hoja1.title = "Resumen_KYC"
+        encabezados1 = [
+            "ID_Cliente", "Tipo_Persona", "Nombre_Razon_Social", "Identificador_Fiscal",
+            "Nivel_Riesgo", "Estado_KYC", "Analista_Aprobador", "Enlace_Expediente_Completo",
+        ]
+        hoja1.append(encabezados1)
+        for celda in hoja1[1]:
+            celda.font = negrita
+        for kyc in queryset:
+            if kyc.aprobado_en:
+                estado_kyc = "Aprobado"
+            elif kyc.estado_cuenta != PldContraparteKyc.CUENTA_ACTIVA:
+                estado_kyc = kyc.get_estado_cuenta_display()
+            else:
+                estado_kyc = kyc.get_estado_llenado_display() if kyc.estado_llenado else "Pendiente"
+            fila = hoja1.max_row + 1
+            hoja1.append(
+                [
+                    kyc.id_contraparte,
+                    kyc.get_tipo_persona_display() if kyc.tipo_persona else "Sin especificar",
+                    kyc.nombre_completo or "N/A",
+                    kyc.rfc or "N/A",
+                    "Sin evaluar",
+                    estado_kyc,
+                    kyc.aprobado_por or "N/A",
+                    f"{settings.FRONTEND_BASE_URL}/pld/{kyc.id_kyc}",
+                ]
+            )
+            celda_enlace = hoja1.cell(row=fila, column=len(encabezados1))
+            celda_enlace.hyperlink = celda_enlace.value
+            celda_enlace.style = "Hyperlink"
+
+        # --- Pestaña 2: Detalle_Screening ---
+        hoja2 = libro.create_sheet("Detalle_Screening")
+        encabezados2 = [
+            "ID_Cliente", "Nombre_Evaluado", "Fecha_Screening_UTC", "Coincidencia_Listas",
+            "Estatus_PEP", "Alertas_Noticias", "Enlace_Reporte_PDF",
+        ]
+        hoja2.append(encabezados2)
+        for celda in hoja2[1]:
+            celda.font = negrita
+        for kyc in queryset:
+            hoja2.append(
+                [
+                    kyc.id_contraparte,
+                    kyc.nombre_completo or "N/A",
+                    "N/A",
+                    "Sin verificar",
+                    "Sin verificar",
+                    "Sin verificar",
+                    "N/A",
+                ]
+            )
+
+        # --- Pestaña 3: Beneficiarios_Finales ---
+        hoja3 = libro.create_sheet("Beneficiarios_Finales")
+        encabezados3 = [
+            "ID_Cliente", "Empresa_Madre", "Nombre_Beneficiario", "%_Participacion",
+            "Rol_Puesto", "Identificador_Fiscal", "PEP",
+        ]
+        hoja3.append(encabezados3)
+        for celda in hoja3[1]:
+            celda.font = negrita
+        for rep in PldRepresentanteLegal.objects.filter(kyc__in=queryset).select_related("kyc"):
+            rol = rep.get_tipo_display()
+            if rep.es_beneficiario_controlador:
+                rol += " (Beneficiario controlador)"
+            fila = hoja3.max_row + 1
+            hoja3.append(
+                [
+                    rep.kyc.id_contraparte,
+                    rep.kyc.nombre_completo or "N/A",
+                    rep.nombre_completo,
+                    None,  # se llena abajo con formato numerico nativo
+                    rol,
+                    rep.rfc or "N/A",
+                    "Sin verificar",
+                ]
+            )
+            if rep.porcentaje_participacion is not None:
+                celda_pct = hoja3.cell(row=fila, column=4)
+                celda_pct.value = float(rep.porcentaje_participacion) / 100
+                celda_pct.number_format = "0.00%"
+
+        for hoja in (hoja1, hoja2, hoja3):
+            for i, encabezado in enumerate(hoja[1], start=1):
+                hoja.column_dimensions[get_column_letter(i)].width = max(18, len(str(encabezado.value)) + 2)
+
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response["Content-Disposition"] = 'attachment; filename="reporte_cumplimiento_pld.xlsx"'
+        libro.save(response)
+        return response
 
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):

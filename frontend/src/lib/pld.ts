@@ -1192,3 +1192,66 @@ export const AUTORIDAD_POR_TIPO_IDENTIFICACION: Record<string, string> = {
   "Forma migratoria (FM2/FM3)": "Instituto Nacional de Migración (INM)",
   "Licencia de conducir": "Secretaría/Instituto de Movilidad de la entidad (varía por estado)",
 };
+
+// Dashboard interno de cumplimiento PLD/AML (07/Sep/2026, v1 con los datos
+// que ya existen - ver PldContraparteKycViewSet.reportes en el backend).
+// Respeta el mismo alcance por sociedad/proyecto que listKyc().
+export interface PldReportesCumplimiento {
+  resumen_por_categoria_estado: {
+    categoria_cumplimiento: PldCategoriaCumplimiento | null;
+    estado_llenado: PldEstadoLlenado;
+    total: number;
+  }[];
+  documentos_pendientes: {
+    id_contraparte: string;
+    id_kyc: string;
+    tipo_documento: string | null;
+    vencido: boolean;
+    fecha_vencimiento: string | null;
+    tiene_archivo: boolean;
+  }[];
+  cuentas_en_riesgo: {
+    id_contraparte: string;
+    id_kyc: string;
+    nombre_completo: string | null;
+    estado_cuenta: "SOSPECHOSA" | "CONGELADA";
+    actualizado_en: string;
+  }[];
+  expedientes_sin_aprobar: {
+    id_contraparte: string;
+    id_kyc: string;
+    nombre_completo: string | null;
+    sociedad_nombre: string | null;
+    creado_en: string;
+    dias_sin_aprobar: number;
+  }[];
+}
+
+export async function getReportesCumplimiento(dias?: number): Promise<PldReportesCumplimiento> {
+  const params = new URLSearchParams();
+  if (dias) params.set("dias", String(dias));
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/reportes/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Export de 3 pestañas para auditores/desarrolladores (07/Sep/2026,
+// Resumen_KYC/Detalle_Screening/Beneficiarios_Finales - ver
+// PldContraparteKycViewSet.exportar_excel). Descarga el .xlsx real como
+// blob (necesita la cookie de sesion, por eso via apiFetch en vez de un
+// <a href> directo).
+export async function descargarExcelCumplimiento(): Promise<void> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/exportar-excel/`);
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "reporte_cumplimiento_pld.xlsx";
+  link.click();
+  URL.revokeObjectURL(url);
+}
