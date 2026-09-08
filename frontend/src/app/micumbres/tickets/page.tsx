@@ -46,7 +46,6 @@ import {
   urlVerTicket,
   CATEGORIA_GASTO_LABELS,
   listTicketsReembolso,
-  subirFotoTicket,
   TesoreriaCategoriaGasto,
   TesoreriaFechaLimiteReembolso,
   TesoreriaTicketEstado,
@@ -174,6 +173,13 @@ export default function MiCumbresTicketsPage() {
   useEffect(() => {
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
+  // El ticket solo guarda el RFC (referencia laxa a general_sociedades,
+  // mismo criterio que TesoreriaContrato.sociedad) - mostrar el RFC crudo
+  // no le dice nada al empleado, necesita ver la razon social (07/Sep/2026).
+  function nombreSociedad(rfc: string | null): string {
+    if (!rfc) return "—";
+    return sociedades.find((s) => s.rfc === rfc)?.razon_social || rfc;
+  }
   const [archivoTicket, setArchivoTicket] = useState<File | null>(null);
   // Piloto de escaneo (28/Ago/2026, pedido de Mariana): foto tomada con
   // "Tomar foto" pasa por EscanerDocumento antes de quedar como adjunto.
@@ -203,10 +209,24 @@ export default function MiCumbresTicketsPage() {
       setErrorAlta("Al menos un concepto (descripción + monto) y la fecha del gasto son obligatorios.");
       return;
     }
+    // 07/Sep/2026: el comprobante ya es obligatorio para crear el ticket -
+    // antes se podia guardar sin foto y subirla despues (o nunca). Se
+    // valida aqui ANTES de llamar al backend para dar el mensaje al
+    // instante, aunque el backend tambien lo exige (ver
+    // TesoreriaTicketReembolsoViewSet.create).
+    if (!archivoTicket) {
+      setErrorAlta("Adjunta una foto o PDF del comprobante antes de subir el ticket.");
+      return;
+    }
     setGuardando(true);
     setErrorAlta(null);
     try {
-      const nuevo = await crearTicketReembolso({
+      // Un solo paso (antes era crear + subirFotoTicket por separado) -
+      // evita el bug real de tickets duplicados: si la subida a Drive
+      // fallaba, el ticket ya habia quedado creado sin imagen, y
+      // reintentar desde aqui creaba OTRO ticket completo en vez de solo
+      // reintentar la subida.
+      await crearTicketReembolso({
         descripcion: descripcion || undefined,
         conceptos: conceptosValidos.map((c) => ({
           descripcion: c.descripcion,
@@ -216,10 +236,8 @@ export default function MiCumbresTicketsPage() {
         moneda,
         fechaGasto,
         sociedad: sociedad || undefined,
+        archivo: archivoTicket,
       });
-      if (archivoTicket) {
-        await subirFotoTicket(nuevo.id_ticket, archivoTicket);
-      }
       cerrarNuevo();
       await cargar();
     } catch (err) {
@@ -440,7 +458,7 @@ export default function MiCumbresTicketsPage() {
       )}
 
       {/* Alta del empleado - solo crear, nunca editar despues */}
-      <Dialog open={openNuevo} onClose={cerrarNuevo} fullWidth maxWidth="sm">
+      <Dialog open={openNuevo} onClose={cerrarNuevo} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           Ticket de Reembolso
           <IconButton size="small" onClick={cerrarNuevo} aria-label="Cerrar">
@@ -653,7 +671,7 @@ export default function MiCumbresTicketsPage() {
                 </Button>
               )}
               <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />}>
-                Elegir archivo
+                Elegir archivo (requerido)
                 <input
                   type="file"
                   hidden
@@ -681,7 +699,7 @@ export default function MiCumbresTicketsPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={cerrarNuevo}>Cancelar</Button>
-          <Button variant="contained" onClick={handleCrearTicket} disabled={guardando}>
+          <Button variant="contained" onClick={handleCrearTicket} disabled={guardando || !archivoTicket}>
             {guardando ? <CircularProgress size={20} color="inherit" /> : "Subir"}
           </Button>
         </DialogActions>
@@ -699,7 +717,7 @@ export default function MiCumbresTicketsPage() {
 
       {/* Detalle de solo lectura (04/Sep/2026, ver comentario del estado
           ticketAbierto arriba) - el empleado solo consulta, nunca edita. */}
-      <Dialog open={!!ticketAbierto} onClose={() => setTicketAbierto(null)} fullWidth maxWidth="sm">
+      <Dialog open={!!ticketAbierto} onClose={() => setTicketAbierto(null)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         {ticketAbierto && (
           <>
             <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -726,7 +744,7 @@ export default function MiCumbresTicketsPage() {
                   {ticketAbierto.fecha_gasto}
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Sociedad:</strong> {ticketAbierto.sociedad || "—"}
+                  <strong>Sociedad:</strong> {nombreSociedad(ticketAbierto.sociedad)}
                 </Typography>
                 {ticketAbierto.autorizado_por && (
                   <Typography variant="body2">
@@ -760,20 +778,27 @@ export default function MiCumbresTicketsPage() {
                     <strong>Comentarios de Tesorería:</strong> {ticketAbierto.comentarios}
                   </Typography>
                 )}
-                <Stack direction="row" spacing={2}>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   {ticketAbierto.link_ticket && (
-                    <MuiLink
-                      component="button"
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth={esMovil}
+                      startIcon={<TicketIcon size={14} strokeWidth={1.5} />}
                       onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "ticket" })}
-                      sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
                     >
-                      <TicketIcon size={14} strokeWidth={1.5} /> Ver ticket
-                    </MuiLink>
+                      Ver ticket
+                    </Button>
                   )}
                   {ticketAbierto.link_factura_pdf && (
-                    <MuiLink component="button" onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "factura" })}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth={esMovil}
+                      onClick={() => setPreviewDoc({ ticket: ticketAbierto, tipo: "factura" })}
+                    >
                       Ver factura
-                    </MuiLink>
+                    </Button>
                   )}
                 </Stack>
               </Stack>

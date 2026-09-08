@@ -17,9 +17,11 @@ from . import gmailclient
 
 
 class SendEmailView(APIView):
-    """POST /api/send/ - JSON: to, subject, html_body, permiso requerido via
-    query param ?perm=iam.crear (el llamador decide cual perm_key aplica a
-    SU caso de uso, mismo patron que drive-service/drive/views.py)."""
+    """POST /api/send/ - JSON: to, subject, html_body, adjuntos (opcional,
+    lista de {"filename", "content_type", "data_b64"} - el llamador ya trae
+    el archivo descargado y codificado), permiso requerido via query param
+    ?perm=iam.crear (el llamador decide cual perm_key aplica a SU caso de
+    uso, mismo patron que drive-service/drive/views.py)."""
 
     def post(self, request, *args, **kwargs):
         perm_key = request.query_params.get("perm")
@@ -31,11 +33,14 @@ class SendEmailView(APIView):
         to = request.data.get("to")
         subject = request.data.get("subject")
         html_body = request.data.get("html_body")
+        adjuntos = request.data.get("adjuntos")
         if not to or not subject or not html_body:
             return Response({"detail": "Campos 'to', 'subject' y 'html_body' requeridos"}, status=400)
 
         try:
-            resultado = gmailclient.send_email(to=to, subject=subject, html_body=html_body)
+            resultado = gmailclient.send_email(
+                to=to, subject=subject, html_body=html_body, adjuntos=adjuntos
+            )
         except gmailclient.MailError as exc:
             return Response({"detail": str(exc)}, status=502)
 

@@ -196,7 +196,20 @@ export interface MotorDocumentalContexto {
   // que todo lo que se sube a esta carpeta es del mismo tipo de documento).
   expectedDocumentType?: string;
   camposConfirmables: readonly string[];
-  onConfirmar: (campos: Record<string, unknown>) => Promise<void>;
+  // Comparacion "documento vs. lo que ya declaro el usuario" (07/Sep/2026,
+  // Reembolsos - mismo mecanismo de PLD/kycActual, generalizado). Llaves =
+  // nombres de extracted_data (ej. "monto_total", "fecha_gasto", "concepto"),
+  // valores = lo que el usuario ya habia escrito para ese mismo campo. Un
+  // campo ausente aqui simplemente no se compara (ej. "comercio_nombre" -
+  // el empleado nunca declara el nombre del comercio, no tiene con que
+  // comparar). Solo aviso visual para el analista, igual que en PLD: no
+  // bloquea nada, el decide si aprueba o rechaza viendo las discrepancias.
+  registroActual?: Record<string, string | null | undefined>;
+  // El archivo de Drive que de verdad se analizo (07/Sep/2026, cierra el
+  // hueco real de Facturas: link_pdf/link_xml nunca se llenaban solos) -
+  // el llamador decide si le importa (ej. TesoreriaFacturaViewSet.
+  // confirmar_extraccion/create lo usan para fijar drive_file_id_pdf/xml).
+  onConfirmar: (campos: Record<string, unknown>, archivo?: DriveArchivo) => Promise<void>;
 }
 
 interface DocumentResult {
@@ -447,6 +460,28 @@ export default function MotorDocumentalDialog({
     return distanciaEdicion(doc, actual) <= tolerancia;
   }
 
+  // Montos (07/Sep/2026, Reembolsos): "1500" vs "1500.00" o "$1,500.00" no
+  // deberian marcarse como conflicto - son el mismo numero con formato
+  // distinto, y Levenshtein los marcaria diferentes (varios caracteres de
+  // diferencia). Tolerancia de 1 centavo por redondeo.
+  function sonMontosIguales(valorDocumento: string, valorActual: string): boolean | null {
+    const limpiar = (v: string) => Number(v.replace(/[^0-9.-]/g, ""));
+    const doc = limpiar(valorDocumento);
+    const actual = limpiar(valorActual);
+    if (Number.isNaN(doc) || Number.isNaN(actual)) return null;
+    return Math.abs(doc - actual) < 0.01;
+  }
+
+  // Fechas: el documento puede traer "2026-09-05" y el usuario haber
+  // escrito "05/09/2026" - mismo dia, formato distinto. Compara solo la
+  // parte de fecha si ambas son parseables.
+  function sonFechasIguales(valorDocumento: string, valorActual: string): boolean | null {
+    const fechaDoc = new Date(valorDocumento);
+    const fechaActual = new Date(valorActual);
+    if (Number.isNaN(fechaDoc.getTime()) || Number.isNaN(fechaActual.getTime())) return null;
+    return fechaDoc.toISOString().slice(0, 10) === fechaActual.toISOString().slice(0, 10);
+  }
+
   // Compara los datos que salieron del documento contra lo que el cliente
   // ya tiene guardado en el expediente (25/Ago/2026, requerimiento real:
   // "vamos a comparar con la informacion que da el usuario") - solo aviso
@@ -455,6 +490,35 @@ export default function MotorDocumentalDialog({
   // fetch) regresa vacio - no compara contra un expediente que no se pudo
   // leer.
   function compararConExpediente(extractedData: Record<string, unknown>): FilaComparacion[] {
+    // Modo generico (07/Sep/2026, Reembolsos): el llamador ya trae
+    // registroActual (lo que el usuario declaro), en vez del expediente KYC
+    // de PLD. Mismas reglas de tolerancia, sin los alias/sinonimos que solo
+    // aplican a PLD (nombre por palabras, tipo de identificacion).
+    if (contexto?.registroActual) {
+      const registroActual = contexto.registroActual;
+      return Object.entries(extractedData)
+        .filter(
+          ([campo, value]) => value !== null && contexto.camposConfirmables.includes(campo)
+        )
+        .map(([campo, value]) => {
+          const valorDocumento = String(value);
+          const valorActual = registroActual[campo] ?? null;
+          let coincide = !valorActual || normalizar(valorActual) === normalizar(valorDocumento);
+          if (valorActual && !coincide) {
+            const montosIguales = sonMontosIguales(valorDocumento, valorActual);
+            const fechasIguales = sonFechasIguales(valorDocumento, valorActual);
+            coincide = montosIguales ?? fechasIguales ?? sonSimilares(valorDocumento, valorActual);
+          }
+          return {
+            campo,
+            label: LABELS_CAMPOS[campo] ?? campo,
+            valorDocumento,
+            valorActual,
+            coincide,
+          };
+        });
+    }
+
     if (!kycActual) return [];
     return Object.entries(extractedData)
       .map(([key, value]) => [ALIAS_CAMPOS[key] ?? key, value] as const)
@@ -528,7 +592,7 @@ export default function MotorDocumentalDialog({
 
     try {
       if (contexto) {
-        await contexto.onConfirmar(campos);
+        await contexto.onConfirmar(campos, doc.archivo);
       } else {
         await confirmarExtraccionKyc(kycSeleccionado, campos, actorUserId);
       }

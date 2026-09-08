@@ -159,6 +159,14 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
   const [cargandoRecursos, setCargandoRecursos] = useState(false);
   const recursoOpciones = catalogoRecursos[recursoTipo] ?? [];
 
+  // Filtros (07/Sep/2026, pedido explicito: "agrega filtro por fecha de
+  // emision y estado y que por default hasta arriba esten los mas
+  // recientes") - del lado del cliente sobre la lista ya cargada, mismo
+  // criterio que filtroSociedad en otras pantallas de Tesoreria.
+  const [filtroEstado, setFiltroEstado] = useState("");
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
+
   const [links, setLinks] = useState<IamMagicLink[]>([]);
   // Tickets de proveedor (27/Ago/2026) - mecanismo distinto (anonimo, sin
   // sesion) pero se muestran en la MISMA tabla que los Magic Links, ver
@@ -392,6 +400,59 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     return opcion ? `${tipoLabel} — ${opcion.label}` : tipoLabel;
   }
 
+  // Fila normalizada (07/Sep/2026) - Magic Links y tickets de proveedor son
+  // 2 backends distintos pero se muestran en una sola lista, mismo criterio
+  // que FilaColaborador en ColaboradoresTab mas abajo. Unifica para poder
+  // filtrar/ordenar una sola vez en vez de duplicar la logica por tipo.
+  type FilaTemporal = {
+    key: string;
+    email: string;
+    recurso: string;
+    emitido: string;
+    expira: string;
+    usos: string;
+    estado: { label: string; color: "success" | "default" | "error" | "warning" };
+    onRevocar?: () => void;
+  };
+
+  const ESTADOS_TEMPORAL_FILTRO = ["Pendiente", "Aceptado", "Expirado", "Revocado"] as const;
+
+  const filasTemporales: FilaTemporal[] = [
+    ...links.map((link) => {
+      const estado = estadoDe(link);
+      return {
+        key: link.magic_link_id,
+        email: link.email,
+        recurso: recursoNombre(link),
+        emitido: link.issued_at,
+        expira: link.expires_at,
+        usos: `${link.uses_count}/${link.max_uses}`,
+        estado,
+        onRevocar: estado.label === "Pendiente" ? () => handleRevocar(link.magic_link_id) : undefined,
+      };
+    }),
+    ...ticketsProveedor.map((t) => {
+      const estado = estadoTicketProveedor(t);
+      return {
+        key: `prov-${t.id_ticket}`,
+        email: t.email,
+        recurso: `Factura de proveedor (Tesorería) — ${t.contraparte_nombre}`,
+        emitido: t.issued_at,
+        expira: t.expires_at,
+        usos: `${t.uses_count}/${t.max_uses}`,
+        estado,
+        onRevocar: estado.label === "Pendiente" ? () => handleRevocarProveedor(t.id_ticket) : undefined,
+      };
+    }),
+  ]
+    .filter((f) => !filtroEstado || f.estado.label === filtroEstado)
+    .filter((f) => !filtroFechaDesde || new Date(f.emitido) >= new Date(filtroFechaDesde))
+    .filter((f) => !filtroFechaHasta || new Date(f.emitido) <= new Date(`${filtroFechaHasta}T23:59:59`))
+    // Mas recientes primero (07/Sep/2026, pedido explicito) - antes el
+    // orden era "todos los links, luego todos los tickets de proveedor",
+    // sin importar cuando se emitio cada uno.
+    .sort((a, b) => new Date(b.emitido).getTime() - new Date(a.emitido).getTime());
+
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -598,6 +659,45 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
       </Paper>
       )}
 
+      {/* Filtros (07/Sep/2026) - Estado + rango de fecha de emision, sobre
+          la lista ya combinada de Magic Links + tickets de proveedor. */}
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="filtro-estado-temporal-label">Estado</InputLabel>
+          <Select
+            labelId="filtro-estado-temporal-label"
+            label="Estado"
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todos</em>
+            </MenuItem>
+            {ESTADOS_TEMPORAL_FILTRO.map((estado) => (
+              <MenuItem key={estado} value={estado}>
+                {estado}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField
+          size="small"
+          type="date"
+          label="Emitido desde"
+          value={filtroFechaDesde}
+          onChange={(e) => setFiltroFechaDesde(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
+        <TextField
+          size="small"
+          type="date"
+          label="Emitido hasta"
+          value={filtroFechaHasta}
+          onChange={(e) => setFiltroFechaHasta(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
+      </Stack>
+
       <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - 7 columnas no caben comodas en un
@@ -623,91 +723,49 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
                     <CircularProgress size={24} />
                   </TableCell>
                 </TableRow>
-              ) : links.length === 0 && ticketsProveedor.length === 0 ? (
+              ) : filasTemporales.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
-                      Sin enlaces generados todavía.
+                      {links.length === 0 && ticketsProveedor.length === 0
+                        ? "Sin enlaces generados todavía."
+                        : "Ningún enlace coincide con los filtros."}
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                <>
-                {links.map((link) => {
-                  const estado = estadoDe(link);
-                  return (
-                    <TableRow key={link.magic_link_id} hover>
-                      <TableCell>{link.email}</TableCell>
-                      <TableCell>{recursoNombre(link)}</TableCell>
-                      <TableCell>{new Date(link.issued_at).toLocaleString("es-MX")}</TableCell>
-                      <TableCell>{new Date(link.expires_at).toLocaleString("es-MX")}</TableCell>
-                      <TableCell>
-                        {link.uses_count}/{link.max_uses}
-                      </TableCell>
-                      <TableCell>
-                        <Stack spacing={0.25}>
-                          <Chip size="small" label={estado.label} color={estado.color} sx={{ width: "fit-content" }} />
-                          {estado.label === "Pendiente" && (
-                            <Typography variant="caption" color="text.secondary">
-                              Queda {tiempoRestante(link.expires_at)}
-                            </Typography>
-                          )}
-                        </Stack>
-                      </TableCell>
-                      <TableCell align="right">
-                        {estado.label === "Pendiente" && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="error"
-                            onClick={() => handleRevocar(link.magic_link_id)}
-                            disabled={!puedeEditar}
-                          >
-                            Revocar
-                          </Button>
+                filasTemporales.map((f) => (
+                  <TableRow key={f.key} hover>
+                    <TableCell>{f.email}</TableCell>
+                    <TableCell>{f.recurso}</TableCell>
+                    <TableCell>{new Date(f.emitido).toLocaleString("es-MX")}</TableCell>
+                    <TableCell>{new Date(f.expira).toLocaleString("es-MX")}</TableCell>
+                    <TableCell>{f.usos}</TableCell>
+                    <TableCell>
+                      <Stack spacing={0.25}>
+                        <Chip size="small" label={f.estado.label} color={f.estado.color} sx={{ width: "fit-content" }} />
+                        {f.estado.label === "Pendiente" && (
+                          <Typography variant="caption" color="text.secondary">
+                            Queda {tiempoRestante(f.expira)}
+                          </Typography>
                         )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {ticketsProveedor.map((t) => {
-                  const estado = estadoTicketProveedor(t);
-                  return (
-                    <TableRow key={`prov-${t.id_ticket}`} hover>
-                      <TableCell>{t.email}</TableCell>
-                      <TableCell>Factura de proveedor (Tesorería) — {t.contraparte_nombre}</TableCell>
-                      <TableCell>{new Date(t.issued_at).toLocaleString("es-MX")}</TableCell>
-                      <TableCell>{new Date(t.expires_at).toLocaleString("es-MX")}</TableCell>
-                      <TableCell>
-                        {t.uses_count}/{t.max_uses}
-                      </TableCell>
-                      <TableCell>
-                        <Stack spacing={0.25}>
-                          <Chip size="small" label={estado.label} color={estado.color} sx={{ width: "fit-content" }} />
-                          {estado.label === "Pendiente" && (
-                            <Typography variant="caption" color="text.secondary">
-                              Queda {tiempoRestante(t.expires_at)}
-                            </Typography>
-                          )}
-                        </Stack>
-                      </TableCell>
-                      <TableCell align="right">
-                        {estado.label === "Pendiente" && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="error"
-                            onClick={() => handleRevocarProveedor(t.id_ticket)}
-                            disabled={!puedeEditar}
-                          >
-                            Revocar
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                </>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="right">
+                      {f.onRevocar && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          onClick={f.onRevocar}
+                          disabled={!puedeEditar}
+                        >
+                          Revocar
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
               )}
             </TableBody>
           </Table>
@@ -720,93 +778,50 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
             <Stack alignItems="center" sx={{ py: 3 }}>
               <CircularProgress size={20} />
             </Stack>
-          ) : links.length === 0 && ticketsProveedor.length === 0 ? (
+          ) : filasTemporales.length === 0 ? (
             <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
-              Sin enlaces generados todavía.
+              {links.length === 0 && ticketsProveedor.length === 0
+                ? "Sin enlaces generados todavía."
+                : "Ningún enlace coincide con los filtros."}
             </Typography>
           ) : (
-            <>
-              {links.map((link) => {
-                const estado = estadoDe(link);
-                return (
-                  <Paper key={link.magic_link_id} variant="outlined" sx={{ p: 2 }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
-                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                        <Typography variant="subtitle2" noWrap>
-                          {link.email}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {recursoNombre(link)}
-                        </Typography>
-                      </Stack>
-                      <Stack spacing={0.25} alignItems="flex-end" sx={{ flexShrink: 0 }}>
-                        <Chip size="small" label={estado.label} color={estado.color} />
-                        {estado.label === "Pendiente" && (
-                          <Typography variant="caption" color="text.secondary">
-                            Queda {tiempoRestante(link.expires_at)}
-                          </Typography>
-                        )}
-                      </Stack>
-                    </Stack>
-                    <Typography variant="body2" sx={{ mt: 1 }}>
-                      <strong>Usos:</strong> {link.uses_count}/{link.max_uses}
+            filasTemporales.map((f) => (
+              <Paper key={f.key} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" noWrap>
+                      {f.email}
                     </Typography>
-                    {estado.label === "Pendiente" && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="error"
-                        onClick={() => handleRevocar(link.magic_link_id)}
-                        disabled={!puedeEditar}
-                        sx={{ mt: 1 }}
-                      >
-                        Revocar
-                      </Button>
-                    )}
-                  </Paper>
-                );
-              })}
-              {ticketsProveedor.map((t) => {
-                const estado = estadoTicketProveedor(t);
-                return (
-                  <Paper key={`prov-${t.id_ticket}`} variant="outlined" sx={{ p: 2 }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
-                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                        <Typography variant="subtitle2" noWrap>
-                          {t.email}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Factura de proveedor (Tesorería) — {t.contraparte_nombre}
-                        </Typography>
-                      </Stack>
-                      <Stack spacing={0.25} alignItems="flex-end" sx={{ flexShrink: 0 }}>
-                        <Chip size="small" label={estado.label} color={estado.color} />
-                        {estado.label === "Pendiente" && (
-                          <Typography variant="caption" color="text.secondary">
-                            Queda {tiempoRestante(t.expires_at)}
-                          </Typography>
-                        )}
-                      </Stack>
-                    </Stack>
-                    <Typography variant="body2" sx={{ mt: 1 }}>
-                      <strong>Usos:</strong> {t.uses_count}/{t.max_uses}
+                    <Typography variant="caption" color="text.secondary">
+                      {f.recurso}
                     </Typography>
-                    {estado.label === "Pendiente" && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="error"
-                        onClick={() => handleRevocarProveedor(t.id_ticket)}
-                        disabled={!puedeEditar}
-                        sx={{ mt: 1 }}
-                      >
-                        Revocar
-                      </Button>
+                  </Stack>
+                  <Stack spacing={0.25} alignItems="flex-end" sx={{ flexShrink: 0 }}>
+                    <Chip size="small" label={f.estado.label} color={f.estado.color} />
+                    {f.estado.label === "Pendiente" && (
+                      <Typography variant="caption" color="text.secondary">
+                        Queda {tiempoRestante(f.expira)}
+                      </Typography>
                     )}
-                  </Paper>
-                );
-              })}
-            </>
+                  </Stack>
+                </Stack>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  <strong>Usos:</strong> {f.usos}
+                </Typography>
+                {f.onRevocar && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    onClick={f.onRevocar}
+                    disabled={!puedeEditar}
+                    sx={{ mt: 1 }}
+                  >
+                    Revocar
+                  </Button>
+                )}
+              </Paper>
+            ))
           )}
         </Stack>
       </Paper>
@@ -840,6 +855,13 @@ type FilaColaborador = {
 function ColaboradoresTab({ session }: { session: SessionUser | null }) {
   const puedeCrear = session?.perm_keys.includes("iam.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
+
+  // Filtros (07/Sep/2026, "igual en los internos" - mismo criterio que la
+  // pestaña Temporales) - estado y rango de fecha de invitacion, del lado
+  // del cliente sobre `filas` ya combinada mas abajo.
+  const [filtroEstado, setFiltroEstado] = useState("");
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
 
   // --- Alta Workspace ---
   const [emailWorkspace, setEmailWorkspace] = useState("");
@@ -1003,6 +1025,16 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
     return { label: "Pendiente", color: "default" };
   }
 
+  // Normaliza "Aceptada"/"Aceptado" y "Revocada"/"Revocado" a una sola
+  // categoria (07/Sep/2026, filtro de estado) - Workspace e Invitacion
+  // Externa usan genero distinto del mismo concepto.
+  function categoriaEstado(label: string): string {
+    if (label.startsWith("Acepta")) return "Aceptado";
+    if (label.startsWith("Revoca")) return "Revocado";
+    return label;
+  }
+  const ESTADOS_COLABORADOR_FILTRO = ["Pendiente", "Aceptado", "Revocado"] as const;
+
   // Historial unico, mas reciente primero - combina ambos mecanismos
   // (misma fila visual, columna "Tipo" distingue de cual se trata).
   const filas: FilaColaborador[] = [
@@ -1061,7 +1093,16 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
         ) : null,
       };
     }),
-  ].sort((a, b) => new Date(b.invitadoEl).getTime() - new Date(a.invitadoEl).getTime());
+  ]
+    // Workspace usa "Aceptada"/"Revocada", Externo usa "Aceptado"/"Revocado"
+    // (mismo concepto, genero distinto segun el sustantivo original -
+    // "invitacion" vs "acceso") - el filtro compara por categoria
+    // normalizada, no por el label exacto, para que un solo dropdown sirva
+    // para los 2 tipos sin duplicar opciones.
+    .filter((f) => !filtroEstado || categoriaEstado(f.estado.label) === filtroEstado)
+    .filter((f) => !filtroFechaDesde || new Date(f.invitadoEl) >= new Date(filtroFechaDesde))
+    .filter((f) => !filtroFechaHasta || new Date(f.invitadoEl) <= new Date(`${filtroFechaHasta}T23:59:59`))
+    .sort((a, b) => new Date(b.invitadoEl).getTime() - new Date(a.invitadoEl).getTime());
 
   return (
     <>
@@ -1231,6 +1272,45 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
           )}
         </Paper>
         )}
+      </Stack>
+
+      {/* Filtros (07/Sep/2026, "igual en los internos") - mismo patron que
+          InvitacionesTemporalesTab. */}
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="filtro-estado-colaborador-label">Estado</InputLabel>
+          <Select
+            labelId="filtro-estado-colaborador-label"
+            label="Estado"
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todos</em>
+            </MenuItem>
+            {ESTADOS_COLABORADOR_FILTRO.map((estado) => (
+              <MenuItem key={estado} value={estado}>
+                {estado}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField
+          size="small"
+          type="date"
+          label="Invitado desde"
+          value={filtroFechaDesde}
+          onChange={(e) => setFiltroFechaDesde(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
+        <TextField
+          size="small"
+          type="date"
+          label="Invitado hasta"
+          value={filtroFechaHasta}
+          onChange={(e) => setFiltroFechaHasta(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
       </Stack>
 
       <Paper variant="outlined">

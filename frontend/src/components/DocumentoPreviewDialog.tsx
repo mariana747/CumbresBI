@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, Dialog, DialogContent, DialogTitle, IconButton, Paper, Stack } from "@mui/material";
 import { ExternalLink, Minus, Plus, Search, X as CloseIcon } from "lucide-react";
 
@@ -39,12 +39,54 @@ export default function DocumentoPreviewDialog({ open, onClose, url, titulo }: D
   // (ej. PDF), onError cae a <iframe> (el visor nativo de PDF del
   // navegador si se ajusta razonablemente al ancho).
   const [esImagen, setEsImagen] = useState(true);
+  // Pan con mouse directo sobre la imagen (07/Sep/2026, pedido de Mariana:
+  // "manipular con el mouse" igual que en PLD) - arrastrar mueve `offset`,
+  // la rueda del mouse hace zoom centrado donde esta el cursor. Ambos se
+  // reinician junto con el zoom cada vez que se abre un documento distinto.
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const arrastrando = useRef(false);
+  const inicioArrastre = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
   useEffect(() => {
     if (open) {
       setZoom(1);
       setEsImagen(true);
+      setOffset({ x: 0, y: 0 });
     }
   }, [open, url]);
+
+  function manejarWheel(e: React.WheelEvent) {
+    if (!esImagen) return;
+    e.preventDefault();
+    setZoom((z) => {
+      const siguiente = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(z - e.deltaY * 0.001).toFixed(2)));
+      if (siguiente === ZOOM_MIN) setOffset({ x: 0, y: 0 });
+      return siguiente;
+    });
+  }
+
+  function manejarMouseDown(e: React.MouseEvent) {
+    if (!esImagen || zoom <= ZOOM_MIN) return;
+    e.preventDefault();
+    arrastrando.current = true;
+    inicioArrastre.current = { x: e.clientX, y: e.clientY, offsetX: offset.x, offsetY: offset.y };
+  }
+
+  function manejarMouseMove(e: React.MouseEvent) {
+    if (!arrastrando.current) return;
+    setOffset({
+      x: inicioArrastre.current.offsetX + (e.clientX - inicioArrastre.current.x),
+      y: inicioArrastre.current.offsetY + (e.clientY - inicioArrastre.current.y),
+    });
+  }
+
+  function terminarArrastre() {
+    arrastrando.current = false;
+  }
+
+  function manejarDobleClick() {
+    setZoom(ZOOM_MIN);
+    setOffset({ x: 0, y: 0 });
+  }
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl">
@@ -93,21 +135,35 @@ export default function DocumentoPreviewDialog({ open, onClose, url, titulo }: D
                 // hacia abajo, no simetrico desde el centro).
                 alignItems: zoom > ZOOM_MIN ? "flex-start" : "center",
                 justifyContent: "center",
+                // El scroll nativo del navegador (overflow:auto) queda solo
+                // como respaldo - el pan real ahora es el arrastre con
+                // mouse de abajo, que mueve `offset` en vez de depender del
+                // scrollbar.
                 overflow: zoom > ZOOM_MIN ? "auto" : "hidden",
               }}
+              onWheel={manejarWheel}
             >
               {esImagen ? (
                 <Box
                   component="img"
                   src={url}
                   alt={titulo}
+                  draggable={false}
                   onError={() => setEsImagen(false)}
+                  onMouseDown={manejarMouseDown}
+                  onMouseMove={manejarMouseMove}
+                  onMouseUp={terminarArrastre}
+                  onMouseLeave={terminarArrastre}
+                  onDoubleClick={manejarDobleClick}
                   sx={{
                     maxWidth: "100%",
                     maxHeight: "100%",
                     objectFit: "contain",
-                    transform: `scale(${zoom})`,
+                    transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`,
                     transformOrigin: zoom > ZOOM_MIN ? "center top" : "center center",
+                    cursor: zoom > ZOOM_MIN ? "grab" : "default",
+                    "&:active": { cursor: zoom > ZOOM_MIN ? "grabbing" : "default" },
+                    userSelect: "none",
                   }}
                 />
               ) : (

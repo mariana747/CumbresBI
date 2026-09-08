@@ -1,3 +1,4 @@
+import base64
 import logging
 
 import requests
@@ -8,6 +9,12 @@ from django.utils.html import escape
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SEGUNDOS = 10
+_TIMEOUT_DESCARGA_ADJUNTO_SEGUNDOS = 20
+# Envios con adjuntos tardan mas que el resto de las llamadas a mail-service
+# (sube el PDF/XML ya codificados) - timeout mas holgado solo para esa
+# llamada, ver enviar_factura.
+_TIMEOUT_ENVIO_CON_ADJUNTOS_SEGUNDOS = 30
+_TAMANO_MAXIMO_ADJUNTO_BYTES = 15 * 1024 * 1024  # limite practico de Gmail (25MB) con margen
 
 # Mismos tokens de marca que pld-service/pld/mail_utils.py e iam-service/
 # iam/mail_utils.py - duplicado a proposito, ver docstring de esos archivos
@@ -170,15 +177,109 @@ def _renderizar_factura(factura) -> str:
 """.strip()
 
 
+def _descargar_adjunto(url: str, nombre_archivo: str) -> dict | None:
+    """Descarga un archivo desde una URL externa (link_pdf/link_xml de
+    Factura - son links pegados a mano, NO drive_file_id: no hay Unidad de
+    Drive propia para este flujo todavia, ver models.py::TesoreriaFactura)
+    y lo regresa listo para mail-service ({"filename", "content_type",
+    "data_b64"}). Regresa None si falla o si el archivo excede el tamano
+    maximo - fail-open, mismo criterio que el resto de este archivo: un
+    adjunto que no se pudo traer no debe tumbar el envio del correo, solo
+    hace que ese correo se mande con el link en vez del archivo."""
+    try:
+        respuesta = requests.get(url, timeout=_TIMEOUT_DESCARGA_ADJUNTO_SEGUNDOS)
+    except requests.RequestException:
+        logger.warning("no se pudo descargar el adjunto %s desde %s", nombre_archivo, url, exc_info=True)
+        return None
+    if respuesta.status_code != 200:
+        logger.warning("la URL del adjunto %s respondio %s: %s", nombre_archivo, respuesta.status_code, url)
+        return None
+    if len(respuesta.content) > _TAMANO_MAXIMO_ADJUNTO_BYTES:
+        logger.warning("el adjunto %s excede el tamano maximo permitido, se manda solo el link", nombre_archivo)
+        return None
+    return {
+        "filename": nombre_archivo,
+        "content_type": respuesta.headers.get("Content-Type") or "application/octet-stream",
+        "data_b64": base64.b64encode(respuesta.content).decode("ascii"),
+    }
+
+
+def _descargar_adjunto_drive(request, drive_file_id: str, nombre_archivo: str, mime_type: str | None) -> dict | None:
+    """Mismo resultado que _descargar_adjunto, pero via drive-service
+    autenticado en vez de una URL externa (07/Sep/2026, factura con
+    drive_file_id_pdf/xml reales - ver TesoreriaFacturaViewSet.
+    confirmar_extraccion/_vincular_archivo_drive). No manda `carpeta` -
+    innecesaria en modo real (Drive resuelve por file_id solo, ver
+    drive-service/drive/driveclient.py::iter_download), solo hace falta en
+    el modo simulado de drive-service."""
+    headers, cookies = forward_auth_headers(request)
+    try:
+        respuesta = requests.get(
+            f"{settings.DRIVE_SERVICE_URL}/api/download/{drive_file_id}/",
+            params={"perm": "facturacion-cfdi.editar"},
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_DESCARGA_ADJUNTO_SEGUNDOS,
+        )
+    except requests.RequestException:
+        logger.warning("drive-service no respondio al descargar el adjunto %s", nombre_archivo, exc_info=True)
+        return None
+    if respuesta.status_code != 200:
+        logger.warning("drive-service rechazo el adjunto %s: %s", nombre_archivo, respuesta.status_code)
+        return None
+    if len(respuesta.content) > _TAMANO_MAXIMO_ADJUNTO_BYTES:
+        logger.warning("el adjunto %s excede el tamano maximo permitido, se manda solo el link", nombre_archivo)
+        return None
+    return {
+        "filename": nombre_archivo,
+        "content_type": respuesta.headers.get("Content-Type") or mime_type or "application/octet-stream",
+        "data_b64": base64.b64encode(respuesta.content).decode("ascii"),
+    }
+
+
 def enviar_factura(request, destinatario: str, factura) -> bool:
     """Envia UNA factura por correo via mail-service - se llama una vez por
     factura seleccionada desde TesoreriaFacturaViewSet.enviar_masivo (envio
     "por separado", ver finanzas.md: "Multiple invoices can be selected to
     send massively (separately)"). No propaga la excepcion, mismo criterio
-    que enviar_reporte_diario."""
+    que enviar_reporte_diario.
+
+    07/Sep/2026: ahora intenta adjuntar el PDF/XML real en vez de solo
+    poner los links en el cuerpo - preferimos drive_file_id_pdf/xml (el
+    archivo real que el Motor Documental analizo, ver
+    TesoreriaFacturaViewSet._vincular_archivo_drive) via drive-service
+    autenticado; si no hay drive_file_id (alta manual historica con solo
+    link_pdf/link_xml pegado a mano) cae a la descarga por URL externa. Si
+    la descarga de alguno falla, ese archivo se manda solo como link (el
+    correo de _renderizar_factura ya trae los links de respaldo), nunca se
+    bloquea el envio completo por un adjunto que no se pudo traer."""
     headers, cookies = forward_auth_headers(request)
     html_body = _renderizar_factura(factura)
     folio_texto = f"{factura.comprobante_serie or ''}{factura.comprobante_folio or factura.timbre_uuid}"
+
+    adjuntos = []
+    if factura.drive_file_id_pdf:
+        adjunto_pdf = _descargar_adjunto_drive(
+            request, factura.drive_file_id_pdf, f"{folio_texto}.pdf", factura.mime_type_pdf
+        )
+    elif factura.link_pdf:
+        adjunto_pdf = _descargar_adjunto(factura.link_pdf, f"{folio_texto}.pdf")
+    else:
+        adjunto_pdf = None
+    if adjunto_pdf:
+        adjuntos.append(adjunto_pdf)
+
+    if factura.drive_file_id_xml:
+        adjunto_xml = _descargar_adjunto_drive(
+            request, factura.drive_file_id_xml, f"{folio_texto}.xml", factura.mime_type_xml
+        )
+    elif factura.link_xml:
+        adjunto_xml = _descargar_adjunto(factura.link_xml, f"{folio_texto}.xml")
+    else:
+        adjunto_xml = None
+    if adjunto_xml:
+        adjuntos.append(adjunto_xml)
+
     try:
         respuesta = requests.post(
             f"{settings.MAIL_SERVICE_URL}/api/send/",
@@ -187,10 +288,11 @@ def enviar_factura(request, destinatario: str, factura) -> bool:
                 "to": destinatario,
                 "subject": f"Factura {folio_texto}",
                 "html_body": html_body,
+                "adjuntos": adjuntos,
             },
             headers=headers,
             cookies=cookies,
-            timeout=_TIMEOUT_SEGUNDOS,
+            timeout=_TIMEOUT_ENVIO_CON_ADJUNTOS_SEGUNDOS,
         )
     except requests.RequestException:
         logger.warning("mail-service no respondio al enviar la factura %s a %s", factura.timbre_uuid, destinatario, exc_info=True)

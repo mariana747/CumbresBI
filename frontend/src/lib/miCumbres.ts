@@ -138,30 +138,42 @@ export function urlVerFactura(idTicket: string): string {
   return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_factura/`;
 }
 
-// Crea el registro del ticket (JSON, sin archivo todavia) - el empleado
-// sube la foto/comprobante despues con subirFotoTicket(), mismo patron en
-// dos pasos que TesoreriaFlujoViewSet (crear -> subir_comprobante).
+// Crea el ticket Y sube su comprobante en una sola llamada multipart
+// (07/Sep/2026 - antes eran dos pasos separados, crear() por JSON y luego
+// subirFotoTicket() aparte; bug real encontrado ese dia: si el segundo
+// paso fallaba - ej. timeout de drive-service - quedaba un ticket creado
+// SIN imagen, y reintentar desde el formulario creaba un ticket
+// DUPLICADO completo en vez de solo reintentar la subida. Ahora el
+// archivo es obligatorio y el backend hace rollback del ticket si la
+// subida a Drive falla, ver TesoreriaTicketReembolsoViewSet.create).
 export async function crearTicketReembolso(params: {
   descripcion?: string;
   conceptos: Array<{ descripcion: string; monto: string; categoriaGasto?: TesoreriaCategoriaGasto }>;
   moneda?: string;
   fechaGasto: string;
   sociedad?: string;
+  archivo: File;
 }): Promise<TesoreriaTicketReembolso> {
-  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      descripcion: params.descripcion || null,
-      conceptos: params.conceptos.map((c) => ({
+  const formData = new FormData();
+  if (params.descripcion) formData.append("descripcion", params.descripcion);
+  formData.append(
+    "conceptos",
+    JSON.stringify(
+      params.conceptos.map((c) => ({
         descripcion: c.descripcion,
         monto: c.monto,
         categoria_gasto: c.categoriaGasto || null,
-      })),
-      moneda: params.moneda || "MXP",
-      fecha_gasto: params.fechaGasto,
-      sociedad: params.sociedad || null,
-    }),
+      }))
+    )
+  );
+  formData.append("moneda", params.moneda || "MXP");
+  formData.append("fecha_gasto", params.fechaGasto);
+  if (params.sociedad) formData.append("sociedad", params.sociedad);
+  formData.append("file", params.archivo);
+
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 
 import requests
@@ -1074,6 +1075,60 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             created_by=self.request.effective_scope.identity_user_id,
         )
 
+    def create(self, request, *args, **kwargs):
+        """Crea el ticket Y sube su comprobante en una sola llamada
+        (07/Sep/2026 - antes eran dos pasos separados: crear() via JSON y
+        luego subirFotoTicket() via multipart aparte, ver miCumbres.ts. Bug
+        real encontrado ese dia: si el segundo paso fallaba (ej. timeout de
+        drive-service), el ticket ya quedaba creado SIN imagen, y el
+        reintento del empleado desde el formulario volvia a llamar crear(),
+        generando un ticket DUPLICADO completo en vez de solo reintentar la
+        subida sobre el mismo). Ahora "file" es requerido para crear el
+        ticket - no puede existir un ticket sin comprobante - y si la subida
+        a Drive falla, se borra el ticket recien creado (rollback manual,
+        sin dejar un registro huerfano) y se regresa el mismo error de
+        siempre; el empleado reintenta desde cero, sin que eso deje
+        basura."""
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response(
+                {"detail": "Debes adjuntar una foto o PDF del comprobante para crear el ticket."}, status=400
+            )
+
+        # multipart no manda "conceptos" como lista anidada (a diferencia
+        # del body JSON que soportaba el create() default) - el frontend lo
+        # manda como un campo de texto con el JSON ya serializado.
+        conceptos_raw = request.data.get("conceptos")
+        try:
+            conceptos = json.loads(conceptos_raw) if isinstance(conceptos_raw, str) else conceptos_raw
+        except (TypeError, ValueError):
+            return Response({"conceptos": ["Formato inválido."]}, status=400)
+
+        payload = {
+            "descripcion": request.data.get("descripcion") or None,
+            "moneda": request.data.get("moneda") or "MXP",
+            "fecha_gasto": request.data.get("fecha_gasto"),
+            "sociedad": request.data.get("sociedad") or None,
+            "conceptos": conceptos,
+        }
+        serializer = self.get_serializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        ticket = serializer.instance
+
+        resultado, error = _subir_a_drive(request, archivo, f"Tesoreria/Facturas/TicketsReembolso/{ticket.id_ticket}")
+        if error:
+            ticket.delete()
+            return error
+
+        ticket.link_ticket = resultado["web_view_link"]
+        ticket.drive_file_id_ticket = resultado["file_id"]
+        ticket.mime_type_ticket = resultado.get("mime_type")
+        ticket.save(update_fields=["link_ticket", "drive_file_id_ticket", "mime_type_ticket"])
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(self.get_serializer(ticket).data, status=201, headers=headers)
+
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir_ticket(self, request, pk=None):
         """Sube la foto/comprobante del ticket a Drive (mismo patron que
@@ -1771,7 +1826,7 @@ class _PermisosFacturacionCfdiMixin:
     def get_permissions(self):
         if self.action == "create":
             return [require_permission("facturacion-cfdi.crear")()]
-        if self.action in ("update", "partial_update", "destroy"):
+        if self.action in ("update", "partial_update", "destroy", "vincular_flujo"):
             return [require_permission("facturacion-cfdi.editar")()]
         return super().get_permissions()
 
@@ -1793,6 +1848,36 @@ def _vincular_contraparte_por_rfc(instance):
     if instance.contraparte_id != contraparte.id_contraparte:
         instance.contraparte = contraparte
         instance.save(update_fields=["contraparte"])
+
+
+def _vincular_archivo_drive(factura, archivo) -> bool:
+    """Liga a la factura el archivo de Drive que de verdad se analizo con
+    el Motor Documental (07/Sep/2026, cierra el hueco real de link_pdf/
+    link_xml nunca llenados solos - ver comentario en models.py). `archivo`
+    es {"file_id", "nombre", "mime_type", "web_view_link"} tal como lo
+    manda DriveArchivo del frontend, o None/vacio si no aplica (ej. alta
+    manual sin pasar por el Motor Documental). PDF vs XML se detecta por
+    mime_type o por la extension del nombre; cualquier otro tipo se ignora
+    en silencio. Regresa True si de verdad se guardo algo."""
+    if not isinstance(archivo, dict) or not archivo.get("file_id"):
+        return False
+    mime_type = (archivo.get("mime_type") or "").lower()
+    nombre = (archivo.get("nombre") or "").lower()
+    campos_actualizados = []
+    if "pdf" in mime_type or nombre.endswith(".pdf"):
+        factura.drive_file_id_pdf = archivo["file_id"]
+        factura.mime_type_pdf = archivo.get("mime_type")
+        factura.link_pdf = archivo.get("web_view_link") or factura.link_pdf
+        campos_actualizados = ["drive_file_id_pdf", "mime_type_pdf", "link_pdf"]
+    elif "xml" in mime_type or nombre.endswith(".xml"):
+        factura.drive_file_id_xml = archivo["file_id"]
+        factura.mime_type_xml = archivo.get("mime_type")
+        factura.link_xml = archivo.get("web_view_link") or factura.link_xml
+        campos_actualizados = ["drive_file_id_xml", "mime_type_xml", "link_xml"]
+    if not campos_actualizados:
+        return False
+    factura.save(update_fields=campos_actualizados)
+    return True
 
 
 class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
@@ -1827,6 +1912,14 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     def perform_create(self, serializer):
         instance = serializer.save()
         _vincular_contraparte_por_rfc(instance)
+        # Mismo "archivo" opcional que confirmar_extraccion (07/Sep/2026) -
+        # cubre el caso real donde la factura NO existia todavia cuando el
+        # Motor Documental analizo el PDF/XML (handleAutorellenarNuevaFactura
+        # en el frontend: primero se prellena el formulario, la factura se
+        # crea hasta que el analista da "Guardar"). Sin esto, ese camino
+        # (el mas comun - proveedor sube por ticket, analista abre "Nueva
+        # Factura" apuntando a esa carpeta) nunca ligaria el archivo real.
+        _vincular_archivo_drive(instance, self.request.data.get("archivo"))
 
     # Whitelist de columnas que confirmar_extraccion puede escribir - mismo
     # criterio que PldContraparteKycViewSet.CAMPOS_CONFIRMABLES (ver
@@ -1950,7 +2043,16 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
         Body: {"campos": {<nombre_de_campo>: <valor>, ...}} - solo se
         aceptan campos en CAMPOS_CONFIRMABLES, cualquier otra llave
-        (incluido timbre_uuid) se ignora silenciosamente."""
+        (incluido timbre_uuid) se ignora silenciosamente.
+
+        Body opcional: {"archivo": {"file_id", "nombre", "mime_type",
+        "web_view_link"}} - el archivo de Drive que de verdad se analizo
+        (07/Sep/2026, cierra el hueco real: antes link_pdf/link_xml nunca
+        se llenaban solos, ni por el ticket publico del proveedor ni por
+        el Motor Documental - quedaban como texto libre pegado a mano para
+        siempre). Se detecta PDF vs XML por mime_type/extension del
+        nombre; cualquier otro tipo se ignora en silencio (ej. el analista
+        selecciono una imagen suelta, no el CFDI)."""
         campos = request.data.get("campos")
         if not isinstance(campos, dict) or not campos:
             return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
@@ -1967,14 +2069,45 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         _vincular_contraparte_por_rfc(factura)
+
+        archivo_vinculado = _vincular_archivo_drive(factura, request.data.get("archivo"))
+
         emitir_evento_auditoria(
             "tesoreria_facturas.confirmar_extraccion",
             "tesoreria_facturas",
             factura.timbre_uuid,
             actor_user_id=request.data.get("actor_user_id"),
-            valores_nuevos={"campos": datos_validos},
+            valores_nuevos={"campos": datos_validos, "archivo_vinculado": archivo_vinculado},
         )
-        return Response(serializer.data)
+        return Response(self.get_serializer(factura).data)
+
+    @action(detail=True, methods=["post"])
+    def vincular_flujo(self, request, pk=None):
+        """Liga esta factura a un TesoreriaFlujo ya existente - sentido
+        inverso a TesoreriaFlujoViewSet.vincular_factura (07/Sep/2026,
+        "vinculacion factura<->flujo bidireccional": antes solo se podia
+        iniciar desde el lado del flujo/ticket/solicitud de pago, nunca
+        desde la factura misma). Escribe el mismo campo real
+        (TesoreriaFlujo.factura), solo cambia el punto de entrada -
+        no crea una relacion paralela. Requiere facturacion-cfdi.editar."""
+        factura = self.get_object()
+        id_flujo = request.data.get("flujo")
+        if not id_flujo:
+            return Response({"flujo": ["Este campo es requerido."]}, status=400)
+        try:
+            flujo = TesoreriaFlujo.objects.get(id_flujo=id_flujo)
+        except TesoreriaFlujo.DoesNotExist:
+            return Response({"flujo": ["No existe un flujo con ese ID."]}, status=400)
+        flujo.factura = factura
+        flujo.save(update_fields=["factura"])
+        emitir_evento_auditoria(
+            "tesoreria_facturas.vincular_flujo",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"flujo": id_flujo},
+        )
+        return Response(TesoreriaFlujoSerializer(flujo).data)
 
 
 class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
