@@ -12,6 +12,7 @@ permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
 import json
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 import requests
@@ -37,6 +38,7 @@ from .models import (
     TesoreriaDiaFestivo,
     TesoreriaFactura,
     TesoreriaFlujo,
+    TesoreriaMovimientoBancario,
     TesoreriaNotaCredito,
     TesoreriaContratoDocumento,
     TesoreriaTicketProveedor,
@@ -62,6 +64,7 @@ from .views import (
     TesoreriaCuentaViewSet,
     TesoreriaFacturaViewSet,
     TesoreriaFlujoViewSet,
+    TesoreriaMovimientoBancarioViewSet,
     TesoreriaNotaCreditoViewSet,
     TesoreriaContratoDocumentoViewSet,
     TesoreriaRecNominaViewSet,
@@ -2666,3 +2669,79 @@ class TesoreriaEnviarFacturaAdjuntosTests(TestCase):
         self.assertTrue(resultado)
         payload_enviado = mock_post.call_args.kwargs["json"]
         self.assertEqual(payload_enviado["adjuntos"], [])
+
+
+class TesoreriaMovimientoBancarioImportarTests(TestCase):
+    """Primer paso de la conciliacion bancaria real (08/Sep/2026) - importar
+    un extracto CSV/Excel crea un TesoreriaCorteEdc de encabezado y una
+    TesoreriaMovimientoBancario por linea con fecha valida."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex", alias="BMX")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000000001", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+
+    def _post_importar(self, archivo, perm_keys=("tesoreria.crear",)):
+        request = self.factory.post(
+            "/api/movimientos-bancarios/importar/",
+            {"cuenta": self.cuenta.id_cuenta_bancaria, "file": archivo},
+            format="multipart",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=perm_keys)
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "importar"})
+        return view(request)
+
+    def test_importar_csv_crea_corte_edc_y_movimientos(self):
+        contenido = (
+            b"Fecha,Descripcion,Referencia,Cargo,Abono,Saldo\n"
+            b"01/09/2026,PAGO PROVEEDOR X,REF001,1500.50,,10000.00\n"
+            b"02/09/2026,DEPOSITO CLIENTE,REF002,,5000.00,15000.00\n"
+        )
+        archivo = SimpleUploadedFile("extracto.csv", contenido, content_type="text/csv")
+        response = self._post_importar(archivo)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["importados"], 2)
+        self.assertEqual(response.data["errores"], [])
+
+        corte = TesoreriaCorteEdc.objects.get(pk=response.data["corte_edc"])
+        self.assertEqual(corte.cuenta_id, self.cuenta.id_cuenta_bancaria)
+        self.assertEqual(corte.tipo, TesoreriaCorteEdc.TIPO_ESTADO_CUENTA)
+        self.assertEqual(corte.formato, TesoreriaCorteEdc.FORMATO_CSV)
+
+        movimientos = TesoreriaMovimientoBancario.objects.filter(corte_edc=corte).order_by("fecha")
+        self.assertEqual(movimientos.count(), 2)
+        primero = movimientos[0]
+        self.assertEqual(str(primero.fecha), "2026-09-01")
+        self.assertEqual(primero.cargo, Decimal("1500.50"))
+        self.assertIsNone(primero.abono)
+        self.assertEqual(primero.descripcion, "PAGO PROVEEDOR X")
+        self.assertIsNone(primero.flujo)  # sin conciliar
+
+    def test_importar_sin_permiso_da_403(self):
+        archivo = SimpleUploadedFile(
+            "extracto.csv", b"Fecha,Cargo\n01/09/2026,100\n", content_type="text/csv"
+        )
+        response = self._post_importar(archivo, perm_keys=())
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(TesoreriaMovimientoBancario.objects.count(), 0)
+
+    def test_importar_formato_no_soportado(self):
+        archivo = SimpleUploadedFile("extracto.pdf", b"no es un csv", content_type="application/pdf")
+        response = self._post_importar(archivo)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(TesoreriaMovimientoBancario.objects.count(), 0)
+
+    def test_importar_fila_con_monto_invalido_se_reporta_como_error(self):
+        contenido = (
+            b"Fecha,Descripcion,Cargo\n"
+            b"01/09/2026,Fila buena,100.00\n"
+            b"02/09/2026,Fila mala,no-es-un-monto\n"
+        )
+        archivo = SimpleUploadedFile("extracto.csv", contenido, content_type="text/csv")
+        response = self._post_importar(archivo)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["importados"], 1)
+        self.assertEqual(len(response.data["errores"]), 1)
+        self.assertIn("Fila 3", response.data["errores"][0])

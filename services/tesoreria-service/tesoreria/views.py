@@ -1,9 +1,12 @@
+import csv
 import datetime
+import io
 import json
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import requests
+from openpyxl import load_workbook
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
 from django.db.models import ProtectedError
@@ -49,6 +52,7 @@ from .models import (
     TesoreriaDocumentoTicket,
     TesoreriaFactura,
     TesoreriaFlujo,
+    TesoreriaMovimientoBancario,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -72,6 +76,7 @@ from .serializers import (
     TesoreriaDiaFestivoSerializer,
     TesoreriaFacturaSerializer,
     TesoreriaFlujoSerializer,
+    TesoreriaMovimientoBancarioSerializer,
     TesoreriaNotaCreditoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
@@ -2350,6 +2355,199 @@ class TesoreriaCorteEdcViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         if cuenta_id:
             queryset = queryset.filter(cuenta_id=cuenta_id)
         return queryset
+
+
+# Encabezados aceptados por columna del extracto bancario (08/Sep/2026,
+# primer paso de la conciliacion bancaria real - ver finanzas.md
+# "Generate reconciliation reports (transactions vs. invoices)"). No hay un
+# formato unico de estado de cuenta entre bancos, asi que se acepta
+# cualquiera de estos alias por columna en vez de exigir un nombre exacto.
+_ENCABEZADOS_MOVIMIENTO = {
+    "fecha": ("fecha", "date"),
+    "descripcion": ("descripcion", "concepto", "description"),
+    "referencia": ("referencia", "ref", "reference"),
+    "cargo": ("cargo", "debito", "retiro", "debit"),
+    "abono": ("abono", "credito", "deposito", "credit"),
+    "saldo": ("saldo", "balance"),
+}
+
+
+def _valor_columna(fila: dict, campo: str):
+    normalizada = {str(k).strip().lower(): v for k, v in fila.items() if k}
+    for alias in _ENCABEZADOS_MOVIMIENTO[campo]:
+        if alias in normalizada and normalizada[alias] not in (None, ""):
+            return normalizada[alias]
+    return None
+
+
+def _parsear_fecha_movimiento(valor):
+    if valor in (None, ""):
+        return None
+    if isinstance(valor, datetime.datetime):
+        return valor.date()
+    if isinstance(valor, datetime.date):
+        return valor
+    texto = str(valor).strip()
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"):
+        try:
+            return datetime.datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    parseada = parse_date(texto)
+    if parseada:
+        return parseada
+    raise ValueError(f"fecha invalida: '{texto}'")
+
+
+def _parsear_monto_movimiento(valor):
+    if valor in (None, ""):
+        return None
+    if isinstance(valor, (int, float, Decimal)):
+        return Decimal(str(valor))
+    texto = str(valor).strip().replace("$", "").replace(",", "")
+    if texto in ("", "-"):
+        return None
+    try:
+        return Decimal(texto)
+    except InvalidOperation:
+        raise ValueError(f"monto invalido: '{valor}'")
+
+
+def _parsear_filas_extracto(nombre_archivo: str, contenido: bytes) -> list[dict]:
+    """Regresa una lista de dicts {encabezado_original: valor} por fila de
+    datos - CSV con encabezados o Excel (.xlsx) con encabezados en la
+    primera fila. No hay soporte de OFX/PDF por ahora (pendiente, igual que
+    el resto de integraciones de escaneo/Drive del proyecto)."""
+    nombre = nombre_archivo.lower()
+    if nombre.endswith(".csv"):
+        texto = contenido.decode("utf-8-sig", errors="replace")
+        return list(csv.DictReader(io.StringIO(texto)))
+    if nombre.endswith(".xlsx") or nombre.endswith(".xlsm"):
+        libro = load_workbook(io.BytesIO(contenido), data_only=True)
+        hoja = libro.active
+        filas_iter = hoja.iter_rows(values_only=True)
+        try:
+            encabezados = [str(h).strip() if h is not None else "" for h in next(filas_iter)]
+        except StopIteration:
+            return []
+        filas = []
+        for valores in filas_iter:
+            if valores is None or all(v is None for v in valores):
+                continue
+            filas.append(dict(zip(encabezados, valores)))
+        return filas
+    raise ValidationError("Formato no soportado. Sube un archivo CSV o Excel (.xlsx).")
+
+
+class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Lineas del estado de cuenta bancario (08/Sep/2026, primer paso de la
+    conciliacion bancaria real) - se cargan via `importar` (CSV/Excel), no
+    se capturan una por una a mano. Filtros ?cuenta=, ?corte_edc= y
+    ?conciliado=true/false (flujo asignado o no)."""
+
+    serializer_class = TesoreriaMovimientoBancarioSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["descripcion", "referencia"]
+
+    def get_permissions(self):
+        if self.action == "importar":
+            return [require_permission("tesoreria.crear")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = TesoreriaMovimientoBancario.objects.select_related("cuenta", "flujo").order_by("-fecha")
+        cuenta_id = self.request.query_params.get("cuenta")
+        if cuenta_id:
+            queryset = queryset.filter(cuenta_id=cuenta_id)
+        corte_edc_id = self.request.query_params.get("corte_edc")
+        if corte_edc_id:
+            queryset = queryset.filter(corte_edc_id=corte_edc_id)
+        conciliado = self.request.query_params.get("conciliado")
+        if conciliado == "true":
+            queryset = queryset.filter(flujo__isnull=False)
+        elif conciliado == "false":
+            queryset = queryset.filter(flujo__isnull=True)
+        return queryset
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def importar(self, request):
+        """Sube y parsea un extracto bancario completo: crea un
+        TesoreriaCorteEdc como encabezado del lote y una
+        TesoreriaMovimientoBancario por cada fila con fecha valida. No sube
+        el archivo original a Drive todavia (mismo hueco que camara/Drive
+        en otros modulos) - por ahora solo se guardan las lineas
+        parseadas."""
+        archivo = request.FILES.get("file")
+        cuenta_id = request.data.get("cuenta")
+        if not archivo or not cuenta_id:
+            raise ValidationError("Se requiere 'cuenta' y 'file'.")
+        try:
+            cuenta = TesoreriaCuenta.objects.get(pk=cuenta_id)
+        except TesoreriaCuenta.DoesNotExist:
+            raise ValidationError("Cuenta no encontrada.")
+
+        try:
+            filas = _parsear_filas_extracto(archivo.name, archivo.read())
+        except ValidationError:
+            raise
+        except Exception as exc:
+            raise ValidationError(f"No se pudo leer el archivo: {exc}")
+
+        movimientos = []
+        errores = []
+        fechas = []
+        for numero_fila, fila in enumerate(filas, start=2):
+            try:
+                fecha = _parsear_fecha_movimiento(_valor_columna(fila, "fecha"))
+                if fecha is None:
+                    continue
+                cargo = _parsear_monto_movimiento(_valor_columna(fila, "cargo"))
+                abono = _parsear_monto_movimiento(_valor_columna(fila, "abono"))
+                saldo = _parsear_monto_movimiento(_valor_columna(fila, "saldo"))
+            except ValueError as exc:
+                errores.append(f"Fila {numero_fila}: {exc}")
+                continue
+            descripcion = _valor_columna(fila, "descripcion")
+            referencia = _valor_columna(fila, "referencia")
+            fechas.append(fecha)
+            movimientos.append(
+                TesoreriaMovimientoBancario(
+                    cuenta=cuenta,
+                    fecha=fecha,
+                    descripcion=str(descripcion)[:255] if descripcion else None,
+                    referencia=str(referencia)[:100] if referencia else None,
+                    cargo=cargo,
+                    abono=abono,
+                    saldo=saldo,
+                    created_by=(request.data.get("created_by") or "")[:100],
+                )
+            )
+
+        if not movimientos:
+            detalle = " " + "; ".join(errores) if errores else ""
+            raise ValidationError("El archivo no tiene filas validas para importar." + detalle)
+
+        corte = TesoreriaCorteEdc.objects.create(
+            cuenta=cuenta,
+            fecha_final=max(fechas),
+            tipo=TesoreriaCorteEdc.TIPO_ESTADO_CUENTA,
+            formato=TesoreriaCorteEdc.FORMATO_CSV if archivo.name.lower().endswith(".csv") else TesoreriaCorteEdc.FORMATO_EXCEL,
+            # Pendiente: subir el archivo original a Drive (mismo hueco que
+            # camara/Drive en Obra/Materiales/Flujos, ver memoria del
+            # proyecto) - por ahora solo quedan las lineas ya parseadas.
+            link="",
+            disponible=True,
+            created_by=(request.data.get("created_by") or "")[:8],
+            updated_by=(request.data.get("created_by") or "")[:8],
+        )
+        for movimiento in movimientos:
+            movimiento.corte_edc = corte
+        TesoreriaMovimientoBancario.objects.bulk_create(movimientos)
+
+        return Response(
+            {"corte_edc": corte.id, "importados": len(movimientos), "errores": errores},
+            status=201,
+        )
 
 
 class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):

@@ -1044,6 +1044,63 @@ class TesoreriaFlujo(models.Model):
         return self.id_flujo
 
 
+class TesoreriaMovimientoBancario(models.Model):
+    """Una linea del estado de cuenta bancario, importada desde el CSV/Excel
+    que sube el analista (08/Sep/2026, primer paso de la conciliacion
+    bancaria - ver TesoreriaMovimientoBancarioViewSet.importar). Es el lado
+    "banco" de la conciliacion (finanzas.md: "Generate reconciliation
+    reports (transactions vs. invoices)") - distinto de TesoreriaFlujo, que
+    es el registro INTERNO capturado a mano o via IA (comprobante de pago).
+
+    `flujo` se llena al conciliar (a mano por ahora; el match automatico
+    fecha+monto queda para el reporte de conciliacion, siguiente paso) -
+    null significa "sin conciliar todavia"."""
+
+    id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    cuenta = models.ForeignKey(
+        TesoreriaCuenta, db_column="cuenta", on_delete=models.CASCADE, related_name="movimientos_bancarios"
+    )
+    # Corte/EDC del que se importo esta linea (el archivo real vive ahi,
+    # ver TesoreriaCorteEdc.link) - null si el registro se creo a mano en
+    # vez de por importacion.
+    corte_edc = models.ForeignKey(
+        TesoreriaCorteEdc,
+        db_column="corte_edc",
+        on_delete=models.SET_NULL,
+        related_name="movimientos",
+        blank=True,
+        null=True,
+    )
+    fecha = models.DateField()
+    descripcion = models.CharField(max_length=255, blank=True, null=True)
+    referencia = models.CharField(max_length=100, blank=True, null=True)
+    cargo = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    abono = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    saldo = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    flujo = models.ForeignKey(
+        TesoreriaFlujo,
+        db_column="flujo",
+        on_delete=models.SET_NULL,
+        related_name="movimientos_bancarios",
+        blank=True,
+        null=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+
+    # Alcance por sociedad via la cuenta relacionada, mismo criterio que
+    # TesoreriaFlujo.SCOPE_FIELD_SOCIEDAD via contrato.
+    SCOPE_FIELD_SOCIEDAD = "cuenta__sociedad"
+    objects = ScopedManager()
+
+    class Meta:
+        db_table = "tesoreria_movimientos_bancarios"
+        ordering = ["-fecha"]
+
+    def __str__(self):
+        return str(self.id)
+
+
 class TesoreriaDiaFestivo(models.Model):
     """Cache local de dias festivos oficiales de MX, sincronizada desde
     Nager.Date (03/Sep/2026, pedido explicito de Mariana: "usemos

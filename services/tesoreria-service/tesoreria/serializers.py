@@ -16,6 +16,7 @@ from .models import (
     TesoreriaCuenta,
     TesoreriaFactura,
     TesoreriaFlujo,
+    TesoreriaMovimientoBancario,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -678,6 +679,34 @@ class TesoreriaCorteEdcSerializer(serializers.ModelSerializer):
         # Ver comentario en TesoreriaContraparteSerializer - id ya no es
         # read_only, mismo motivo.
         read_only_fields = ["created_at", "updated_at"]
+
+
+class TesoreriaMovimientoBancarioSerializer(serializers.ModelSerializer):
+    """Linea del estado de cuenta bancario importada (08/Sep/2026, ver
+    TesoreriaMovimientoBancarioViewSet.importar)."""
+
+    cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
+    flujo_concepto = serializers.CharField(source="flujo.concepto", read_only=True, default=None)
+
+    class Meta:
+        model = TesoreriaMovimientoBancario
+        fields = [
+            "id",
+            "cuenta",
+            "cuenta_alias",
+            "corte_edc",
+            "fecha",
+            "descripcion",
+            "referencia",
+            "cargo",
+            "abono",
+            "saldo",
+            "flujo",
+            "flujo_concepto",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = ["id", "created_at", "created_by"]
 
 
 class TesoreriaSaldoSerializer(serializers.ModelSerializer):
