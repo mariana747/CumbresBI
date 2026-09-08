@@ -107,7 +107,20 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
         # retrieve() ya resuelve esto solo).
         read_only_fields = ["created_at", "updated_at", "fusionado_en"]
 
+    # Campos que se guardan siempre en mayusculas (08/Sep/2026, pedido
+    # explicito de Mariana: "quiero que todo se mantenga en mayusculas para
+    # estar estandarizado" - viendo la tabla de Contrapartes con nombres
+    # mezclados, ej. "Anthropic, PBC" vs "IZEL") - texto de identidad
+    # (razon social/nombre, apellidos, contacto, RFC), no correo (los
+    # correos si distinguen mayusculas/minusculas en la practica, aunque
+    # rara vez importe, no se tocan).
+    CAMPOS_MAYUSCULAS = ["razon_social", "apellido_paterno", "apellido_materno", "contacto", "rfc"]
+
     def validate(self, attrs):
+        for campo in self.CAMPOS_MAYUSCULAS:
+            valor = attrs.get(campo)
+            if valor:
+                attrs[campo] = valor.upper()
         # email/tipo_persona son obligatorios otra vez (28/Ago/2026, ver
         # comentario en models.py) EXCEPTO para el alta automatica de la IA
         # de conciliacion bancaria (origen=ia) - esa via no tiene forma de

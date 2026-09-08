@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+from decimal import Decimal
 
 import requests
 from cumbresbi_scope import forward_auth_headers
@@ -8,6 +9,7 @@ from django.conf import settings
 from django.db.models import ProtectedError
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.clickjacking import xframe_options_exempt
 from cumbresbi_scope.permissions import require_permission
 from rest_framework.decorators import action
@@ -656,6 +658,74 @@ class TesoreriaDocumentoTicketViewSet(ViewSet):
         return Response({"detail": "Documento subido correctamente. Tesorería lo va a procesar en breve."})
 
 
+def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
+    """Propone candidatos de Factura para conciliar con un Flujo (07/Sep/2026,
+    "IA que proponga el match comprobante->factura" - antes el enlace
+    factura<->flujo siempre era 100% manual, la IA solo ayudaba con los
+    demas campos/contraparte, ver docstring de confirmar_conciliacion).
+
+    Heuristica simple, no un modelo de ML: mismo RFC de la contraparte si
+    ya se conoce + monto igual o muy cercano (tolerancia de 1 peso por
+    redondeo) + fecha cercana (una factura muy vieja no deberia sugerirse
+    aunque el monto cuadre por casualidad, ver TOLERANCIA_DIAS). Excluye
+    facturas que ya tienen un flujo ligado (`factura.flujos.exists()`) -
+    un mismo CFDI no debe proponerse dos veces para pagos distintos.
+    Nunca liga sola: regresa solo una lista de sugerencias ordenadas por
+    score descendente, el analista sigue siendo quien confirma cual (o
+    ninguna)."""
+    if monto is None:
+        return []
+
+    TOLERANCIA_MONTO = Decimal("1.00")
+    TOLERANCIA_DIAS = 15
+
+    candidatos = TesoreriaFactura.objects.filter(comprobante_total__isnull=False)
+    if contraparte and contraparte.rfc:
+        candidatos = candidatos.filter(emisor_rfc=contraparte.rfc)
+    # Sin contraparte conocida, acotar solo por monto (dentro de tolerancia)
+    # para no traer el catalogo completo de facturas sin filtro real.
+    candidatos = candidatos.filter(
+        comprobante_total__gte=monto - TOLERANCIA_MONTO, comprobante_total__lte=monto + TOLERANCIA_MONTO
+    )
+
+    sugerencias = []
+    for factura in candidatos:
+        if factura.flujos.exists():
+            continue
+        score = 0
+        motivos = []
+        if factura.comprobante_total == monto:
+            score += 2
+            motivos.append("mismo monto exacto")
+        else:
+            score += 1
+            motivos.append("monto muy cercano")
+        if contraparte and factura.emisor_rfc == contraparte.rfc:
+            score += 2
+            motivos.append("mismo RFC de contraparte")
+        if fecha and factura.comprobante_fecha:
+            dias_diferencia = abs((factura.comprobante_fecha.date() - fecha).days)
+            if dias_diferencia <= TOLERANCIA_DIAS:
+                score += 1
+                motivos.append(f"fecha cercana ({dias_diferencia} días)")
+        sugerencias.append((score, factura, motivos))
+
+    sugerencias.sort(key=lambda t: t[0], reverse=True)
+    return [
+        {
+            "timbre_uuid": factura.timbre_uuid,
+            "comprobante_folio": factura.comprobante_folio,
+            "comprobante_total": factura.comprobante_total,
+            "comprobante_fecha": factura.comprobante_fecha,
+            "emisor_nombre": factura.emisor_nombre,
+            "emisor_rfc": factura.emisor_rfc,
+            "score": score,
+            "motivos": motivos,
+        }
+        for score, factura, motivos in sugerencias[:limite]
+    ]
+
+
 class TesoreriaFlujoViewSet(ModelViewSet):
     """Flujo de caja - un movimiento real de
     dinero (pago a proveedor, reembolso, nomina) ligado a un contrato.
@@ -977,6 +1047,26 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         data["contraparte_detectada"] = (
             TesoreriaContraparteSerializer(contraparte_detectada).data if contraparte_detectada else None
         )
+
+        # Sugerencias de factura (07/Sep/2026, "IA que proponga el match
+        # comprobante->factura") - solo si todavia no se ligo una a mano en
+        # esta misma llamada (timbre_uuid_factura arriba); no tiene caso
+        # sugerir si el analista ya confirmo cual es. Contraparte: la recien
+        # detectada, o si no hubo ("contraparte_nombre" vacio, ya se habia
+        # confirmado antes) la del contrato del propio flujo.
+        sugerencias_factura = []
+        if not timbre_uuid_factura:
+            contraparte_para_sugerir = contraparte_detectada or (
+                flujo.contrato.contraparte if flujo.contrato_id else None
+            )
+            fecha_para_sugerir = None
+            fecha_raw = datos_validos.get("fecha_efectiva") or flujo.fecha_efectiva
+            if fecha_raw:
+                fecha_para_sugerir = fecha_raw if isinstance(fecha_raw, datetime.date) else parse_date(str(fecha_raw))
+            sugerencias_factura = _sugerir_facturas_para_flujo(
+                contraparte_para_sugerir, flujo.total_mxp, fecha_para_sugerir
+            )
+        data["sugerencias_factura"] = sugerencias_factura
         return Response(data)
 
 
@@ -1752,17 +1842,27 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
 
     @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
     def subir_factura(self, request):
-        """Formulario publico del proveedor: sube su factura (PDF) sin
-        sesion, canjeando el token del link. Un solo archivo por llamada
-        (a diferencia de PldTicketCliente.subir_documento, que acepta
-        varios) - una factura es un solo PDF. Protegido por reCAPTCHA."""
+        """Formulario publico del proveedor: sube su factura sin sesion,
+        canjeando el token del link. Protegido por reCAPTCHA.
+
+        "file" (PDF) sigue siendo obligatorio - es lo minimo para poder
+        procesar la factura. "file_xml" es opcional (07/Sep/2026, "debe
+        poder subir el PDF y el XML" - antes solo se aceptaba un archivo):
+        el XML es el CFDI real, con el 100% de los datos fiscales; el PDF
+        es solo una representacion impresa que puede omitir campos enteros
+        segun la version del esquema (ver hallazgo real con un CFDI de
+        2013, memoria de sesion). Ambos se suben a la MISMA carpeta para
+        que el Motor Documental los encuentre juntos al dar de alta la
+        factura - no crea la factura por si sola, ver
+        TesoreriaFacturaViewSet.confirmar_extraccion/create."""
         ticket, error = self._resolver_ticket(request.data.get("token"))
         if error:
             return error
 
-        archivo = request.FILES.get("file")
-        if not archivo:
+        archivo_pdf = request.FILES.get("file")
+        if not archivo_pdf:
             return Response({"detail": "Campo 'file' requerido"}, status=400)
+        archivo_xml = request.FILES.get("file_xml")
 
         if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
             return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
@@ -1772,11 +1872,31 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
         # razon_social, mismo criterio que el resto del proyecto (ej.
         # PLD/Nuevos Clientes/<id_contraparte>) - un nombre puede repetirse
         # o traer caracteres raros para una ruta de Drive, el id nunca.
-        resultado, drive_error = _subir_a_drive(
-            request, archivo, f"Tesoreria/Facturas/FacturasProveedores/{ticket.contraparte_id}"
-        )
+        #
+        # Sub-division por SOLICITUD (08/Sep/2026, "seria por registro de
+        # solicitud como se hace ahora pero que de la contraparte dentro se
+        # creen subcarpetas donde se iran metiendo cada que se genere una")
+        # - una misma contraparte (ej. IZEL) puede facturar desde varias
+        # unidades de negocio (Acuario, Restaurante, etc.) sin que exista un
+        # catalogo fijo de cuales son; en vez de intentar adivinar/capturar
+        # esa unidad, cada ticket (=una solicitud de subida) ya es un evento
+        # propio con su propio id_ticket - se usa ese id como subcarpeta, asi
+        # los archivos de una solicitud nunca se mezclan con los de otra,
+        # sin importar cuantas unidades de negocio tenga la contraparte.
+        carpeta = f"Tesoreria/Facturas/FacturasProveedores/{ticket.contraparte_id}/{ticket.id_ticket}"
+        resultado_pdf, drive_error = _subir_a_drive(request, archivo_pdf, carpeta)
         if drive_error:
             return drive_error
+
+        resultado_xml = None
+        if archivo_xml:
+            resultado_xml, drive_error_xml = _subir_a_drive(request, archivo_xml, carpeta)
+            # El XML es opcional - si falla su subida no se tumba el envio
+            # completo (el PDF ya se subio y es lo minimo indispensable),
+            # solo se avisa en la respuesta para que el proveedor sepa que
+            # le falto ese archivo.
+            if drive_error_xml:
+                resultado_xml = None
 
         now = timezone.now()
         ticket.uses_count += 1
@@ -1790,9 +1910,16 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
             "tesoreria_ticket_proveedor",
             ticket.id_ticket,
             actor_user_id="externo",
-            valores_nuevos={"nombre_archivo": archivo.name},
+            valores_nuevos={
+                "nombre_archivo": archivo_pdf.name,
+                "nombre_archivo_xml": archivo_xml.name if archivo_xml else None,
+                "xml_subido": resultado_xml is not None,
+            },
         )
-        return Response({"detail": "Factura subida correctamente. Tesorería la va a procesar en breve.", **resultado})
+        detalle = "Factura subida correctamente. Tesorería la va a procesar en breve."
+        if archivo_xml and resultado_xml is None:
+            detalle = "El PDF se subió, pero el XML no se pudo subir. Vuelve a intentarlo solo con el XML si puedes."
+        return Response({"detail": detalle, "pdf": resultado_pdf, "xml": resultado_xml})
 
 
 class FacturaConceptoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -1858,7 +1985,13 @@ def _vincular_archivo_drive(factura, archivo) -> bool:
     manda DriveArchivo del frontend, o None/vacio si no aplica (ej. alta
     manual sin pasar por el Motor Documental). PDF vs XML se detecta por
     mime_type o por la extension del nombre; cualquier otro tipo se ignora
-    en silencio. Regresa True si de verdad se guardo algo."""
+    en silencio. Regresa True si de verdad se guardo algo.
+
+    NOTA (08/Sep/2026): se probo aceptar XPS como alternativa al XML
+    (algunos proveedores, ej. gncys.com, lo entregan en su lugar), pero se
+    descarto - Gemini no lee XPS (formato de IMPRESION propietario de
+    Microsoft, no el CFDI fiscal real), asi que no sirve para el Motor
+    Documental ni para comparar contra el PDF. Solo se aceptan PDF y XML."""
     if not isinstance(archivo, dict) or not archivo.get("file_id"):
         return False
     mime_type = (archivo.get("mime_type") or "").lower()
@@ -1876,6 +2009,23 @@ def _vincular_archivo_drive(factura, archivo) -> bool:
         campos_actualizados = ["drive_file_id_xml", "mime_type_xml", "link_xml"]
     if not campos_actualizados:
         return False
+    factura.save(update_fields=campos_actualizados)
+    return True
+
+
+def _vincular_archivos_drive(factura, data) -> int:
+    """Version plural de _vincular_archivo_drive (08/Sep/2026, comparacion
+    PDF vs XML) - antes solo se podia ligar UN archivo por llamada
+    (el que el analista analizo con el Motor Documental), asi que el
+    "otro" archivo (ej. el XML, cuando se comparo contra el PDF) nunca
+    quedaba ligado a menos que se confirmara una segunda vez. Acepta
+    "archivos" (lista de 0-2 archivos) o, por compatibilidad, el singular
+    "archivo" de siempre. Regresa cuantos se ligaron de verdad."""
+    archivos = data.get("archivos")
+    if not isinstance(archivos, list):
+        archivo_unico = data.get("archivo")
+        archivos = [archivo_unico] if archivo_unico else []
+    return sum(1 for archivo in archivos if _vincular_archivo_drive(factura, archivo))
     factura.save(update_fields=campos_actualizados)
     return True
 
@@ -1919,7 +2069,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         # crea hasta que el analista da "Guardar"). Sin esto, ese camino
         # (el mas comun - proveedor sube por ticket, analista abre "Nueva
         # Factura" apuntando a esa carpeta) nunca ligaria el archivo real.
-        _vincular_archivo_drive(instance, self.request.data.get("archivo"))
+        _vincular_archivos_drive(instance, self.request.data)
 
     # Whitelist de columnas que confirmar_extraccion puede escribir - mismo
     # criterio que PldContraparteKycViewSet.CAMPOS_CONFIRMABLES (ver
@@ -2052,7 +2202,13 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         el Motor Documental - quedaban como texto libre pegado a mano para
         siempre). Se detecta PDF vs XML por mime_type/extension del
         nombre; cualquier otro tipo se ignora en silencio (ej. el analista
-        selecciono una imagen suelta, no el CFDI)."""
+        selecciono una imagen suelta, no el CFDI).
+
+        Tambien acepta "archivos" (lista, 0-2 elementos con la misma forma
+        que "archivo") - 08/Sep/2026, comparacion PDF vs XML: cuando el
+        analista compara ambos archivos del ticket antes de confirmar, se
+        pueden ligar los dos de una sola vez en vez de solo el que se
+        analizo. Ver _vincular_archivos_drive."""
         campos = request.data.get("campos")
         if not isinstance(campos, dict) or not campos:
             return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
@@ -2070,14 +2226,14 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         serializer.save()
         _vincular_contraparte_por_rfc(factura)
 
-        archivo_vinculado = _vincular_archivo_drive(factura, request.data.get("archivo"))
+        archivos_vinculados = _vincular_archivos_drive(factura, request.data)
 
         emitir_evento_auditoria(
             "tesoreria_facturas.confirmar_extraccion",
             "tesoreria_facturas",
             factura.timbre_uuid,
             actor_user_id=request.data.get("actor_user_id"),
-            valores_nuevos={"campos": datos_validos, "archivo_vinculado": archivo_vinculado},
+            valores_nuevos={"campos": datos_validos, "archivos_vinculados": archivos_vinculados},
         )
         return Response(self.get_serializer(factura).data)
 

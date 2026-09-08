@@ -11,13 +11,14 @@ mismo criterio que GeneralSociedad en iam-service); el filtro real es por
 permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import requests
 from cumbresbi_scope.scope import EffectiveScope
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
 
@@ -38,6 +39,7 @@ from .models import (
     TesoreriaFlujo,
     TesoreriaNotaCredito,
     TesoreriaContratoDocumento,
+    TesoreriaTicketProveedor,
     TesoreriaTicketReembolso,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -45,6 +47,7 @@ from .models import (
 from . import mail_utils
 from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
 from .reportes import calcular_reporte_diario
+from .ticket_utils import generate_token
 from .views import (
     FacturaConceptoViewSet,
     FacturaDoctoRelacionadoViewSet,
@@ -120,7 +123,10 @@ class TesoreriaContraparteCrudTests(TestCase):
         request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
         response2 = view(request2, pk=self.contraparte.id_contraparte)
         self.assertEqual(response2.status_code, 200)
-        self.assertEqual(response2.data["razon_social"], "Editada")
+        # En mayusculas (08/Sep/2026, "quiero que todo se mantenga en
+        # mayusculas para estar estandarizado") - ver
+        # TesoreriaContraparteSerializer.CAMPOS_MAYUSCULAS.
+        self.assertEqual(response2.data["razon_social"], "EDITADA")
 
     def test_lectura_sigue_sin_permiso_especial(self):
         """Ver el catalogo sigue abierto (igual que GeneralSociedad en
@@ -720,6 +726,57 @@ class TesoreriaFlujoConfirmarConciliacionTests(TestCase):
         response = self._post({"factura": "no-existe"})
         self.assertEqual(response.status_code, 400)
 
+    def test_sugiere_factura_por_rfc_y_monto_exacto(self):
+        # 07/Sep/2026 ("IA que proponga el match comprobante->factura") -
+        # antes el enlace factura<->flujo siempre era 100% manual.
+        self.contraparte.rfc = "CDP900101AB1"
+        self.contraparte.save(update_fields=["rfc"])
+        factura_correcta = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-sugerida-1", comprobante_folio="F-S1",
+            emisor_rfc="CDP900101AB1", comprobante_total="1500.00",
+        )
+        # Distractor: mismo RFC pero otro monto, no deberia ganarle en score.
+        TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-sugerida-2", comprobante_folio="F-S2",
+            emisor_rfc="CDP900101AB1", comprobante_total="200.00",
+        )
+        response = self._post({"campos": {"total_mxp": "1500.00"}, "contraparte_nombre": "Constructora de prueba"})
+        self.assertEqual(response.status_code, 200)
+        sugerencias = response.data["sugerencias_factura"]
+        self.assertEqual(sugerencias[0]["timbre_uuid"], factura_correcta.timbre_uuid)
+
+    def test_no_sugiere_factura_ya_ligada_a_otro_flujo(self):
+        self.contraparte.rfc = "CDP900101AB1"
+        self.contraparte.save(update_fields=["rfc"])
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-sugerida-3", comprobante_folio="F-S3",
+            emisor_rfc="CDP900101AB1", comprobante_total="750.00",
+        )
+        banco = TesoreriaBanco.objects.create(id_banxico="00004", banco="Banamex", alias="BMX2")
+        cuenta2 = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000000003", alias="Otra cuenta", apertura="2026-01-01"
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000951", contrato=self.contrato, cuenta=cuenta2, factura=factura
+        )
+        response = self._post({"campos": {"total_mxp": "750.00"}, "contraparte_nombre": "Constructora de prueba"})
+        self.assertEqual(response.status_code, 200)
+        uuids_sugeridos = [s["timbre_uuid"] for s in response.data["sugerencias_factura"]]
+        self.assertNotIn(factura.timbre_uuid, uuids_sugeridos)
+
+    def test_no_sugiere_nada_si_ya_se_vinculo_en_la_misma_llamada(self):
+        TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-sugerida-4", comprobante_folio="F-S4", comprobante_total="99.00"
+        )
+        response = self._post({"campos": {"total_mxp": "99.00"}, "factura": "uuid-sugerida-4"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sugerencias_factura"], [])
+
+    def test_sin_monto_no_sugiere_nada(self):
+        response = self._post({"contraparte_nombre": "Constructora de prueba"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sugerencias_factura"], [])
+
 
 class TesoreriaContraparteOrigenTests(TestCase):
     """Excepcion de origen=ia a la obligatoriedad de email/tipo_persona
@@ -1177,6 +1234,57 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         factura.refresh_from_db()
         self.assertEqual(factura.drive_file_id_xml, "drive-456")
+        self.assertIsNone(factura.drive_file_id_pdf)
+
+    def test_confirmar_extraccion_con_archivos_lista_liga_pdf_y_xml_juntos(self):
+        # 08/Sep/2026 (comparacion PDF vs XML) - "archivos" (plural) liga
+        # los DOS de una sola llamada, no solo el que se analizo con el
+        # Motor Documental; antes el otro se quedaba sin ligar hasta una
+        # segunda confirmacion.
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-ambos", comprobante_folio="F-AAMBOS")
+        request = self.factory.post(
+            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
+            {
+                "campos": {"comprobante_folio": "F-AAMBOS"},
+                "archivos": [
+                    {"file_id": "drive-pdf-1", "nombre": "factura.pdf", "mime_type": "application/pdf"},
+                    {"file_id": "drive-xml-1", "nombre": "factura.xml", "mime_type": "application/xml"},
+                ],
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 200)
+        factura.refresh_from_db()
+        self.assertEqual(factura.drive_file_id_pdf, "drive-pdf-1")
+        self.assertEqual(factura.drive_file_id_xml, "drive-xml-1")
+
+    def test_confirmar_extraccion_con_archivo_xps_se_ignora(self):
+        # 08/Sep/2026 ("no vamos a aceptar xps, solo PDF y XML") - se probo
+        # aceptar XPS como alternativa al XML pero se descarto (Gemini no
+        # lo lee); ahora un archivo XPS se ignora igual que cualquier tipo
+        # no reconocido, no se liga a ningun slot.
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-xps", comprobante_folio="F-AXPS")
+        request = self.factory.post(
+            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
+            {
+                "campos": {"comprobante_folio": "F-AXPS"},
+                "archivo": {
+                    "file_id": "drive-xps-1",
+                    "nombre": "factura-50.xps",
+                    "mime_type": "application/vnd.ms-xpsdocument",
+                },
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 200)
+        factura.refresh_from_db()
+        self.assertIsNone(factura.drive_file_id_xml)
         self.assertIsNone(factura.drive_file_id_pdf)
 
     def test_confirmar_extraccion_archivo_no_reconocido_se_ignora(self):
@@ -2334,6 +2442,113 @@ class TesoreriaTicketProveedorScopeTests(TestCase):
         view = TesoreriaTicketProveedorViewSet.as_view({"post": "validar"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
+
+
+class TesoreriaTicketProveedorSubirFacturaTests(TestCase):
+    """subir_factura publico (07/Sep/2026, "debe poder subir el PDF y el
+    XML") - antes solo aceptaba un archivo ("file"); el XML es el CFDI
+    real con el 100% de los datos fiscales, a diferencia del PDF que es
+    solo una representacion impresa (puede omitir campos enteros segun la
+    version del esquema, ver hallazgo real con un CFDI de 2013)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        # Este entorno trae una RECAPTCHA_SECRET_KEY real configurada
+        # (hallazgo real 07/Sep/2026, mismo patron que las credenciales
+        # reales de Gmail/Drive) - sin este mock, "modo simulado" no
+        # aplica y cualquier token de prueba se rechaza de verdad contra
+        # la API de Google.
+        parche_recaptcha = patch("tesoreria.views.recaptcha.verificar", return_value=True)
+        parche_recaptcha.start()
+        self.addCleanup(parche_recaptcha.stop)
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        token, token_hash = generate_token()
+        self.token = token
+        self.ticket = TesoreriaTicketProveedor.objects.create(
+            contraparte=self.contraparte,
+            email="proveedor@ejemplo.com",
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(hours=1),
+            max_uses=1,
+        )
+
+    def _post(self, archivos):
+        data = {"token": self.token, "recaptcha_token": "cualquier-token-no-vacio", **archivos}
+        request = self.factory.post("/api/tickets-proveedor/subir_factura/", data, format="multipart")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaTicketProveedorViewSet.as_view({"post": "subir_factura"})
+        return view(request)
+
+    def test_sin_pdf_da_400(self):
+        response = self._post({})
+        self.assertEqual(response.status_code, 400)
+
+    def test_solo_pdf_sigue_funcionando(self):
+        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
+        with patch(
+            "tesoreria.views._subir_a_drive",
+            return_value=({"web_view_link": "https://drive.example/pdf", "file_id": "pdf-1", "mime_type": "application/pdf"}, None),
+        ) as mock_subir:
+            response = self._post({"file": pdf})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.data["pdf"])
+        self.assertIsNone(response.data["xml"])
+        mock_subir.assert_called_once()
+
+    def test_pdf_y_xml_juntos_se_suben_a_la_misma_carpeta(self):
+        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
+        xml = SimpleUploadedFile("factura.xml", b"<cfdi/>", content_type="application/xml")
+        with patch(
+            "tesoreria.views._subir_a_drive",
+            side_effect=[
+                ({"web_view_link": "https://drive.example/pdf", "file_id": "pdf-1", "mime_type": "application/pdf"}, None),
+                ({"web_view_link": "https://drive.example/xml", "file_id": "xml-1", "mime_type": "application/xml"}, None),
+            ],
+        ) as mock_subir:
+            response = self._post({"file": pdf, "file_xml": xml})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["pdf"]["file_id"], "pdf-1")
+        self.assertEqual(response.data["xml"]["file_id"], "xml-1")
+        # Misma carpeta para ambos archivos, para que el Motor Documental
+        # los encuentre juntos.
+        carpeta_pdf = mock_subir.call_args_list[0].args[2]
+        carpeta_xml = mock_subir.call_args_list[1].args[2]
+        self.assertEqual(carpeta_pdf, carpeta_xml)
+
+    def test_xml_falla_no_tumba_el_pdf_ya_subido(self):
+        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
+        xml = SimpleUploadedFile("factura.xml", b"<cfdi/>", content_type="application/xml")
+        with patch(
+            "tesoreria.views._subir_a_drive",
+            side_effect=[
+                ({"web_view_link": "https://drive.example/pdf", "file_id": "pdf-1", "mime_type": "application/pdf"}, None),
+                (None, Response({"detail": "Drive no respondio"}, status=502)),
+            ],
+        ):
+            response = self._post({"file": pdf, "file_xml": xml})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.data["pdf"])
+        self.assertIsNone(response.data["xml"])
+
+    def test_cada_ticket_sube_a_su_propia_subcarpeta_por_id_ticket(self):
+        """08/Sep/2026, "seria por registro de solicitud como se hace ahora
+        pero que de la contraparte dentro se creen subcarpetas donde se
+        iran metiendo cada que se genere una" - una misma contraparte (ej.
+        IZEL) puede facturar desde varias unidades de negocio sin un
+        catalogo fijo de cuales son; cada ticket ya es su propia solicitud
+        con su propio id, asi que su subcarpeta usa ese id, nunca la
+        carpeta raiz compartida del proveedor."""
+        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
+        with patch(
+            "tesoreria.views._subir_a_drive",
+            return_value=({"web_view_link": "https://drive.example/pdf", "file_id": "pdf-1", "mime_type": "application/pdf"}, None),
+        ) as mock_subir:
+            response = self._post({"file": pdf})
+        self.assertEqual(response.status_code, 200)
+        carpeta = mock_subir.call_args.args[2]
+        self.assertTrue(carpeta.endswith(f"/{self.contraparte.id_contraparte}/{self.ticket.id_ticket}"))
 
 
 class _RespuestaFalsa:
