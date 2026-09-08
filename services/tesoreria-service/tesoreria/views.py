@@ -2026,8 +2026,6 @@ def _vincular_archivos_drive(factura, data) -> int:
         archivo_unico = data.get("archivo")
         archivos = [archivo_unico] if archivo_unico else []
     return sum(1 for archivo in archivos if _vincular_archivo_drive(factura, archivo))
-    factura.save(update_fields=campos_actualizados)
-    return True
 
 
 class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
