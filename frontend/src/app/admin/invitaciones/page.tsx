@@ -436,7 +436,14 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
       return {
         key: `prov-${t.id_ticket}`,
         email: t.email,
-        recurso: `Factura de proveedor (Tesorería) — ${t.contraparte_nombre}`,
+        // id_contraparte visible (07/Sep/2026, "como el 10b3994a") - es el
+        // mismo id que nombra la carpeta real en Drive
+        // (Tesoreria/Facturas/FacturasProveedores/<id_contraparte>), util
+        // para verificar de un vistazo a que carpeta apunta este ticket
+        // sin tener que entrar a la base de datos. Cada ticket ademas sube
+        // a su propia subcarpeta por id_ticket (08/Sep/2026), ver
+        // TesoreriaTicketProveedorViewSet.subir_factura.
+        recurso: `Factura de proveedor (Tesorería) — ${t.contraparte_nombre} (${t.contraparte})`,
         emitido: t.issued_at,
         expira: t.expires_at,
         usos: `${t.uses_count}/${t.max_uses}`,

@@ -113,6 +113,13 @@ class TesoreriaContraparte(models.Model):
     # ia-plan"). La constraint de BD se relaja a blank/null; quien impone
     # "obligatorio salvo IA" es el serializer, no el modelo.
     email = models.CharField(max_length=100, blank=True, null=True)
+    # NOTA (08/Sep/2026): se probo un campo "sucursal" de texto libre aqui
+    # para distinguir unidades de negocio de una misma contraparte (ej. IZEL
+    # Acuario vs IZEL Restaurante), pero se descarto - una contraparte puede
+    # tener VARIAS sucursales, no una sola fija por registro. La division
+    # real quedo resuelta por SOLICITUD (ver TesoreriaTicketProveedor.
+    # subir_factura: subcarpeta Tesoreria/Facturas/FacturasProveedores/
+    # <id_contraparte>/<id_ticket>), no por un campo en la contraparte.
     # Marca si esta contraparte se dio de alta a mano (pantalla de
     # Contrapartes, exige email/tipo_persona) o automaticamente por la IA de
     # conciliacion de comprobantes bancarios (los permite vacios). Default
