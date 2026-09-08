@@ -64,6 +64,7 @@ import {
   TesoreriaContrato,
   TesoreriaCuenta,
   TesoreriaFactura,
+  TesoreriaFacturaSugerida,
   TesoreriaFlujo,
   TesoreriaValidacionEstado,
   aprobarFlujo,
@@ -202,6 +203,15 @@ export default function TesoreriaFlujosPage() {
   // la devuelve en contraparte_detectada pero antes se descartaba en
   // silencio; ahora se avisa con link directo a revisarla.
   const [avisoContraparteIA, setAvisoContraparteIA] = useState<{ id: string; nombre: string } | null>(null);
+  // Sugerencias de factura para el flujo que se acaba de conciliar
+  // (07/Sep/2026, "IA que proponga el match comprobante->factura") - solo
+  // avisa, nunca liga sola; el analista da clic en "Vincular" para
+  // confirmar una (o ninguna, si ninguna aplica).
+  const [sugerenciasFactura, setSugerenciasFactura] = useState<{
+    idFlujo: string;
+    opciones: TesoreriaFacturaSugerida[];
+  } | null>(null);
+  const [vinculandoSugerencia, setVinculandoSugerencia] = useState<string | null>(null);
 
   // Autocomplete con busqueda en vivo contra tesoreria-service, mismo
   // patron que ContraparteSelector (openOnFocus + debounce 300ms, catalogo
@@ -318,7 +328,29 @@ export default function TesoreriaFlujosPage() {
     } else {
       setAvisoContraparteIA(null);
     }
+    setSugerenciasFactura(
+      resultado.sugerencias_factura.length > 0
+        ? { idFlujo: motorFlujo.id_flujo, opciones: resultado.sugerencias_factura }
+        : null
+    );
     refresh();
+  }
+
+  // Confirma una sugerencia de factura propuesta por la IA (07/Sep/2026) -
+  // mismo endpoint que el vinculo manual (vincularFactura), la unica
+  // diferencia es que el UUID ya viene precargado por la sugerencia en vez
+  // de que el analista lo busque a mano.
+  async function handleVincularSugerencia(idFlujo: string, timbreUuid: string) {
+    setVinculandoSugerencia(timbreUuid);
+    try {
+      await vincularFactura(idFlujo, { factura: timbreUuid });
+      setSugerenciasFactura(null);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al vincular la factura sugerida");
+    } finally {
+      setVinculandoSugerencia(null);
+    }
   }
 
   function refresh() {
@@ -569,6 +601,51 @@ export default function TesoreriaFlujosPage() {
         >
           La contraparte &quot;{avisoContraparteIA.nombre}&quot; se creó automáticamente a partir del comprobante y le
           falta correo o tipo de persona.
+        </Alert>
+      )}
+
+      {/* Sugerencias de factura (07/Sep/2026, "IA que proponga el match
+          comprobante->factura") - solo aviso, el analista confirma cual
+          (o cierra el panel sin vincular ninguna). */}
+      {sugerenciasFactura && (
+        <Alert
+          severity="info"
+          sx={{ mb: 3 }}
+          onClose={() => setSugerenciasFactura(null)}
+        >
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            La IA propone estas facturas para conciliar con el flujo <strong>{sugerenciasFactura.idFlujo}</strong>:
+          </Typography>
+          <Stack spacing={1}>
+            {sugerenciasFactura.opciones.map((s) => (
+              <Stack
+                key={s.timbre_uuid}
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ bgcolor: "background.paper", borderRadius: 1, px: 1.5, py: 1 }}
+              >
+                <Box>
+                  <Typography variant="body2" fontWeight={600}>
+                    {s.comprobante_folio || s.timbre_uuid} — {s.emisor_nombre || s.emisor_rfc || "—"} — $
+                    {s.comprobante_total}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {s.motivos.join(" · ")}
+                  </Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={vinculandoSugerencia === s.timbre_uuid}
+                  onClick={() => handleVincularSugerencia(sugerenciasFactura.idFlujo, s.timbre_uuid)}
+                >
+                  {vinculandoSugerencia === s.timbre_uuid ? <CircularProgress size={14} /> : "Vincular"}
+                </Button>
+              </Stack>
+            ))}
+          </Stack>
         </Alert>
       )}
 

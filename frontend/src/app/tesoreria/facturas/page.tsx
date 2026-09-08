@@ -56,7 +56,8 @@ import AppShell from "@/components/AppShell";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import TicketsReembolsoAdminPanel from "@/components/TicketsReembolsoAdminPanel";
 import { SessionUser, getSession } from "@/lib/auth";
-import { DriveArchivo } from "@/lib/drive";
+import { DriveArchivo, listDriveFiles } from "@/lib/drive";
+import { analyzeDocument, pollAnalysis } from "@/lib/docint";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   EnvioMasivoResultado,
@@ -515,6 +516,14 @@ export default function TesoreriaFacturasPage() {
   // hace falta elegir cual proveedor se va a listar.
   const [proveedores, setProveedores] = useState<TesoreriaContraparte[]>([]);
   const [proveedorBandeja, setProveedorBandeja] = useState("");
+  // Ticket exacto que disparo "Revisar" (08/Sep/2026, "seria por registro de
+  // solicitud... que de la contraparte dentro se creen subcarpetas donde se
+  // iran metiendo cada que se genere una") - una misma contraparte puede
+  // tener varias solicitudes/tickets (distintas unidades de negocio, ej.
+  // IZEL Acuario vs IZEL Restaurante); ya no basta con el id_contraparte
+  // para armar la carpeta a listar, hace falta el id_ticket exacto para que
+  // el analista solo vea los archivos de ESA solicitud, no los de otra.
+  const [idTicketBandeja, setIdTicketBandeja] = useState("");
   // Filtro por receptor (02/Sep/2026, pedido explicito: "en todo donde
   // aparezca una sociedad agrega el filtro por sociedad o receptor" ->
   // "receptor debe ser alguna sociedad" - el receptor de una factura de
@@ -633,7 +642,9 @@ export default function TesoreriaFacturasPage() {
     setForm(FORM_VACIO);
     setFormError(null);
     setProveedorBandeja("");
+    setIdTicketBandeja("");
     setArchivoNuevaFactura(undefined);
+    setArchivoXmlNuevaFactura(undefined);
     setMotorEjecutadoNuevaFactura(false);
     setTabFactura("Comprobante");
     setDialogOpen(true);
@@ -652,6 +663,136 @@ export default function TesoreriaFacturasPage() {
     // Documental" el mismo cuando este listo.
     abrirAlta();
     setProveedorBandeja(ticket.contraparte);
+    setIdTicketBandeja(ticket.id_ticket);
+  }
+
+  // Comparacion PDF vs XML (08/Sep/2026, "no vamos a aceptar xps, solo
+  // para comparacion PDF y XML y asi vemos cual se guarda") - cuando el
+  // ticket ya tiene los dos archivos, se analizan ambos con el Motor
+  // Documental y se muestran lado a lado antes de decidir cual valor usar
+  // por campo (el XML es la fuente fiscal real, pero el analista puede
+  // preferir el PDF si el XML viene incompleto/raro).
+  const [ticketComparando, setTicketComparando] = useState<TesoreriaTicketProveedor | null>(null);
+  const [carpetaComparando, setCarpetaComparando] = useState("");
+  const [errorComparacion, setErrorComparacion] = useState<string | null>(null);
+  const [camposComparados, setCamposComparados] = useState<
+    { campo: string; valorPdf: string; valorXml: string; usarXml: boolean }[]
+  >([]);
+  // Estado de extraccion INDEPENDIENTE por archivo (08/Sep/2026, "si
+  // primero se extrae y luego compara") - antes un solo fallo (ej. Gemini
+  // saturado con el XML) tiraba tambien el resultado del PDF que si habia
+  // salido bien, obligando a repetir ambos desde cero. Ahora cada archivo
+  // se extrae por su cuenta, se guarda su resultado en cuanto termina, y
+  // solo se arma la comparacion cuando los dos ya estan listos - un fallo
+  // en uno no toca al otro, y "Reintentar" solo repite el que fallo.
+  const [archivoPdfComparado, setArchivoPdfComparado] = useState<DriveArchivo | null>(null);
+  const [archivoXmlComparado, setArchivoXmlComparado] = useState<DriveArchivo | null>(null);
+  const [extraccionPdf, setExtraccionPdf] = useState<{
+    cargando: boolean;
+    error: string | null;
+    datos: Record<string, unknown> | null;
+  }>({ cargando: false, error: null, datos: null });
+  const [extraccionXml, setExtraccionXml] = useState<{
+    cargando: boolean;
+    error: string | null;
+    datos: Record<string, unknown> | null;
+  }>({ cargando: false, error: null, datos: null });
+
+  async function extraerArchivoComparacion(archivo: DriveArchivo, carpeta: string, tipo: "pdf" | "xml") {
+    const setExtraccion = tipo === "pdf" ? setExtraccionPdf : setExtraccionXml;
+    setExtraccion({ cargando: true, error: null, datos: null });
+    try {
+      const { analysisId } = await analyzeDocument({
+        driveFileId: archivo.file_id,
+        carpeta,
+        permKey: "facturacion-cfdi.crear",
+        nombreArchivo: archivo.nombre,
+        mimeType: archivo.mime_type || undefined,
+        expectedDocumentType: "tesoreria.cfdi_factura",
+        internalPromptKey: "tesoreria.cfdi_factura",
+        servicioSolicitante: "tesoreria-service",
+      });
+      const estado = await pollAnalysis(analysisId);
+      if (estado.status === "ERROR" || !estado.result) {
+        setExtraccion({ cargando: false, error: estado.error || "No se pudo analizar el documento.", datos: null });
+        return;
+      }
+      setExtraccion({ cargando: false, error: null, datos: estado.result.extracted_data });
+    } catch (err) {
+      setExtraccion({
+        cargando: false,
+        error: err instanceof Error ? err.message : "Error desconocido.",
+        datos: null,
+      });
+    }
+  }
+
+  // Arma la tabla de comparacion en cuanto AMBOS resultados ya estan
+  // disponibles - no bloquea a que ambas llamadas terminen "juntas", cada
+  // una llega cuando llega (secuencial, ver abrirComparacion).
+  useEffect(() => {
+    if (!extraccionPdf.datos || !extraccionXml.datos) return;
+    const campos = new Set([...Object.keys(extraccionPdf.datos), ...Object.keys(extraccionXml.datos)]);
+    const comparados = Array.from(campos)
+      .filter((campo) => (TESORERIA_CAMPOS_CONFIRMABLES_NUEVA as readonly string[]).includes(campo))
+      .map((campo) => {
+        const valorPdf = String(extraccionPdf.datos![campo] ?? "");
+        const valorXml = String(extraccionXml.datos![campo] ?? "");
+        return { campo, valorPdf, valorXml, usarXml: Boolean(valorXml) };
+      });
+    setCamposComparados(comparados);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extraccionPdf.datos, extraccionXml.datos]);
+
+  async function abrirComparacion(ticket: TesoreriaTicketProveedor) {
+    setTicketComparando(ticket);
+    setErrorComparacion(null);
+    setCamposComparados([]);
+    setExtraccionPdf({ cargando: false, error: null, datos: null });
+    setExtraccionXml({ cargando: false, error: null, datos: null });
+    try {
+      const carpeta = `Tesoreria/Facturas/FacturasProveedores/${ticket.contraparte}/${ticket.id_ticket}`;
+      setCarpetaComparando(carpeta);
+      const archivos = await listDriveFiles(carpeta, "facturacion-cfdi.crear");
+      const pdf = archivos.find((a) => (a.mime_type || "").includes("pdf") || a.nombre.toLowerCase().endsWith(".pdf"));
+      const xml = archivos.find(
+        (a) => (a.mime_type || "").includes("xml") || a.nombre.toLowerCase().endsWith(".xml")
+      );
+      if (!pdf || !xml) {
+        setErrorComparacion(
+          `Falta ${!pdf ? "el PDF" : "el XML"} en esta solicitud — solo hay ${archivos.length} archivo(s), no se puede comparar.`
+        );
+        return;
+      }
+      setArchivoPdfComparado(pdf);
+      setArchivoXmlComparado(xml);
+      // Secuencial, NO en paralelo (08/Sep/2026, hallazgo real: 2 llamadas
+      // simultaneas a Gemini con la clave gratuita de AI Studio dispararon
+      // un 429 "saturado" que tumbo el analisis) - una tras otra evita
+      // duplicar la tasa de solicitudes por minuto contra el mismo modelo.
+      // Ademas cada una ya se guarda por su cuenta (extraerArchivoComparacion),
+      // asi que si el PDF sale bien y el XML falla, el resultado del PDF no
+      // se pierde.
+      await extraerArchivoComparacion(pdf, carpeta, "pdf");
+      await extraerArchivoComparacion(xml, carpeta, "xml");
+    } catch (err) {
+      setErrorComparacion(err instanceof Error ? err.message : "Error desconocido al comparar.");
+    }
+  }
+
+  function handleUsarComparacion() {
+    if (!ticketComparando || !archivoPdfComparado) return;
+    const campos: Record<string, string> = {};
+    for (const fila of camposComparados) {
+      const elegido = fila.usarXml ? fila.valorXml : fila.valorPdf;
+      if (elegido) campos[fila.campo] = elegido;
+    }
+    abrirAlta();
+    setProveedorBandeja(ticketComparando.contraparte);
+    setIdTicketBandeja(ticketComparando.id_ticket);
+    handleAutorellenarNuevaFactura(campos, archivoPdfComparado);
+    setArchivoXmlNuevaFactura(archivoXmlComparado || undefined);
+    setTicketComparando(null);
   }
 
   // Clasificacion de un ticket de proveedor (27/Ago/2026) - separa los que
@@ -770,6 +911,12 @@ export default function TesoreriaFacturasPage() {
   // porque no es un campo de texto editable, se manda tal cual a
   // createFactura() cuando el analista confirme el alta.
   const [archivoNuevaFactura, setArchivoNuevaFactura] = useState<DriveArchivo | undefined>(undefined);
+  // XML que acompaño al PDF cuando la factura se dio de alta via
+  // "Comparar PDF vs XML" (08/Sep/2026) - se manda junto al PDF en
+  // createFactura() para que ambos queden ligados (ver
+  // TesoreriaFacturaViewSet._vincular_archivos_drive), no solo el que el
+  // Motor Documental analizo.
+  const [archivoXmlNuevaFactura, setArchivoXmlNuevaFactura] = useState<DriveArchivo | undefined>(undefined);
   // Bloquea los campos del CFDI hasta que el Motor Documental ya corrio
   // una vez (07/Sep/2026, "solo asi podra editar de forma manual") - cierra
   // el atajo de teclear una factura desde cero saltandose la IA, que
@@ -812,13 +959,14 @@ export default function TesoreriaFacturasPage() {
       if (editing) {
         await updateFactura(editing.id, form);
       } else {
-        await createFactura(form, archivoNuevaFactura);
+        await createFactura(form, archivoNuevaFactura, archivoXmlNuevaFactura);
         setArchivoNuevaFactura(undefined);
-        if (proveedorBandeja) {
-          const ticket = ticketsProveedor.find((t) => t.contraparte === proveedorBandeja);
-          if (ticket) setTicketsOcultos((prev) => new Set(prev).add(ticket.id_ticket));
-          setProveedorBandeja("");
+        setArchivoXmlNuevaFactura(undefined);
+        if (idTicketBandeja) {
+          setTicketsOcultos((prev) => new Set(prev).add(idTicketBandeja));
         }
+        setProveedorBandeja("");
+        setIdTicketBandeja("");
       }
       setDialogOpen(false);
       refresh();
@@ -1003,7 +1151,14 @@ export default function TesoreriaFacturasPage() {
                           (fecha/total/estado/acciones) se corria una
                           columna. */}
                       <TableCell colSpan={4} sx={{ color: "text.secondary" }}>
-                        Ticket de proveedor — {t.contraparte_nombre} ({t.email})
+                        {/* id_contraparte visible (07/Sep/2026, "como el
+                            10b3994a") - es el mismo id que nombra la
+                            carpeta real en Drive
+                            (FacturasProveedores/<id_contraparte>). Ademas
+                            (08/Sep/2026) cada solicitud/ticket sube a su
+                            propia subcarpeta por id_ticket, ver
+                            TesoreriaTicketProveedorViewSet.subir_factura. */}
+                        Ticket de proveedor — {t.contraparte_nombre} ({t.contraparte}) — {t.email}
                       </TableCell>
                       <TableCell>{new Date(t.issued_at).toLocaleDateString("es-MX")}</TableCell>
                       <TableCell align="right">—</TableCell>
@@ -1014,6 +1169,11 @@ export default function TesoreriaFacturasPage() {
                         {estado.recibida && puedeCrear && (
                           <Button size="small" onClick={() => abrirRevisionTicket(t)}>
                             Revisar
+                          </Button>
+                        )}
+                        {estado.recibida && puedeCrear && (
+                          <Button size="small" onClick={() => abrirComparacion(t)}>
+                            Comparar PDF/XML
                           </Button>
                         )}
                       </TableCell>
@@ -1100,7 +1260,9 @@ export default function TesoreriaFacturasPage() {
                       const estado = estadoTicketFactura(t);
                       return (
                         <TableRow key={`ticket-vencido-${t.id_ticket}`} hover>
-                          <TableCell>{t.contraparte_nombre}</TableCell>
+                          <TableCell>
+                            {t.contraparte_nombre} ({t.contraparte})
+                          </TableCell>
                           <TableCell>{t.email}</TableCell>
                           <TableCell>{new Date(t.issued_at).toLocaleDateString("es-MX")}</TableCell>
                           <TableCell>
@@ -1615,6 +1777,31 @@ export default function TesoreriaFacturasPage() {
                 }}
               />
             </Stack>
+            {/* drive_file_id real (07/Sep/2026, "agrega al ui el id de
+                como se guarda en drive") - de solo lectura, nunca se
+                edita a mano (lo llena _vincular_archivo_drive). Util para
+                verificar rapido a que archivo real de Drive esta ligada
+                la factura, sin tener que entrar a la base de datos. */}
+            {editing && (editing.drive_file_id_pdf || editing.drive_file_id_xml) && (
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  size="small"
+                  label="Drive file ID (PDF)"
+                  value={editing.drive_file_id_pdf || "—"}
+                  disabled
+                  fullWidth
+                  sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
+                />
+                <TextField
+                  size="small"
+                  label="Drive file ID (XML)"
+                  value={editing.drive_file_id_xml || "—"}
+                  disabled
+                  fullWidth
+                  sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
+                />
+              </Stack>
+            )}
             </>
             )}
             </Stack>
@@ -1799,16 +1986,23 @@ export default function TesoreriaFacturasPage() {
                 // de darla de alta; el mismo lugar donde el ticket público
                 // de proveedores (TesoreriaTicketProveedorViewSet.
                 // subir_factura) deja el PDF real que sube el proveedor,
-                // ya subdividido por proveedorBandeja (id_contraparte) -
-                // sin elegir proveedor, cae a la bandeja general (raiz de
-                // FacturasProveedores, solo staging manual del analista).
+                // ya subdividido por proveedorBandeja (id_contraparte) y,
+                // dentro de esa, por id_ticket (08/Sep/2026 - cada
+                // solicitud/ticket es su propia subcarpeta, para que una
+                // contraparte con varias unidades de negocio -ej. IZEL
+                // Acuario vs IZEL Restaurante- nunca mezcle los archivos de
+                // una solicitud con los de otra) - sin elegir proveedor, cae
+                // a la bandeja general (raiz de FacturasProveedores, solo
+                // staging manual del analista).
                 // No hay id de factura que mandar a confirmar_extraccion,
                 // por eso onConfirmar solo prellena `form` en vez de llamar
                 // al backend.
                 etiqueta: "una factura nueva",
                 servicioSolicitante: "tesoreria-service",
                 carpeta: proveedorBandeja
-                  ? `Tesoreria/Facturas/FacturasProveedores/${proveedorBandeja}`
+                  ? `Tesoreria/Facturas/FacturasProveedores/${proveedorBandeja}${
+                      idTicketBandeja ? `/${idTicketBandeja}` : ""
+                    }`
                   : "Tesoreria/Facturas/FacturasProveedores",
                 permKey: "facturacion-cfdi.crear",
                 expectedDocumentType: "tesoreria.cfdi_factura",
@@ -1817,6 +2011,103 @@ export default function TesoreriaFacturasPage() {
               }
         }
       />
+
+      {/* Comparacion PDF vs XML (08/Sep/2026) - ver abrirComparacion. */}
+      <Dialog open={Boolean(ticketComparando)} onClose={() => setTicketComparando(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Comparar PDF vs XML — {ticketComparando?.contraparte_nombre}
+          <IconButton
+            onClick={() => setTicketComparando(null)}
+            sx={{ position: "absolute", right: 8, top: 8 }}
+          >
+            <CloseIcon size={18} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {errorComparacion && <Alert severity="error">{errorComparacion}</Alert>}
+          {/* Estado por archivo (08/Sep/2026, "si primero se extrae y
+          luego compara") - cada uno avanza/falla por su cuenta; un fallo
+          en uno no esconde el resultado del otro. */}
+          {!errorComparacion && archivoPdfComparado && archivoXmlComparado && (
+            <Stack spacing={1} sx={{ mb: 2 }}>
+              {[
+                { label: "PDF", archivo: archivoPdfComparado, extraccion: extraccionPdf, tipo: "pdf" as const },
+                { label: "XML", archivo: archivoXmlComparado, extraccion: extraccionXml, tipo: "xml" as const },
+              ].map(({ label, archivo, extraccion, tipo }) => (
+                <Stack key={label} direction="row" spacing={1} alignItems="center">
+                  {extraccion.cargando && <CircularProgress size={16} />}
+                  {extraccion.datos && <CheckCircle2 size={16} color="green" />}
+                  {extraccion.error && <XCircle size={16} color="red" />}
+                  <Typography variant="body2">
+                    {label}: {extraccion.cargando ? "analizando…" : extraccion.datos ? "listo" : extraccion.error || "pendiente"}
+                  </Typography>
+                  {extraccion.error && (
+                    <Button size="small" onClick={() => extraerArchivoComparacion(archivo, carpetaComparando, tipo)}>
+                      Reintentar
+                    </Button>
+                  )}
+                </Stack>
+              ))}
+            </Stack>
+          )}
+          {camposComparados.length > 0 && (
+            <Stack spacing={1.5}>
+              <Typography variant="body2" color="text.secondary">
+                Por default se usa el XML (fuente fiscal completa) en los campos donde difiere del PDF.
+                Cambia el que prefieras antes de continuar.
+              </Typography>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Campo</TableCell>
+                      <TableCell>PDF</TableCell>
+                      <TableCell>XML</TableCell>
+                      <TableCell align="right">Usar</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {camposComparados.map((fila, i) => {
+                      const difieren = fila.valorPdf !== fila.valorXml;
+                      return (
+                        <TableRow key={fila.campo} sx={difieren ? { bgcolor: "warning.50" } : undefined}>
+                          <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{fila.campo}</TableCell>
+                          <TableCell>{fila.valorPdf || "—"}</TableCell>
+                          <TableCell>{fila.valorXml || "—"}</TableCell>
+                          <TableCell align="right">
+                            {difieren ? (
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  setCamposComparados((prev) =>
+                                    prev.map((f, j) => (j === i ? { ...f, usarXml: !f.usarXml } : f))
+                                  )
+                                }
+                              >
+                                {fila.usarXml ? "XML" : "PDF"}
+                              </Button>
+                            ) : (
+                              <Typography variant="caption" color="text.secondary">
+                                igual
+                              </Typography>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTicketComparando(null)}>Cancelar</Button>
+          <Button variant="contained" disabled={camposComparados.length === 0} onClick={handleUsarComparacion}>
+            Usar estos datos y continuar
+          </Button>
+        </DialogActions>
+      </Dialog>
         </>
       )}
     </AppShell>

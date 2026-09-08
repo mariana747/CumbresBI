@@ -1496,7 +1496,15 @@ export interface TesoreriaFactura {
   timbre_no_certificado_sat: string | null;
   tipo_factura: string | null;
   link_pdf: string | null;
+  // drive_file_id_* (07/Sep/2026, cierra el hueco real de link_pdf/link_xml
+  // nunca llenados solos) - de solo lectura, los llena
+  // _vincular_archivo_drive cuando el Motor Documental analiza el archivo
+  // real de Drive.
+  drive_file_id_pdf: string | null;
+  mime_type_pdf: string | null;
   link_xml: string | null;
+  drive_file_id_xml: string | null;
+  mime_type_xml: string | null;
   // De solo lectura en el backend (ver TesoreriaFacturaSerializer.read_only_fields)
   // - solo cambia via marcarEstadoFactura(), no via update/createFactura.
   estado: TesoreriaFacturaEstado | null;
@@ -1620,11 +1628,21 @@ function facturaBody(params: FacturaInput) {
 // via ticket publico, el Motor Documental lo analizo ANTES de que la
 // factura existiera (handleAutorellenarNuevaFactura solo prellena el
 // formulario) - sin esto, ese camino nunca ligaria el archivo real.
-export async function createFactura(params: FacturaInput, archivo?: DriveArchivo): Promise<TesoreriaFactura> {
+// `archivoXml` opcional (08/Sep/2026, comparacion PDF vs XML) - cuando el
+// analista compara ambos archivos del ticket antes de dar de alta la
+// factura, se ligan los dos de una sola vez (ver
+// TesoreriaFacturaViewSet._vincular_archivos_drive), no solo el que se
+// analizo con el Motor Documental.
+export async function createFactura(
+  params: FacturaInput,
+  archivo?: DriveArchivo,
+  archivoXml?: DriveArchivo
+): Promise<TesoreriaFactura> {
+  const archivos = [archivo, archivoXml].filter((a): a is DriveArchivo => Boolean(a));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...facturaBody(params), archivo }),
+    body: JSON.stringify({ ...facturaBody(params), archivos }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1745,12 +1763,14 @@ export const TESORERIA_CAMPOS_CONFIRMABLES_NUEVA = [...TESORERIA_CAMPOS_CONFIRMA
 export async function confirmarExtraccionFactura(
   id: number,
   campos: Record<string, unknown>,
-  archivo?: DriveArchivo
+  archivo?: DriveArchivo,
+  archivoXml?: DriveArchivo
 ): Promise<TesoreriaFactura> {
+  const archivos = [archivo, archivoXml].filter((a): a is DriveArchivo => Boolean(a));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/confirmar_extraccion/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campos, archivo }),
+    body: JSON.stringify({ campos, archivos }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1775,10 +1795,28 @@ export const TESORERIA_FLUJO_CAMPOS_CONFIRMABLES = [
   "complemento",
 ] as const;
 
+// Candidato de Factura propuesto por la IA para conciliar con el flujo
+// (07/Sep/2026, "IA que proponga el match comprobante->factura") - solo
+// una sugerencia, nunca se liga sola; `motivos` es texto libre para
+// mostrarle al analista por que se propuso (mismo RFC, monto exacto, etc.).
+export interface TesoreriaFacturaSugerida {
+  timbre_uuid: string;
+  comprobante_folio: string | null;
+  comprobante_total: string | null;
+  comprobante_fecha: string | null;
+  emisor_nombre: string | null;
+  emisor_rfc: string | null;
+  score: number;
+  motivos: string[];
+}
+
 // Resultado de confirmar_conciliacion: el flujo actualizado, mas la
-// contraparte que la IA detecto/creo (null si no se mando contraparte_nombre).
+// contraparte que la IA detecto/creo (null si no se mando contraparte_nombre)
+// y las facturas sugeridas para vincular (vacio si ya se vinculo una en la
+// misma llamada, o si no hay monto con que comparar).
 export interface ConfirmarConciliacionResultado extends TesoreriaFlujo {
   contraparte_detectada: TesoreriaContraparte | null;
+  sugerencias_factura: TesoreriaFacturaSugerida[];
 }
 
 // Guarda en el flujo los datos ya revisados por el analista (Motor
@@ -2495,15 +2533,23 @@ export async function validarTicketProveedor(token: string): Promise<TesoreriaTi
   return response.json();
 }
 
+// `fileXml` opcional (07/Sep/2026, "debe poder subir el PDF y el XML") - el
+// XML es el CFDI real con el 100% de los datos fiscales, a diferencia del
+// PDF que es solo una representacion impresa (puede omitir campos enteros
+// segun la version del esquema, ver hallazgo real con un CFDI de 2013).
+// `xml` en la respuesta viene null si no se mando o si su subida fallo -
+// el PDF sigue siendo lo minimo obligatorio.
 export async function subirFacturaTicketProveedor(params: {
   token: string;
   recaptchaToken: string;
   file: File;
-}): Promise<{ detail: string }> {
+  fileXml?: File;
+}): Promise<{ detail: string; pdf: { file_id: string; web_view_link: string } | null; xml: { file_id: string; web_view_link: string } | null }> {
   const formData = new FormData();
   formData.append("token", params.token);
   formData.append("recaptcha_token", params.recaptchaToken);
   formData.append("file", params.file);
+  if (params.fileXml) formData.append("file_xml", params.fileXml);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/subir_factura/`, {
     method: "POST",
     body: formData,
