@@ -119,9 +119,12 @@ def ejecutar_con_reintentos(job: AnalysisJob) -> bool:
             return False
 
         job.status = AnalysisJob.ERROR
+        # Con acentos (08/Sep/2026, "le faltan acentos") - este mensaje SI lo
+        # ve el analista en pantalla, a diferencia de los comentarios de
+        # codigo de este archivo (que a proposito van sin acentos).
         job.error_mensaje = (
-            "No se pudo analizar el documento despues de varios intentos. "
-            "El servicio de analisis no esta disponible en este momento, intenta de nuevo mas tarde."
+            "No se pudo analizar el documento después de varios intentos. "
+            "El servicio de análisis no está disponible en este momento, intenta de nuevo más tarde."
         )
         job.save(update_fields=["status", "error_mensaje", "updated_at"])
 
