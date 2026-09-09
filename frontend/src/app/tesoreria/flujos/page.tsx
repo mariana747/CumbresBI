@@ -33,6 +33,7 @@ import {
   TableRow,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import {
@@ -42,6 +43,7 @@ import {
   Download,
   Eye,
   FileCheck2,
+  HelpCircle,
   Link2,
   MoreVertical,
   Pencil,
@@ -55,6 +57,7 @@ import {
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { ToggleCard } from "@/components/ToggleCard";
@@ -90,6 +93,7 @@ const FORM_VACIO = {
   contrato: "",
   cuenta: "",
   totalMxp: "",
+  ivaMxp: "",
   fechaEfectiva: new Date().toISOString().slice(0, 10),
   concepto: "",
   reembolso: false,
@@ -139,6 +143,13 @@ const VALIDACION_COLOR: Record<TesoreriaValidacionEstado, "warning" | "success" 
   RECHAZADA: "error",
 };
 
+// Glosario de Estado/Pagado
+const VALIDACION_DESCRIPCION: Record<TesoreriaValidacionEstado, string> = {
+  PENDIENTE: "Todavía nadie lo autoriza.",
+  APROBADA: "Ya autorizado, listo para registrar el pago.",
+  RECHAZADA: "No se autoriza, no se puede pagar así.",
+};
+
 // Flujos de caja (24/Ago/2026, Sem 21 del cronograma) - un movimiento real
 // de dinero (pago a proveedor, reembolso, nomina) ligado a un contrato.
 // Ciclo de vida propio con segregacion de funciones: capturar (cualquiera
@@ -154,6 +165,8 @@ export default function TesoreriaFlujosPage() {
   const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
   const [search, setSearch] = useState("");
   const [filtroContrato, setFiltroContrato] = useState("");
+  const [filtroEmpresa, setFiltroEmpresa] = useState("");
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   const [loading, setLoading] = useState(true);
@@ -265,6 +278,7 @@ export default function TesoreriaFlujosPage() {
     getSession().then(setSession);
     listContratos().then(setContratos).catch(() => setContratos([]));
     listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listFacturas().then(setFacturas).catch(() => setFacturas([]));
     listComplementosPago().then(setComplementos).catch(() => setComplementos([]));
   }, []);
@@ -371,7 +385,11 @@ export default function TesoreriaFlujosPage() {
 
   function refresh() {
     setLoading(true);
-    listFlujos({ search: search || undefined, contrato: filtroContrato || undefined })
+    listFlujos({
+      search: search || undefined,
+      contrato: filtroContrato || undefined,
+      sociedad: filtroEmpresa || undefined,
+    })
       .then(setFlujos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -381,7 +399,7 @@ export default function TesoreriaFlujosPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroContrato]);
+  }, [search, filtroContrato, filtroEmpresa]);
 
   // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
   // del cliente: listFlujos no tiene parametro de fecha en el backend
@@ -414,6 +432,7 @@ export default function TesoreriaFlujosPage() {
       contrato: f.contrato || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
+      ivaMxp: f.iva_mxp || "",
       fechaEfectiva: f.fecha_efectiva || "",
       concepto: f.concepto || "",
       reembolso: f.reembolso ?? false,
@@ -449,6 +468,7 @@ export default function TesoreriaFlujosPage() {
       contrato: f.contrato || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
+      ivaMxp: f.iva_mxp || "",
       fechaEfectiva: new Date().toISOString().slice(0, 10),
       concepto: f.concepto || "",
       reembolso: f.reembolso ?? false,
@@ -493,6 +513,7 @@ export default function TesoreriaFlujosPage() {
           concepto: form.concepto || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
           totalMxp: form.totalMxp || undefined,
+          ivaMxp: form.ivaMxp || undefined,
           comentarios: form.comentarios || undefined,
           fechaPagoOriginal: form.fechaPagoOriginal || undefined,
           linkComprobanteBanco: form.linkComprobanteBanco || undefined,
@@ -502,6 +523,7 @@ export default function TesoreriaFlujosPage() {
           contrato: form.contrato,
           cuenta: form.cuenta,
           totalMxp: form.totalMxp || undefined,
+          ivaMxp: form.ivaMxp || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
           concepto: form.concepto || undefined,
           reembolso: form.reembolso,
@@ -677,7 +699,11 @@ export default function TesoreriaFlujosPage() {
               startIcon={<Download size={14} strokeWidth={2} />}
               onClick={() =>
                 window.open(
-                  urlExportarFlujosCsv({ search: search || undefined, contrato: filtroContrato || undefined }),
+                  urlExportarFlujosCsv({
+                    search: search || undefined,
+                    contrato: filtroContrato || undefined,
+                    sociedad: filtroEmpresa || undefined,
+                  }),
                   "_blank"
                 )
               }
@@ -699,6 +725,27 @@ export default function TesoreriaFlujosPage() {
           </Stack>
         }
       >
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
+          <Select
+            labelId="filtro-empresa-label"
+            label="Filtrar por empresa"
+            value={filtroEmpresa}
+            onChange={(e) => {
+              setFiltroEmpresa(e.target.value);
+              setFiltroContrato("");
+            }}
+          >
+            <MenuItem value="">
+              <em>Todas las empresas</em>
+            </MenuItem>
+            {sociedades.map((s) => (
+              <MenuItem key={s.rfc} value={s.rfc}>
+                {s.alias_sociedad || s.razon_social || s.rfc}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
           <Select
@@ -710,7 +757,9 @@ export default function TesoreriaFlujosPage() {
             <MenuItem value="">
               <em>Todos los contratos</em>
             </MenuItem>
-            {contratos.map((c) => (
+            {contratos
+              .filter((c) => !filtroEmpresa || c.sociedad === filtroEmpresa)
+              .map((c) => (
               <MenuItem key={c.id_contrato} value={c.id_contrato}>
                 {c.id_contrato} — {c.contraparte_nombre}
               </MenuItem>
@@ -753,22 +802,47 @@ export default function TesoreriaFlujosPage() {
                 <TableCell>Concepto</TableCell>
 
                 <TableCell align="right">Total MXP</TableCell>
+                <TableCell align="right">IVA MXP</TableCell>
                 <TableCell>CFDI vinculado</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell>Pagado</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>Estado</span>
+                    <Tooltip
+                      title={
+                        <Stack spacing={0.5} sx={{ py: 0.5 }}>
+                          {(Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]).map((e) => (
+                            <Typography key={e} variant="caption" component="div">
+                              <b>{e}</b> — {VALIDACION_DESCRIPCION[e]}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      }
+                    >
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
+                </TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>Pagado</span>
+                    <Tooltip title="Si ya se registró el pago real (Registrar pago), con comprobante o sin él.">
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
+                </TableCell>
                 <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : flujosFiltrados.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin flujos registrados.
                     </Typography>
@@ -785,6 +859,11 @@ export default function TesoreriaFlujosPage() {
                     <TableCell align="right">
                       {f.total_mxp
                         ? Number(f.total_mxp).toLocaleString("es-MX", { style: "currency", currency: "MXN" })
+                        : "—"}
+                    </TableCell>
+                    <TableCell align="right">
+                      {f.iva_mxp
+                        ? Number(f.iva_mxp).toLocaleString("es-MX", { style: "currency", currency: "MXN" })
                         : "—"}
                     </TableCell>
                     <TableCell>
@@ -1035,13 +1114,22 @@ export default function TesoreriaFlujosPage() {
                   ))}
                 </Select>
               </FormControl>
-              <TextField
-                size="small"
-                label="Total (MXP)"
-                value={form.totalMxp}
-                onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
-                fullWidth
-              />
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  size="small"
+                  label="Total (MXP)"
+                  value={form.totalMxp}
+                  onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="IVA (MXP)"
+                  value={form.ivaMxp}
+                  onChange={(e) => setForm({ ...form, ivaMxp: e.target.value })}
+                  fullWidth
+                />
+              </Stack>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
                   size="small"

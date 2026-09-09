@@ -1008,6 +1008,7 @@ export interface TesoreriaFlujo {
   cuenta: string;
   cuenta_alias: string | null;
   total_mxp: string | null;
+  iva_mxp: string | null;
   autorizacion: boolean | null;
   autorizado_por: string | null;
   fecha_autorizacion: string | null;
@@ -1037,10 +1038,15 @@ export interface TesoreriaFlujo {
   updated_by: string | null;
 }
 
-export async function listFlujos(params?: { search?: string; contrato?: string }): Promise<TesoreriaFlujo[]> {
+export async function listFlujos(params?: {
+  search?: string;
+  contrato?: string;
+  sociedad?: string;
+}): Promise<TesoreriaFlujo[]> {
   const query = new URLSearchParams();
   if (params?.search) query.set("search", params.search);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1050,10 +1056,11 @@ export async function listFlujos(params?: { search?: string; contrato?: string }
 
 // Exportar a CSV (09/Sep/2026, "replica el export en Flujos tambien") -
 // mismo patron que urlExportarFacturasCsv.
-export function urlExportarFlujosCsv(opciones?: { search?: string; contrato?: string }): string {
+export function urlExportarFlujosCsv(opciones?: { search?: string; contrato?: string; sociedad?: string }): string {
   const params = new URLSearchParams();
   if (opciones?.search) params.set("search", opciones.search);
   if (opciones?.contrato) params.set("contrato", opciones.contrato);
+  if (opciones?.sociedad) params.set("sociedad", opciones.sociedad);
   return `${TESORERIA_API_BASE_URL}/api/flujos/exportar_csv/?${params.toString()}`;
 }
 
@@ -1061,6 +1068,7 @@ export async function createFlujo(params: {
   contrato: string;
   cuenta: string;
   totalMxp?: string;
+  ivaMxp?: string;
   fechaEfectiva?: string;
   concepto?: string;
   reembolso?: boolean;
@@ -1086,6 +1094,7 @@ export async function createFlujo(params: {
       contrato: params.contrato,
       cuenta: params.cuenta,
       total_mxp: params.totalMxp || null,
+      iva_mxp: params.ivaMxp || null,
       fecha_efectiva: params.fechaEfectiva || null,
       concepto: params.concepto || null,
       reembolso: params.reembolso ?? false,
@@ -1117,6 +1126,7 @@ export async function updateFlujo(
     concepto: string;
     fechaEfectiva: string;
     totalMxp: string;
+    ivaMxp: string;
     linkReferencia: string;
     comentarios: string;
     fechaPagoOriginal: string;
@@ -1130,6 +1140,7 @@ export async function updateFlujo(
       concepto: params.concepto,
       fecha_efectiva: params.fechaEfectiva,
       total_mxp: params.totalMxp,
+      iva_mxp: params.ivaMxp,
       link_referencia: params.linkReferencia,
       comentarios: params.comentarios,
       fecha_pago_original: params.fechaPagoOriginal,
@@ -2663,6 +2674,7 @@ export interface ReporteDiarioTransaccion {
   id_flujo: string;
   concepto: string | null;
   total_mxp: string | null;
+  iva_mxp: string | null;
 }
 
 export interface ReporteDiarioCuenta {

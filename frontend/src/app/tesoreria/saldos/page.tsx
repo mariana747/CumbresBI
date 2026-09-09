@@ -79,6 +79,7 @@ export default function TesoreriaSaldosPage() {
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroCuenta, setFiltroCuenta] = useState("");
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
@@ -131,17 +132,27 @@ export default function TesoreriaSaldosPage() {
   // desde el backend) - mismo agrupamiento que el panel real de AppSheet.
   // El rango de fecha se filtra aqui, del lado del cliente (listSaldos no
   // tiene parametro de fecha en el backend, solo ?cuenta=).
+  // Cuentas de la empresa elegida (09/Sep/2026, "filtro por empresa,
+  // mostrando las cuentas de los distintos bancos de esa empresa") - el
+  // filtro de cuenta ya no muestra TODAS las cuentas del catalogo, solo
+  // las de la empresa elegida (o todas si no se elige ninguna).
+  const cuentasDeEmpresa = useMemo(
+    () => (filtroEmpresa ? cuentas.filter((c) => c.sociedad === filtroEmpresa) : cuentas),
+    [cuentas, filtroEmpresa]
+  );
+
   const gruposPorFecha = useMemo(() => {
     const mapa = new Map<string, TesoreriaSaldo[]>();
     for (const s of saldos) {
       if (filtroFechaDesde && s.fecha < filtroFechaDesde) continue;
       if (filtroFechaHasta && s.fecha > filtroFechaHasta) continue;
+      if (filtroEmpresa && !cuentasDeEmpresa.some((c) => c.id_cuenta_bancaria === s.cuenta)) continue;
       const grupo = mapa.get(s.fecha) || [];
       grupo.push(s);
       mapa.set(s.fecha, grupo);
     }
     return Array.from(mapa.entries());
-  }, [saldos, filtroFechaDesde, filtroFechaHasta]);
+  }, [saldos, filtroFechaDesde, filtroFechaHasta, filtroEmpresa, cuentasDeEmpresa]);
 
   function abrirAlta() {
     setDetalle(null);
@@ -244,6 +255,27 @@ export default function TesoreriaSaldosPage() {
         sx={{ mb: 3 }}
       >
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
+            <Select
+              labelId="filtro-empresa-label"
+              label="Filtrar por empresa"
+              value={filtroEmpresa}
+              onChange={(e) => {
+                setFiltroEmpresa(e.target.value);
+                setFiltroCuenta("");
+              }}
+            >
+              <MenuItem value="">
+                <em>Todas las empresas</em>
+              </MenuItem>
+              {sociedades.map((s) => (
+                <MenuItem key={s.rfc} value={s.rfc}>
+                  {s.alias_sociedad || s.razon_social || s.rfc}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
             <Select
@@ -255,7 +287,7 @@ export default function TesoreriaSaldosPage() {
               <MenuItem value="">
                 <em>Todas las cuentas</em>
               </MenuItem>
-              {cuentas.map((c) => (
+              {cuentasDeEmpresa.map((c) => (
                 <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
                   {c.alias || c.clabe || c.id_cuenta_bancaria}
                 </MenuItem>
