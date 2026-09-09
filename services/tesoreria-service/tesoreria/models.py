@@ -8,6 +8,44 @@ def _short_id():
     return uuid.uuid4().hex[:8]
 
 
+# Categoria de gasto (09/Sep/2026, "clasificar y rastrear movimientos de
+# todo tipo" - pedido explicito: saber a fin de mes en que area se gasto
+# mas, ej. Oficina vs. RRHH vs. Equipo de Computo). Se reusa EXACTO el
+# catalogo que ya existia solo en TesoreriaTicketReembolsoConcepto (mismos
+# 9 valores, sin agregar ninguno nuevo por ahora - decision explicita de
+# Mariana) y se extiende a TesoreriaFlujo/TesoreriaFactura/
+# TesoreriaSolicitudPago para que TODO movimiento de dinero, no solo los
+# reembolsos, se pueda clasificar igual.
+#
+# Deliberadamente NO es una tabla/catalogo en BD (serian los mismos 9
+# valores fijos en 4 lugares via choices=, un solo lugar de verdad) - mas
+# simple y de menor riesgo que migrar el campo ya vivo de Reembolsos a una
+# FK nueva. Candidato a futuro (anotado, no implementado): alinear estos
+# valores contra el Codigo Agrupador de Cuentas del SAT (Anexo 24) si algun
+# dia existe un catalogo de cuentas contables real - hoy no aplica, ver
+# docs/Documentacion/tesoreria/pendiente.md.
+CATEGORIA_GASTO_VIATICOS = "VIATICOS"
+CATEGORIA_GASTO_PAPELERIA = "PAPELERIA"
+CATEGORIA_GASTO_TRANSPORTE = "TRANSPORTE"
+CATEGORIA_GASTO_ALIMENTOS = "ALIMENTOS"
+CATEGORIA_GASTO_HOSPEDAJE = "HOSPEDAJE"
+CATEGORIA_GASTO_ADMINISTRACION = "ADMINISTRACION"
+CATEGORIA_GASTO_RECURSOSHUMANOS = "RECURSOSHUMANOS"
+CATEGORIA_GASTO_LEGAL = "LEGAL"
+CATEGORIA_GASTO_EXTRAORDINARIOS = "EXTRAORDINARIOS"
+CATEGORIA_GASTO_CHOICES = [
+    (CATEGORIA_GASTO_VIATICOS, "Viáticos"),
+    (CATEGORIA_GASTO_PAPELERIA, "Papelería"),
+    (CATEGORIA_GASTO_TRANSPORTE, "Transporte"),
+    (CATEGORIA_GASTO_ALIMENTOS, "Alimentos"),
+    (CATEGORIA_GASTO_HOSPEDAJE, "Hospedaje"),
+    (CATEGORIA_GASTO_ADMINISTRACION, "Administración"),
+    (CATEGORIA_GASTO_RECURSOSHUMANOS, "Recursos Humanos"),
+    (CATEGORIA_GASTO_LEGAL, "Legal"),
+    (CATEGORIA_GASTO_EXTRAORDINARIOS, "Extraordinarios"),
+]
+
+
 # Nota general: este servicio agrupa Tesoreria + CFDI/Facturacion + el
 # maestro de Contrapartes (tesoreria_contrapartes) en un solo esquema, tal
 # como estaba documentado en docs/architecture/README.md sec. 1.1 - separado
@@ -405,6 +443,14 @@ class TesoreriaCorteEdc(models.Model):
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
     formato = models.CharField(max_length=20, choices=FORMATO_CHOICES)
     link = models.CharField(max_length=2083)
+    # drive_file_id/mime_type (08/Sep/2026, "subir el extracto original a
+    # Drive" - antes `link` se pegaba a mano; ahora, cuando el corte se crea
+    # desde TesoreriaMovimientoBancarioViewSet.importar, se sube el archivo
+    # real a drive-service y aqui queda el ID real (permite reemplazarlo
+    # despues sin duplicar, mismo patron que TesoreriaFlujo.drive_file_id_comprobante).
+    # Siguen NULL para un corte creado a mano con solo `link` pegado.
+    drive_file_id = models.CharField(max_length=255, blank=True, null=True)
+    mime_type = models.CharField(max_length=100, blank=True, null=True)
     disponible = models.BooleanField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=8)
@@ -526,6 +572,27 @@ class TesoreriaFactura(models.Model):
         related_name="facturas",
         blank=True,
         null=True,
+    )
+    # Ticket de proveedor de donde vino el archivo (09/Sep/2026, "los
+    # documentos ya estan en Drive deben traerse de ahi") - el proveedor ya
+    # subio el PDF real a Drive desde su ticket publico; sin este vinculo,
+    # el apartado de Documentos solo mostraba el archivo si el analista
+    # volvia a correr el Motor Documental justo al crear la factura -
+    # ahora perform_create() copia drive_file_id_pdf del ticket si el
+    # analista no mando uno nuevo explicito.
+    ticket_origen = models.ForeignKey(
+        "TesoreriaTicketProveedor",
+        on_delete=models.SET_NULL,
+        related_name="facturas",
+        blank=True,
+        null=True,
+    )
+    # categoria_gasto (09/Sep/2026) - ver comentario junto a
+    # CATEGORIA_GASTO_CHOICES (junto a _short_id). El analista la captura
+    # al confirmar la factura; permite reportar "en que se gasto mas" antes
+    # incluso de que exista el Flujo que la paga.
+    categoria_gasto = models.CharField(
+        max_length=20, choices=CATEGORIA_GASTO_CHOICES, blank=True, null=True
     )
     comprobante_version = models.CharField(
         db_column="Comprobante_Version", max_length=10, blank=True, null=True
@@ -954,6 +1021,13 @@ class TesoreriaFlujo(models.Model):
         on_delete=models.PROTECT,
         related_name="flujos",
     )
+    # categoria_gasto (09/Sep/2026) - mismo catalogo compartido que ya
+    # usaba Reembolsos (ver CATEGORIA_GASTO_CHOICES junto a _short_id), aqui
+    # para poder reportar "en que se gasto mas" sobre TODOS los flujos, no
+    # solo los que vienen de un ticket de reembolso.
+    categoria_gasto = models.CharField(
+        max_length=20, choices=CATEGORIA_GASTO_CHOICES, blank=True, null=True
+    )
     id_empleado = models.CharField(max_length=255, blank=True, null=True)
     id_requisicion = models.CharField(max_length=255, blank=True, null=True)
     fecha_efectiva = models.DateField(blank=True, null=True)
@@ -1168,26 +1242,20 @@ class TesoreriaTicketReembolso(models.Model):
     # comentario en el campo mas abajo, regla de minuta 03/Sep/2026: "si se
     # equivoca de sociedad ya tampoco se acepta" - se rechaza el ticket
     # completo, no se corrige).
-    CATEGORIA_VIATICOS = "VIATICOS"
-    CATEGORIA_PAPELERIA = "PAPELERIA"
-    CATEGORIA_TRANSPORTE = "TRANSPORTE"
-    CATEGORIA_ALIMENTOS = "ALIMENTOS"
-    CATEGORIA_HOSPEDAJE = "HOSPEDAJE"
-    CATEGORIA_ADMINISTRACION = "ADMINISTRACION"
-    CATEGORIA_RECURSOSHUMANOS = "RECURSOSHUMANOS"
-    CATEGORIA_LEGAL = "LEGAL"
-    CATEGORIA_EXTRAORDINARIOS = "EXTRAORDINARIOS"
-    CATEGORIA_CHOICES = [
-        (CATEGORIA_VIATICOS, "Viáticos"),
-        (CATEGORIA_PAPELERIA, "Papelería"),
-        (CATEGORIA_TRANSPORTE, "Transporte"),
-        (CATEGORIA_ALIMENTOS, "Alimentos"),
-        (CATEGORIA_HOSPEDAJE, "Hospedaje"),
-        (CATEGORIA_ADMINISTRACION, "Administración"),
-        (CATEGORIA_RECURSOSHUMANOS, "Recursos Humanos"),
-        (CATEGORIA_LEGAL, "Legal"),
-        (CATEGORIA_EXTRAORDINARIOS, "Extraordinarios"),
-    ]
+    # 09/Sep/2026: promovido a constante compartida a nivel de modulo
+    # (CATEGORIA_GASTO_CHOICES, ver comentario junto a _short_id arriba) -
+    # los alias de clase se quedan por compatibilidad con codigo/migraciones
+    # viejas que referencian TesoreriaTicketReembolso.CATEGORIA_*.
+    CATEGORIA_VIATICOS = CATEGORIA_GASTO_VIATICOS
+    CATEGORIA_PAPELERIA = CATEGORIA_GASTO_PAPELERIA
+    CATEGORIA_TRANSPORTE = CATEGORIA_GASTO_TRANSPORTE
+    CATEGORIA_ALIMENTOS = CATEGORIA_GASTO_ALIMENTOS
+    CATEGORIA_HOSPEDAJE = CATEGORIA_GASTO_HOSPEDAJE
+    CATEGORIA_ADMINISTRACION = CATEGORIA_GASTO_ADMINISTRACION
+    CATEGORIA_RECURSOSHUMANOS = CATEGORIA_GASTO_RECURSOSHUMANOS
+    CATEGORIA_LEGAL = CATEGORIA_GASTO_LEGAL
+    CATEGORIA_EXTRAORDINARIOS = CATEGORIA_GASTO_EXTRAORDINARIOS
+    CATEGORIA_CHOICES = CATEGORIA_GASTO_CHOICES
     MONEDA_CHOICES = [("MXP", "MXP"), ("USD", "USD"), ("EUR", "EUR")]
     # centro (lista cerrada de areas) se elimino 03/Sep/2026 - pedido
     # explicito de Mariana en minuta ("centro de costos se elimina"), sin
@@ -1378,6 +1446,12 @@ class TesoreriaSolicitudPago(models.Model):
     # aceptara" aplicado ahi.
     sociedad = models.CharField(max_length=13, blank=True, null=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    # categoria_gasto (09/Sep/2026) - ver comentario junto a
+    # CATEGORIA_GASTO_CHOICES (junto a _short_id), mismo catalogo que
+    # Reembolsos/Facturas/Flujos.
+    categoria_gasto = models.CharField(
+        max_length=20, choices=CATEGORIA_GASTO_CHOICES, blank=True, null=True
+    )
     descripcion = models.TextField()
     monto = models.DecimalField(max_digits=14, decimal_places=2)
     moneda = models.CharField(max_length=5, choices=MONEDA_CHOICES, default="MXP")
@@ -1725,6 +1799,19 @@ class TesoreriaTicketProveedor(models.Model):
     # TesoreriaTicketReembolso.sociedad/centro, agregados el mismo dia).
     sociedad = models.CharField(max_length=13, blank=True, null=True)
     proyecto = models.CharField(max_length=3, blank=True, null=True)
+    # Archivo real ya subido a Drive por el proveedor (09/Sep/2026, "los
+    # documentos ya estan en Drive deben traerse de ahi") - subir_factura
+    # ya subia el PDF a Drive pero nunca guardaba el file_id en ningun
+    # lado, asi que "ver documento" solo funcionaba hasta que el analista
+    # corria el Motor Documental. Con esto el boton de ver puede funcionar
+    # apenas se recibe, sin esperar a nadie mas.
+    drive_file_id_pdf = models.CharField(max_length=100, blank=True, null=True)
+    mime_type_pdf = models.CharField(max_length=100, blank=True, null=True)
+    # XML (09/Sep/2026, "que el ticket del proveedor tambien acepte subir
+    # el XML" - antes solo se subia el PDF, el XML siempre caia al link
+    # manual pegado a mano). Mismo criterio que drive_file_id_pdf.
+    drive_file_id_xml = models.CharField(max_length=100, blank=True, null=True)
+    mime_type_xml = models.CharField(max_length=100, blank=True, null=True)
 
     SCOPE_FIELD_SOCIEDAD = "sociedad"
     SCOPE_FIELD_PROYECTO = "proyecto"

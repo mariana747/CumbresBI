@@ -13,7 +13,7 @@ permiso (tesoreria.crear/.editar), no por alcance de fila."""
 import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import requests
 from cumbresbi_scope.scope import EffectiveScope
@@ -377,10 +377,30 @@ class TesoreriaFlujoTests(TestCase):
         response = view(request)
         self.assertEqual(len(response.data), 0)
 
-        request2 = self.factory.get("/api/flujos/")
-        request2.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
-        response2 = view(request2)
-        self.assertEqual(len(response2.data), 1)
+    def test_ver_comprobante_sin_drive_file_id_da_404(self):
+        response = self._crear_flujo()
+        flujo = TesoreriaFlujo.objects.get(pk=response.data["id_flujo"])
+        request = self.factory.get(f"/api/flujos/{flujo.pk}/ver_comprobante/")
+        request.effective_scope = self.scope_crear
+        view = TesoreriaFlujoViewSet.as_view({"get": "ver_comprobante"})
+        response = view(request, pk=flujo.pk)
+        self.assertEqual(response.status_code, 404)
+
+    def test_ver_comprobante_con_drive_file_id_transmite_el_archivo(self):
+        response = self._crear_flujo()
+        flujo = TesoreriaFlujo.objects.get(pk=response.data["id_flujo"])
+        flujo.drive_file_id_comprobante = "drive-comprobante-1"
+        flujo.save(update_fields=["drive_file_id_comprobante"])
+        contenido_falso = MagicMock()
+        contenido_falso.status_code = 200
+        contenido_falso.headers = {"Content-Type": "application/pdf"}
+        contenido_falso.iter_content = lambda chunk_size: iter([b"%PDF-comprobante"])
+        with patch("tesoreria.views.requests.get", return_value=contenido_falso):
+            request = self.factory.get(f"/api/flujos/{flujo.pk}/ver_comprobante/")
+            request.effective_scope = self.scope_crear
+            view = TesoreriaFlujoViewSet.as_view({"get": "ver_comprobante"})
+            response = view(request, pk=flujo.pk)
+        self.assertEqual(response.status_code, 200)
 
     def test_usuario_con_acceso_a_un_centro_ve_flujos_de_contratos_de_ese_centro(self):
         # 31/Ago/2026: SCOPE_FIELD_CENTRO recien declarado, via contrato__centro.
@@ -472,6 +492,62 @@ class TesoreriaFlujoTests(TestCase):
         self.assertEqual(response.data["descripcion_pago"], "SPEI BBVA")
 
 
+class TesoreriaFlujoExportarCsvTests(TestCase):
+    """exportar_csv de Flujos (09/Sep/2026, "replica el export en Flujos
+    tambien") - mismo patron que TesoreriaFacturaExportarCsvTests."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Constructora de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex", alias="BMX")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000001", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CSV-1", contrato=self.contrato, cuenta=self.cuenta, total_mxp="1000.00", pagado=True
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CSV-2", contrato=self.contrato, cuenta=self.cuenta, total_mxp="2000.00", pagado=False
+        )
+
+    def _exportar(self, **params):
+        request = self.factory.get("/api/flujos/exportar_csv/", params)
+        request.effective_scope = self.scope
+        view = TesoreriaFlujoViewSet.as_view({"get": "exportar_csv"})
+        return view(request)
+
+    def test_exporta_todos_sin_filtros(self):
+        response = self._exportar()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        contenido = response.content.decode("utf-8")
+        self.assertIn("FLJ-CSV-1", contenido)
+        self.assertIn("FLJ-CSV-2", contenido)
+
+    def test_respeta_filtro_de_contrato(self):
+        otro_contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-002",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        TesoreriaFlujo.objects.create(id_flujo="FLJ-CSV-3", contrato=otro_contrato, cuenta=self.cuenta, total_mxp="300.00")
+
+        response = self._exportar(contrato=self.contrato.id_contrato)
+        contenido = response.content.decode("utf-8")
+        self.assertIn("FLJ-CSV-1", contenido)
+        self.assertNotIn("FLJ-CSV-3", contenido)
+
+
 class TesoreriaFacturaTests(TestCase):
     """Facturacion CFDI (24/Ago/2026, Sem 20 del cronograma) - encabezado,
     permiso distinto (facturacion-cfdi.*) al resto del servicio (tesoreria.*)
@@ -528,6 +604,271 @@ class TesoreriaFacturaTests(TestCase):
         self.assertEqual(factura.estado, TesoreriaFactura.ESTADO_PENDIENTE)
 
 
+class TesoreriaFacturaExportarCsvTests(TestCase):
+    """exportar_csv (09/Sep/2026, pendiente real de negocio: "Exportar:
+    Facturas, Flujos, Contratos") - mismos filtros que la lista, via
+    filter_queryset."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.leer",))
+        TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-csv-1", comprobante_folio="F-1", emisor_nombre="Proveedor A",
+            comprobante_total=100, estado=TesoreriaFactura.ESTADO_PENDIENTE,
+        )
+        TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-csv-2", comprobante_folio="F-2", emisor_nombre="Proveedor B",
+            comprobante_total=200, estado=TesoreriaFactura.ESTADO_ACEPTADA,
+        )
+
+    def _exportar(self, **params):
+        request = self.factory.get("/api/facturas/exportar_csv/", params)
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"get": "exportar_csv"})
+        return view(request)
+
+    def test_exporta_todas_sin_filtros(self):
+        response = self._exportar()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        contenido = response.content.decode("utf-8")
+        self.assertIn("uuid-csv-1", contenido)
+        self.assertIn("uuid-csv-2", contenido)
+
+    def test_respeta_filtro_de_estado(self):
+        response = self._exportar(estado="ACEPTADA")
+        contenido = response.content.decode("utf-8")
+        self.assertNotIn("uuid-csv-1", contenido)
+        self.assertIn("uuid-csv-2", contenido)
+
+
+class TesoreriaFacturaTicketOrigenTests(TestCase):
+    """Vinculo factura->ticket (09/Sep/2026, "los documentos ya estan en
+    Drive deben traerse de ahi") - si el analista crea la factura desde un
+    ticket que ya recibio el PDF, el archivo se copia solo, sin depender
+    de que se vuelva a correr el Motor Documental justo en ese momento."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.crear",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        _, token_hash = generate_token()
+        self.ticket = TesoreriaTicketProveedor.objects.create(
+            contraparte=self.contraparte,
+            email="proveedor@ejemplo.com",
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(hours=1),
+            max_uses=1,
+            drive_file_id_pdf="pdf-del-ticket",
+            mime_type_pdf="application/pdf",
+        )
+
+    def test_copia_el_archivo_del_ticket_si_no_llega_archivo_explicito(self):
+        request = self.factory.post(
+            "/api/facturas/",
+            {"timbre_uuid": "uuid-desde-ticket", "comprobante_folio": "F-1", "ticket_origen": self.ticket.id_ticket},
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        factura = TesoreriaFactura.objects.get(timbre_uuid="uuid-desde-ticket")
+        self.assertEqual(factura.drive_file_id_pdf, "pdf-del-ticket")
+        self.assertEqual(factura.mime_type_pdf, "application/pdf")
+
+    def test_archivo_explicito_gana_sobre_el_del_ticket(self):
+        request = self.factory.post(
+            "/api/facturas/",
+            {
+                "timbre_uuid": "uuid-desde-ticket-2",
+                "comprobante_folio": "F-1",
+                "ticket_origen": self.ticket.id_ticket,
+                "archivo": {"file_id": "pdf-recien-analizado", "nombre": "f.pdf", "mime_type": "application/pdf"},
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        factura = TesoreriaFactura.objects.get(timbre_uuid="uuid-desde-ticket-2")
+        self.assertEqual(factura.drive_file_id_pdf, "pdf-recien-analizado")
+
+    def test_sin_ticket_origen_no_copia_nada(self):
+        request = self.factory.post(
+            "/api/facturas/", {"timbre_uuid": "uuid-sin-ticket", "comprobante_folio": "F-1"}, format="json"
+        )
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        factura = TesoreriaFactura.objects.get(timbre_uuid="uuid-sin-ticket")
+        self.assertIsNone(factura.drive_file_id_pdf)
+
+    def test_copia_tambien_el_xml_del_ticket(self):
+        self.ticket.drive_file_id_xml = "xml-del-ticket"
+        self.ticket.mime_type_xml = "application/xml"
+        self.ticket.save(update_fields=["drive_file_id_xml", "mime_type_xml"])
+        request = self.factory.post(
+            "/api/facturas/",
+            {"timbre_uuid": "uuid-desde-ticket-xml", "comprobante_folio": "F-1", "ticket_origen": self.ticket.id_ticket},
+            format="json",
+        )
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        factura = TesoreriaFactura.objects.get(timbre_uuid="uuid-desde-ticket-xml")
+        self.assertEqual(factura.drive_file_id_xml, "xml-del-ticket")
+
+
+class TesoreriaFacturaFiltrosCombinadosTests(TestCase):
+    """Filtros combinados de la pantalla de Facturas (09/Sep/2026, "hay que
+    agregar filtros combinados por ejemplos, por empresa, proveedor,
+    fechas" + "tambien por estado") - un test por filtro, mas uno
+    combinando 2 a la vez para confirmar que se aplican con AND."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.crear",))
+        self.contraparte_a = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor A", rfc="PAA010101AAA",
+            email="a@ejemplo.com", tipo_persona=TesoreriaContraparte.TIPO_MORAL,
+        )
+        self.contraparte_b = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor B", rfc="PBB010101BBB",
+            email="b@ejemplo.com", tipo_persona=TesoreriaContraparte.TIPO_MORAL,
+        )
+        self.f1 = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-filtro-1", comprobante_folio="F-1",
+            contraparte=self.contraparte_a, receptor_rfc="CTZ010101AAA",
+            comprobante_fecha="2026-01-10T00:00:00Z", estado=TesoreriaFactura.ESTADO_ACEPTADA,
+        )
+        self.f2 = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-filtro-2", comprobante_folio="F-2",
+            contraparte=self.contraparte_b, receptor_rfc="CTZ020202BBB",
+            comprobante_fecha="2026-03-20T00:00:00Z", estado=TesoreriaFactura.ESTADO_PENDIENTE,
+        )
+
+    def _listar(self, **params):
+        request = self.factory.get("/api/facturas/", params)
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        return {f["timbre_uuid"] for f in response.data}
+
+    def test_filtro_por_proveedor(self):
+        self.assertEqual(self._listar(contraparte=self.contraparte_a.id_contraparte), {"uuid-filtro-1"})
+
+    def test_filtro_por_empresa_receptora(self):
+        self.assertEqual(self._listar(receptor_rfc="CTZ020202BBB"), {"uuid-filtro-2"})
+
+    def test_filtro_por_estado(self):
+        self.assertEqual(self._listar(estado="PENDIENTE"), {"uuid-filtro-2"})
+
+    def test_filtro_por_rango_de_fechas(self):
+        self.assertEqual(
+            self._listar(fecha_desde="2026-01-01", fecha_hasta="2026-01-31"), {"uuid-filtro-1"}
+        )
+
+    def test_filtros_combinados_con_and(self):
+        # proveedor A + estado ACEPTADA -> si coincide
+        self.assertEqual(
+            self._listar(contraparte=self.contraparte_a.id_contraparte, estado="ACEPTADA"),
+            {"uuid-filtro-1"},
+        )
+        # proveedor A + estado PENDIENTE -> no hay match (AND real, no OR)
+        self.assertEqual(
+            self._listar(contraparte=self.contraparte_a.id_contraparte, estado="PENDIENTE"), set()
+        )
+
+    def test_sin_filtros_regresa_todas(self):
+        self.assertEqual(self._listar(), {"uuid-filtro-1", "uuid-filtro-2"})
+
+
+class TesoreriaFacturaVerDocumentoTests(TestCase):
+    """ver_pdf/ver_xml (09/Sep/2026, cierra el pendiente "boton que abra
+    directo el documento en Drive, en vez de solo el link crudo") - mismo
+    streaming que TesoreriaTicketReembolsoViewSet.ver_ticket/ver_factura."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.leer",))
+
+    def test_ver_pdf_sin_drive_file_id_da_404(self):
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-sin-pdf", comprobante_folio="F-1")
+        request = self.factory.get("/api/facturas/uuid-sin-pdf/ver_pdf/")
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"get": "ver_pdf"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 404)
+
+    def test_ver_xml_sin_drive_file_id_da_404(self):
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-sin-xml", comprobante_folio="F-1")
+        request = self.factory.get("/api/facturas/uuid-sin-xml/ver_xml/")
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"get": "ver_xml"})
+        response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 404)
+
+    def test_ver_pdf_con_drive_file_id_transmite_el_archivo(self):
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-con-pdf",
+            comprobante_folio="F-1",
+            drive_file_id_pdf="drive-abc",
+            mime_type_pdf="application/pdf",
+        )
+        contenido_falso = MagicMock()
+        contenido_falso.status_code = 200
+        contenido_falso.headers = {"Content-Type": "application/pdf"}
+        contenido_falso.iter_content = lambda chunk_size: iter([b"%PDF-contenido"])
+        with patch("tesoreria.views.requests.get", return_value=contenido_falso):
+            request = self.factory.get("/api/facturas/uuid-con-pdf/ver_pdf/")
+            request.effective_scope = self.scope
+            view = TesoreriaFacturaViewSet.as_view({"get": "ver_pdf"})
+            response = view(request, pk=factura.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+
+
+class TesoreriaFacturaSaldoPendienteExhibicionesTests(TestCase):
+    """saldo_pendiente_exhibiciones (09/Sep/2026, "exhibiciones PUE/PPD") -
+    calculado del ultimo FacturaDoctoRelacionado (nodo real del Complemento
+    de Pago/REP), no de un modelo propio - ver docstring del serializer."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.leer",))
+
+    def _get(self, pk):
+        request = self.factory.get(f"/api/facturas/{pk}/")
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"get": "retrieve"})
+        return view(request, pk=pk)
+
+    def test_sin_ningun_rep_ligado_regresa_none(self):
+        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-sin-rep", comprobante_folio="F-1")
+        response = self._get(factura.pk)
+        self.assertIsNone(response.data["saldo_pendiente_exhibiciones"])
+
+    def test_con_reps_regresa_el_saldo_insoluto_de_la_ultima_parcialidad(self):
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-ppd", comprobante_folio="F-1", comprobante_total=Decimal("1000.00")
+        )
+        FacturaDoctoRelacionado.objects.create(
+            id_documento="uuid-ppd", num_parcialidad=1, imp_pagado=Decimal("400.00"), imp_saldo_insoluto=Decimal("600.00")
+        )
+        FacturaDoctoRelacionado.objects.create(
+            id_documento="uuid-ppd", num_parcialidad=2, imp_pagado=Decimal("600.00"), imp_saldo_insoluto=Decimal("0.00")
+        )
+        response = self._get(factura.pk)
+        self.assertEqual(response.data["saldo_pendiente_exhibiciones"], Decimal("0.00"))
+
+
 class TesoreriaFacturaMarcarEstadoTests(TestCase):
     """marcar_estado() - ciclo de vida propio (24/Ago/2026, pedido explicito
     de Mariana): PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA. Aceptar exige
@@ -582,6 +923,23 @@ class TesoreriaFacturaMarcarEstadoTests(TestCase):
         self.factura.link_pdf = "https://drive.google.com/pdf"
         self.factura.link_xml = "https://drive.google.com/xml"
         self.factura.save(update_fields=["link_pdf", "link_xml"])
+        request = self.factory.post(
+            f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "ACEPTADA"}, format="json"
+        )
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
+        response = view(request, pk=self.factura.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "ACEPTADA")
+
+    def test_aceptar_con_drive_file_id_sin_link_manual_ok(self):
+        # 09/Sep/2026, "no se aceptan de links manuales, todo de drive" -
+        # el gate tambien debe aceptar drive_file_id_pdf/xml solos, sin
+        # necesitar link_pdf/link_xml (que ya no se pueden capturar desde
+        # la UI).
+        self.factura.drive_file_id_pdf = "drive-pdf-1"
+        self.factura.drive_file_id_xml = "drive-xml-1"
+        self.factura.save(update_fields=["drive_file_id_pdf", "drive_file_id_xml"])
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "ACEPTADA"}, format="json"
         )
@@ -1220,75 +1578,6 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         self.assertEqual(factura.mime_type_pdf, "application/pdf")
         self.assertEqual(factura.link_pdf, "https://drive.example/view/drive-123")
         self.assertIsNone(factura.drive_file_id_xml)
-
-    def test_confirmar_extraccion_con_archivo_xml_liga_drive_file_id(self):
-        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-2", comprobante_folio="F-A2")
-        request = self.factory.post(
-            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
-            {
-                "campos": {"comprobante_folio": "F-A2"},
-                "archivo": {"file_id": "drive-456", "nombre": "factura.xml", "mime_type": "application/xml"},
-            },
-            format="json",
-        )
-        request.effective_scope = self.scope_aprobar
-        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
-        response = view(request, pk=factura.pk)
-        self.assertEqual(response.status_code, 200)
-        factura.refresh_from_db()
-        self.assertEqual(factura.drive_file_id_xml, "drive-456")
-        self.assertIsNone(factura.drive_file_id_pdf)
-
-    def test_confirmar_extraccion_con_archivos_lista_liga_pdf_y_xml_juntos(self):
-        # 08/Sep/2026 (comparacion PDF vs XML) - "archivos" (plural) liga
-        # los DOS de una sola llamada, no solo el que se analizo con el
-        # Motor Documental; antes el otro se quedaba sin ligar hasta una
-        # segunda confirmacion.
-        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-ambos", comprobante_folio="F-AAMBOS")
-        request = self.factory.post(
-            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
-            {
-                "campos": {"comprobante_folio": "F-AAMBOS"},
-                "archivos": [
-                    {"file_id": "drive-pdf-1", "nombre": "factura.pdf", "mime_type": "application/pdf"},
-                    {"file_id": "drive-xml-1", "nombre": "factura.xml", "mime_type": "application/xml"},
-                ],
-            },
-            format="json",
-        )
-        request.effective_scope = self.scope_aprobar
-        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
-        response = view(request, pk=factura.pk)
-        self.assertEqual(response.status_code, 200)
-        factura.refresh_from_db()
-        self.assertEqual(factura.drive_file_id_pdf, "drive-pdf-1")
-        self.assertEqual(factura.drive_file_id_xml, "drive-xml-1")
-
-    def test_confirmar_extraccion_con_archivo_xps_se_ignora(self):
-        # 08/Sep/2026 ("no vamos a aceptar xps, solo PDF y XML") - se probo
-        # aceptar XPS como alternativa al XML pero se descarto (Gemini no
-        # lo lee); ahora un archivo XPS se ignora igual que cualquier tipo
-        # no reconocido, no se liga a ningun slot.
-        factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-archivo-xps", comprobante_folio="F-AXPS")
-        request = self.factory.post(
-            f"/api/facturas/{factura.pk}/confirmar_extraccion/",
-            {
-                "campos": {"comprobante_folio": "F-AXPS"},
-                "archivo": {
-                    "file_id": "drive-xps-1",
-                    "nombre": "factura-50.xps",
-                    "mime_type": "application/vnd.ms-xpsdocument",
-                },
-            },
-            format="json",
-        )
-        request.effective_scope = self.scope_aprobar
-        view = TesoreriaFacturaViewSet.as_view({"post": "confirmar_extraccion"})
-        response = view(request, pk=factura.pk)
-        self.assertEqual(response.status_code, 200)
-        factura.refresh_from_db()
-        self.assertIsNone(factura.drive_file_id_xml)
-        self.assertIsNone(factura.drive_file_id_pdf)
 
     def test_confirmar_extraccion_archivo_no_reconocido_se_ignora(self):
         # Ni pdf ni xml (ej. el analista selecciono una imagen suelta) - no
@@ -2448,11 +2737,8 @@ class TesoreriaTicketProveedorScopeTests(TestCase):
 
 
 class TesoreriaTicketProveedorSubirFacturaTests(TestCase):
-    """subir_factura publico (07/Sep/2026, "debe poder subir el PDF y el
-    XML") - antes solo aceptaba un archivo ("file"); el XML es el CFDI
-    real con el 100% de los datos fiscales, a diferencia del PDF que es
-    solo una representacion impresa (puede omitir campos enteros segun la
-    version del esquema, ver hallazgo real con un CFDI de 2013)."""
+    """subir_factura publico - el proveedor sube su factura (PDF) sin
+    sesion, canjeando el token del link."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -2497,43 +2783,7 @@ class TesoreriaTicketProveedorSubirFacturaTests(TestCase):
             response = self._post({"file": pdf})
         self.assertEqual(response.status_code, 200)
         self.assertIsNotNone(response.data["pdf"])
-        self.assertIsNone(response.data["xml"])
         mock_subir.assert_called_once()
-
-    def test_pdf_y_xml_juntos_se_suben_a_la_misma_carpeta(self):
-        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
-        xml = SimpleUploadedFile("factura.xml", b"<cfdi/>", content_type="application/xml")
-        with patch(
-            "tesoreria.views._subir_a_drive",
-            side_effect=[
-                ({"web_view_link": "https://drive.example/pdf", "file_id": "pdf-1", "mime_type": "application/pdf"}, None),
-                ({"web_view_link": "https://drive.example/xml", "file_id": "xml-1", "mime_type": "application/xml"}, None),
-            ],
-        ) as mock_subir:
-            response = self._post({"file": pdf, "file_xml": xml})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["pdf"]["file_id"], "pdf-1")
-        self.assertEqual(response.data["xml"]["file_id"], "xml-1")
-        # Misma carpeta para ambos archivos, para que el Motor Documental
-        # los encuentre juntos.
-        carpeta_pdf = mock_subir.call_args_list[0].args[2]
-        carpeta_xml = mock_subir.call_args_list[1].args[2]
-        self.assertEqual(carpeta_pdf, carpeta_xml)
-
-    def test_xml_falla_no_tumba_el_pdf_ya_subido(self):
-        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
-        xml = SimpleUploadedFile("factura.xml", b"<cfdi/>", content_type="application/xml")
-        with patch(
-            "tesoreria.views._subir_a_drive",
-            side_effect=[
-                ({"web_view_link": "https://drive.example/pdf", "file_id": "pdf-1", "mime_type": "application/pdf"}, None),
-                (None, Response({"detail": "Drive no respondio"}, status=502)),
-            ],
-        ):
-            response = self._post({"file": pdf, "file_xml": xml})
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNotNone(response.data["pdf"])
-        self.assertIsNone(response.data["xml"])
 
     def test_cada_ticket_sube_a_su_propia_subcarpeta_por_id_ticket(self):
         """08/Sep/2026, "seria por registro de solicitud como se hace ahora
@@ -2552,6 +2802,265 @@ class TesoreriaTicketProveedorSubirFacturaTests(TestCase):
         self.assertEqual(response.status_code, 200)
         carpeta = mock_subir.call_args.args[2]
         self.assertTrue(carpeta.endswith(f"/{self.contraparte.id_contraparte}/{self.ticket.id_ticket}"))
+
+    def test_guarda_drive_file_id_del_pdf_recibido(self):
+        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
+        with patch(
+            "tesoreria.views._subir_a_drive",
+            return_value=({"web_view_link": "https://drive.example/pdf", "file_id": "pdf-real-1", "mime_type": "application/pdf"}, None),
+        ):
+            response = self._post({"file": pdf})
+        self.assertEqual(response.status_code, 200)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.drive_file_id_pdf, "pdf-real-1")
+        self.assertEqual(self.ticket.mime_type_pdf, "application/pdf")
+
+
+class TesoreriaTicketProveedorVerPdfTests(TestCase):
+    """ver_pdf (09/Sep/2026, "los documentos ya estan en Drive deben
+    traerse de ahi") - debe funcionar apenas se recibio el archivo, sin
+    esperar a que exista una TesoreriaFactura ni a que corra el Motor
+    Documental."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        _, token_hash = generate_token()
+        self.ticket = TesoreriaTicketProveedor.objects.create(
+            contraparte=self.contraparte,
+            email="proveedor@ejemplo.com",
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(hours=1),
+            max_uses=1,
+        )
+
+    def _ver_pdf(self):
+        request = self.factory.get(f"/api/tickets-proveedor/{self.ticket.id_ticket}/ver_pdf/")
+        request.effective_scope = self.scope
+        view = TesoreriaTicketProveedorViewSet.as_view({"get": "ver_pdf"})
+        return view(request, pk=self.ticket.id_ticket)
+
+    def test_404_si_todavia_no_se_ha_recibido_ningun_archivo(self):
+        response = self._ver_pdf()
+        self.assertEqual(response.status_code, 404)
+
+    def test_sirve_el_archivo_sin_necesitar_factura_ni_motor_documental(self):
+        self.ticket.drive_file_id_pdf = "pdf-real-1"
+        self.ticket.mime_type_pdf = "application/pdf"
+        self.ticket.save(update_fields=["drive_file_id_pdf", "mime_type_pdf"])
+        contenido_falso = MagicMock()
+        contenido_falso.status_code = 200
+        contenido_falso.headers = {"Content-Type": "application/pdf"}
+        contenido_falso.iter_content = lambda chunk_size: iter([b"%PDF-contenido"])
+        with patch("tesoreria.views.requests.get", return_value=contenido_falso):
+            response = self._ver_pdf()
+        self.assertEqual(response.status_code, 200)
+
+
+class TesoreriaTicketProveedorSubirXmlTests(TestCase):
+    """subir_factura con 'file_xml' opcional (09/Sep/2026, "que el ticket
+    del proveedor tambien acepte subir el XML")."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        parche_recaptcha = patch("tesoreria.views.recaptcha.verificar", return_value=True)
+        parche_recaptcha.start()
+        self.addCleanup(parche_recaptcha.stop)
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        token, token_hash = generate_token()
+        self.token = token
+        self.ticket = TesoreriaTicketProveedor.objects.create(
+            contraparte=self.contraparte,
+            email="proveedor@ejemplo.com",
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(hours=1),
+            max_uses=1,
+        )
+
+    def test_sube_xml_junto_con_el_pdf(self):
+        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
+        xml = SimpleUploadedFile("factura.xml", b"<cfdi/>", content_type="application/xml")
+
+        def subir_falso(request, archivo, carpeta):
+            return {"file_id": f"drive-{archivo.name}", "mime_type": archivo.content_type}, None
+
+        data = {"token": self.token, "recaptcha_token": "cualquier-token", "file": pdf, "file_xml": xml}
+        request = self.factory.post("/api/tickets-proveedor/subir_factura/", data, format="multipart")
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch("tesoreria.views._subir_a_drive", side_effect=subir_falso):
+            view = TesoreriaTicketProveedorViewSet.as_view({"post": "subir_factura"})
+            response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.drive_file_id_pdf, "drive-factura.pdf")
+        self.assertEqual(self.ticket.drive_file_id_xml, "drive-factura.xml")
+
+    def test_sin_xml_sigue_funcionando_solo_con_pdf(self):
+        pdf = SimpleUploadedFile("factura.pdf", b"contenido-pdf", content_type="application/pdf")
+        data = {"token": self.token, "recaptcha_token": "cualquier-token", "file": pdf}
+        request = self.factory.post("/api/tickets-proveedor/subir_factura/", data, format="multipart")
+        request.effective_scope = EffectiveScope.anonymous()
+        with patch(
+            "tesoreria.views._subir_a_drive",
+            return_value=({"file_id": "pdf-1", "mime_type": "application/pdf"}, None),
+        ):
+            view = TesoreriaTicketProveedorViewSet.as_view({"post": "subir_factura"})
+            response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.ticket.refresh_from_db()
+        self.assertIsNone(self.ticket.drive_file_id_xml)
+
+
+class TesoreriaTicketProveedorVerXmlTests(TestCase):
+    """ver_xml del ticket - mismo criterio que ver_pdf."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        _, token_hash = generate_token()
+        self.ticket = TesoreriaTicketProveedor.objects.create(
+            contraparte=self.contraparte,
+            email="proveedor@ejemplo.com",
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(hours=1),
+            max_uses=1,
+        )
+
+    def test_404_sin_xml_recibido(self):
+        request = self.factory.get(f"/api/tickets-proveedor/{self.ticket.id_ticket}/ver_xml/")
+        request.effective_scope = self.scope
+        view = TesoreriaTicketProveedorViewSet.as_view({"get": "ver_xml"})
+        response = view(request, pk=self.ticket.id_ticket)
+        self.assertEqual(response.status_code, 404)
+
+    def test_sirve_el_xml_recibido(self):
+        self.ticket.drive_file_id_xml = "xml-real-1"
+        self.ticket.mime_type_xml = "application/xml"
+        self.ticket.save(update_fields=["drive_file_id_xml", "mime_type_xml"])
+        contenido_falso = MagicMock()
+        contenido_falso.status_code = 200
+        contenido_falso.headers = {"Content-Type": "application/xml"}
+        contenido_falso.iter_content = lambda chunk_size: iter([b"<cfdi/>"])
+        with patch("tesoreria.views.requests.get", return_value=contenido_falso):
+            request = self.factory.get(f"/api/tickets-proveedor/{self.ticket.id_ticket}/ver_xml/")
+            request.effective_scope = self.scope
+            view = TesoreriaTicketProveedorViewSet.as_view({"get": "ver_xml"})
+            response = view(request, pk=self.ticket.id_ticket)
+        self.assertEqual(response.status_code, 200)
+
+
+class TesoreriaTicketProveedorSincronizarDriveTests(TestCase):
+    """sincronizar_drive (09/Sep/2026, boton temporal: "eso esta en drive,
+    pon el boton de sincronizacion temporal") - liga PDF/XML que ya estan
+    en la carpeta de Drive del ticket pero nunca pasaron por
+    subir_factura() (ej. alguien los subio a mano en drive.google.com)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        _, token_hash = generate_token()
+        self.ticket = TesoreriaTicketProveedor.objects.create(
+            contraparte=self.contraparte,
+            email="proveedor@ejemplo.com",
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(hours=1),
+            max_uses=1,
+        )
+
+    def _sincronizar(self):
+        request = self.factory.post(f"/api/tickets-proveedor/{self.ticket.id_ticket}/sincronizar_drive/")
+        request.effective_scope = self.scope
+        view = TesoreriaTicketProveedorViewSet.as_view({"post": "sincronizar_drive"})
+        return view(request, pk=self.ticket.id_ticket)
+
+    def test_liga_pdf_y_xml_encontrados_en_la_carpeta(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {
+            "archivos": [
+                {"file_id": "drive-1", "nombre": "factura.pdf", "mime_type": "application/pdf"},
+                {"file_id": "drive-2", "nombre": "factura.xml", "mime_type": "application/xml"},
+            ]
+        }
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            response = self._sincronizar()
+        self.assertEqual(response.status_code, 200)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.drive_file_id_pdf, "drive-1")
+        self.assertEqual(self.ticket.drive_file_id_xml, "drive-2")
+
+    def test_404_si_la_carpeta_no_tiene_pdf_ni_xml(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {"archivos": [{"file_id": "d1", "nombre": "notas.txt", "mime_type": "text/plain"}]}
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            response = self._sincronizar()
+        self.assertEqual(response.status_code, 404)
+
+
+class TesoreriaFacturaSincronizarDriveTests(TestCase):
+    """sincronizar_drive de una factura ya creada (09/Sep/2026, "en
+    factura no veo el actualizar") - revisa primero su propia carpeta y,
+    si no hay nada, la del ticket de origen."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.leer",))
+        self.factura = TesoreriaFactura.objects.create(timbre_uuid="uuid-sync-1", comprobante_folio="F-1")
+
+    def _sincronizar(self):
+        request = self.factory.post(f"/api/facturas/{self.factura.pk}/sincronizar_drive/")
+        request.effective_scope = self.scope
+        view = TesoreriaFacturaViewSet.as_view({"post": "sincronizar_drive"})
+        return view(request, pk=self.factura.pk)
+
+    def test_liga_pdf_y_xml_de_la_carpeta_propia(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {
+            "archivos": [
+                {"file_id": "drive-pdf", "nombre": "factura.pdf", "mime_type": "application/pdf"},
+                {"file_id": "drive-xml", "nombre": "factura.xml", "mime_type": "application/xml"},
+            ]
+        }
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            response = self._sincronizar()
+        self.assertEqual(response.status_code, 200)
+        self.factura.refresh_from_db()
+        self.assertEqual(self.factura.drive_file_id_pdf, "drive-pdf")
+        self.assertEqual(self.factura.drive_file_id_xml, "drive-xml")
+
+    def test_404_si_no_hay_nada_en_ninguna_carpeta(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {"archivos": []}
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            response = self._sincronizar()
+        self.assertEqual(response.status_code, 404)
+
+    def test_error_real_de_drive_no_se_confunde_con_404_generico(self):
+        # 09/Sep/2026, hallazgo real: un error de verdad (permiso, cuota,
+        # 502) se estaba tragando en silencio y devolviendo el mismo 404
+        # generico de "no hay archivos" - imposible de diagnosticar.
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 502
+        respuesta_falsa.content = b'{"detail": "El servicio de Drive no respondio"}'
+        respuesta_falsa.json.return_value = {"detail": "El servicio de Drive no respondio"}
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            response = self._sincronizar()
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("Drive", response.data["detail"])
 
 
 class _RespuestaFalsa:
@@ -2700,7 +3209,13 @@ class TesoreriaMovimientoBancarioImportarTests(TestCase):
             b"02/09/2026,DEPOSITO CLIENTE,REF002,,5000.00,15000.00\n"
         )
         archivo = SimpleUploadedFile("extracto.csv", contenido, content_type="text/csv")
-        response = self._post_importar(archivo)
+        # Drive real no esta disponible en pruebas - se mockea el resultado
+        # exitoso (08/Sep/2026, "subir el extracto original a Drive") para
+        # probar que el corte queda con link/drive_file_id/mime_type reales,
+        # sin depender de una llamada de red de verdad.
+        drive_ok = ({"web_view_link": "https://drive.google.com/x", "file_id": "abc123", "mime_type": "text/csv"}, None)
+        with patch("tesoreria.views._subir_a_drive", return_value=drive_ok):
+            response = self._post_importar(archivo)
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["importados"], 2)
         self.assertEqual(response.data["errores"], [])
@@ -2709,6 +3224,9 @@ class TesoreriaMovimientoBancarioImportarTests(TestCase):
         self.assertEqual(corte.cuenta_id, self.cuenta.id_cuenta_bancaria)
         self.assertEqual(corte.tipo, TesoreriaCorteEdc.TIPO_ESTADO_CUENTA)
         self.assertEqual(corte.formato, TesoreriaCorteEdc.FORMATO_CSV)
+        self.assertEqual(corte.link, "https://drive.google.com/x")
+        self.assertEqual(corte.drive_file_id, "abc123")
+        self.assertEqual(corte.mime_type, "text/csv")
 
         movimientos = TesoreriaMovimientoBancario.objects.filter(corte_edc=corte).order_by("fecha")
         self.assertEqual(movimientos.count(), 2)
@@ -2718,6 +3236,23 @@ class TesoreriaMovimientoBancarioImportarTests(TestCase):
         self.assertIsNone(primero.abono)
         self.assertEqual(primero.descripcion, "PAGO PROVEEDOR X")
         self.assertIsNone(primero.flujo)  # sin conciliar
+
+    def test_importar_si_drive_falla_igual_importa_los_movimientos(self):
+        """Best-effort (08/Sep/2026): drive-service caido no debe tumbar la
+        importacion - ya se leyeron las filas reales, eso es lo que importa
+        hoy. El corte solo se queda sin link/drive_file_id."""
+        archivo = SimpleUploadedFile(
+            "extracto.csv", b"Fecha,Cargo\n01/09/2026,100.00\n", content_type="text/csv"
+        )
+        drive_caido = (None, Response({"detail": "Drive no respondió"}, status=502))
+        with patch("tesoreria.views._subir_a_drive", return_value=drive_caido):
+            response = self._post_importar(archivo)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["importados"], 1)
+
+        corte = TesoreriaCorteEdc.objects.get(pk=response.data["corte_edc"])
+        self.assertEqual(corte.link, "")
+        self.assertIsNone(corte.drive_file_id)
 
     def test_importar_sin_permiso_da_403(self):
         archivo = SimpleUploadedFile(
@@ -2740,8 +3275,208 @@ class TesoreriaMovimientoBancarioImportarTests(TestCase):
             b"02/09/2026,Fila mala,no-es-un-monto\n"
         )
         archivo = SimpleUploadedFile("extracto.csv", contenido, content_type="text/csv")
-        response = self._post_importar(archivo)
+        with patch("tesoreria.views._subir_a_drive", return_value=(None, None)):
+            response = self._post_importar(archivo)
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["importados"], 1)
         self.assertEqual(len(response.data["errores"]), 1)
         self.assertIn("Fila 3", response.data["errores"][0])
+
+
+class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
+    """Matching automatico fecha+monto (08/Sep/2026), siguiente paso despues
+    de importar el extracto - ver _sugerir_flujos_para_movimiento y
+    TesoreriaMovimientoBancarioViewSet.sugerencias/conciliar_automatico."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Constructora de prueba", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="c@c.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-001",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex", alias="BMX")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000001", alias="Cuenta operativa", apertura="2026-01-01"
+        )
+        self.otra_cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000002", alias="Otra cuenta", apertura="2026-01-01"
+        )
+        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+
+    def _crear_flujo(self, total_mxp, fecha_pago, cuenta=None):
+        return TesoreriaFlujo.objects.create(
+            id_flujo=f"FLJ-{TesoreriaFlujo.objects.count() + 1:06d}",
+            contrato=self.contrato,
+            cuenta=cuenta or self.cuenta,
+            total_mxp=Decimal(total_mxp),
+            fecha_pago=fecha_pago,
+            pagado=True,
+        )
+
+    def _crear_movimiento(self, abono=None, cargo=None, fecha="2026-09-01", cuenta=None):
+        return TesoreriaMovimientoBancario.objects.create(
+            cuenta=cuenta or self.cuenta,
+            fecha=fecha,
+            abono=Decimal(abono) if abono is not None else None,
+            cargo=Decimal(cargo) if cargo is not None else None,
+        )
+
+    def test_sugerencias_devuelve_candidato_por_monto_y_fecha(self):
+        flujo = self._crear_flujo("1500.50", "2026-09-01")
+        movimiento = self._crear_movimiento(cargo="1500.50", fecha="2026-09-01")
+
+        request = self.factory.get(f"/api/movimientos-bancarios/{movimiento.id}/sugerencias/")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"get": "sugerencias"})
+        response = view(request, pk=movimiento.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_flujo"], flujo.id_flujo)
+        self.assertIn("mismo monto exacto", response.data[0]["motivos"])
+
+    def test_sugerencias_excluye_flujo_de_otra_cuenta(self):
+        self._crear_flujo("1500.50", "2026-09-01", cuenta=self.otra_cuenta)
+        movimiento = self._crear_movimiento(cargo="1500.50", fecha="2026-09-01")
+
+        request = self.factory.get(f"/api/movimientos-bancarios/{movimiento.id}/sugerencias/")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"get": "sugerencias"})
+        response = view(request, pk=movimiento.id)
+
+        self.assertEqual(response.data, [])
+
+    def test_sugerencias_excluye_flujo_ya_ligado_a_otro_movimiento(self):
+        flujo = self._crear_flujo("1500.50", "2026-09-01")
+        primero = self._crear_movimiento(cargo="1500.50", fecha="2026-09-01")
+        primero.flujo = flujo
+        primero.save(update_fields=["flujo"])
+        segundo = self._crear_movimiento(cargo="1500.50", fecha="2026-09-01")
+
+        request = self.factory.get(f"/api/movimientos-bancarios/{segundo.id}/sugerencias/")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"get": "sugerencias"})
+        response = view(request, pk=segundo.id)
+
+        self.assertEqual(response.data, [])
+
+    def test_conciliar_automatico_liga_match_de_alta_confianza(self):
+        flujo = self._crear_flujo("5000.00", "2026-09-02")
+        movimiento = self._crear_movimiento(abono="5000.00", fecha="2026-09-02")
+
+        request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
+        response = view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["conciliados"], 1)
+        movimiento.refresh_from_db()
+        self.assertEqual(movimiento.flujo_id, flujo.id_flujo)
+
+    def test_conciliar_automatico_no_liga_si_hay_mas_de_un_candidato(self):
+        self._crear_flujo("1000.00", "2026-09-01")
+        self._crear_flujo("1000.00", "2026-09-01")
+        movimiento = self._crear_movimiento(cargo="1000.00", fecha="2026-09-01")
+
+        request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
+        response = view(request)
+
+        self.assertEqual(response.data["conciliados"], 0)
+        self.assertEqual(response.data["ambiguos"], 1)
+        movimiento.refresh_from_db()
+        self.assertIsNone(movimiento.flujo)
+
+    def test_conciliar_automatico_no_liga_si_fecha_esta_lejos(self):
+        self._crear_flujo("1000.00", "2026-08-01")
+        movimiento = self._crear_movimiento(cargo="1000.00", fecha="2026-09-15")
+
+        request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
+        response = view(request)
+
+        self.assertEqual(response.data["conciliados"], 0)
+        self.assertEqual(response.data["sin_match"], 1)
+
+    def test_conciliar_automatico_respeta_filtro_de_cuenta(self):
+        self._crear_flujo("1000.00", "2026-09-01", cuenta=self.otra_cuenta)
+        self._crear_movimiento(cargo="1000.00", fecha="2026-09-01", cuenta=self.otra_cuenta)
+        movimiento_cuenta_principal = self._crear_movimiento(cargo="2000.00", fecha="2026-09-01")
+        self._crear_flujo("2000.00", "2026-09-01")
+
+        request = self.factory.post(
+            "/api/movimientos-bancarios/conciliar_automatico/",
+            {"cuenta": self.cuenta.id_cuenta_bancaria},
+            format="json",
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
+        response = view(request)
+
+        self.assertEqual(response.data["conciliados"], 1)
+        movimiento_cuenta_principal.refresh_from_db()
+        self.assertIsNotNone(movimiento_cuenta_principal.flujo)
+
+    def test_reporte_conciliacion_sin_cuenta_da_400(self):
+        request = self.factory.get("/api/movimientos-bancarios/reporte_conciliacion/")
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"get": "reporte_conciliacion"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_reporte_conciliacion_separa_conciliados_y_pendientes(self):
+        flujo_conciliado = self._crear_flujo("1000.00", "2026-09-01")
+        movimiento_conciliado = self._crear_movimiento(cargo="1000.00", fecha="2026-09-01")
+        movimiento_conciliado.flujo = flujo_conciliado
+        movimiento_conciliado.save(update_fields=["flujo"])
+
+        # Linea de banco sin flujo interno ligado.
+        self._crear_movimiento(cargo="300.00", fecha="2026-09-02")
+        # Flujo interno (mismo rango de fechas) que ningun movimiento referencia.
+        flujo_huerfano = self._crear_flujo("777.00", "2026-09-01")
+
+        request = self.factory.get(
+            "/api/movimientos-bancarios/reporte_conciliacion/",
+            {"cuenta": self.cuenta.id_cuenta_bancaria},
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"get": "reporte_conciliacion"})
+        response = view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["conciliados"]), 1)
+        self.assertEqual(response.data["conciliados"][0]["id_flujo"], flujo_conciliado.id_flujo)
+        self.assertTrue(response.data["conciliados"][0]["cuadra"])
+        self.assertEqual(len(response.data["sin_conciliar_banco"]), 1)
+        self.assertEqual(response.data["sin_conciliar_banco"][0]["monto"], Decimal("-300.00"))
+        ids_huerfanos = [f["id_flujo"] for f in response.data["sin_conciliar_interno"]]
+        self.assertIn(flujo_huerfano.id_flujo, ids_huerfanos)
+        self.assertNotIn(flujo_conciliado.id_flujo, ids_huerfanos)
+        self.assertEqual(response.data["totales"]["total_conciliado"], Decimal("1000.00"))
+
+    def test_reporte_conciliacion_respeta_rango_de_fechas_explicito(self):
+        # Flujo fuera del rango pedido no debe aparecer como "sin conciliar".
+        self._crear_flujo("500.00", "2026-08-01")
+        self._crear_movimiento(cargo="100.00", fecha="2026-09-01")
+
+        request = self.factory.get(
+            "/api/movimientos-bancarios/reporte_conciliacion/",
+            {
+                "cuenta": self.cuenta.id_cuenta_bancaria,
+                "fecha_inicio": "2026-09-01",
+                "fecha_fin": "2026-09-30",
+            },
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"get": "reporte_conciliacion"})
+        response = view(request)
+
+        self.assertEqual(response.data["sin_conciliar_interno"], [])
