@@ -100,7 +100,12 @@ const HEADER_HEIGHT = 56;
 // y un `React.ComponentType<{size?, strokeWidth?}>` hecho a mano - con
 // `LucideIcon` real como tipo de icono, la union queda limpia y
 // `"children" in item` narrowa sin conflicto.
-type NavChild = { label: string; href: string; icon: LucideIcon };
+// "group" opcional (08/Sep/2026, reorganizacion de Tesoreria en secciones -
+// pedido de Mariana) - subdivide los children de un apartado con un
+// subheader no clickeable (ej. "REPORTES", "OPERACIONES") sin necesitar un
+// tercer nivel real de anidacion. Los items sin "group" (el resto de
+// apartados, que no lo usan) se siguen renderizando igual que antes.
+type NavChild = { label: string; href: string; icon: LucideIcon; group?: string };
 type NavLeaf = { label: string; href: string; icon: LucideIcon; enabled: boolean };
 type NavParent = NavLeaf & { children: readonly NavChild[] };
 export type NavItem = NavLeaf | NavParent;
@@ -274,25 +279,69 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       href: "/tesoreria/contrapartes",
       icon: Landmark,
       enabled: true,
+      // Reorganizado en secciones (08/Sep/2026, pedido de Mariana) - antes
+      // era una lista plana de 11 items sin agrupar, dificil de escanear
+      // ahora que Tesoreria es la prioridad del mes. "Reembolsos" no entra
+      // todavia (sin pantalla propia del lado Tesoreria, el ticket vive
+      // hoy solo en MiCumbres - ver micumbres-tickets-reembolso-provisional)
+      // - se agrega aqui cuando exista.
       children: [
-        { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users },
-        { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine },
-        { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote },
-        { label: "Solicitudes de Pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard },
-        { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank },
-        { label: "Reporte Diario", href: "/tesoreria/reportes", icon: FileBarChart },
-        { label: "Notas de Crédito", href: "/tesoreria/notas-credito", icon: FileMinus },
-        { label: "Cuentas Bancarias", href: "/tesoreria/cuentas", icon: Wallet },
-        { label: "Facturas", href: "/tesoreria/facturas", icon: FileText },
-        { label: "Complementos de Pago", href: "/tesoreria/complementos-pago", icon: Receipt },
-        { label: "Recibos de Nómina", href: "/tesoreria/rec-nominas", icon: Wallet2 },
+        { label: "Reporte Diario", href: "/tesoreria/reportes", icon: FileBarChart, group: "REPORTES" },
+        { label: "Reporte de Saldos", href: "/tesoreria/saldos", icon: PiggyBank, group: "REPORTES" },
+
+        { label: "Solicitudes de Pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard, group: "OPERACIONES" },
+        { label: "Reembolsos", href: "/tesoreria/reembolsos", icon: Receipt, group: "OPERACIONES" },
+        { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote, group: "OPERACIONES" },
+
+        {
+          label: "Facturas",
+          href: "/tesoreria/facturas",
+          icon: FileText,
+          group: "FACTURACIÓN Y COMPROBANTES",
+        },
+        {
+          label: "Complementos de Pago",
+          href: "/tesoreria/complementos-pago",
+          icon: Receipt,
+          group: "FACTURACIÓN Y COMPROBANTES",
+        },
+        {
+          label: "Notas de Crédito",
+          href: "/tesoreria/notas-credito",
+          icon: FileMinus,
+          group: "FACTURACIÓN Y COMPROBANTES",
+        },
+        {
+          label: "Recibos de Nómina",
+          href: "/tesoreria/rec-nominas",
+          icon: Wallet2,
+          group: "FACTURACIÓN Y COMPROBANTES",
+        },
+
+        {
+          label: "Cuentas Bancarias",
+          href: "/tesoreria/cuentas",
+          icon: Wallet,
+          group: "CONFIGURACIÓN Y BANCOS",
+        },
+        { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users, group: "CONFIGURACIÓN Y BANCOS" },
+        { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine, group: "CONFIGURACIÓN Y BANCOS" },
+        // Conciliacion bancaria (08/Sep/2026) - importar extracto + matching
+        // automatico + reporte transaccion-por-transaccion, ver
+        // tesoreria-service/tesoreria/reportes.py::calcular_reporte_conciliacion.
+        { label: "Conciliación Bancaria", href: "/tesoreria/conciliacion", icon: Landmark, group: "CONFIGURACIÓN Y BANCOS" },
       ],
     });
   }
   // Obra (obra-service, 21/Ago/2026) - avance semanal, reusa la vista/
   // nomenclatura del Excel legado. Mismo criterio que Tesoreria: children
   // con URL propio por pantalla, no pestañas dentro de un solo /obra.
-  if (tieneAlgunPermiso(session, ["obra", "materiales"])) {
+  //
+  // OCULTO del nav (08/Sep/2026, decision de Mariana: "este mes la
+  // prioridad es terminar Tesoreria") - el backend/rutas siguen intactos,
+  // solo se oculta la entrada del sidebar. Quitar el "false &&" para
+  // reactivar cuando Tesoreria este cerrada.
+  if (false && tieneAlgunPermiso(session, ["obra", "materiales"])) {
     items.push({
       label: "Obra",
       href: "/obra/avance",
@@ -321,7 +370,10 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // Separado de Tesoreria a proposito - dominio propio (solicitud ->
   // cotizacion -> orden -> recepcion), aunque comparte el catalogo de
   // proveedores (tesoreria_contrapartes) via ContraparteSelector.
-  if (tieneAlgunPermiso(session, ["compras"])) {
+  //
+  // OCULTO del nav (08/Sep/2026, misma decision de arriba) - quitar el
+  // "false &&" para reactivar cuando Tesoreria este cerrada.
+  if (false && tieneAlgunPermiso(session, ["compras"])) {
     items.push({
       label: "Compras",
       href: "/compras/solicitudes",
@@ -335,7 +387,9 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       ],
     });
   }
-  if (tieneAlgunPermiso(session, ["rrhh"])) {
+  // OCULTO del nav (08/Sep/2026, misma decision de arriba) - quitar el
+  // "false &&" para reactivar cuando Tesoreria este cerrada.
+  if (false && tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });
   }
   // Tickets/Rentas quitados del sidebar (19/Ago/2026, pedido de Mariana) -
@@ -419,30 +473,115 @@ function NavItemConChildren({
       </ListItemButton>
       <Collapse in={abierto} timeout="auto" unmountOnExit>
         <List component="div" disablePadding>
-          {item.children.map((child) => (
-            <ListItemButton
-              key={child.href}
-              component="a"
-              href={child.href}
-              selected={pathname === child.href}
-              onClick={onNavigate}
-              sx={{
-                borderRadius: 1,
-                color: "inherit",
-                pl: 3,
-                "&.Mui-selected": { bgcolor: "rgba(255,255,255,0.12)" },
-                "&.Mui-selected:hover": { bgcolor: "rgba(255,255,255,0.18)" },
-              }}
-            >
-              <ListItemIcon sx={{ minWidth: 36, color: "inherit" }}>
-                <child.icon size={16} strokeWidth={1.5} />
-              </ListItemIcon>
-              <ListItemText primary={child.label} primaryTypographyProps={{ fontSize: 13 }} />
-            </ListItemButton>
-          ))}
+          {agruparChildren(item.children).map((entrada) =>
+            entrada.group ? (
+              <NavGrupoColapsable
+                key={entrada.group}
+                nombre={entrada.group}
+                items={entrada.items}
+                pathname={pathname}
+                onNavigate={onNavigate}
+              />
+            ) : (
+              entrada.items.map((child) => (
+                <NavChildButton key={child.href} child={child} pathname={pathname} onNavigate={onNavigate} />
+              ))
+            )
+          )}
         </List>
       </Collapse>
     </Box>
+  );
+}
+
+// Agrupa children consecutivos que comparten el mismo "group" en un solo
+// bloque (08/Sep/2026, subsecciones de Tesoreria) - preserva el orden
+// original, items sin "group" quedan sueltos (entrada.group === undefined)
+// para que el resto de apartados que no usan subsecciones no cambien nada.
+function agruparChildren(children: readonly NavChild[]): { group: string | undefined; items: NavChild[] }[] {
+  const bloques: { group: string | undefined; items: NavChild[] }[] = [];
+  for (const child of children) {
+    const ultimo = bloques[bloques.length - 1];
+    if (ultimo && ultimo.group === child.group) {
+      ultimo.items.push(child);
+    } else {
+      bloques.push({ group: child.group, items: [child] });
+    }
+  }
+  return bloques;
+}
+
+// Subseccion plegable dentro de un apartado (ej. "REPORTES" dentro de
+// Tesoreria) - mismo patron de chevron + Collapse que NavItemConChildren,
+// un nivel mas adentro. Abierta por default (o si contiene la pagina
+// activa) - a diferencia del apartado padre, aqui no tiene sentido empezar
+// cerrado: son pocas subsecciones y esconderlas todas de entrada oculta el
+// menu casi por completo.
+function NavGrupoColapsable({
+  nombre,
+  items,
+  pathname,
+  onNavigate,
+}: {
+  nombre: string;
+  items: NavChild[];
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const [abierto, setAbierto] = useState(true);
+
+  return (
+    <Box>
+      <ListItemButton
+        onClick={() => setAbierto((v) => !v)}
+        dense
+        sx={{ borderRadius: 1, color: "inherit", opacity: 0.75, pl: 3, py: 0.25 }}
+      >
+        <ListItemText
+          primary={nombre}
+          primaryTypographyProps={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}
+        />
+        {abierto ? <ChevronDown size={13} strokeWidth={1.5} /> : <ChevronRight size={13} strokeWidth={1.5} />}
+      </ListItemButton>
+      <Collapse in={abierto} timeout="auto" unmountOnExit>
+        {items.map((child) => (
+          <NavChildButton key={child.href} child={child} pathname={pathname} onNavigate={onNavigate} pl={4} />
+        ))}
+      </Collapse>
+    </Box>
+  );
+}
+
+function NavChildButton({
+  child,
+  pathname,
+  onNavigate,
+  pl = 3,
+}: {
+  child: NavChild;
+  pathname: string;
+  onNavigate?: () => void;
+  pl?: number;
+}) {
+  return (
+                <ListItemButton
+                  component="a"
+                  href={child.href}
+                  selected={pathname === child.href}
+                  onClick={onNavigate}
+                  sx={{
+                    borderRadius: 1,
+                    color: "inherit",
+                    pl,
+                    "&.Mui-selected": { bgcolor: "rgba(255,255,255,0.12)" },
+                    "&.Mui-selected:hover": { bgcolor: "rgba(255,255,255,0.18)" },
+                  }}
+                >
+      <ListItemIcon sx={{ minWidth: 36, color: "inherit" }}>
+        <child.icon size={16} strokeWidth={1.5} />
+      </ListItemIcon>
+      <ListItemText primary={child.label} primaryTypographyProps={{ fontSize: 13 }} />
+    </ListItemButton>
   );
 }
 

@@ -139,24 +139,21 @@ describe("buildNavItems - Ventas / Vivienda", () => {
 
 // Materiales vive en Obra desde 21/Ago/2026 (pedido de Mariana: "materiales
 // debe estar en obra") - antes colgaba de Ventas/Vivienda; ver AppShell.tsx.
-describe("buildNavItems - Obra (incluye Materiales)", () => {
-  it("algun perm de obra/materiales muestra el apartado con Materiales", () => {
+//
+// OCULTO del nav (08/Sep/2026, decision de Mariana: "este mes la prioridad
+// es terminar Tesoreria" - Obra/Compras/RRHH se ocultan del sidebar sin
+// tocar backend/rutas, ver el "false &&" en AppShell.tsx). El test de abajo
+// se invierte mientras dure: confirma que el apartado NO aparece pase lo
+// que pase el permiso. Revertir junto con el "false &&" de AppShell.tsx.
+describe("buildNavItems - Obra (oculto temporalmente, prioridad Tesorería)", () => {
+  it("ningun perm de obra/materiales muestra el apartado mientras esta oculto", () => {
     for (const roleKey of Object.keys(ROLES)) {
       const tieneAlguno = ROLES[roleKey].some(
         (p) => p.startsWith("obra.") || p.startsWith("materiales.")
       );
       if (!tieneAlguno) continue;
       const items = buildNavItems(sesionDe(roleKey));
-      const obra = buscar(items, "/obra/avance");
-      expect(obra, `${roleKey} deberia ver Obra`).toBeDefined();
-      expect(obra?.enabled).toBe(true);
-      const labels = hijos(obra).map((c) => c.label);
-      expect(labels).toContain("Materiales");
-      expect(labels).toContain("Requisiciones");
-      const materiales = hijos(obra).find((c) => c.label === "Materiales");
-      expect(materiales?.href).toBe("/obra/materiales");
-      const requisiciones = hijos(obra).find((c) => c.label === "Requisiciones");
-      expect(requisiciones?.href).toBe("/obra/requisiciones");
+      expect(buscar(items, "/obra/avance"), `${roleKey} NO deberia ver Obra (oculto)`).toBeUndefined();
     }
   });
 
@@ -184,22 +181,25 @@ describe("buildNavItems - Tesorería", () => {
       expect(tesoreria, `${roleKey} deberia ver Tesorería`).toBeDefined();
       expect(tesoreria?.enabled).toBe(true);
       const labels = hijos(tesoreria).map((c) => c.label);
-      // Orden real de AppShell.tsx (31/Ago/2026): Contrapartes ahora va
-      // primero, seguida de Contratos y Flujos (Contrato -> genera Flujos,
-      // ver memoria "tesoreria-alcance-real"), el resto sigue igual desde
-      // el 26/Ago/2026; "Solicitudes de Pago" agregada 04/Sep/2026.
+      // Reorganizado en secciones (08/Sep/2026, pedido de Mariana - prioridad
+      // del mes es Tesoreria): REPORTES, OPERACIONES, FACTURACIÓN Y
+      // COMPROBANTES, CONFIGURACIÓN Y BANCOS (ver "group" en NavChild,
+      // AppShell.tsx). "Reembolsos" no entra todavia - sin pantalla propia
+      // del lado Tesoreria (el ticket vive hoy solo en MiCumbres).
       expect(labels).toEqual([
-        "Contrapartes",
-        "Contratos",
-        "Flujos",
-        "Solicitudes de Pago",
-        "Saldos",
         "Reporte Diario",
-        "Notas de Crédito",
-        "Cuentas Bancarias",
+        "Reporte de Saldos",
+        "Solicitudes de Pago",
+        "Reembolsos",
+        "Flujos",
         "Facturas",
         "Complementos de Pago",
+        "Notas de Crédito",
         "Recibos de Nómina",
+        "Cuentas Bancarias",
+        "Contrapartes",
+        "Contratos",
+        "Conciliación Bancaria",
       ]);
     }
   });
@@ -210,25 +210,24 @@ describe("buildNavItems - Tesorería", () => {
   });
 });
 
-describe("buildNavItems - placeholders 'en desarrollo' (clickeables, no deshabilitados)", () => {
-  // "compras" se quito de esta lista (24/Ago/2026, pedido de Mariana) -
-  // /compras-tesoreria ya no existe como item del sidebar en absoluto (no
-  // es que siga deshabilitado, se elimino por completo: mismo dominio que
-  // Tesoreria, que ya tiene pantallas reales - ver DUEÑO_CONOCIDO abajo).
-  const CASOS: { prefijos: string[]; href: string }[] = [{ prefijos: ["rrhh"], href: "/rrhh" }];
+// "buildNavItems - placeholders 'en desarrollo'" (CASOS: rrhh) se elimino
+// por completo (08/Sep/2026) - "compras" ya se habia quitado el 24/Ago
+// (dominio real propio) y ahora "rrhh" tambien se oculta del nav (prioridad
+// Tesorería, ver test siguiente); un describe con CASOS vacio no corre
+// ningun test y vitest lo marca como suite fallida.
 
-  for (const { prefijos, href } of CASOS) {
-    it(`algun perm de [${prefijos.join(", ")}] muestra ${href} habilitado`, () => {
-      for (const roleKey of Object.keys(ROLES)) {
-        const tieneAlguno = ROLES[roleKey].some((p) => prefijos.some((pre) => p.startsWith(`${pre}.`)));
-        if (!tieneAlguno) continue;
-        const items = buildNavItems(sesionDe(roleKey));
-        const item = buscar(items, href);
-        expect(item, `${roleKey} deberia ver ${href}`).toBeDefined();
-        expect(item?.enabled, `${roleKey}: ${href} deberia estar habilitado (no gris)`).toBe(true);
-      }
-    });
-  }
+// OCULTO del nav (08/Sep/2026, prioridad Tesorería) - RRHH ya no aparece
+// aunque el rol tenga permiso rrhh.*. Revertir junto con el "false &&" de
+// AppShell.tsx.
+describe("buildNavItems - RRHH (oculto temporalmente, prioridad Tesorería)", () => {
+  it("ningun perm de rrhh muestra /rrhh mientras esta oculto", () => {
+    for (const roleKey of Object.keys(ROLES)) {
+      const tieneAlguno = ROLES[roleKey].some((p) => p.startsWith("rrhh."));
+      if (!tieneAlguno) continue;
+      const items = buildNavItems(sesionDe(roleKey));
+      expect(buscar(items, "/rrhh"), `${roleKey} NO deberia ver /rrhh (oculto)`).toBeUndefined();
+    }
+  });
 });
 
 describe("buildNavItems - siempre presentes", () => {
@@ -271,10 +270,18 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
 
   const SIN_DUEÑO_A_PROPOSITO = new Set(["tickets", "rentas"]);
 
+  // Ocultos temporalmente del nav (08/Sep/2026, prioridad Tesorería) - SI
+  // tienen apartado real en AppShell.tsx (obra/materiales -> "Obra",
+  // compras -> "Compras", rrhh -> "/rrhh"), solo esta detras de un
+  // "false &&" mientras dura la prioridad. Quitar de aqui junto con el
+  // "false &&" de AppShell.tsx cuando se reactiven.
+  const OCULTOS_TEMPORALMENTE = new Set(["obra", "materiales", "compras", "rrhh"]);
+
   it("todo servicio de la matriz tiene un apartado dueno en el sidebar (o esta en SIN_DUEÑO_A_PROPOSITO)", () => {
     const sinDueno: string[] = [];
     for (const servicio of matrizFixture.servicios) {
-      if (DUEÑO_CONOCIDO[servicio] || SIN_DUEÑO_A_PROPOSITO.has(servicio)) continue;
+      if (DUEÑO_CONOCIDO[servicio] || SIN_DUEÑO_A_PROPOSITO.has(servicio) || OCULTOS_TEMPORALMENTE.has(servicio))
+        continue;
 
       // Sesion sintetica con SOLO el permiso de este servicio (no un rol
       // real completo) - a proposito, para aislar el hallazgo: un rol

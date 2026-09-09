@@ -453,7 +453,7 @@ export default function PldExpedienteDetallePage() {
     setTransaccionesLoading(true);
     setTransaccionesError(null);
     Promise.all([
-      listFacturas(undefined, kyc.id_contraparte),
+      listFacturas({ contraparte: kyc.id_contraparte }),
       listComplementosPago(undefined, kyc.id_contraparte),
       listNotasCredito(undefined, kyc.id_contraparte),
     ])

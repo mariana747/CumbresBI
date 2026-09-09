@@ -24,9 +24,6 @@ export default function TesoreriaTicketPage() {
   const [contraparteNombre, setContraparteNombre] = useState<string | null>(null);
 
   const [archivo, setArchivo] = useState<File | null>(null);
-  // XML opcional (07/Sep/2026, "debe poder subir el PDF y el XML") - el
-  // CFDI real, con el 100% de los datos fiscales (el PDF es solo una
-  // representacion impresa, puede omitir campos enteros).
   const [archivoXml, setArchivoXml] = useState<File | null>(null);
   const [errorSeleccion, setErrorSeleccion] = useState<string | null>(null);
   const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
@@ -110,14 +107,13 @@ export default function TesoreriaTicketPage() {
                 </Stack>
               ) : (
                 <Stack component="form" spacing={2} onSubmit={handleSubir}>
-                  <Typography variant="subtitle2">Sube tu factura (PDF y XML)</Typography>
+                  <Typography variant="subtitle2">Sube tu factura (PDF)</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    El PDF es obligatorio; el XML es opcional pero recomendado — trae todos los datos
-                    fiscales completos. Máximo {MAX_TAMANO_ARCHIVO_MB}MB por archivo.
+                    Un solo archivo, máximo {MAX_TAMANO_ARCHIVO_MB}MB.
                   </Typography>
 
                   <Button component="label" variant="outlined" startIcon={<UploadCloud size={18} strokeWidth={1.5} />}>
-                    {archivo ? archivo.name : "Seleccionar PDF"}
+                    {archivo ? archivo.name : "Seleccionar archivo"}
                     <input
                       type="file"
                       hidden
@@ -138,19 +134,17 @@ export default function TesoreriaTicketPage() {
                       }}
                     />
                   </Button>
+                  {errorSeleccion && <Alert severity="error">{errorSeleccion}</Alert>}
+
+                  <Typography variant="subtitle2">Comprobante fiscal (XML, opcional)</Typography>
                   <Button component="label" variant="outlined" startIcon={<UploadCloud size={18} strokeWidth={1.5} />}>
-                    {archivoXml ? archivoXml.name : "Seleccionar XML (opcional)"}
+                    {archivoXml ? archivoXml.name : "Seleccionar archivo"}
                     <input
                       type="file"
                       hidden
-                      // NOTA (08/Sep/2026): se probo aceptar XPS como
-                      // alternativa aqui, pero se descarto - Gemini no lo
-                      // lee, no sirve para el Motor Documental ni para
-                      // comparar contra el PDF. Solo XML.
-                      accept="application/xml,text/xml,.xml"
+                      accept="text/xml,application/xml,.xml"
                       onChange={(e) => {
                         const elegido = e.target.files?.[0];
-                        setErrorSeleccion(null);
                         if (!elegido) {
                           setArchivoXml(null);
                           return;
@@ -164,7 +158,6 @@ export default function TesoreriaTicketPage() {
                       }}
                     />
                   </Button>
-                  {errorSeleccion && <Alert severity="error">{errorSeleccion}</Alert>}
 
                   <RecaptchaV2
                     onChange={(token) => {

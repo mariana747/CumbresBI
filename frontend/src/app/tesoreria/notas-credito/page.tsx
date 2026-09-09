@@ -289,7 +289,7 @@ export default function TesoreriaNotasCreditoPage() {
     if (!dialogOpen) return;
     setBuscandoFactura(true);
     const timeout = setTimeout(() => {
-      listFacturas(buscaFactura || undefined)
+      listFacturas({ search: buscaFactura || undefined })
         .then(setOpcionesFactura)
         .catch(() => setOpcionesFactura([]))
         .finally(() => setBuscandoFactura(false));
@@ -328,7 +328,7 @@ export default function TesoreriaNotasCreditoPage() {
     setEditing(n);
     setBuscaFactura("");
     if (n.uuid_relacionado) {
-      listFacturas(n.uuid_relacionado)
+      listFacturas({ search: n.uuid_relacionado })
         .then((facturas) => setFacturaRelacionada(facturas.find((f) => f.timbre_uuid === n.uuid_relacionado) || null))
         .catch(() => setFacturaRelacionada(null));
     } else {

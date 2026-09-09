@@ -6,6 +6,7 @@
 // Contrato: services/tesoreria-service/tesoreria/views.py::TesoreriaSolicitudPagoViewSet.
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
+import { TesoreriaCategoriaGasto } from "./miCumbres";
 
 const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
 
@@ -32,6 +33,7 @@ export interface TesoreriaSolicitudPago {
   sociedad: string | null;
   tipo: SolicitudPagoTipo;
   tipo_label: string;
+  categoria_gasto: TesoreriaCategoriaGasto | null;
   descripcion: string;
   monto: string;
   moneda: string;

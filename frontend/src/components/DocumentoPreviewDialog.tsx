@@ -16,6 +16,16 @@ export interface DocumentoPreviewDialogProps {
   onClose: () => void;
   url: string | null;
   titulo: string;
+  // false para documentos que sabemos que no son imagen (ej. XML) -
+  // 09/Sep/2026, hallazgo real: el intento previo como <img> (que
+  // siempre falla para XML) dejaba el <iframe> de respaldo en blanco -
+  // salta directo a <iframe> sin pasar por el intento de <img>.
+  probablementeImagen?: boolean;
+  // "Abrir en pestaña nueva" debe apuntar al archivo real de Drive
+  // (09/Sep/2026, "la redireccion debe hacer al archivo de drive"), no a
+  // nuestro endpoint de streaming - `url` sigue siendo el que se embebe
+  // en el <img>/<iframe>. Si se omite, cae a `url`.
+  urlExterna?: string | null;
 }
 
 // ZOOM_MIN = 1 (04/Sep/2026, pedido de Mariana: "de ese contenedor que ya
@@ -26,7 +36,14 @@ const ZOOM_MIN = 1;
 const ZOOM_MAX = 5;
 const ZOOM_PASO = 0.1;
 
-export default function DocumentoPreviewDialog({ open, onClose, url, titulo }: DocumentoPreviewDialogProps) {
+export default function DocumentoPreviewDialog({
+  open,
+  onClose,
+  url,
+  titulo,
+  probablementeImagen = true,
+  urlExterna,
+}: DocumentoPreviewDialogProps) {
   // Zoom +/- (04/Sep/2026, pedido de Mariana: barra flotante centrada
   // abajo, encima del documento - como en apps de galeria/escaner, no dos
   // botones sueltos en el titulo) - transform:scale. Se reinicia cada vez
@@ -49,9 +66,10 @@ export default function DocumentoPreviewDialog({ open, onClose, url, titulo }: D
   useEffect(() => {
     if (open) {
       setZoom(1);
-      setEsImagen(true);
+      setEsImagen(probablementeImagen);
       setOffset({ x: 0, y: 0 });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, url]);
 
   function manejarWheel(e: React.WheelEvent) {
@@ -93,17 +111,22 @@ export default function DocumentoPreviewDialog({ open, onClose, url, titulo }: D
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Box sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{titulo}</Box>
         <Box sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-          {url && (
-            <IconButton
-              size="small"
-              aria-label="Abrir en pestaña nueva"
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink size={16} strokeWidth={1.5} />
-            </IconButton>
-          )}
+          {(() => {
+            const hrefExterno = urlExterna || url;
+            return (
+              hrefExterno && (
+                <IconButton
+                  size="small"
+                  aria-label="Abrir en pestaña nueva"
+                  href={hrefExterno}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink size={16} strokeWidth={1.5} />
+                </IconButton>
+              )
+            );
+          })()}
           <IconButton onClick={onClose} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>

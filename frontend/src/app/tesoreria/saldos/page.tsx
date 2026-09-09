@@ -31,6 +31,7 @@ import {
 import { Copy, Pencil, PiggyBank, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   TesoreriaCuenta,
   TesoreriaSaldo,
@@ -69,6 +70,7 @@ export default function TesoreriaSaldosPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [saldos, setSaldos] = useState<TesoreriaSaldo[]>([]);
   const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -84,6 +86,7 @@ export default function TesoreriaSaldosPage() {
   useEffect(() => {
     getSession().then(setSession);
     listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
@@ -102,9 +105,26 @@ export default function TesoreriaSaldosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtroCuenta]);
 
+  // Etiqueta completa de la cuenta (08/Sep/2026, pedido explícito: "CTZ/BBVA/1131
+  // CHEQUES CIF TIZARA" - abreviatura de sociedad / banco / últimos dígitos de
+  // cuenta, tipo, nombre completo de la empresa). Cae a lo que haya disponible
+  // si falta algún dato (sin sociedad conocida, sin alias de banco, etc.) en
+  // vez de romper la pantalla - los datos capturados a mano no siempre están
+  // completos.
   function aliasCuenta(idCuentaBancaria: string): string {
     const c = cuentas.find((x) => x.id_cuenta_bancaria === idCuentaBancaria);
-    return c ? c.alias || c.clabe || idCuentaBancaria : idCuentaBancaria;
+    if (!c) return idCuentaBancaria;
+    const sociedad = sociedades.find((s) => s.rfc === c.sociedad);
+    const abreviatura = sociedad?.alias_sociedad;
+    const bancoAlias = c.banco_alias || c.banco_nombre;
+    const numeroCuenta = c.cuenta || c.clabe;
+    const ultimosDigitos = numeroCuenta ? numeroCuenta.slice(-4) : null;
+    const empresa = sociedad?.razon_social;
+
+    const prefijo = [abreviatura, bancoAlias, ultimosDigitos].filter(Boolean).join("/");
+    const sufijo = [c.tipo, empresa].filter(Boolean).join(" ");
+    const etiqueta = [prefijo, sufijo].filter(Boolean).join(" ");
+    return etiqueta || c.alias || c.clabe || idCuentaBancaria;
   }
 
   // Agrupados por fecha (mas reciente primero, ya viene ordenado -fecha

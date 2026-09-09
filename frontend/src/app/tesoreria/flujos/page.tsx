@@ -16,7 +16,6 @@ import {
   FormControl,
   FormHelperText,
   IconButton,
-  InputAdornment,
   InputLabel,
   ListItemIcon,
   ListItemText,
@@ -40,13 +39,13 @@ import {
   Banknote,
   Check,
   Copy,
+  Download,
   Eye,
   FileCheck2,
   Link2,
   MoreVertical,
   Pencil,
   Plus,
-  Search,
   Sparkles,
   ThumbsUp,
   Undo2,
@@ -55,6 +54,8 @@ import {
   X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -78,6 +79,8 @@ import {
   rechazarFlujo,
   registrarPagoFlujo,
   subirComprobanteFlujo,
+  urlVerComprobanteFlujo,
+  urlExportarFlujosCsv,
   updateFlujo,
   vincularFactura,
 } from "@/lib/tesoreria";
@@ -116,8 +119,19 @@ const FORM_VACIO = {
 // complemento/nomina se ligan aparte con vincular_factura, no aqui - solo
 // se muestra donde va eso), Control = seguimiento/permisos internos, casi
 // todo de solo lectura porque lo llenan aprobar/rechazar/registrar_pago.
-const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Control"] as const;
+// "Documentos" (09/Sep/2026, pedido explicito: "debe haber un apartado de
+// documentos en facturas y flujos", "algo como esta en pld") - antes el
+// comprobante bancario solo vivia como un campo de texto suelto en
+// Detalles, sin boton de ver real (streaming) ni vista consolidada de a
+// que CFDI esta ligado el flujo.
+const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Documentos", "Control"] as const;
 type TabFlujo = (typeof TABS_FLUJO)[number];
+
+// Link real de Drive a partir del file_id - "Abrir en pestaña nueva" debe
+// ir al archivo real, no a nuestro endpoint de streaming.
+function urlDriveWebView(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
 
 const VALIDACION_COLOR: Record<TesoreriaValidacionEstado, "warning" | "success" | "error"> = {
   PENDIENTE: "warning",
@@ -151,6 +165,8 @@ export default function TesoreriaFlujosPage() {
   // se mueve al menu de tres puntos) - mismo dialogo/formulario, con todo
   // deshabilitado y sin boton de Guardar cuando soloLectura es true.
   const [soloLectura, setSoloLectura] = useState(false);
+  // Preview embebido del comprobante (09/Sep/2026, apartado de Documentos)
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
   const [form, setForm] = useState(FORM_VACIO);
   const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -223,7 +239,7 @@ export default function TesoreriaFlujosPage() {
     if (!vinculando) return;
     setBuscandoFactura(true);
     const timeout = setTimeout(() => {
-      listFacturas(buscaFactura || undefined)
+      listFacturas({ search: buscaFactura || undefined })
         .then(setOpcionesFactura)
         .catch(() => setOpcionesFactura([]))
         .finally(() => setBuscandoFactura(false));
@@ -649,78 +665,79 @@ export default function TesoreriaFlujosPage() {
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack
-          direction={{ xs: "column", md: "row" }}
-          spacing={2}
-          alignItems={{ xs: "stretch", md: "flex-start" }}
-          justifyContent="space-between"
-          sx={{ p: 2 }}
-        >
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
-            <TextField
-              size="small"
-              placeholder="Buscar por ID de flujo o concepto..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ minWidth: 240 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search size={16} strokeWidth={1.5} />
-                  </InputAdornment>
-                ),
-              }}
-            />
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
-              <Select
-                labelId="filtro-contrato-label"
-                label="Filtrar por contrato"
-                value={filtroContrato}
-                onChange={(e) => setFiltroContrato(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Todos los contratos</em>
-                </MenuItem>
-                {contratos.map((c) => (
-                  <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                    {c.id_contrato} — {c.contraparte_nombre}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              type="date"
-              label="Fecha desde"
-              value={filtroFechaDesde}
-              onChange={(e) => setFiltroFechaDesde(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160 }}
-            />
-            <TextField
-              size="small"
-              type="date"
-              label="Fecha hasta"
-              value={filtroFechaHasta}
-              onChange={(e) => setFiltroFechaHasta(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160 }}
-            />
-          </Stack>
-          {puedeCrear && (
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por ID de flujo o concepto..."
+        actions={
+          <Stack direction="row" spacing={1}>
             <Button
               size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
+              variant="outlined"
+              startIcon={<Download size={14} strokeWidth={2} />}
+              onClick={() =>
+                window.open(
+                  urlExportarFlujosCsv({ search: search || undefined, contrato: filtroContrato || undefined }),
+                  "_blank"
+                )
+              }
               sx={{ flexShrink: 0 }}
             >
-              Nuevo Flujo
+              Exportar CSV
             </Button>
-          )}
-        </Stack>
+            {puedeCrear && (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+                sx={{ flexShrink: 0 }}
+              >
+                Nuevo Flujo
+              </Button>
+            )}
+          </Stack>
+        }
+      >
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
+          <Select
+            labelId="filtro-contrato-label"
+            label="Filtrar por contrato"
+            value={filtroContrato}
+            onChange={(e) => setFiltroContrato(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todos los contratos</em>
+            </MenuItem>
+            {contratos.map((c) => (
+              <MenuItem key={c.id_contrato} value={c.id_contrato}>
+                {c.id_contrato} — {c.contraparte_nombre}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField
+          size="small"
+          type="date"
+          label="Fecha desde"
+          value={filtroFechaDesde}
+          onChange={(e) => setFiltroFechaDesde(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+        <TextField
+          size="small"
+          type="date"
+          label="Fecha hasta"
+          value={filtroFechaHasta}
+          onChange={(e) => setFiltroFechaHasta(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+      </FiltrosBar>
+
+      <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 10 columnas no cabe en
         un telefono sin scroll horizontal incomodo. */}
@@ -1141,6 +1158,46 @@ export default function TesoreriaFlujosPage() {
             </Stack>
           )}
 
+          {tab === "Documentos" && (
+            <Stack spacing={1.5}>
+              <Typography variant="caption" color="text.secondary">
+                El comprobante se trae directo de Drive - se sube desde "Registrar pago" o el menú de
+                tres puntos de la fila.
+              </Typography>
+              <Paper variant="outlined" sx={{ p: 1.5 }}>
+                <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <FileCheck2 size={18} strokeWidth={1.5} />
+                    <Typography variant="body2">Comprobante de pago</Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <IconButton
+                      size="small"
+                      aria-label="Ver comprobante"
+                      title="Ver comprobante"
+                      disabled={!editing?.drive_file_id_comprobante}
+                      onClick={() => {
+                        if (!editing?.drive_file_id_comprobante) return;
+                        setPreviewDoc({
+                          url: urlVerComprobanteFlujo(editing.id_flujo),
+                          titulo: `Flujo ${editing.id_flujo} — Comprobante`,
+                          urlExterna: urlDriveWebView(editing.drive_file_id_comprobante),
+                        });
+                      }}
+                    >
+                      <Eye size={16} strokeWidth={1.5} />
+                    </IconButton>
+                    <Chip
+                      size="small"
+                      color={editing?.drive_file_id_comprobante ? "success" : "default"}
+                      label={editing?.drive_file_id_comprobante ? "Disponible en Drive" : "Sin archivo"}
+                    />
+                  </Stack>
+                </Stack>
+              </Paper>
+            </Stack>
+          )}
+
           {tab === "Control" && (
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
@@ -1530,6 +1587,13 @@ export default function TesoreriaFlujosPage() {
               }
             : undefined
         }
+      />
+      <DocumentoPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={previewDoc?.url ?? null}
+        titulo={previewDoc?.titulo ?? ""}
+        urlExterna={previewDoc?.urlExterna}
       />
     </AppShell>
   );
