@@ -801,6 +801,12 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         categoria_gasto = self.request.query_params.get("categoria_gasto")
         if categoria_gasto:
             queryset = queryset.filter(categoria_gasto=categoria_gasto)
+        # ?sociedad= (09/Sep/2026, "filtro por empresa") - el flujo no
+        # tiene sociedad directa, se filtra via el contrato (misma fuente
+        # de verdad que TesoreriaContrato.sociedad).
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(contrato__sociedad=sociedad)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -813,7 +819,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         response["Content-Disposition"] = 'attachment; filename="flujos.csv"'
         writer = csv.writer(response)
         writer.writerow(
-            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría"]
+            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "IVA MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría"]
         )
         for f in queryset:
             writer.writerow(
@@ -823,6 +829,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                     f.cuenta_id,
                     f.concepto or "",
                     f.total_mxp or "",
+                    f.iva_mxp or "",
                     f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
                     f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
                     "Sí" if f.pagado else "No",

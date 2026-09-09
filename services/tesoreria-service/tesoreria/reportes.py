@@ -63,7 +63,8 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
             "diferencia": diferencia,
             "cuadra": diferencia == Decimal("0") if diferencia is not None else None,
             "transacciones": [
-                {"id_flujo": t.id_flujo, "concepto": t.concepto, "total_mxp": t.total_mxp} for t in transacciones
+                {"id_flujo": t.id_flujo, "concepto": t.concepto, "total_mxp": t.total_mxp, "iva_mxp": t.iva_mxp}
+                for t in transacciones
             ],
         }
         empresas.setdefault(cuenta.sociedad or "", []).append(fila)

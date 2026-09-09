@@ -360,6 +360,50 @@ class TesoreriaFlujoTests(TestCase):
         response = self._crear_flujo(scope=EffectiveScope(is_global=True, perm_keys=()))
         self.assertEqual(response.status_code, 403)
 
+    def test_iva_desglosado_se_guarda_y_se_expone(self):
+        # 09/Sep/2026, "hay que hacer el desglose del iva en flujos"
+        request = self.factory.post(
+            "/api/flujos/",
+            {
+                "contrato": self.contrato.id_contrato,
+                "cuenta": self.cuenta.id_cuenta_bancaria,
+                "total_mxp": "116.00",
+                "iva_mxp": "16.00",
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        view = TesoreriaFlujoViewSet.as_view({"post": "create"})
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["iva_mxp"], "16.00")
+
+    def test_filtro_por_sociedad_via_contrato(self):
+        # 09/Sep/2026, "agrega en flujos ... filtro por empresa"
+        self._crear_flujo()
+        otra_contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Otra constructora", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="otra@c.com"
+        )
+        otro_contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_CAPITAL}-{otra_contraparte.id_contraparte}-001",
+            sociedad=RFC_CAPITAL,
+            contraparte=otra_contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        request = self.factory.post(
+            "/api/flujos/",
+            {"contrato": otro_contrato.id_contrato, "cuenta": self.cuenta.id_cuenta_bancaria, "total_mxp": "500.00"},
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        TesoreriaFlujoViewSet.as_view({"post": "create"})(request)
+
+        request2 = self.factory.get("/api/flujos/", {"sociedad": RFC_TIZARA})
+        request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
+        response2 = TesoreriaFlujoViewSet.as_view({"get": "list"})(request2)
+        self.assertEqual(len(response2.data), 1)
+        self.assertEqual(response2.data[0]["contrato"], self.contrato.id_contrato)
+
     def test_id_flujo_se_genera_con_consecutivo(self):
         response = self._crear_flujo()
         self.assertEqual(response.status_code, 201)
@@ -513,7 +557,7 @@ class TesoreriaFlujoExportarCsvTests(TestCase):
         )
         self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-CSV-1", contrato=self.contrato, cuenta=self.cuenta, total_mxp="1000.00", pagado=True
+            id_flujo="FLJ-CSV-1", contrato=self.contrato, cuenta=self.cuenta, total_mxp="1000.00", iva_mxp="160.00", pagado=True
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-CSV-2", contrato=self.contrato, cuenta=self.cuenta, total_mxp="2000.00", pagado=False
@@ -532,6 +576,14 @@ class TesoreriaFlujoExportarCsvTests(TestCase):
         contenido = response.content.decode("utf-8")
         self.assertIn("FLJ-CSV-1", contenido)
         self.assertIn("FLJ-CSV-2", contenido)
+
+    def test_iva_mxp_es_columna_propia(self):
+        # 09/Sep/2026, "que se pueda exportar flujos por separado" - el
+        # IVA debe salir en su propia columna, no mezclado con el total.
+        response = self._exportar()
+        contenido = response.content.decode("utf-8")
+        self.assertIn("IVA MXP", contenido)
+        self.assertIn("160.00", contenido)
 
     def test_respeta_filtro_de_contrato(self):
         otro_contrato = TesoreriaContrato.objects.create(

@@ -1038,6 +1038,10 @@ class TesoreriaFlujo(models.Model):
         TesoreriaCuenta, db_column="cuenta", on_delete=models.PROTECT, related_name="flujos"
     )
     total_mxp = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    # IVA desglosado (09/Sep/2026, pendiente real de Jenny) - captura libre,
+    # no se calcula solo (no todo flujo lleva 16% - hay exentos, tasa 0,
+    # y pagos que ya vienen desglosados distinto en el CFDI real).
+    iva_mxp = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
     autorizacion = models.BooleanField(blank=True, null=True)
     autorizado_por = models.CharField(max_length=100, blank=True, null=True)
     fecha_autorizacion = models.DateField(blank=True, null=True)
@@ -1071,6 +1075,13 @@ class TesoreriaFlujo(models.Model):
         blank=True,
         null=True,
     )
+    # requiere_cfdi (09/Sep/2026, "podemos distinguir los tipos de pago
+    # entre si cfdi, sin cfdi y no requiere") - no todo pago tiene un CFDI
+    # detras (ej. comision bancaria, traspaso interno) - sin este campo,
+    # esos pagos se veian identicos a uno que SI necesita factura/REP/nomina
+    # y todavia no la tiene. default=True porque la mayoria de los pagos
+    # reales si llevan CFDI.
+    requiere_cfdi = models.BooleanField(default=True)
     nomina = models.ForeignKey(
         TesoreriaRecNomina,
         db_column="nomina_uuid",
@@ -1116,6 +1127,22 @@ class TesoreriaFlujo(models.Model):
 
     def __str__(self):
         return self.id_flujo
+
+    # Clasificacion del CFDI (09/Sep/2026, "podemos distinguir los tipos
+    # de pago entre si cfdi, sin cfdi y no requiere") - no se guarda en un
+    # campo propio, se deriva de lo que ya existe (requiere_cfdi + los 3
+    # FK de factura/complemento/nomina), asi nunca se puede desincronizar.
+    TIPO_CFDI_CON = "CON_CFDI"
+    TIPO_CFDI_SIN = "SIN_CFDI"
+    TIPO_CFDI_NO_REQUIERE = "NO_REQUIERE"
+
+    @property
+    def tipo_cfdi(self):
+        if not self.requiere_cfdi:
+            return self.TIPO_CFDI_NO_REQUIERE
+        if self.factura_id or self.complemento_id or self.nomina_id:
+            return self.TIPO_CFDI_CON
+        return self.TIPO_CFDI_SIN
 
 
 class TesoreriaMovimientoBancario(models.Model):
