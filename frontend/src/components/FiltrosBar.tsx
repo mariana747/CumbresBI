@@ -50,26 +50,39 @@ export default function FiltrosBar({
 
   const contenido = (
     <>
-      <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-        <TextField
-          size="small"
-          placeholder={searchPlaceholder}
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          sx={{ flex: 1, maxWidth: 320 }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search size={16} strokeWidth={1.5} />
-              </InputAdornment>
-            ),
-          }}
-        />
-
-        {!children && botonEnviarMasivo}
+      {/* justifyContent="space-between" en vez de ml:auto condicional en el
+      grupo de acciones (10/Sep/2026, "que todos los botones como Nuevo
+      Saldo se pongan hacia la derecha") - el ml:auto dependia de si habia
+      children/botonEnviarMasivo y en la practica no empujaba el grupo al
+      extremo derecho; con dos grupos (izquierda: buscador, derecha:
+      acciones) el espacio libre siempre lo absorbe el hueco entre ambos. */}
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        spacing={2}
+        alignItems="center"
+        justifyContent="space-between"
+        sx={{ p: 2 }}
+      >
+        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+          <TextField
+            size="small"
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            sx={{ flex: 1, maxWidth: 320 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search size={16} strokeWidth={1.5} />
+                </InputAdornment>
+              ),
+            }}
+          />
+          {!children && botonEnviarMasivo}
+        </Stack>
 
         {actions && (
-          <Stack direction="row" sx={{ ml: { md: !children && botonEnviarMasivo ? 0 : "auto" } }}>
+          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
             {actions}
           </Stack>
         )}

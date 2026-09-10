@@ -30,6 +30,7 @@ import {
 } from "@mui/material";
 import { Copy, Pencil, PiggyBank, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
@@ -83,6 +84,7 @@ export default function TesoreriaSaldosPage() {
   const [filtroCuenta, setFiltroCuenta] = useState("");
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     getSession().then(setSession);
@@ -142,17 +144,20 @@ export default function TesoreriaSaldosPage() {
   );
 
   const gruposPorFecha = useMemo(() => {
+    const busqueda = search.trim().toLowerCase();
     const mapa = new Map<string, TesoreriaSaldo[]>();
     for (const s of saldos) {
       if (filtroFechaDesde && s.fecha < filtroFechaDesde) continue;
       if (filtroFechaHasta && s.fecha > filtroFechaHasta) continue;
       if (filtroEmpresa && !cuentasDeEmpresa.some((c) => c.id_cuenta_bancaria === s.cuenta)) continue;
+      if (busqueda && !`${s.id} ${aliasCuenta(s.cuenta)}`.toLowerCase().includes(busqueda)) continue;
       const grupo = mapa.get(s.fecha) || [];
       grupo.push(s);
       mapa.set(s.fecha, grupo);
     }
     return Array.from(mapa.entries());
-  }, [saldos, filtroFechaDesde, filtroFechaHasta, filtroEmpresa, cuentasDeEmpresa]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saldos, filtroFechaDesde, filtroFechaHasta, filtroEmpresa, cuentasDeEmpresa, search]);
 
   function abrirAlta() {
     setDetalle(null);
@@ -247,84 +252,82 @@ export default function TesoreriaSaldosPage() {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Balanza — el saldo de cada cuenta bancaria, agrupado por fecha de corte.
       </Typography>
-      <Stack
-        direction={{ xs: "column", md: "row" }}
-        spacing={2}
-        alignItems={{ xs: "stretch", md: "flex-start" }}
-        justifyContent="space-between"
-        sx={{ mb: 3 }}
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por ID de saldo o cuenta..."
+        actions={
+          puedeCrear ? (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<Plus size={14} strokeWidth={2} />}
+              onClick={abrirAlta}
+              sx={{ flexShrink: 0 }}
+            >
+              Nuevo Saldo
+            </Button>
+          ) : undefined
+        }
       >
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
-          <FormControl size="small" sx={{ minWidth: 180 }}>
-            <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
-            <Select
-              labelId="filtro-empresa-label"
-              label="Filtrar por empresa"
-              value={filtroEmpresa}
-              onChange={(e) => {
-                setFiltroEmpresa(e.target.value);
-                setFiltroCuenta("");
-              }}
-            >
-              <MenuItem value="">
-                <em>Todas las empresas</em>
-              </MenuItem>
-              {sociedades.map((s) => (
-                <MenuItem key={s.rfc} value={s.rfc}>
-                  {s.alias_sociedad || s.razon_social || s.rfc}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
-            <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
-            <Select
-              labelId="filtro-cuenta-label"
-              label="Filtrar por cuenta"
-              value={filtroCuenta}
-              onChange={(e) => setFiltroCuenta(e.target.value)}
-            >
-              <MenuItem value="">
-                <em>Todas las cuentas</em>
-              </MenuItem>
-              {cuentasDeEmpresa.map((c) => (
-                <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                  {c.alias || c.clabe || c.id_cuenta_bancaria}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            size="small"
-            type="date"
-            label="Fecha desde"
-            value={filtroFechaDesde}
-            onChange={(e) => setFiltroFechaDesde(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 160 }}
-          />
-          <TextField
-            size="small"
-            type="date"
-            label="Fecha hasta"
-            value={filtroFechaHasta}
-            onChange={(e) => setFiltroFechaHasta(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 160 }}
-          />
-        </Stack>
-        {puedeCrear && (
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Plus size={14} strokeWidth={2} />}
-            onClick={abrirAlta}
-            sx={{ flexShrink: 0 }}
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
+          <Select
+            labelId="filtro-empresa-label"
+            label="Filtrar por empresa"
+            value={filtroEmpresa}
+            onChange={(e) => {
+              setFiltroEmpresa(e.target.value);
+              setFiltroCuenta("");
+            }}
           >
-            Nuevo Saldo
-          </Button>
-        )}
-      </Stack>
+            <MenuItem value="">
+              <em>Todas las empresas</em>
+            </MenuItem>
+            {sociedades.map((s) => (
+              <MenuItem key={s.rfc} value={s.rfc}>
+                {s.alias_sociedad || s.razon_social || s.rfc}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 220 }}>
+          <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
+          <Select
+            labelId="filtro-cuenta-label"
+            label="Filtrar por cuenta"
+            value={filtroCuenta}
+            onChange={(e) => setFiltroCuenta(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todas las cuentas</em>
+            </MenuItem>
+            {cuentasDeEmpresa.map((c) => (
+              <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
+                {c.alias || c.clabe || c.id_cuenta_bancaria}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField
+          size="small"
+          type="date"
+          label="Fecha desde"
+          value={filtroFechaDesde}
+          onChange={(e) => setFiltroFechaDesde(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+        <TextField
+          size="small"
+          type="date"
+          label="Fecha hasta"
+          value={filtroFechaHasta}
+          onChange={(e) => setFiltroFechaHasta(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+      </FiltrosBar>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>

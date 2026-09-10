@@ -275,33 +275,13 @@ export default function SolicitudesPagoPage() {
 
   return (
     <AppShell>
-      <Stack
-        direction={{ xs: "column", sm: "row" }}
-        justifyContent="space-between"
-        alignItems={{ xs: "stretch", sm: "center" }}
-        spacing={1.5}
-        sx={{ mb: 2 }}
-      >
-        <Box>
-          <Stack direction="row" alignItems="center" spacing={1.5}>
-            <CreditCard size={22} strokeWidth={1.5} />
-            <Typography variant={esMovil ? "h6" : "h5"}>Solicitudes de Pago</Typography>
-          </Stack>
-          <Typography variant="body2" color="text.secondary">
-            Pago de servicios, licencias y renovaciones, dividido por proyecto.
-          </Typography>
-        </Box>
-        {puedeCrear && (
-          <Button
-            variant="contained"
-            size={esMovil ? "small" : "medium"}
-            startIcon={<Plus size={18} strokeWidth={1.5} />}
-            onClick={() => setOpenNuevo(true)}
-          >
-            Nueva Solicitud
-          </Button>
-        )}
+      <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
+        <CreditCard size={22} strokeWidth={1.5} />
+        <Typography variant={esMovil ? "h6" : "h5"}>Solicitudes de Pago</Typography>
       </Stack>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Pago de servicios, licencias y renovaciones, dividido por proyecto.
+      </Typography>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -322,6 +302,19 @@ export default function SolicitudesPagoPage() {
           setFiltroTipo("");
           setFiltroEstado("");
         }}
+        actions={
+          puedeCrear ? (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<Plus size={14} strokeWidth={2} />}
+              onClick={() => setOpenNuevo(true)}
+              sx={{ flexShrink: 0 }}
+            >
+              Nueva Solicitud
+            </Button>
+          ) : undefined
+        }
       >
         <FormControl size="small" sx={{ minWidth: 160 }}>
           <InputLabel id="filtro-proyecto-label">Proyecto</InputLabel>
