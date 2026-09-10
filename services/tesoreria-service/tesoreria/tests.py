@@ -39,7 +39,6 @@ from .models import (
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaMovimientoBancario,
-    TesoreriaNomina,
     TesoreriaNotaCredito,
     TesoreriaContratoDocumento,
     TesoreriaTicketProveedor,
