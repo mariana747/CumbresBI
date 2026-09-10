@@ -39,12 +39,15 @@ from .models import (
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaMovimientoBancario,
+    TesoreriaNomina,
     TesoreriaNotaCredito,
     TesoreriaContratoDocumento,
     TesoreriaTicketProveedor,
     TesoreriaTicketReembolso,
     TesoreriaRecNomina,
     TesoreriaSaldo,
+    contrato_generico_nomina,
+    contrato_generico_reembolso,
 )
 from . import mail_utils
 from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
@@ -65,6 +68,7 @@ from .views import (
     TesoreriaFacturaViewSet,
     TesoreriaFlujoViewSet,
     TesoreriaMovimientoBancarioViewSet,
+    TesoreriaNominaViewSet,
     TesoreriaNotaCreditoViewSet,
     TesoreriaContratoDocumentoViewSet,
     TesoreriaRecNominaViewSet,
@@ -289,6 +293,23 @@ class TesoreriaContratoTests(TestCase):
         response = self._crear_contrato(RFC_TIZARA)
         self.assertEqual(response.data["contraparte_nombre"], "Contraparte de prueba")
 
+    def test_contrato_generico_reembolso_por_sociedad(self):
+        # 10/Sep/2026, "Contratos REEMB por sociedad" - para dar de alta un
+        # Flujo de reembolso directo en Flujos, sin partir de un ticket.
+        request = self.factory.get("/api/contratos/contrato_generico_reembolso/", {"sociedad": RFC_TIZARA})
+        request.effective_scope = EffectiveScope(is_global=True)
+        view = TesoreriaContratoViewSet.as_view({"get": "contrato_generico_reembolso"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id_contrato"], f"GEN-REEMBOLSOS-{RFC_TIZARA}")
+
+    def test_contrato_generico_reembolso_sin_sociedad_da_400(self):
+        request = self.factory.get("/api/contratos/contrato_generico_reembolso/")
+        request.effective_scope = EffectiveScope(is_global=True)
+        view = TesoreriaContratoViewSet.as_view({"get": "contrato_generico_reembolso"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+
     def test_usuario_con_acceso_solo_a_un_centro_ve_solo_esos_contratos(self):
         # 31/Ago/2026: SCOPE_FIELD_CENTRO recien declarado - el claim
         # centro_ids ya existia en el JWT (IamUserCentroAccess) pero
@@ -315,6 +336,127 @@ class TesoreriaContratoTests(TestCase):
         response = view(request)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["id_contrato"], creado1.data["id_contrato"])
+
+
+class TesoreriaNominaTests(TestCase):
+    """Periodo/agrupador de nomina (10/Sep/2026, modulo de Nominas Fase 1) -
+    mismo patron de scope por sociedad/centro que TesoreriaContratoTests, mas
+    la resolucion del contrato generico por sociedad (contrato_generico_nomina)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+
+    def _crear_nomina(self, sociedad, scope=None, centro=None, tipo="QUINCENAL"):
+        body = {"tipo": tipo, "sociedad": sociedad, "serie": "Q1 2026"}
+        if centro:
+            body["centro"] = centro
+        request = self.factory.post("/api/nominas/", body, format="json")
+        request.effective_scope = scope or self.scope_crear
+        view = TesoreriaNominaViewSet.as_view({"post": "create"})
+        return view(request)
+
+    def test_crear_sin_permiso_da_403(self):
+        response = self._crear_nomina(RFC_TIZARA, scope=EffectiveScope(is_global=True, perm_keys=()))
+        self.assertEqual(response.status_code, 403)
+
+    def test_id_nomina_se_genera_con_consecutivo_global(self):
+        response = self._crear_nomina(RFC_TIZARA)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id_nomina"], "NOM-000001")
+
+        response2 = self._crear_nomina(RFC_CAPITAL)
+        self.assertEqual(response2.data["id_nomina"], "NOM-000002")
+
+    def test_usuario_de_una_sociedad_no_ve_nominas_de_otra(self):
+        self._crear_nomina(RFC_TIZARA)
+        self._crear_nomina(RFC_CAPITAL)
+
+        request = self.factory.get("/api/nominas/")
+        request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
+        view = TesoreriaNominaViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
+
+    def test_status_default_es_activo(self):
+        response = self._crear_nomina(RFC_TIZARA)
+        self.assertEqual(response.data["status"], "ACTIVO")
+
+
+class ContratoGenericoNominaTests(TestCase):
+    """contrato_generico_nomina (10/Sep/2026) - GEN-NOMINA-<sociedad>, uno
+    por sociedad (a diferencia de GEN-REEMBOLSOS-001, que es unico total) -
+    para que el filtro por empresa siga funcionando en Flujos de nomina."""
+
+    def test_crea_un_contrato_generico_por_sociedad(self):
+        contrato = contrato_generico_nomina(RFC_TIZARA)
+        self.assertEqual(contrato.id_contrato, f"GEN-NOMINA-{RFC_TIZARA}")
+        self.assertEqual(contrato.sociedad, RFC_TIZARA)
+        self.assertFalse(contrato.requiere_factura)
+
+    def test_es_idempotente_no_duplica(self):
+        primero = contrato_generico_nomina(RFC_TIZARA)
+        segundo = contrato_generico_nomina(RFC_TIZARA)
+        self.assertEqual(primero.id_contrato, segundo.id_contrato)
+        self.assertEqual(TesoreriaContrato.objects.filter(id_contrato=f"GEN-NOMINA-{RFC_TIZARA}").count(), 1)
+
+    def test_genera_un_contrato_distinto_por_cada_sociedad(self):
+        contrato1 = contrato_generico_nomina(RFC_TIZARA)
+        contrato2 = contrato_generico_nomina(RFC_CAPITAL)
+        self.assertNotEqual(contrato1.id_contrato, contrato2.id_contrato)
+
+
+class ContratoGenericoReembolsoTests(TestCase):
+    """contrato_generico_reembolso (10/Sep/2026, "Contratos REEMB por
+    sociedad" - decision explicita: SI se separa) - GEN-REEMBOLSOS-<sociedad>,
+    mismo patron que contrato_generico_nomina, reemplaza al viejo
+    GEN-REEMBOLSOS-001 unico total."""
+
+    def test_crea_un_contrato_generico_por_sociedad(self):
+        contrato = contrato_generico_reembolso(RFC_TIZARA)
+        self.assertEqual(contrato.id_contrato, f"GEN-REEMBOLSOS-{RFC_TIZARA}")
+        self.assertEqual(contrato.sociedad, RFC_TIZARA)
+        self.assertFalse(contrato.requiere_factura)
+
+    def test_es_idempotente_no_duplica(self):
+        primero = contrato_generico_reembolso(RFC_TIZARA)
+        segundo = contrato_generico_reembolso(RFC_TIZARA)
+        self.assertEqual(primero.id_contrato, segundo.id_contrato)
+        self.assertEqual(TesoreriaContrato.objects.filter(id_contrato=f"GEN-REEMBOLSOS-{RFC_TIZARA}").count(), 1)
+
+    def test_genera_un_contrato_distinto_por_cada_sociedad(self):
+        contrato1 = contrato_generico_reembolso(RFC_TIZARA)
+        contrato2 = contrato_generico_reembolso(RFC_CAPITAL)
+        self.assertNotEqual(contrato1.id_contrato, contrato2.id_contrato)
+
+
+class TesoreriaTicketReembolsoContratoGenericoTests(TestCase):
+    """TesoreriaTicketReembolsoViewSet.contrato_generico (10/Sep/2026) -
+    mismo patron que TesoreriaNominaViewSet.contrato_generico, para
+    preseleccionar Contrato al dar de alta el Flujo del reembolso."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
+
+    def _contrato_generico(self, id_ticket):
+        request = self.factory.get(f"/api/tickets-reembolso/{id_ticket}/contrato_generico/")
+        request.effective_scope = self.scope
+        return TesoreriaTicketReembolsoViewSet.as_view({"get": "contrato_generico"})(request, pk=id_ticket)
+
+    def test_regresa_el_contrato_generico_por_sociedad(self):
+        TesoreriaTicketReembolso.objects.create(
+            id_ticket="TKT-REEMB-1", id_empleado="empleado1", sociedad=RFC_TIZARA, fecha_gasto=date.today()
+        )
+        response = self._contrato_generico("TKT-REEMB-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id_contrato"], f"GEN-REEMBOLSOS-{RFC_TIZARA}")
+
+    def test_sin_sociedad_da_400(self):
+        TesoreriaTicketReembolso.objects.create(id_ticket="TKT-REEMB-2", id_empleado="empleado1", fecha_gasto=date.today())
+        response = self._contrato_generico("TKT-REEMB-2")
+        self.assertEqual(response.status_code, 400)
 
 
 class TesoreriaFlujoTests(TestCase):
@@ -1459,6 +1601,28 @@ class TesoreriaFlujoVincularFacturaTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["complemento"], "uuid-comp")
 
+    def test_vincular_recibo_de_nomina_real(self):
+        # 10/Sep/2026, "como se une nomina y recibos de nomina" - antes era
+        # un FK muerto, ahora se liga igual que factura/complemento.
+        TesoreriaRecNomina.objects.create(timbre_uuid="uuid-nomina", folio="N-1")
+        request = self.factory.post(
+            f"/api/flujos/{self.flujo.id_flujo}/vincular_factura/", {"nomina": "uuid-nomina"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "vincular_factura"})
+        response = view(request, pk=self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["nomina"], "uuid-nomina")
+
+    def test_vincular_recibo_de_nomina_inexistente_da_400(self):
+        request = self.factory.post(
+            f"/api/flujos/{self.flujo.id_flujo}/vincular_factura/", {"nomina": "no-existe"}, format="json"
+        )
+        request.effective_scope = self.scope_editar
+        view = TesoreriaFlujoViewSet.as_view({"post": "vincular_factura"})
+        response = view(request, pk=self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 400)
+
 
 class TesoreriaFlujoConfirmarConciliacionTests(TestCase):
     """confirmar_conciliacion() - paso 4 del plan de conciliacion bancaria
@@ -2430,6 +2594,25 @@ class FacturaLineasCrudTests(TestCase):
         list_response = list_view(list_request)
         self.assertEqual(len(list_response.data), 1)
         self.assertEqual(list_response.data[0]["id_documento"], "F-PPD-1")
+
+    def test_filtrar_docto_relacionado_por_id_documento(self):
+        # 10/Sep/2026, "mostrar la lista de exhibiciones/REPs ya recibidos
+        # dentro de la misma factura" - filtro nuevo, distinto de
+        # ?timbre_uuid= (ese es el uuid del REP, no el de la factura).
+        FacturaDoctoRelacionado.objects.create(
+            timbre_uuid="rep-uuid-1", id_documento="factura-uuid-1", num_parcialidad=1
+        )
+        FacturaDoctoRelacionado.objects.create(
+            timbre_uuid="rep-uuid-2", id_documento="factura-uuid-1", num_parcialidad=2
+        )
+        FacturaDoctoRelacionado.objects.create(
+            timbre_uuid="rep-uuid-3", id_documento="factura-uuid-otra", num_parcialidad=1
+        )
+        request = self.factory.get("/api/factura-doctos-relacionados/", {"id_documento": "factura-uuid-1"})
+        request.effective_scope = EffectiveScope.anonymous()
+        response = FacturaDoctoRelacionadoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual({f["timbre_uuid"] for f in response.data}, {"rep-uuid-1", "rep-uuid-2"})
 
     def test_crear_linea_nota_credito_y_filtrar_por_uuid(self):
         request = self.factory.post(

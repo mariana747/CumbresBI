@@ -61,12 +61,15 @@ from .models import (
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaMovimientoBancario,
+    TesoreriaNomina,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
     TesoreriaSolicitudPago,
     TesoreriaTicketProveedor,
     TesoreriaTicketReembolso,
+    contrato_generico_nomina,
+    contrato_generico_reembolso,
 )
 from .serializers import (
     FacturaConceptoSerializer,
@@ -85,6 +88,7 @@ from .serializers import (
     TesoreriaFacturaSerializer,
     TesoreriaFlujoSerializer,
     TesoreriaMovimientoBancarioSerializer,
+    TesoreriaNominaSerializer,
     TesoreriaNotaCreditoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
@@ -417,6 +421,20 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
             queryset = queryset.filter(contraparte_id=contraparte_id)
         return queryset
 
+    @action(detail=False, methods=["get"])
+    def contrato_generico_reembolso(self, request):
+        """Contrato generico GEN-REEMBOLSOS-<sociedad> por empresa
+        (10/Sep/2026, "Contratos REEMB por sociedad") - a diferencia del
+        action homonimo en TesoreriaTicketReembolsoViewSet (que resuelve la
+        sociedad de un ticket ya existente), este es para cuando el
+        analista da de alta el Flujo del reembolso directo en Flujos, sin
+        partir de un ticket - recibe ?sociedad= explicito."""
+        sociedad = request.query_params.get("sociedad")
+        if not sociedad:
+            return Response({"sociedad": ["Este parámetro es requerido."]}, status=400)
+        contrato = contrato_generico_reembolso(sociedad)
+        return Response({"id_contrato": contrato.id_contrato})
+
     def perform_create(self, serializer):
         # id_contrato = "{sociedad}-{id_contraparte}-{consecutivo 3 digitos}"
         # (decision de Mariana 18/Ago/2026) - generado aqui, no autogenerado
@@ -501,6 +519,41 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
             valores_nuevos={"destinatario": email, "documentos": enviados},
         )
         return Response({"enviados": enviados, "total_pendientes": len(faltantes)})
+
+
+class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Periodo/agrupador de nomina (10/Sep/2026, modulo de Nominas Fase 1) -
+    ver TesoreriaNomina.__doc__. Mismo gate de permisos y ScopedManager que
+    TesoreriaContratoViewSet.
+
+    Filtros por query param: ?sociedad=, ?proyecto=, ?centro=, ?tipo=."""
+
+    serializer_class = TesoreriaNominaSerializer
+
+    def get_queryset(self):
+        queryset = TesoreriaNomina.objects.for_scope(self.request.effective_scope).order_by("-created_at")
+        for campo in ("sociedad", "proyecto", "centro", "tipo"):
+            valor = self.request.query_params.get(campo)
+            if valor:
+                queryset = queryset.filter(**{campo: valor})
+        return queryset
+
+    def perform_create(self, serializer):
+        # id_nomina = "NOM-{consecutivo global de 6 digitos}", mismo
+        # criterio que TesoreriaFlujo.id_flujo (ver
+        # TesoreriaFlujoViewSet.perform_create).
+        consecutivo = TesoreriaNomina.objects.count() + 1
+        serializer.save(id_nomina=f"NOM-{consecutivo:06d}")
+
+    @action(detail=True, methods=["get"])
+    def contrato_generico(self, request, pk=None):
+        """Devuelve (creandolo si hace falta) el contrato generico
+        GEN-NOMINA-<sociedad> de esta nomina - el frontend lo usa para
+        preseleccionar Contrato al dar de alta un Flujo ligado a esta
+        nomina (ver contrato_generico_nomina en models.py)."""
+        nomina = self.get_object()
+        contrato = contrato_generico_nomina(nomina.sociedad)
+        return Response({"id_contrato": contrato.id_contrato})
 
 
 class TesoreriaContratoDocumentoViewSet(ModelViewSet):
@@ -849,6 +902,11 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         contraparte_id = self.request.query_params.get("contraparte")
         if contraparte_id:
             queryset = queryset.filter(contrato__contraparte_id=contraparte_id)
+        # ?nomina= (10/Sep/2026, modulo de Nominas Fase 1) - "Ver Flujos"
+        # desde una fila de Nomina filtra sus Flujos hijos.
+        nomina_id = self.request.query_params.get("nomina")
+        if nomina_id:
+            queryset = queryset.filter(periodo_nomina_id=nomina_id)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -1123,16 +1181,23 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def vincular_factura(self, request, pk=None):
-        """Liga el flujo a una factura/complemento ya emitidos
-         - `factura`/`complemento` son de solo
+        """Liga el flujo a una factura/complemento/recibo de nomina ya
+        emitidos - `factura`/`complemento`/`nomina` son de solo
         lectura en el serializer (ver TesoreriaFlujoSerializer) porque no
-        tiene sentido escribirlos a mano en un POST/PATCH normal: la
-        factura debe existir de antemano en tesoreria-service, esta accion
-        solo valida eso y hace el enlace. Recibe timbre_uuid (PK real de
-        ambos modelos), no el id numerico interno."""
+        tiene sentido escribirlos a mano en un POST/PATCH normal: el CFDI
+        debe existir de antemano en tesoreria-service, esta accion solo
+        valida eso y hace el enlace. Recibe timbre_uuid (PK real de los 3
+        modelos), no el id numerico interno.
+
+        `nomina` (10/Sep/2026, "como se une nomina y recibos de nomina") -
+        antes era un FK muerto (nunca se llenaba desde ningun lado); ahora
+        un Flujo con periodo_nomina puede ligarse tambien al recibo de
+        nomina (CFDI) real de ese empleado, igual patron que factura/
+        complemento."""
         flujo = self.get_object()
         timbre_uuid_factura = request.data.get("factura")
         timbre_uuid_complemento = request.data.get("complemento")
+        timbre_uuid_nomina = request.data.get("nomina")
         update_fields = []
 
         if timbre_uuid_factura:
@@ -1149,8 +1214,15 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 return Response({"complemento": ["No existe un complemento de pago con ese UUID."]}, status=400)
             update_fields.append("complemento")
 
+        if timbre_uuid_nomina:
+            try:
+                flujo.nomina = TesoreriaRecNomina.objects.get(timbre_uuid=timbre_uuid_nomina)
+            except TesoreriaRecNomina.DoesNotExist:
+                return Response({"nomina": ["No existe un recibo de nómina con ese UUID."]}, status=400)
+            update_fields.append("nomina")
+
         if not update_fields:
-            return Response({"detail": "Manda factura y/o complemento (timbre_uuid)."}, status=400)
+            return Response({"detail": "Manda factura, complemento y/o nomina (timbre_uuid)."}, status=400)
 
         flujo.save(update_fields=update_fields)
         return Response(self.get_serializer(flujo).data)
@@ -1609,6 +1681,20 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             valores_nuevos={"factura": timbre_uuid},
         )
         return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["get"])
+    def contrato_generico(self, request, pk=None):
+        """Devuelve (creandolo si hace falta) el contrato generico
+        GEN-REEMBOLSOS-<sociedad> de este ticket (10/Sep/2026, "Contratos
+        REEMB por sociedad") - el frontend lo usa para preseleccionar
+        Contrato al dar de alta el Flujo del reembolso (ver
+        contrato_generico_reembolso en models.py). Mismo patron que
+        TesoreriaNominaViewSet.contrato_generico."""
+        ticket = self.get_object()
+        if not ticket.sociedad:
+            return Response({"detail": "Este ticket no tiene sociedad capturada."}, status=400)
+        contrato = contrato_generico_reembolso(ticket.sociedad)
+        return Response({"id_contrato": contrato.id_contrato})
 
     @action(detail=True, methods=["post"])
     def vincular_flujo(self, request, pk=None):
@@ -3467,17 +3553,28 @@ class FacturaTrasladoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
 
 class FacturaDoctoRelacionadoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
-    """Documento relacionado de una factura (parcialidades de pago) -
-    filtro ?timbre_uuid=<uuid> desde la vista de detalle de la factura."""
+    """Documento relacionado de un CFDI (parcialidad de pago) - dos filtros
+    distintos, no intercambiables:
+    - ?timbre_uuid=<uuid del complemento> - lineas QUE TRAE ese complemento
+      de pago (uso original: pantalla de Complementos de Pago, para
+      capturar/editar sus DoctoRelacionado).
+    - ?id_documento=<uuid de la factura> (10/Sep/2026, "mostrar la lista de
+      exhibiciones/REPs ya recibidos dentro de la misma factura") - todas
+      las parcialidades YA RECIBIDAS que pagan esa factura en especifico,
+      sin importar de que complemento vengan. Mismo campo que usa
+      TesoreriaFacturaSerializer.get_saldo_pendiente_exhibiciones."""
 
     serializer_class = FacturaDoctoRelacionadoSerializer
     filter_backends = [SearchFilter]
 
     def get_queryset(self):
-        queryset = FacturaDoctoRelacionado.objects.all().order_by("id")
+        queryset = FacturaDoctoRelacionado.objects.all().order_by("num_parcialidad", "id")
         timbre_uuid = self.request.query_params.get("timbre_uuid")
         if timbre_uuid:
             queryset = queryset.filter(timbre_uuid=timbre_uuid)
+        id_documento = self.request.query_params.get("id_documento")
+        if id_documento:
+            queryset = queryset.filter(id_documento=id_documento)
         return queryset
 
 

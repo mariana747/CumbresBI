@@ -419,6 +419,132 @@ class TesoreriaContrato(models.Model):
         return self.id_contrato
 
 
+CONTRAPARTE_NOMINA_ID = "GENNOM"
+CONTRATO_NOMINA_PREFIJO = "GEN-NOMINA-"
+
+
+def contrato_generico_nomina(sociedad: str) -> "TesoreriaContrato":
+    """Contrato generico obligatorio para Flujos de nomina (10/Sep/2026,
+    modulo de Nominas Fase 1) - mismo criterio que contrato_generico_
+    reembolso (abajo), UNO POR SOCIEDAD en vez de uno solo total: la
+    nomina/el reembolso son un gasto real de una empresa especifica y el
+    filtro por empresa en Flujos/Reportes debe seguir funcionando.
+    get_or_create es idempotente - se puede llamar en cada alta de Flujo de
+    nomina sin duplicar."""
+    TesoreriaContraparte.objects.get_or_create(
+        id_contraparte=CONTRAPARTE_NOMINA_ID,
+        defaults={"razon_social": "Nómina interna (genérico)"},
+    )
+    id_contrato = f"{CONTRATO_NOMINA_PREFIJO}{sociedad}"
+    contrato, _ = TesoreriaContrato.objects.get_or_create(
+        id_contrato=id_contrato,
+        defaults={
+            "sociedad": sociedad,
+            "tipo": TesoreriaContrato.TIPO_INTERNO,
+            "contraparte_id": CONTRAPARTE_NOMINA_ID,
+            "concepto_factura": "Nómina",
+            "status": TesoreriaContrato.STATUS_ACTIVO,
+            "requiere_factura": False,
+        },
+    )
+    return contrato
+
+
+CONTRAPARTE_REEMBOLSO_ID = "GENREEMB"
+CONTRATO_REEMBOLSO_PREFIJO = "GEN-REEMBOLSOS-"
+
+
+def contrato_generico_reembolso(sociedad: str) -> "TesoreriaContrato":
+    """Contrato generico obligatorio para Flujos de reembolso (10/Sep/2026,
+    "Contratos REEMB por sociedad" - decision explicita de Mariana: SI se
+    separa por sociedad, igual que Nomina) - reemplaza el viejo
+    GEN-REEMBOLSOS-001 unico total (migracion 0011_contrato_obligatorio_en_
+    flujo) por UNO POR SOCIEDAD, mismo criterio que contrato_generico_
+    nomina: sin esto, todo reembolso quedaba bajo sociedad="GENERICO" y
+    nunca aparecia al filtrar Flujos/Reportes por empresa real.
+    get_or_create es idempotente."""
+    TesoreriaContraparte.objects.get_or_create(
+        id_contraparte=CONTRAPARTE_REEMBOLSO_ID,
+        defaults={"razon_social": "Reembolsos a empleados (genérico)"},
+    )
+    id_contrato = f"{CONTRATO_REEMBOLSO_PREFIJO}{sociedad}"
+    contrato, _ = TesoreriaContrato.objects.get_or_create(
+        id_contrato=id_contrato,
+        defaults={
+            "sociedad": sociedad,
+            "tipo": TesoreriaContrato.TIPO_INTERNO,
+            "contraparte_id": CONTRAPARTE_REEMBOLSO_ID,
+            "concepto_factura": "Reembolsos a empleados",
+            "status": TesoreriaContrato.STATUS_ACTIVO,
+            "requiere_factura": False,
+        },
+    )
+    return contrato
+
+
+class TesoreriaNomina(models.Model):
+    """Periodo/agrupador de nomina (09/Sep/2026, notas de Jenny - ver
+    memoria de sesion "tesoreria-nominas-diseno-09sep") - NO es el CFDI de
+    nomina (ver TesoreriaRecNomina/tesoreria_rec_nominas, que es el recibo
+    individual timbrado de un empleado). Un TesoreriaNomina se desglosa en N
+    TesoreriaFlujo (uno por empleado pagado, via TesoreriaFlujo.periodo_nomina)
+    - mismo patron que TesoreriaContrato -> Flujos, sin tabla de detalle
+    intermedia porque el propio Flujo ya trae empleado/monto/comprobante/
+    concepto (decision 10/Sep/2026, ver pendiente.md > Manejo de Nominas).
+
+    Fase 1: captura manual del empleado en cada Flujo (rrhh-service todavia
+    no tiene API/Puestos expuestos) - la generacion automatica de N lineas
+    por empleado activo queda para cuando exista esa integracion."""
+
+    TIPO_QUINCENAL = "QUINCENAL"
+    TIPO_SEMANAL = "SEMANAL"
+    TIPO_CHOICES = [
+        (TIPO_QUINCENAL, "Quincenal (corporativo)"),
+        (TIPO_SEMANAL, "Semanal (obra)"),
+    ]
+
+    STATUS_ACTIVO = "ACTIVO"
+    STATUS_CERRADA = "CERRADA"
+    STATUS_CHOICES = [(STATUS_ACTIVO, "Activa"), (STATUS_CERRADA, "Cerrada")]
+
+    id_nomina = models.CharField(max_length=255, primary_key=True)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    sociedad = models.CharField(max_length=13)
+    # proyecto solo aplica tipicamente a SEMANAL/obra - queda libre para
+    # QUINCENAL/corporativo. A diferencia de TesoreriaContrato.proyecto
+    # (CharField suelto de 3, sin catalogo real - hueco heredado que
+    # Contratos/Obra siguen teniendo), aqui SI se liga al catalogo real:
+    # vivienda-service.ViviendaProyecto.id_proyecto (10/Sep/2026, pedido
+    # explicito de Mariana: "el proyecto de nominas...son los mismos" que
+    # Vivienda/Obra) - CharField plano de 8 (mismo largo que id_proyecto),
+    # no ForeignKey real (cruza de servicio, ver docs/architecture/README.md
+    # sec. 11.2 #1). El frontend resuelve alias/denominacion llamando a
+    # vivienda-service (ver listProyectos en frontend/src/lib/vivienda.ts).
+    proyecto = models.CharField(max_length=8, blank=True, null=True)
+    centro = models.CharField(max_length=100, blank=True, null=True)
+    # serie: "Q1 2026", "S1 2026" (texto libre, no hay calculo de fechas
+    # automatico) - tambien es el concepto default de los Flujos hijos.
+    serie = models.CharField(max_length=50)
+    fecha_inicio = models.DateField(blank=True, null=True)
+    fecha_fin = models.DateField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVO)
+    comentarios = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=100, blank=True, null=True)
+
+    SCOPE_FIELD_SOCIEDAD = "sociedad"
+    SCOPE_FIELD_CENTRO = "centro"
+    objects = ScopedManager()
+
+    class Meta:
+        db_table = "tesoreria_nominas"
+
+    def __str__(self):
+        return self.id_nomina
+
+
 class TesoreriaCorteEdc(models.Model):
     TIPO_CORTE = "corte"
     TIPO_ESTADO_CUENTA = "estado_cuenta"
@@ -1098,6 +1224,19 @@ class TesoreriaFlujo(models.Model):
         db_column="nomina_uuid",
         to_field="timbre_uuid",
         on_delete=models.SET_NULL,
+        related_name="flujos",
+        blank=True,
+        null=True,
+    )
+    # periodo_nomina (10/Sep/2026, modulo de Nominas Fase 1) - distinto de
+    # `nomina` de arriba (ese es el CFDI/recibo timbrado individual, este es
+    # el agrupador/periodo de TesoreriaNomina). Un Flujo de nomina es la
+    # linea de pago a UN empleado dentro de ese periodo - ver
+    # TesoreriaNomina docstring.
+    periodo_nomina = models.ForeignKey(
+        TesoreriaNomina,
+        db_column="id_nomina_periodo",
+        on_delete=models.PROTECT,
         related_name="flujos",
         blank=True,
         null=True,
