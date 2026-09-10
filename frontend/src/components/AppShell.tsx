@@ -37,6 +37,7 @@ import {
   Package,
   Calculator,
   Landmark,
+  UserCheck,
   Users,
   Wallet,
   UserRound,
@@ -292,6 +293,17 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Solicitudes de Pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard, group: "OPERACIONES" },
         { label: "Reembolsos", href: "/tesoreria/reembolsos", icon: Receipt, group: "OPERACIONES" },
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote, group: "OPERACIONES" },
+        // Nominas (10/Sep/2026, modulo de Nominas Fase 1) - el periodo/
+        // agrupador que se desglosa en Flujos, distinto de "Recibos de
+        // Nomina" (el CFDI individual, ver group FACTURACION Y COMPROBANTES
+        // abajo).
+        { label: "Nóminas", href: "/tesoreria/nominas", icon: Users, group: "OPERACIONES" },
+        // Empleados/Puestos (10/Sep/2026, Fase 2 del modulo de Nominas) -
+        // vive en rrhh-service de verdad, pero se enlaza aqui porque el
+        // item "RRHH y Talento" del sidebar sigue oculto a proposito
+        // (linea "if (false && ...)" abajo) mientras Tesoreria sea la
+        // prioridad - alimenta a Nominas (empleado/sueldo vigente).
+        { label: "Empleados", href: "/rrhh/empleados", icon: UserCheck, group: "OPERACIONES" },
 
         {
           label: "Facturas",

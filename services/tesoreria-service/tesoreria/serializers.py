@@ -17,6 +17,7 @@ from .models import (
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaMovimientoBancario,
+    TesoreriaNomina,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -259,6 +260,33 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
         read_only_fields = ["id_contrato", "created_at", "updated_at"]
 
 
+class TesoreriaNominaSerializer(serializers.ModelSerializer):
+    """Periodo/agrupador de nomina (10/Sep/2026, modulo de Nominas Fase 1) -
+    ver TesoreriaNomina.__doc__. `id_nomina` se genera en el backend (ver
+    TesoreriaNominaViewSet.perform_create), mismo criterio de consecutivo
+    global que TesoreriaFlujo.id_flujo (FLJ-######)."""
+
+    class Meta:
+        model = TesoreriaNomina
+        fields = [
+            "id_nomina",
+            "tipo",
+            "sociedad",
+            "proyecto",
+            "centro",
+            "serie",
+            "fecha_inicio",
+            "fecha_fin",
+            "status",
+            "comentarios",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        read_only_fields = ["id_nomina", "created_at", "updated_at"]
+
+
 class TesoreriaContratoDocumentoSerializer(serializers.ModelSerializer):
     """Un renglon del checklist de documentos requeridos de un contrato. 
     `link_archivo`/`drive_file_id`
@@ -313,6 +341,10 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
 
     contrato_sociedad = serializers.CharField(source="contrato.sociedad", read_only=True, default=None)
     cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
+    # periodo_nomina_serie (10/Sep/2026, modulo de Nominas Fase 1) - mismo
+    # criterio que contrato_sociedad arriba, para no obligar al frontend a
+    # resolver la serie con una llamada aparte a /api/nominas/.
+    periodo_nomina_serie = serializers.CharField(source="periodo_nomina.serie", read_only=True, default=None)
 
     class Meta:
         model = TesoreriaFlujo
@@ -320,6 +352,8 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "id_flujo",
             "contrato",
             "contrato_sociedad",
+            "periodo_nomina",
+            "periodo_nomina_serie",
             "categoria_gasto",
             "id_empleado",
             "id_requisicion",

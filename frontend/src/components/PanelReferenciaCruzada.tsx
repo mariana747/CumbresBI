@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { Box, Button, Chip, CircularProgress, Collapse, Divider, Drawer, IconButton, Stack, Typography } from "@mui/material";
 import { ChevronDown, ChevronRight, Eye, Maximize2, Minimize2, X as CloseIcon } from "lucide-react";
 import {
+  TesoreriaNomina,
   getContraparte,
   getContrato,
+  getNomina,
   listFlujos,
   TesoreriaContraparte,
   TesoreriaContrato,
@@ -17,7 +19,13 @@ function numero(valor: string | null | undefined): string {
   return Number(valor).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
 
-export type ReferenciaCruzada = { tipo: "contrato"; id: string } | { tipo: "proveedor"; id: string } | null;
+export type ReferenciaCruzada =
+  | { tipo: "contrato"; id: string }
+  | { tipo: "proveedor"; id: string }
+  // nomina (10/Sep/2026, "Ver Flujos debe seguir el patron de referencias
+  // cruzadas") - mismo Drawer, en vez de navegar a /tesoreria/flujos.
+  | { tipo: "nomina"; id: string }
+  | null;
 
 // Panel de referencias cruzadas (10/Sep/2026, "replica el patron en
 // Facturas y Flujos") - extraido de Conciliacion de Facturas para
@@ -36,6 +44,7 @@ export default function PanelReferenciaCruzada({
 }) {
   const [datosContrato, setDatosContrato] = useState<TesoreriaContrato | null>(null);
   const [datosProveedor, setDatosProveedor] = useState<TesoreriaContraparte | null>(null);
+  const [datosNomina, setDatosNomina] = useState<TesoreriaNomina | null>(null);
   const [cargando, setCargando] = useState(false);
   const [pantallaCompleta, setPantallaCompleta] = useState(false);
   const [flujos, setFlujos] = useState<TesoreriaFlujo[]>([]);
@@ -48,6 +57,7 @@ export default function PanelReferenciaCruzada({
     setFlujoExpandido(null);
     setDatosContrato(null);
     setDatosProveedor(null);
+    setDatosNomina(null);
     setCargando(true);
     setCargandoFlujos(true);
     if (referencia.tipo === "contrato") {
@@ -59,12 +69,21 @@ export default function PanelReferenciaCruzada({
         .then(setFlujos)
         .catch(() => setFlujos([]))
         .finally(() => setCargandoFlujos(false));
-    } else {
+    } else if (referencia.tipo === "proveedor") {
       getContraparte(referencia.id)
         .then(setDatosProveedor)
         .catch(() => setDatosProveedor(null))
         .finally(() => setCargando(false));
       listFlujos({ contraparte: referencia.id })
+        .then(setFlujos)
+        .catch(() => setFlujos([]))
+        .finally(() => setCargandoFlujos(false));
+    } else {
+      getNomina(referencia.id)
+        .then(setDatosNomina)
+        .catch(() => setDatosNomina(null))
+        .finally(() => setCargando(false));
+      listFlujos({ nomina: referencia.id })
         .then(setFlujos)
         .catch(() => setFlujos([]))
         .finally(() => setCargandoFlujos(false));
@@ -87,7 +106,9 @@ export default function PanelReferenciaCruzada({
     >
       <Box sx={{ width: pantallaCompleta ? "100vw" : 380, p: 3, transition: "width 0.15s" }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-          <Typography variant="h6">{referencia?.tipo === "contrato" ? "Contrato" : "Proveedor"}</Typography>
+          <Typography variant="h6">
+            {referencia?.tipo === "contrato" ? "Contrato" : referencia?.tipo === "proveedor" ? "Proveedor" : "Nómina"}
+          </Typography>
           <Stack direction="row" spacing={0.5}>
             <IconButton
               size="small"
@@ -164,6 +185,30 @@ export default function PanelReferenciaCruzada({
             </Typography>
             <Typography variant="body2">
               <strong>Teléfono:</strong> {datosProveedor.telefono_sms || "—"}
+            </Typography>
+          </Stack>
+        ) : referencia?.tipo === "nomina" && datosNomina ? (
+          <Stack spacing={1.5}>
+            <Typography variant="body2">
+              <strong>ID:</strong> {datosNomina.id_nomina}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Tipo:</strong> {datosNomina.tipo === "QUINCENAL" ? "Quincenal (corporativo)" : "Semanal (obra)"}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Empresa:</strong> {datosNomina.sociedad}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Proyecto:</strong> {datosNomina.proyecto || "—"}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Serie:</strong> {datosNomina.serie}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Periodo:</strong> {datosNomina.fecha_inicio || "—"} a {datosNomina.fecha_fin || "—"}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Status:</strong> {datosNomina.status === "ACTIVO" ? "Activa" : "Cerrada"}
             </Typography>
           </Stack>
         ) : (

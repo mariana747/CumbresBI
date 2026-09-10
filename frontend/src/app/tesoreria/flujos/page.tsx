@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
   Autocomplete,
@@ -72,15 +73,21 @@ import {
   TesoreriaFactura,
   TesoreriaFacturaSugerida,
   TesoreriaFlujo,
+  TesoreriaNomina,
+  TesoreriaRecNomina,
   TesoreriaValidacionEstado,
   aprobarFlujo,
   confirmarConciliacionFlujo,
   createFlujo,
+  getContratoGenericoNomina,
+  getContratoGenericoReembolsoPorSociedad,
   listComplementosPago,
   listContratos,
   listCuentas,
   listFacturas,
   listFlujos,
+  listNominas,
+  listRecNominas,
   rechazarFlujo,
   registrarPagoFlujo,
   subirComprobanteFlujo,
@@ -93,6 +100,10 @@ import {
 const FORM_VACIO = {
   // Detalles
   contrato: "",
+  // periodoNomina (10/Sep/2026, modulo de Nominas Fase 1) - opcional, solo
+  // presente si el Flujo es una linea de pago de una Nomina. Al elegirse
+  // autocompleta contrato/concepto (ver onChange del selector en Detalles).
+  periodoNomina: "",
   cuenta: "",
   totalMxp: "",
   fechaEfectiva: new Date().toISOString().slice(0, 10),
@@ -171,16 +182,32 @@ function LabelTip({ text, tip }: { text: string; tip: string }) {
 // con tesoreria.crear/.editar) -> aprobar/rechazar (solo tesoreria.aprobar,
 // ej. FINANZAS_MANAGER) -> registrar_pago (de vuelta a tesoreria.editar,
 // el analista es quien de verdad hace la transferencia una vez autorizada).
+// useSearchParams() obliga a envolver en Suspense para el build de
+// produccion (mismo motivo ya documentado en contratos/page.tsx) - lo
+// necesitamos para el deep link "Ver Flujos" desde una fila de Nomina
+// (10/Sep/2026, modulo de Nominas Fase 1).
 export default function TesoreriaFlujosPage() {
+  return (
+    <Suspense fallback={null}>
+      <TesoreriaFlujosPageContent />
+    </Suspense>
+  );
+}
+
+function TesoreriaFlujosPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [session, setSession] = useState<SessionUser | null>(null);
   const [flujos, setFlujos] = useState<TesoreriaFlujo[]>([]);
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
   const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
   const [facturas, setFacturas] = useState<TesoreriaFactura[]>([]);
   const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
+  const [nominas, setNominas] = useState<TesoreriaNomina[]>([]);
   const [search, setSearch] = useState("");
   const [filtroContrato, setFiltroContrato] = useState("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
+  const [filtroNomina, setFiltroNomina] = useState(searchParams.get("nomina") || "");
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
@@ -206,6 +233,13 @@ export default function TesoreriaFlujosPage() {
   const [vinculando, setVinculando] = useState<TesoreriaFlujo | null>(null);
   const [vinculoFactura, setVinculoFactura] = useState<TesoreriaFactura | null>(null);
   const [vinculoComplemento, setVinculoComplemento] = useState<TesoreriaComplementoPago | null>(null);
+  // Recibo de nomina (10/Sep/2026, "como se une nomina y recibos de
+  // nomina") - solo tiene sentido ofrecerlo cuando el Flujo tiene
+  // periodo_nomina (ver render condicional abajo). Lista completa de una
+  // vez (catalogo chico) en vez de busqueda incremental como
+  // Factura/Complemento.
+  const [recNominas, setRecNominas] = useState<TesoreriaRecNomina[]>([]);
+  const [vinculoNomina, setVinculoNomina] = useState<TesoreriaRecNomina | null>(null);
   const [buscaFactura, setBuscaFactura] = useState("");
   const [buscaComplemento, setBuscaComplemento] = useState("");
   const [opcionesFactura, setOpcionesFactura] = useState<TesoreriaFactura[]>([]);
@@ -299,6 +333,8 @@ export default function TesoreriaFlujosPage() {
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listFacturas().then(setFacturas).catch(() => setFacturas([]));
     listComplementosPago().then(setComplementos).catch(() => setComplementos([]));
+    listNominas().then(setNominas).catch(() => setNominas([]));
+    listRecNominas().then(setRecNominas).catch(() => setRecNominas([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
@@ -321,10 +357,20 @@ export default function TesoreriaFlujosPage() {
     return c ? c.folio || c.timbre_uuid : timbreUuid;
   }
 
+  // 10/Sep/2026, "y porque no veo el recibo en recibo de nomina" - la
+  // columna "CFDI vinculado" solo mostraba factura/complemento, nunca el
+  // recibo de nomina ya vinculado (ver vincularFactura con `nomina`).
+  function folioRecNomina(timbreUuid: string | null): string | null {
+    if (!timbreUuid) return null;
+    const n = recNominas.find((x) => x.timbre_uuid === timbreUuid);
+    return n ? n.folio || n.timbre_uuid : timbreUuid;
+  }
+
   function abrirVinculo(f: TesoreriaFlujo) {
     setVinculando(f);
     setVinculoFactura(facturas.find((x) => x.timbre_uuid === f.factura) || null);
     setVinculoComplemento(complementos.find((x) => x.timbre_uuid === f.complemento) || null);
+    setVinculoNomina(recNominas.find((x) => x.timbre_uuid === f.nomina) || null);
     setBuscaFactura("");
     setBuscaComplemento("");
     setVinculoError(null);
@@ -332,18 +378,23 @@ export default function TesoreriaFlujosPage() {
 
   async function handleGuardarVinculo() {
     if (!vinculando) return;
-    if (!vinculoFactura && !vinculoComplemento) {
-      setVinculoError("Selecciona al menos una factura o un complemento de pago.");
+    if (!vinculoFactura && !vinculoComplemento && !vinculoNomina) {
+      setVinculoError("Selecciona al menos una factura, un complemento de pago o un recibo de nómina.");
       return;
     }
     setGuardandoVinculo(true);
     setVinculoError(null);
     try {
-      await vincularFactura(vinculando.id_flujo, {
+      const actualizado = await vincularFactura(vinculando.id_flujo, {
         factura: vinculoFactura?.timbre_uuid || undefined,
         complemento: vinculoComplemento?.timbre_uuid || undefined,
+        nomina: vinculoNomina?.timbre_uuid || undefined,
       });
       setVinculando(null);
+      // El dialogo de Editar puede seguir abierto detras con un `editing`
+      // desactualizado (10/Sep/2026, "el chip no se actualiza hasta
+      // reabrir") - refresh() solo recarga la tabla, no ese snapshot.
+      setEditing((prev) => (prev && prev.id_flujo === actualizado.id_flujo ? actualizado : prev));
       refresh();
     } catch (err) {
       setVinculoError(err instanceof Error ? err.message : "Error desconocido");
@@ -407,6 +458,7 @@ export default function TesoreriaFlujosPage() {
       search: search || undefined,
       contrato: filtroContrato || undefined,
       sociedad: filtroEmpresa || undefined,
+      nomina: filtroNomina || undefined,
     })
       .then(setFlujos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
@@ -417,7 +469,7 @@ export default function TesoreriaFlujosPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroContrato, filtroEmpresa]);
+  }, [search, filtroContrato, filtroEmpresa, filtroNomina]);
 
   // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
   // del cliente: listFlujos no tiene parametro de fecha en el backend
@@ -448,6 +500,7 @@ export default function TesoreriaFlujosPage() {
     setSoloLectura(verSolo);
     setForm({
       contrato: f.contrato || "",
+      periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
       fechaEfectiva: f.fecha_efectiva || "",
@@ -483,6 +536,7 @@ export default function TesoreriaFlujosPage() {
     setSoloLectura(false);
     setForm({
       contrato: f.contrato || "",
+      periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
       fechaEfectiva: new Date().toISOString().slice(0, 10),
@@ -536,6 +590,7 @@ export default function TesoreriaFlujosPage() {
       } else {
         await createFlujo({
           contrato: form.contrato,
+          periodoNomina: form.periodoNomina || undefined,
           cuenta: form.cuenta,
           totalMxp: form.totalMxp || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
@@ -782,6 +837,24 @@ export default function TesoreriaFlujosPage() {
             ))}
           </Select>
         </FormControl>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="filtro-nomina-label">Filtrar por nómina</InputLabel>
+          <Select
+            labelId="filtro-nomina-label"
+            label="Filtrar por nómina"
+            value={filtroNomina}
+            onChange={(e) => setFiltroNomina(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todas las nóminas</em>
+            </MenuItem>
+            {nominas.map((n) => (
+              <MenuItem key={n.id_nomina} value={n.id_nomina}>
+                {n.id_nomina} — {n.serie}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <TextField
           size="small"
           type="date"
@@ -881,11 +954,14 @@ export default function TesoreriaFlujosPage() {
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      {f.factura || f.complemento ? (
+                      {f.factura || f.complemento || f.nomina ? (
                         <Stack direction="row" spacing={0.5} flexWrap="wrap">
                           {f.factura && <Chip size="small" label={`Factura ${folioFactura(f.factura)}`} variant="outlined" />}
                           {f.complemento && (
                             <Chip size="small" label={`REP ${folioComplemento(f.complemento)}`} variant="outlined" />
+                          )}
+                          {f.nomina && (
+                            <Chip size="small" label={`Nómina ${folioRecNomina(f.nomina)}`} variant="outlined" />
                           )}
                         </Stack>
                       ) : (
@@ -989,11 +1065,14 @@ export default function TesoreriaFlujosPage() {
                   </Typography>
                   <Typography variant="body2" component="div">
                     <strong>CFDI vinculado:</strong>{" "}
-                    {f.factura || f.complemento ? (
+                    {f.factura || f.complemento || f.nomina ? (
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
                         {f.factura && <Chip size="small" label={`Factura ${folioFactura(f.factura)}`} variant="outlined" />}
                         {f.complemento && (
                           <Chip size="small" label={`REP ${folioComplemento(f.complemento)}`} variant="outlined" />
+                        )}
+                        {f.nomina && (
+                          <Chip size="small" label={`Nómina ${folioRecNomina(f.nomina)}`} variant="outlined" />
                         )}
                       </Stack>
                     ) : (
@@ -1072,10 +1151,101 @@ export default function TesoreriaFlujosPage() {
                 </Select>
                 {form.reembolso && (
                   <FormHelperText>
-                    Para reembolsos sin contrato de obra, usa el contrato genérico (GEN-REEMBOLSOS-001).
+                    Para reembolsos sin contrato de obra, elige la empresa abajo para usar su contrato genérico.
                   </FormHelperText>
                 )}
               </FormControl>
+              {form.reembolso && !editing && (
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="empresa-reembolso-label">Empresa (para el contrato genérico)</InputLabel>
+                  <Select
+                    labelId="empresa-reembolso-label"
+                    label="Empresa (para el contrato genérico)"
+                    value=""
+                    onChange={async (e) => {
+                      const sociedad = e.target.value;
+                      if (!sociedad) return;
+                      try {
+                        const { id_contrato } = await getContratoGenericoReembolsoPorSociedad(sociedad);
+                        setForm((prev) => ({ ...prev, contrato: id_contrato }));
+                      } catch {
+                        // Silencioso - el usuario igual puede elegir el
+                        // contrato a mano si esto falla.
+                      }
+                    }}
+                  >
+                    {sociedades.map((s) => (
+                      <MenuItem key={s.rfc} value={s.rfc}>
+                        {s.alias_sociedad || s.razon_social || s.rfc}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+              <FormControl size="small" fullWidth disabled={!!editing}>
+                <InputLabel id="periodo-nomina-label">Nómina (opcional)</InputLabel>
+                <Select
+                  labelId="periodo-nomina-label"
+                  label="Nómina (opcional)"
+                  value={form.periodoNomina}
+                  onChange={async (e) => {
+                    const idNomina = e.target.value;
+                    setForm((prev) => ({ ...prev, periodoNomina: idNomina }));
+                    // Autocompleta Contrato/Concepto (10/Sep/2026, modulo de
+                    // Nominas Fase 1) - solo si estan vacios, el usuario
+                    // puede sobreescribir despues. GEN-NOMINA-<sociedad> se
+                    // crea solo (get_or_create) la primera vez que se pide.
+                    if (!idNomina) return;
+                    const nomina = nominas.find((n) => n.id_nomina === idNomina);
+                    try {
+                      const { id_contrato } = await getContratoGenericoNomina(idNomina);
+                      setForm((prev) => ({
+                        ...prev,
+                        contrato: prev.contrato || id_contrato,
+                        concepto: prev.concepto || nomina?.serie || prev.concepto,
+                      }));
+                    } catch {
+                      // Silencioso - el usuario igual puede elegir el
+                      // contrato a mano si esto falla.
+                    }
+                  }}
+                >
+                  <MenuItem value="">
+                    <em>Ninguna</em>
+                  </MenuItem>
+                  {nominas.map((n) => (
+                    <MenuItem key={n.id_nomina} value={n.id_nomina}>
+                      {n.id_nomina} — {n.serie}
+                    </MenuItem>
+                  ))}
+                </Select>
+                <FormHelperText>Si este pago es una línea de nómina, elige el periodo aquí.</FormHelperText>
+              </FormControl>
+              {editing && editing.periodo_nomina && (
+                <Button
+                  size="small"
+                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                  onClick={() => router.push(`/tesoreria/nominas`)}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  Ver nómina {editing.periodo_nomina_serie ? `(${editing.periodo_nomina_serie})` : ""}
+                </Button>
+              )}
+              {editing && editing.periodo_nomina && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={editing.nomina ? "success" : "default"}
+                  label={
+                    editing.nomina
+                      ? `Recibo de nómina vinculado: ${
+                          recNominas.find((n) => n.timbre_uuid === editing.nomina)?.folio || editing.nomina
+                        }`
+                      : "Sin recibo de nómina vinculado — usa \"Vincular factura/complemento\""
+                  }
+                  sx={{ alignSelf: "flex-start" }}
+                />
+              )}
               {editing && editing.contrato && (
                 <Button
                   size="small"
@@ -1625,6 +1795,25 @@ export default function TesoreriaFlujosPage() {
                 />
               )}
             />
+            {vinculando?.periodo_nomina && (
+              <Autocomplete
+                openOnFocus
+                size="small"
+                fullWidth
+                value={vinculoNomina}
+                onChange={(_, seleccion) => setVinculoNomina(seleccion)}
+                options={recNominas}
+                getOptionLabel={(n) => `${n.folio || n.timbre_uuid}${n.receptor_nombre ? ` — ${n.receptor_nombre}` : ""}`}
+                isOptionEqualToValue={(a, b) => a.timbre_uuid === b.timbre_uuid}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Recibo de nómina (CFDI)"
+                    helperText="El comprobante timbrado de este empleado para este periodo."
+                  />
+                )}
+              />
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>

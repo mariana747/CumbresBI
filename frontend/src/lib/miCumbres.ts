@@ -258,6 +258,21 @@ export async function vincularFlujoTicket(
   return response.json();
 }
 
+// Contrato generico GEN-REEMBOLSOS-<sociedad> de este ticket (creandolo si
+// hace falta) - para preseleccionar Contrato al dar de alta el Flujo del
+// reembolso (10/Sep/2026, "Contratos REEMB por sociedad"), ver
+// TesoreriaTicketReembolsoViewSet.contrato_generico.
+export async function getContratoGenericoReembolso(idTicket: string): Promise<{ id_contrato: string }> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/contrato_generico/`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 // Primer paso de la revision: acepta el gasto como valido (todavia sin
 // factura ni pago) - solo desde PENDIENTE. tesoreria.editar.
 export async function aprobarTicket(
