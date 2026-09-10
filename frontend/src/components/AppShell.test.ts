@@ -196,6 +196,7 @@ describe("buildNavItems - Tesorería", () => {
         "Complementos de Pago",
         "Notas de Crédito",
         "Recibos de Nómina",
+        "Conciliación de Facturas",
         "Cuentas Bancarias",
         "Contrapartes",
         "Contratos",

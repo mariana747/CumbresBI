@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
@@ -36,6 +36,7 @@ import {
 import { CreditCard, Eye, Plus, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import FiltrosBar from "@/components/FiltrosBar";
 import { getSession, SessionUser } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { TesoreriaFlujo, listFlujos } from "@/lib/tesoreria";
@@ -86,15 +87,33 @@ export default function SolicitudesPagoPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [search, setSearch] = useState("");
+  const [filtroProyecto, setFiltroProyecto] = useState("");
+  const [filtroSociedad, setFiltroSociedad] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState<SolicitudPagoTipo | "">("");
+  const [filtroEstado, setFiltroEstado] = useState<SolicitudPagoEstado | "">("");
+
   function cargar() {
     setLoading(true);
     setError(null);
-    listSolicitudesPago()
+    listSolicitudesPago({
+      search: search || undefined,
+      proyecto: filtroProyecto || undefined,
+      sociedad: filtroSociedad || undefined,
+    })
       .then(setSolicitudes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error al cargar"))
       .finally(() => setLoading(false));
   }
   useEffect(cargar, []);
+
+  const solicitudesFiltradas = useMemo(
+    () =>
+      solicitudes.filter(
+        (s) => (!filtroTipo || s.tipo === filtroTipo) && (!filtroEstado || s.estado === filtroEstado)
+      ),
+    [solicitudes, filtroTipo, filtroEstado]
+  );
 
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   useEffect(() => {
@@ -290,17 +309,105 @@ export default function SolicitudesPagoPage() {
         </Alert>
       )}
 
+      <Paper variant="outlined" sx={{ mb: 3 }}>
+      <FiltrosBar
+        flush
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por ID o descripción..."
+        onAplicarFiltros={cargar}
+        onLimpiarFiltros={() => {
+          setFiltroProyecto("");
+          setFiltroSociedad("");
+          setFiltroTipo("");
+          setFiltroEstado("");
+        }}
+      >
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="filtro-proyecto-label">Proyecto</InputLabel>
+          <Select
+            labelId="filtro-proyecto-label"
+            label="Proyecto"
+            value={filtroProyecto}
+            onChange={(e) => setFiltroProyecto(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todos</em>
+            </MenuItem>
+            {proyectos.map((p) => (
+              <MenuItem key={p.id_proyecto} value={p.id_proyecto}>
+                {p.alias_proyecto || p.denominacion || p.id_proyecto}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="filtro-sociedad-label">Sociedad</InputLabel>
+          <Select
+            labelId="filtro-sociedad-label"
+            label="Sociedad"
+            value={filtroSociedad}
+            onChange={(e) => setFiltroSociedad(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todas</em>
+            </MenuItem>
+            {sociedades.map((s) => (
+              <MenuItem key={s.rfc} value={s.rfc}>
+                {s.alias_sociedad || s.razon_social || s.rfc}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="filtro-tipo-label">Tipo</InputLabel>
+          <Select
+            labelId="filtro-tipo-label"
+            label="Tipo"
+            value={filtroTipo}
+            onChange={(e) => setFiltroTipo(e.target.value as SolicitudPagoTipo | "")}
+          >
+            <MenuItem value="">
+              <em>Todos</em>
+            </MenuItem>
+            {(Object.keys(TIPO_SOLICITUD_PAGO_LABELS) as SolicitudPagoTipo[]).map((t) => (
+              <MenuItem key={t} value={t}>
+                {TIPO_SOLICITUD_PAGO_LABELS[t]}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="filtro-estado-label">Estado</InputLabel>
+          <Select
+            labelId="filtro-estado-label"
+            label="Estado"
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value as SolicitudPagoEstado | "")}
+          >
+            <MenuItem value="">
+              <em>Todos</em>
+            </MenuItem>
+            {(Object.keys(ESTADO_SOLICITUD_PAGO_LABELS) as SolicitudPagoEstado[]).map((e) => (
+              <MenuItem key={e} value={e}>
+                {ESTADO_SOLICITUD_PAGO_LABELS[e]}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </FiltrosBar>
+
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
           <CircularProgress size={24} />
         </Box>
-      ) : esMovil && solicitudes.length === 0 ? (
+      ) : esMovil && solicitudesFiltradas.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
           Sin solicitudes todavía.
         </Typography>
       ) : esMovil ? (
         <Stack spacing={1.5}>
-          {solicitudes.map((s) => (
+          {solicitudesFiltradas.map((s) => (
             <Card key={s.id_solicitud} variant="outlined">
               <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
                 <Stack spacing={0.5}>
@@ -367,7 +474,7 @@ export default function SolicitudesPagoPage() {
           ))}
         </Stack>
       ) : (
-        <TableContainer component={Paper} variant="outlined">
+        <TableContainer>
           <Table size="small">
             <TableHead>
               <TableRow>
@@ -383,7 +490,7 @@ export default function SolicitudesPagoPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {solicitudes.length === 0 ? (
+              {solicitudesFiltradas.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={puedeGestionar ? 9 : 8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -392,7 +499,7 @@ export default function SolicitudesPagoPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                solicitudes.map((s) => (
+                solicitudesFiltradas.map((s) => (
                 <TableRow key={s.id_solicitud} hover>
                   <TableCell>{s.id_solicitud}</TableCell>
                   <TableCell>{s.proyecto}</TableCell>
@@ -467,6 +574,7 @@ export default function SolicitudesPagoPage() {
           </Table>
         </TableContainer>
       )}
+      </Paper>
 
       <Dialog open={openNuevo} onClose={cerrarNuevo} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

@@ -317,6 +317,17 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
           icon: Wallet2,
           group: "FACTURACIÓN Y COMPROBANTES",
         },
+        // Conciliacion de Facturas (10/Sep/2026) - distinta de la bancaria
+        // de abajo: clasifica cada pago segun si ya tiene CFDI, no
+        // extracto vs. interno. Una sola pantalla con 3 tabs (pedido
+        // explicito, no 3 rutas separadas), ver tesoreria-service/tesoreria/
+        // reportes.py::calcular_conciliacion_cfdi.
+        {
+          label: "Conciliación de Facturas",
+          href: "/tesoreria/conciliacion-facturas",
+          icon: FileText,
+          group: "FACTURACIÓN Y COMPROBANTES",
+        },
 
         {
           label: "Cuentas Bancarias",

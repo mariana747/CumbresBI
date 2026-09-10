@@ -18,6 +18,8 @@ interface FiltrosBarProps {
   puedeEditar?: boolean;
   /** Acciones adicionales */
   actions?: ReactNode;
+  /** Sin Paper/margen propio: para vivir pegado a la tabla dentro de un Paper compartido */
+  flush?: boolean;
 }
 
 export default function FiltrosBar({
@@ -31,6 +33,7 @@ export default function FiltrosBar({
   onEnviarMasivo,
   puedeEditar = false,
   actions,
+  flush = false,
 }: FiltrosBarProps) {
   // Boton de enviar por correo
   const botonEnviarMasivo = puedeEditar && onEnviarMasivo && seleccionadas > 0 && (
@@ -45,8 +48,8 @@ export default function FiltrosBar({
     </Button>
   );
 
-  return (
-    <Paper variant="outlined" sx={{ mb: 3 }}>
+  const contenido = (
+    <>
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
         <TextField
           size="small"
@@ -117,6 +120,16 @@ export default function FiltrosBar({
       )}
 
       {!children && <Divider />}
+    </>
+  );
+
+  if (flush) {
+    return contenido;
+  }
+
+  return (
+    <Paper variant="outlined" sx={{ mb: 3 }}>
+      {contenido}
     </Paper>
   );
 }

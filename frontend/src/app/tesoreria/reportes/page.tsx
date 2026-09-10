@@ -392,7 +392,6 @@ export default function TesoreriaReporteDiarioPage() {
                                           <TableCell>ID Flujo</TableCell>
                                           <TableCell>Concepto</TableCell>
                                           <TableCell align="right">Total MXP</TableCell>
-                                          <TableCell align="right">IVA MXP</TableCell>
                                         </TableRow>
                                       </TableHead>
                                       <TableBody>
@@ -401,7 +400,6 @@ export default function TesoreriaReporteDiarioPage() {
                                             <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.id_flujo}</TableCell>
                                             <TableCell>{t.concepto || "—"}</TableCell>
                                             <TableCell align="right">{numero(t.total_mxp)}</TableCell>
-                                            <TableCell align="right">{numero(t.iva_mxp)}</TableCell>
                                           </TableRow>
                                         ))}
                                       </TableBody>

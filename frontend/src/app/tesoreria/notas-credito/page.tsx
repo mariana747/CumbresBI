@@ -30,8 +30,9 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileMinus, Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
+import { FileMinus, Pencil, Plus, Search, Trash2, X as CloseIcon, Eye, ExternalLink, FileText, FileCode2, RefreshCw } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
@@ -44,8 +45,16 @@ import {
   listFacturas,
   listNotaCreditoConceptos,
   listNotasCredito,
+  sincronizarDriveNotaCredito,
   updateNotaCredito,
+  urlVerNotaCreditoPdf,
 } from "@/lib/tesoreria";
+
+// Link real de Drive a partir del file_id - ver comentario equivalente en
+// tesoreria/facturas/page.tsx.
+function urlDriveWebView(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
 
 // Renglones de la nota de credito (Sem 20, CRUD real agregado 24/Ago/2026 -
 // mismo criterio que PanelConceptos en /tesoreria/facturas: enlace logico
@@ -277,6 +286,26 @@ export default function TesoreriaNotasCreditoPage() {
   const [buscaFactura, setBuscaFactura] = useState("");
   const [opcionesFactura, setOpcionesFactura] = useState<TesoreriaFactura[]>([]);
   const [buscandoFactura, setBuscandoFactura] = useState(false);
+
+  // Documentos reales desde Drive - mismo patron que tesoreria/facturas.
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [errorSincronizar, setErrorSincronizar] = useState<string | null>(null);
+
+  async function handleSincronizarDrive() {
+    if (!editing) return;
+    setSincronizando(true);
+    setErrorSincronizar(null);
+    try {
+      const actualizada = await sincronizarDriveNotaCredito(editing.id);
+      setEditing(actualizada);
+      refresh();
+    } catch (err) {
+      setErrorSincronizar(err instanceof Error ? err.message : "Error al sincronizar con Drive");
+    } finally {
+      setSincronizando(false);
+    }
+  }
 
   useEffect(() => {
     getSession().then(setSession);
@@ -846,13 +875,6 @@ export default function TesoreriaNotasCreditoPage() {
                 fullWidth
               />
             </Stack>
-            <TextField
-              size="small"
-              label="Link al PDF"
-              value={form.linkPdf}
-              onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
-              fullWidth
-            />
             {editing && (
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
@@ -861,6 +883,80 @@ export default function TesoreriaNotasCreditoPage() {
             )}
             {editing && (
               <>
+                <Divider sx={{ pt: 1 }} />
+                <Stack spacing={1.5}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
+                    <Typography variant="caption" color="text.secondary">
+                      Los documentos se traen directo de Drive - no se aceptan links pegados a mano.
+                    </Typography>
+                    {puedeEditar && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={sincronizando ? <CircularProgress size={14} /> : <RefreshCw size={14} strokeWidth={1.5} />}
+                        onClick={handleSincronizarDrive}
+                        disabled={sincronizando}
+                      >
+                        Sincronizar con Drive
+                      </Button>
+                    )}
+                  </Stack>
+                  {errorSincronizar && (
+                    <Alert severity="error" onClose={() => setErrorSincronizar(null)}>
+                      {errorSincronizar}
+                    </Alert>
+                  )}
+                  {(["pdf", "xml"] as const).map((tipo) => {
+                    const driveFileId = tipo === "pdf" ? editing.drive_file_id_pdf : editing.drive_file_id_xml;
+                    return (
+                      <Paper key={tipo} variant="outlined" sx={{ p: 1.5 }}>
+                        <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            {tipo === "pdf" ? (
+                              <FileText size={18} strokeWidth={1.5} />
+                            ) : (
+                              <FileCode2 size={18} strokeWidth={1.5} />
+                            )}
+                            <Typography variant="body2">
+                              {tipo === "pdf" ? "Nota de Crédito (PDF)" : "Comprobante Fiscal (XML)"}
+                            </Typography>
+                          </Stack>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <IconButton
+                              size="small"
+                              aria-label={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
+                              title={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
+                              disabled={!driveFileId}
+                              onClick={() => {
+                                if (!driveFileId) return;
+                                if (tipo === "pdf") {
+                                  setPreviewDoc({
+                                    url: urlVerNotaCreditoPdf(editing.id),
+                                    titulo: `Nota ${editing.comprobante_folio || editing.timbre_uuid} — PDF`,
+                                    urlExterna: urlDriveWebView(driveFileId),
+                                  });
+                                } else {
+                                  window.open(urlDriveWebView(driveFileId), "_blank", "noopener,noreferrer");
+                                }
+                              }}
+                            >
+                              {tipo === "pdf" ? (
+                                <Eye size={16} strokeWidth={1.5} />
+                              ) : (
+                                <ExternalLink size={16} strokeWidth={1.5} />
+                              )}
+                            </IconButton>
+                            <Chip
+                              size="small"
+                              color={driveFileId ? "success" : "default"}
+                              label={driveFileId ? "Disponible en Drive" : "Sin archivo"}
+                            />
+                          </Stack>
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
+                </Stack>
                 <Divider sx={{ pt: 1 }} />
                 <PanelConceptos uuidNota={editing.timbre_uuid} puedeEditar={puedeEditar} />
               </>
@@ -874,6 +970,13 @@ export default function TesoreriaNotasCreditoPage() {
           </Button>
         </DialogActions>
       </Dialog>
+      <DocumentoPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={previewDoc?.url ?? null}
+        titulo={previewDoc?.titulo ?? ""}
+        urlExterna={previewDoc?.urlExterna}
+      />
     </AppShell>
   );
 }
