@@ -287,7 +287,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       // - se agrega aqui cuando exista.
       children: [
         { label: "Reporte Diario", href: "/tesoreria/reportes", icon: FileBarChart, group: "REPORTES" },
-        { label: "Reporte de Saldos", href: "/tesoreria/saldos", icon: PiggyBank, group: "REPORTES" },
+        { label: "Saldos", href: "/tesoreria/saldos", icon: PiggyBank, group: "REPORTES" },
 
         { label: "Solicitudes de Pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard, group: "OPERACIONES" },
         { label: "Reembolsos", href: "/tesoreria/reembolsos", icon: Receipt, group: "OPERACIONES" },

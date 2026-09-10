@@ -151,6 +151,20 @@ const VALIDACION_DESCRIPCION: Record<TesoreriaValidacionEstado, string> = {
   RECHAZADA: "No se autoriza, no se puede pagar así.",
 };
 
+// Tooltips de campos heredados/ambiguos del AppSheet original (10/Sep/2026,
+// pendiente.md > Flujos > "Tooltips de campos") - label + icono de ayuda,
+// mismo criterio visual que el glosario de Estado en el encabezado de tabla.
+function LabelTip({ text, tip }: { text: string; tip: string }) {
+  return (
+    <Stack direction="row" spacing={0.5} alignItems="center" component="span">
+      <span>{text}</span>
+      <Tooltip title={tip}>
+        <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+      </Tooltip>
+    </Stack>
+  );
+}
+
 // Flujos de caja (24/Ago/2026, Sem 21 del cronograma) - un movimiento real
 // de dinero (pago a proveedor, reembolso, nomina) ligado a un contrato.
 // Ciclo de vida propio con segregacion de funciones: capturar (cualquiera
@@ -799,7 +813,12 @@ export default function TesoreriaFlujosPage() {
                 <TableCell>ID Flujo</TableCell>
                 <TableCell>ID Contrato</TableCell>
                 <TableCell>Descripción de Pago</TableCell>
-                <TableCell>Fecha Efectiva</TableCell>
+                <TableCell>
+                  <LabelTip
+                    text="Fecha Efectiva"
+                    tip="Fecha del movimiento según el contrato/factura, puede no coincidir con la fecha real de pago."
+                  />
+                </TableCell>
                 <TableCell>Concepto</TableCell>
 
                 <TableCell align="right">Total MXP</TableCell>
@@ -1073,7 +1092,12 @@ export default function TesoreriaFlujosPage() {
               <TextField
                 size="small"
                 type="date"
-                label="Fecha efectiva"
+                label={
+                  <LabelTip
+                    text="Fecha efectiva"
+                    tip="Fecha del movimiento según el contrato/factura, puede no coincidir con la fecha real de pago."
+                  />
+                }
                 value={form.fechaEfectiva}
                 onChange={(e) => setForm({ ...form, fechaEfectiva: e.target.value })}
                 InputLabelProps={{ shrink: true }}
@@ -1130,7 +1154,12 @@ export default function TesoreriaFlujosPage() {
                 <TextField
                   size="small"
                   type="date"
-                  label="Fecha de pago original"
+                  label={
+                    <LabelTip
+                      text="Fecha de pago original"
+                      tip="Fecha en que debía pagarse antes de cualquier reprogramación."
+                    />
+                  }
                   value={form.fechaPagoOriginal}
                   onChange={(e) => setForm({ ...form, fechaPagoOriginal: e.target.value })}
                   InputLabelProps={{ shrink: true }}
@@ -1138,9 +1167,15 @@ export default function TesoreriaFlujosPage() {
                 />
                 <TextField
                   size="small"
-                  label="Comprobante de banco (link)"
+                  label={
+                    <LabelTip
+                      text="Comprobante de banco (link)"
+                      tip='Campo heredado del sistema anterior (link a mano); el comprobante real se sube como archivo desde "Registrar pago".'
+                    />
+                  }
                   value={form.linkComprobanteBanco}
                   onChange={(e) => setForm({ ...form, linkComprobanteBanco: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
                   fullWidth
                 />
               </Stack>
@@ -1165,7 +1200,12 @@ export default function TesoreriaFlujosPage() {
                       />
                       <TextField
                         size="small"
-                        label="Fecha de autorización"
+                        label={
+                          <LabelTip
+                            text="Fecha de autorización"
+                            tip='Se llena sola al presionar "Aprobar", no es editable aquí.'
+                          />
+                        }
                         value={editing.fecha_autorizacion || "—"}
                         disabled
                         fullWidth
@@ -1174,7 +1214,18 @@ export default function TesoreriaFlujosPage() {
                   )}
                   <TextField size="small" label="Pagado" value={editing.pagado ? "Sí" : "No"} disabled fullWidth />
                   {editing.pagado && (
-                    <TextField size="small" label="Fecha de pago" value={editing.fecha_pago || "—"} disabled fullWidth />
+                    <TextField
+                      size="small"
+                      label={
+                        <LabelTip
+                          text="Fecha de pago"
+                          tip='Se llena sola al "Registrar pago", no es editable aquí.'
+                        />
+                      }
+                      value={editing.fecha_pago || "—"}
+                      disabled
+                      fullWidth
+                    />
                   )}
                   <Typography variant="caption" color="text.secondary">
                     Se actualizan con las acciones Aprobar / Rechazar / Registrar pago, no
@@ -1202,16 +1253,28 @@ export default function TesoreriaFlujosPage() {
               />
               <TextField
                 size="small"
-                label="ID de requisición"
+                label={
+                  <LabelTip
+                    text="ID de requisición"
+                    tip="ID de la requisición de materiales relacionada, si aplica. Texto libre, no valida contra el catálogo."
+                  />
+                }
                 value={form.idRequisicion}
                 onChange={(e) => setForm({ ...form, idRequisicion: e.target.value })}
+                InputLabelProps={{ shrink: true }}
                 fullWidth
               />
               <TextField
                 size="small"
-                label="Link de referencia"
+                label={
+                  <LabelTip
+                    text="Link de referencia"
+                    tip="Liga externa de apoyo (cotización, correo, etc.), distinta del comprobante de pago."
+                  />
+                }
                 value={form.linkReferencia}
                 onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
+                InputLabelProps={{ shrink: true }}
                 fullWidth
               />
             </Stack>
@@ -1234,9 +1297,15 @@ export default function TesoreriaFlujosPage() {
               />
               <TextField
                 size="small"
-                label="Estado del CFDI"
+                label={
+                  <LabelTip
+                    text="Estado del CFDI"
+                    tip="Texto libre para anotar el estado del CFDI relacionado; no se calcula automático (ver Conciliación de Facturas para el estado real)."
+                  />
+                }
                 value={form.estadoCfdi}
                 onChange={(e) => setForm({ ...form, estadoCfdi: e.target.value })}
+                InputLabelProps={{ shrink: true }}
                 fullWidth
               />
             </Stack>
@@ -1328,14 +1397,20 @@ export default function TesoreriaFlujosPage() {
                       </Button>
                     )}
                     {puedeEditar && !editing.pagado && (
-                      <Button
-                        size="small"
-                        startIcon={<Check size={14} strokeWidth={1.5} />}
-                        disabled={!editing.autorizacion}
-                        onClick={() => abrirDialogoPago(editing)}
+                      <Tooltip
+                        title={editing.autorizacion ? "" : 'Da clic en "Aprobar" para autorizar el pago'}
                       >
-                        {editing.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}
-                      </Button>
+                        <span>
+                          <Button
+                            size="small"
+                            startIcon={<Check size={14} strokeWidth={1.5} />}
+                            disabled={!editing.autorizacion}
+                            onClick={() => abrirDialogoPago(editing)}
+                          >
+                            {editing.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}
+                          </Button>
+                        </span>
+                      </Tooltip>
                     )}
                     {puedeEditar && editing.pagado && (
                       <Button size="small" startIcon={<Upload size={14} strokeWidth={1.5} />} onClick={() => abrirDialogoPago(editing)}>
@@ -1349,9 +1424,15 @@ export default function TesoreriaFlujosPage() {
               <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
-                label="Comprobación asignada a"
+                label={
+                  <LabelTip
+                    text="Comprobación asignada a"
+                    tip="Quién debe juntar/revisar los comprobantes de este flujo."
+                  />
+                }
                 value={form.comprobacionAsignadaA}
                 onChange={(e) => setForm({ ...form, comprobacionAsignadaA: e.target.value })}
+                InputLabelProps={{ shrink: true }}
                 fullWidth
               />
               <ToggleCard
@@ -1371,16 +1452,28 @@ export default function TesoreriaFlujosPage() {
               />
               <TextField
                 size="small"
-                label="Permiso para enviar pago"
+                label={
+                  <LabelTip
+                    text="Permiso para enviar pago"
+                    tip="Código o nota de quién autorizó que se enviara el pago (heredado del sistema anterior)."
+                  />
+                }
                 value={form.permisoEnviarPago}
                 onChange={(e) => setForm({ ...form, permisoEnviarPago: e.target.value })}
+                InputLabelProps={{ shrink: true }}
                 fullWidth
               />
               <TextField
                 size="small"
-                label="Información de envío"
+                label={
+                  <LabelTip
+                    text="Información de envío"
+                    tip="Notas libres sobre cómo/cuándo se envió el pago (banco, referencia, etc.)."
+                  />
+                }
                 value={form.informacionEnvio}
                 onChange={(e) => setForm({ ...form, informacionEnvio: e.target.value })}
+                InputLabelProps={{ shrink: true }}
                 multiline
                 minRows={2}
                 fullWidth
@@ -1403,9 +1496,15 @@ export default function TesoreriaFlujosPage() {
               />
               <TextField
                 size="small"
-                label="Permiso"
+                label={
+                  <LabelTip
+                    text="Permiso"
+                    tip="Código de permiso/centro de costo heredado del sistema anterior; no controla accesos de la app."
+                  />
+                }
                 value={form.permiso}
                 onChange={(e) => setForm({ ...form, permiso: e.target.value })}
+                InputLabelProps={{ shrink: true }}
                 fullWidth
               />
               <Divider sx={{ my: 1 }} />
