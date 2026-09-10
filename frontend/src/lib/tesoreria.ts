@@ -801,6 +801,21 @@ export async function getContrato(idContrato: string): Promise<TesoreriaContrato
   return response.json();
 }
 
+// Contrato generico GEN-REEMBOLSOS-<sociedad> (creandolo si hace falta) -
+// para preseleccionar Contrato al dar de alta un Flujo de reembolso directo
+// en Flujos, sin partir de un ticket (10/Sep/2026, "Contratos REEMB por
+// sociedad"), ver TesoreriaContratoViewSet.contrato_generico_reembolso.
+export async function getContratoGenericoReembolsoPorSociedad(sociedad: string): Promise<{ id_contrato: string }> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/contratos/contrato_generico_reembolso/?sociedad=${encodeURIComponent(sociedad)}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function createContrato(params: {
   sociedad: string;
   contraparte: string;
@@ -1033,6 +1048,8 @@ export interface TesoreriaFlujo {
   factura: string | null;
   complemento: string | null;
   nomina: string | null;
+  periodo_nomina: string | null;
+  periodo_nomina_serie: string | null;
   estado_cfdi: string | null;
   requiere_complemento: boolean | null;
   comprobacion_asignada_a: string | null;
@@ -1054,12 +1071,14 @@ export async function listFlujos(params?: {
   contrato?: string;
   sociedad?: string;
   contraparte?: string;
+  nomina?: string;
 }): Promise<TesoreriaFlujo[]> {
   const query = new URLSearchParams();
   if (params?.search) query.set("search", params.search);
   if (params?.contrato) query.set("contrato", params.contrato);
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contraparte) query.set("contraparte", params.contraparte);
+  if (params?.nomina) query.set("nomina", params.nomina);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1137,6 +1156,7 @@ export function urlExportarFlujosCsv(opciones?: { search?: string; contrato?: st
 export async function createFlujo(params: {
   contrato: string;
   cuenta: string;
+  periodoNomina?: string;
   totalMxp?: string;
   fechaEfectiva?: string;
   concepto?: string;
@@ -1162,6 +1182,7 @@ export async function createFlujo(params: {
     body: JSON.stringify({
       contrato: params.contrato,
       cuenta: params.cuenta,
+      periodo_nomina: params.periodoNomina || null,
       total_mxp: params.totalMxp || null,
       fecha_efectiva: params.fechaEfectiva || null,
       concepto: params.concepto || null,
@@ -1302,7 +1323,7 @@ export async function subirComprobanteFlujo(
 // enlace (400 si no). Requiere tesoreria.editar, igual que registrarPago.
 export async function vincularFactura(
   idFlujo: string,
-  params: { factura?: string; complemento?: string }
+  params: { factura?: string; complemento?: string; nomina?: string }
 ): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/vincular_factura/`, {
     method: "POST",
@@ -1310,6 +1331,7 @@ export async function vincularFactura(
     body: JSON.stringify({
       factura: params.factura || undefined,
       complemento: params.complemento || undefined,
+      nomina: params.nomina || undefined,
     }),
   });
   if (!response.ok) {
@@ -1501,6 +1523,139 @@ export async function updateContrato(
       autorizacion: params.autorizacion,
     }),
   });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Nomina - periodo/agrupador (10/Sep/2026, modulo de Nominas Fase 1) - NO
+// es el CFDI de nomina (ver TesoreriaRecNomina mas abajo, que es el recibo
+// individual timbrado). Un TesoreriaNomina se desglosa en N Flujos (uno por
+// empleado pagado, via TesoreriaFlujo.periodo_nomina) - sin tabla de
+// detalle intermedia, ver services/tesoreria-service/tesoreria/models.py.
+export type TesoreriaNominaTipo = "QUINCENAL" | "SEMANAL";
+export type TesoreriaNominaStatus = "ACTIVO" | "CERRADA";
+
+export interface TesoreriaNomina {
+  id_nomina: string;
+  tipo: TesoreriaNominaTipo;
+  sociedad: string;
+  proyecto: string | null;
+  centro: string | null;
+  serie: string;
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
+  status: TesoreriaNominaStatus;
+  comentarios: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listNominas(filtros?: {
+  sociedad?: string;
+  proyecto?: string;
+  centro?: string;
+  tipo?: TesoreriaNominaTipo;
+}): Promise<TesoreriaNomina[]> {
+  const params = new URLSearchParams();
+  if (filtros?.sociedad) params.set("sociedad", filtros.sociedad);
+  if (filtros?.proyecto) params.set("proyecto", filtros.proyecto);
+  if (filtros?.centro) params.set("centro", filtros.centro);
+  if (filtros?.tipo) params.set("tipo", filtros.tipo);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/nominas/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Para el panel de referencias cruzadas (10/Sep/2026, "Ver Flujos debe
+// seguir el patron de referencias cruzadas") - mismo criterio que
+// getContrato/getContraparte: retrieve directo por PK.
+export async function getNomina(idNomina: string): Promise<TesoreriaNomina> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/nominas/${encodeURIComponent(idNomina)}/`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function createNomina(params: {
+  tipo: TesoreriaNominaTipo;
+  sociedad: string;
+  proyecto?: string;
+  centro?: string;
+  serie: string;
+  fechaInicio?: string;
+  fechaFin?: string;
+  status?: TesoreriaNominaStatus;
+  comentarios?: string;
+}): Promise<TesoreriaNomina> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/nominas/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tipo: params.tipo,
+      sociedad: params.sociedad,
+      proyecto: params.proyecto || null,
+      centro: params.centro || null,
+      serie: params.serie,
+      fecha_inicio: params.fechaInicio || null,
+      fecha_fin: params.fechaFin || null,
+      status: params.status || undefined,
+      comentarios: params.comentarios || null,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function updateNomina(
+  idNomina: string,
+  params: Partial<{
+    tipo: TesoreriaNominaTipo;
+    proyecto: string;
+    centro: string;
+    serie: string;
+    fechaInicio: string;
+    fechaFin: string;
+    status: TesoreriaNominaStatus;
+    comentarios: string;
+  }>
+): Promise<TesoreriaNomina> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/nominas/${encodeURIComponent(idNomina)}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tipo: params.tipo,
+      proyecto: params.proyecto,
+      centro: params.centro,
+      serie: params.serie,
+      fecha_inicio: params.fechaInicio,
+      fecha_fin: params.fechaFin,
+      status: params.status,
+      comentarios: params.comentarios,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Contrato generico GEN-NOMINA-<sociedad> de esta nomina (creandolo si hace
+// falta) - para preseleccionar Contrato al dar de alta un Flujo ligado a
+// esta nomina, ver TesoreriaNominaViewSet.contrato_generico.
+export async function getContratoGenericoNomina(idNomina: string): Promise<{ id_contrato: string }> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/nominas/${encodeURIComponent(idNomina)}/contrato_generico/`
+  );
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
@@ -1706,6 +1861,21 @@ export async function listFacturaDoctosRelacionados(timbreUuid: string): Promise
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/factura-doctos-relacionados/?timbre_uuid=${encodeURIComponent(timbreUuid)}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Exhibiciones/REPs YA RECIBIDOS que pagan una factura especifica (10/Sep/2026,
+// "mostrar la lista de exhibiciones/REPs ya recibidos dentro de la misma
+// factura") - filtro distinto a listFacturaDoctosRelacionados (ese es por
+// el uuid del REP, este es por el uuid de la FACTURA que se esta pagando).
+export async function listExhibicionesDeFactura(facturaUuid: string): Promise<FacturaDoctoRelacionado[]> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/factura-doctos-relacionados/?id_documento=${encodeURIComponent(facturaUuid)}`
   );
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

@@ -188,10 +188,11 @@ describe("buildNavItems - Tesorería", () => {
       // del lado Tesoreria (el ticket vive hoy solo en MiCumbres).
       expect(labels).toEqual([
         "Reporte Diario",
-        "Reporte de Saldos",
+        "Saldos",
         "Solicitudes de Pago",
         "Reembolsos",
         "Flujos",
+        "Nóminas",
         "Facturas",
         "Complementos de Pago",
         "Notas de Crédito",

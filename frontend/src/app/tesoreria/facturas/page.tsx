@@ -75,6 +75,8 @@ import {
   enviarMasivoFacturas,
   listFacturaConceptos,
   enviarAvisoSaldoPendiente,
+  FacturaDoctoRelacionado,
+  listExhibicionesDeFactura,
   listFacturaTraslados,
   listFacturas,
   marcarEstadoFactura,
@@ -563,6 +565,12 @@ export default function TesoreriaFacturasPage() {
   const [avisoSaldoEnviado, setAvisoSaldoEnviado] = useState(false);
   const [errorAvisoSaldo, setErrorAvisoSaldo] = useState<string | null>(null);
 
+  // Exhibiciones/REPs ya recibidos (10/Sep/2026, "mostrar la lista de
+  // exhibiciones/REPs ya recibidos dentro de la misma factura, asi es mas
+  // visual") - historial real, no editable a mano (viene del REP timbrado).
+  const [exhibiciones, setExhibiciones] = useState<FacturaDoctoRelacionado[]>([]);
+  const [cargandoExhibiciones, setCargandoExhibiciones] = useState(false);
+
   async function handleAvisoSaldoPendiente() {
     if (!editing) return;
     setEnviandoAvisoSaldo(true);
@@ -750,6 +758,14 @@ export default function TesoreriaFacturasPage() {
     setAvisoSaldoEnviado(false);
     setErrorAvisoSaldo(null);
     setModoSoloLectura(soloLectura);
+    setExhibiciones([]);
+    if (f.comprobante_metodo_pago === "PPD") {
+      setCargandoExhibiciones(true);
+      listExhibicionesDeFactura(f.timbre_uuid)
+        .then(setExhibiciones)
+        .catch(() => setExhibiciones([]))
+        .finally(() => setCargandoExhibiciones(false));
+    }
     setDialogOpen(true);
   }
 
@@ -1813,6 +1829,48 @@ export default function TesoreriaFacturasPage() {
                       </Stack>
                     </Paper>
                   )}
+                {/* Exhibiciones/REPs ya recibidos (10/Sep/2026, "mostrar la
+                lista...dentro de la misma factura, asi es mas visual") -
+                historial real de parcialidades, viene del REP timbrado,
+                no es editable a mano. */}
+                {editing.comprobante_metodo_pago === "PPD" && (
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2">Exhibiciones recibidas</Typography>
+                      {cargandoExhibiciones ? (
+                        <CircularProgress size={16} />
+                      ) : exhibiciones.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary">
+                          Todavía no se ha recibido ningún complemento de pago (REP) para esta factura.
+                        </Typography>
+                      ) : (
+                        <Stack spacing={0.5}>
+                          {exhibiciones.map((e) => (
+                            <Stack
+                              key={e.id}
+                              direction="row"
+                              spacing={2}
+                              sx={{ border: 1, borderColor: "divider", borderRadius: 0, p: 1 }}
+                            >
+                              <Typography variant="body2" sx={{ minWidth: 90 }}>
+                                Parcialidad {e.num_parcialidad ?? "—"}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                                Saldo anterior: {e.imp_saldo_ant ? Number(e.imp_saldo_ant).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}
+                              </Typography>
+                              <Typography variant="body2" color="success.main">
+                                Pagado: {e.imp_pagado ? Number(e.imp_pagado).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}
+                              </Typography>
+                              <Typography variant="body2" color={e.imp_saldo_insoluto && Number(e.imp_saldo_insoluto) > 0 ? "error.main" : "text.secondary"}>
+                                Saldo insoluto: {e.imp_saldo_insoluto ? Number(e.imp_saldo_insoluto).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "$0.00"}
+                              </Typography>
+                            </Stack>
+                          ))}
+                        </Stack>
+                      )}
+                    </Stack>
+                  </Paper>
+                )}
                 {/* Vinculacion factura->flujo - sentido inverso al que ya
                     existia desde Flujos. */}
                 {puedeEditar && !modoSoloLectura && (

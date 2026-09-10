@@ -27,7 +27,14 @@ import {
 import { Wallet2, Pencil, Plus, Search, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
-import { TesoreriaRecNomina, createRecNomina, listRecNominas, updateRecNomina } from "@/lib/tesoreria";
+import {
+  TesoreriaFlujo,
+  TesoreriaRecNomina,
+  createRecNomina,
+  listFlujos,
+  listRecNominas,
+  updateRecNomina,
+} from "@/lib/tesoreria";
 
 const FORM_VACIO = {
   timbreUuid: "",
@@ -54,6 +61,11 @@ const FORM_VACIO = {
 export default function TesoreriaRecNominasPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [items, setItems] = useState<TesoreriaRecNomina[]>([]);
+  // Vinculado a un Flujo (10/Sep/2026, "y agrega un indicador de vinculado
+  // a FLJ-XXX") - mismo criterio que las referencias cruzadas: se resuelve
+  // del lado del cliente contra la lista completa de Flujos, no hay filtro
+  // de backend por nomina_uuid todavia.
+  const [flujos, setFlujos] = useState<TesoreriaFlujo[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +77,13 @@ export default function TesoreriaRecNominasPage() {
 
   useEffect(() => {
     getSession().then(setSession);
+    listFlujos().then(setFlujos).catch(() => setFlujos([]));
   }, []);
+
+  function flujoVinculado(timbreUuid: string | null): TesoreriaFlujo | null {
+    if (!timbreUuid) return null;
+    return flujos.find((f) => f.nomina === timbreUuid) || null;
+  }
 
   const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
@@ -194,19 +212,20 @@ export default function TesoreriaRecNominasPage() {
                 <TableCell>Fecha de pago</TableCell>
                 <TableCell align="right">Total</TableCell>
                 <TableCell>Estado</TableCell>
+                <TableCell>Vinculado a</TableCell>
                 <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin recibos de nómina registrados.
                     </Typography>
@@ -222,6 +241,13 @@ export default function TesoreriaRecNominasPage() {
                     <TableCell>{n.nomina_fecha_pago || "—"}</TableCell>
                     <TableCell align="right">{n.total || "—"}</TableCell>
                     <TableCell>{n.estado && <Chip size="small" label={n.estado} variant="outlined" />}</TableCell>
+                    <TableCell>
+                      {flujoVinculado(n.timbre_uuid) ? (
+                        <Chip size="small" color="success" label={flujoVinculado(n.timbre_uuid)!.id_flujo} variant="outlined" />
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(n)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
@@ -281,6 +307,15 @@ export default function TesoreriaRecNominasPage() {
                     <strong>Total:</strong> {n.total || "—"}
                   </Typography>
                   {n.estado && <Chip size="small" label={n.estado} variant="outlined" sx={{ alignSelf: "flex-start" }} />}
+                  {flujoVinculado(n.timbre_uuid) && (
+                    <Chip
+                      size="small"
+                      color="success"
+                      label={`Vinculado a ${flujoVinculado(n.timbre_uuid)!.id_flujo}`}
+                      variant="outlined"
+                      sx={{ alignSelf: "flex-start" }}
+                    />
+                  )}
                 </Stack>
               </Paper>
             ))
