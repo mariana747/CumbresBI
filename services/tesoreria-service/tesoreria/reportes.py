@@ -17,7 +17,83 @@ from decimal import Decimal
 
 from django.db.models.functions import Coalesce
 
-from .models import TesoreriaCuenta, TesoreriaFlujo, TesoreriaMovimientoBancario, TesoreriaSaldo
+from .models import (
+    TesoreriaComplementoPago,
+    TesoreriaCuenta,
+    TesoreriaFactura,
+    TesoreriaFlujo,
+    TesoreriaMovimientoBancario,
+    TesoreriaSaldo,
+)
+
+# Clasificacion CFDI de un Flujo (10/Sep/2026, "Conciliacion de Facturas" -
+# notas de reunion, ver memoria de sesion). Distinta de
+# calcular_reporte_conciliacion (banco vs. interno) - esta clasifica cada
+# pago segun si ya tiene o necesita un comprobante fiscal (factura/
+# complemento) detras, para las 3 pantallas de Conciliacion de Facturas.
+def calcular_conciliacion_cfdi(queryset) -> dict:
+    """queryset ya viene filtrado (scope, mes, empresa, contrato,
+    ingreso/egreso, requiere_factura) por el llamador (ver
+    TesoreriaFlujoViewSet.conciliacion) - aqui solo se clasifica cada Flujo
+    y, para los que ya tienen CFDI, se calcula reconocido/por_reconocer.
+
+    Reglas (segun notas de reunion 09/Sep/2026):
+    - CON_CFDI: el contrato requiere factura AND el flujo ya tiene
+      factura y/o complemento ligado.
+    - SIN_CFDI: el contrato requiere factura AND el flujo todavia NO tiene
+      ninguno de los dos.
+    - NO_REQUIERE_CFDI: el contrato no requiere factura (`requiere_factura`
+      False o sin capturar).
+
+    reconocido (solo CON_CFDI): si la factura es PUE, su propio total; si
+    es PPD (se salda con un REP aparte) o no hay factura pero si complemento/
+    nomina, el total de ese complemento/recibo de nomina.
+    por_reconocer = reconocido - total_mxp del flujo.
+
+    Referencias cruzadas (10/Sep/2026, "hay que ver en que pantallas
+    podemos hacer referencia a sus datos ligados...asi para todo") - cada
+    fila trae ademas el folio/nombre de lo que ya tiene ligado (contrato,
+    contraparte, factura/complemento), para no mostrar solo un ID crudo."""
+    queryset = queryset.select_related(
+        "contrato", "contrato__contraparte", "factura", "complemento", "nomina", "cuenta"
+    )
+
+    con_cfdi, sin_cfdi, no_requiere = [], [], []
+    for flujo in queryset:
+        requiere_factura = flujo.contrato.requiere_factura if flujo.contrato_id else None
+        fila = {
+            "id_flujo": flujo.id_flujo,
+            "contrato": flujo.contrato_id,
+            "contraparte": flujo.contrato.contraparte_id if flujo.contrato_id else None,
+            "contraparte_nombre": flujo.contrato.contraparte.razon_social if flujo.contrato_id else None,
+            "concepto": flujo.concepto,
+            "total_mxp": flujo.total_mxp,
+            "fecha_efectiva": flujo.fecha_efectiva,
+            "factura": flujo.factura_id,
+            "factura_folio": flujo.factura.comprobante_folio if flujo.factura_id else None,
+            "complemento": flujo.complemento_id,
+            "complemento_folio": flujo.complemento.folio if flujo.complemento_id else None,
+            "nomina": flujo.nomina_id,
+            "requiere_factura": requiere_factura,
+        }
+        if requiere_factura is False:
+            no_requiere.append(fila)
+            continue
+        if not flujo.factura_id and not flujo.complemento_id:
+            sin_cfdi.append(fila)
+            continue
+
+        reconocido = None
+        if flujo.factura_id and flujo.factura.comprobante_metodo_pago == "PUE":
+            reconocido = flujo.factura.comprobante_total
+        elif flujo.complemento_id:
+            reconocido = flujo.complemento.total
+        elif flujo.nomina_id:
+            reconocido = flujo.nomina.total
+        por_reconocer = (reconocido - flujo.total_mxp) if reconocido is not None and flujo.total_mxp is not None else None
+        con_cfdi.append({**fila, "reconocido": reconocido, "por_reconocer": por_reconocer})
+
+    return {"con_cfdi": con_cfdi, "sin_cfdi": sin_cfdi, "no_requiere": no_requiere}
 
 
 def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
@@ -63,7 +139,7 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
             "diferencia": diferencia,
             "cuadra": diferencia == Decimal("0") if diferencia is not None else None,
             "transacciones": [
-                {"id_flujo": t.id_flujo, "concepto": t.concepto, "total_mxp": t.total_mxp, "iva_mxp": t.iva_mxp}
+                {"id_flujo": t.id_flujo, "concepto": t.concepto, "total_mxp": t.total_mxp}
                 for t in transacciones
             ],
         }
@@ -189,3 +265,103 @@ def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=Non
         "sin_conciliar_banco": sin_conciliar_banco,
         "sin_conciliar_interno": sin_conciliar_interno,
     }
+
+
+def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dict:
+    """IA/heuristica de conciliacion (10/Sep/2026, notas de reunion: "IA
+    propone complementos para registros con factura PPD y sin comp.;
+    facturas/complementos para registros sin CFDI") - "la IA propone, el
+    humano aprueba": esta funcion solo REGRESA candidatos, nunca liga nada
+    sola (el enlace real sigue pasando por
+    TesoreriaFlujoViewSet.vincular_factura, que exige una accion explicita
+    del analista).
+
+    Heuristica: misma contraparte que el contrato del flujo + monto dentro
+    de `tolerancia` MXP, excluyendo comprobantes que ya tienen otro flujo
+    ligado (para no proponer dos veces el mismo). Solo tiene sentido pedir
+    candidatos para lo que el flujo todavia NO tiene (si ya tiene factura,
+    solo se buscan complementos; si ya tiene complemento, solo facturas)."""
+    if not flujo.contrato_id or flujo.total_mxp is None:
+        return {"facturas": [], "complementos": []}
+
+    contraparte_id = flujo.contrato.contraparte_id
+    monto = flujo.total_mxp
+
+    candidatos_factura = []
+    if not flujo.factura_id:
+        facturas = TesoreriaFactura.objects.filter(contraparte_id=contraparte_id).exclude(flujos__isnull=False)
+        for f in facturas:
+            if f.comprobante_total is None:
+                continue
+            diferencia = abs(f.comprobante_total - monto)
+            if diferencia <= tolerancia:
+                candidatos_factura.append(
+                    {
+                        "timbre_uuid": f.timbre_uuid,
+                        "folio": f.comprobante_folio,
+                        "total": f.comprobante_total,
+                        "metodo_pago": f.comprobante_metodo_pago,
+                        "diferencia": diferencia,
+                    }
+                )
+        candidatos_factura.sort(key=lambda c: c["diferencia"])
+
+    candidatos_complemento = []
+    if not flujo.complemento_id:
+        complementos = TesoreriaComplementoPago.objects.filter(contraparte_id=contraparte_id).exclude(
+            flujos__isnull=False
+        )
+        for c in complementos:
+            if c.total is None:
+                continue
+            diferencia = abs(c.total - monto)
+            if diferencia <= tolerancia:
+                candidatos_complemento.append(
+                    {"timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total, "diferencia": diferencia}
+                )
+        candidatos_complemento.sort(key=lambda c: c["diferencia"])
+
+    return {"facturas": candidatos_factura, "complementos": candidatos_complemento}
+
+
+def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> list[dict]:
+    """Sugerencias para VARIOS flujos a la vez (10/Sep/2026, "aprobar en
+    lote, no uno por uno") - reusa sugerir_cfdi_para_flujo por cada flujo
+    sin CFDI del queryset, pero solo regresa el MEJOR candidato (el de
+    menor diferencia entre factura/complemento) y una `confianza` simple:
+    'alta' si el monto coincide exacto (diferencia = 0) y es el UNICO
+    candidato encontrado (nada ambiguo que decidir), 'media' en cualquier
+    otro caso con candidato. Flujos sin ningun candidato no aparecen en la
+    lista - "la IA propone, el humano aprueba" sigue aplicando: esto solo
+    ahorra abrir cada pago uno por uno, la aprobacion real sigue siendo
+    manual (ver TesoreriaFlujoViewSet.vincular_factura)."""
+    sugerencias = []
+    for flujo in queryset.select_related("contrato", "contrato__contraparte"):
+        if flujo.factura_id or flujo.complemento_id:
+            continue
+        candidatos = sugerir_cfdi_para_flujo(flujo, tolerancia)
+        total_candidatos = len(candidatos["facturas"]) + len(candidatos["complementos"])
+        if total_candidatos == 0:
+            continue
+        # El mejor candidato entre ambas listas (ya vienen ordenadas por
+        # diferencia ascendente cada una).
+        mejor_factura = candidatos["facturas"][0] if candidatos["facturas"] else None
+        mejor_complemento = candidatos["complementos"][0] if candidatos["complementos"] else None
+        if mejor_factura and (not mejor_complemento or mejor_factura["diferencia"] <= mejor_complemento["diferencia"]):
+            tipo, mejor = "factura", mejor_factura
+        else:
+            tipo, mejor = "complemento", mejor_complemento
+        confianza = "alta" if total_candidatos == 1 and mejor["diferencia"] == Decimal("0") else "media"
+        sugerencias.append(
+            {
+                "id_flujo": flujo.id_flujo,
+                "contraparte_nombre": flujo.contrato.contraparte.razon_social if flujo.contrato_id else None,
+                "concepto": flujo.concepto,
+                "total_mxp": flujo.total_mxp,
+                "tipo": tipo,
+                "timbre_uuid": mejor["timbre_uuid"],
+                "folio": mejor["folio"],
+                "confianza": confianza,
+            }
+        )
+    return sugerencias

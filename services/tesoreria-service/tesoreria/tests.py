@@ -360,24 +360,6 @@ class TesoreriaFlujoTests(TestCase):
         response = self._crear_flujo(scope=EffectiveScope(is_global=True, perm_keys=()))
         self.assertEqual(response.status_code, 403)
 
-    def test_iva_desglosado_se_guarda_y_se_expone(self):
-        # 09/Sep/2026, "hay que hacer el desglose del iva en flujos"
-        request = self.factory.post(
-            "/api/flujos/",
-            {
-                "contrato": self.contrato.id_contrato,
-                "cuenta": self.cuenta.id_cuenta_bancaria,
-                "total_mxp": "116.00",
-                "iva_mxp": "16.00",
-            },
-            format="json",
-        )
-        request.effective_scope = self.scope_crear
-        view = TesoreriaFlujoViewSet.as_view({"post": "create"})
-        response = view(request)
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["iva_mxp"], "16.00")
-
     def test_filtro_por_sociedad_via_contrato(self):
         # 09/Sep/2026, "agrega en flujos ... filtro por empresa"
         self._crear_flujo()
@@ -557,7 +539,7 @@ class TesoreriaFlujoExportarCsvTests(TestCase):
         )
         self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-CSV-1", contrato=self.contrato, cuenta=self.cuenta, total_mxp="1000.00", iva_mxp="160.00", pagado=True
+            id_flujo="FLJ-CSV-1", contrato=self.contrato, cuenta=self.cuenta, total_mxp="1000.00", pagado=True
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-CSV-2", contrato=self.contrato, cuenta=self.cuenta, total_mxp="2000.00", pagado=False
@@ -577,14 +559,6 @@ class TesoreriaFlujoExportarCsvTests(TestCase):
         self.assertIn("FLJ-CSV-1", contenido)
         self.assertIn("FLJ-CSV-2", contenido)
 
-    def test_iva_mxp_es_columna_propia(self):
-        # 09/Sep/2026, "que se pueda exportar flujos por separado" - el
-        # IVA debe salir en su propia columna, no mezclado con el total.
-        response = self._exportar()
-        contenido = response.content.decode("utf-8")
-        self.assertIn("IVA MXP", contenido)
-        self.assertIn("160.00", contenido)
-
     def test_respeta_filtro_de_contrato(self):
         otro_contrato = TesoreriaContrato.objects.create(
             id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-002",
@@ -598,6 +572,375 @@ class TesoreriaFlujoExportarCsvTests(TestCase):
         contenido = response.content.decode("utf-8")
         self.assertIn("FLJ-CSV-1", contenido)
         self.assertNotIn("FLJ-CSV-3", contenido)
+
+
+class TesoreriaConciliacionCfdiTests(TestCase):
+    """Conciliacion de Facturas (10/Sep/2026, notas de reunion) - clasificacion
+    CON_CFDI/SIN_CFDI/NO_REQUIERE_CFDI + reconocido/por_reconocer. Base de las
+    3 pantallas, sin UI todavia (Fase 4)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor conciliacion", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="p@p.com"
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00003", banco="BBVA", alias="BBV")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000099", alias="Cuenta conciliacion", apertura="2026-01-01"
+        )
+        self.hoy = timezone.localdate()
+
+    def _contrato(self, requiere_factura, sufijo):
+        return TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-{sufijo}",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+            requiere_factura=requiere_factura,
+        )
+
+    def _conciliacion(self, **params):
+        request = self.factory.get("/api/flujos/conciliacion/", params)
+        request.effective_scope = self.scope
+        return TesoreriaFlujoViewSet.as_view({"get": "conciliacion"})(request)
+
+    def test_no_requiere_factura(self):
+        contrato = self._contrato(False, "001")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-1", contrato=contrato, cuenta=self.cuenta, total_mxp="500.00", fecha_efectiva=self.hoy
+        )
+        response = self._conciliacion()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["no_requiere"]), 1)
+        self.assertEqual(len(response.data["con_cfdi"]), 0)
+        self.assertEqual(len(response.data["sin_cfdi"]), 0)
+
+    def test_requiere_factura_sin_ligar(self):
+        contrato = self._contrato(True, "002")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-2", contrato=contrato, cuenta=self.cuenta, total_mxp="500.00", fecha_efectiva=self.hoy
+        )
+        response = self._conciliacion()
+        self.assertEqual(len(response.data["sin_cfdi"]), 1)
+        self.assertEqual(len(response.data["con_cfdi"]), 0)
+
+    def test_con_cfdi_pue_reconocido_es_total_de_factura(self):
+        contrato = self._contrato(True, "003")
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="11111111-1111-1111-1111-111111111111",
+            comprobante_metodo_pago="PUE",
+            comprobante_total=Decimal("1160.00"),
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-3",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="1160.00",
+            fecha_efectiva=self.hoy,
+            factura=factura,
+        )
+        response = self._conciliacion()
+        self.assertEqual(len(response.data["con_cfdi"]), 1)
+        fila = response.data["con_cfdi"][0]
+        self.assertEqual(fila["reconocido"], Decimal("1160.00"))
+        self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
+
+    def test_con_cfdi_ppd_reconocido_es_total_del_complemento(self):
+        contrato = self._contrato(True, "004")
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="22222222-2222-2222-2222-222222222222",
+            comprobante_metodo_pago="PPD",
+            comprobante_total=Decimal("1160.00"),
+        )
+        complemento = TesoreriaComplementoPago.objects.create(
+            timbre_uuid="33333333-3333-3333-3333-333333333333", total=Decimal("580.00")
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-4",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="580.00",
+            fecha_efectiva=self.hoy,
+            factura=factura,
+            complemento=complemento,
+        )
+        response = self._conciliacion()
+        fila = response.data["con_cfdi"][0]
+        self.assertEqual(fila["reconocido"], Decimal("580.00"))
+        self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
+
+    def test_filtro_mes_excluye_fuera_de_rango(self):
+        contrato = self._contrato(True, "005")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-5",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="100.00",
+            fecha_efectiva=self.hoy.replace(year=self.hoy.year - 1),
+        )
+        response = self._conciliacion()
+        self.assertEqual(len(response.data["sin_cfdi"]), 0)
+
+    def test_filtro_requiere_factura(self):
+        contrato_si = self._contrato(True, "006")
+        contrato_no = self._contrato(False, "007")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-6", contrato=contrato_si, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-7", contrato=contrato_no, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+        )
+        response = self._conciliacion(requiere_factura="true")
+        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]]
+        self.assertIn("FLJ-CONC-6", ids)
+        self.assertEqual(len(response.data["no_requiere"]), 0)
+
+    def test_filtro_por_una_sola_fecha(self):
+        contrato = self._contrato(True, "008")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-8", contrato=contrato, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-9",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="100.00",
+            fecha_efectiva=self.hoy - timedelta(days=1),
+        )
+        response = self._conciliacion(desde=self.hoy.isoformat(), hasta=self.hoy.isoformat())
+        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]]
+        self.assertIn("FLJ-CONC-8", ids)
+        self.assertNotIn("FLJ-CONC-9", ids)
+
+    def test_filtro_por_rango_de_fechas(self):
+        contrato = self._contrato(True, "009")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-10",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="100.00",
+            fecha_efectiva=self.hoy.replace(month=1, day=1),
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-11",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="100.00",
+            fecha_efectiva=self.hoy.replace(year=self.hoy.year - 1),
+        )
+        response = self._conciliacion(
+            desde=self.hoy.replace(month=1, day=1).isoformat(), hasta=self.hoy.replace(month=12, day=31).isoformat()
+        )
+        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]]
+        self.assertIn("FLJ-CONC-10", ids)
+        self.assertNotIn("FLJ-CONC-11", ids)
+
+
+class TesoreriaFlujoRecordatorioTests(TestCase):
+    """Recordatorio manual de factura pendiente (10/Sep/2026, "Sin CFDI" en
+    Conciliacion de Facturas) - nunca se dispara solo, solo via este boton."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor recordatorio", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="prov@ejemplo.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-REC",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00004", banco="Santander", alias="STD")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000088", alias="Cuenta recordatorio", apertura="2026-01-01"
+        )
+        self.flujo = TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-REC-1", contrato=self.contrato, cuenta=self.cuenta, total_mxp="100.00", concepto="Renta"
+        )
+
+    def _recordatorio(self, id_flujo):
+        request = self.factory.post(f"/api/flujos/{id_flujo}/recordatorio/")
+        request.effective_scope = self.scope
+        return TesoreriaFlujoViewSet.as_view({"post": "recordatorio"})(request, pk=id_flujo)
+
+    @patch("tesoreria.views.enviar_correo_recordatorio_factura", return_value=True)
+    def test_envia_recordatorio(self, mock_enviar):
+        response = self._recordatorio(self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 200)
+        mock_enviar.assert_called_once()
+        self.assertEqual(mock_enviar.call_args.kwargs["email"], "prov@ejemplo.com")
+
+    @patch("tesoreria.views.enviar_correo_recordatorio_factura", return_value=False)
+    def test_mail_service_no_responde(self, mock_enviar):
+        response = self._recordatorio(self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 502)
+
+    def test_sin_email_de_contacto(self):
+        self.contraparte.email = ""
+        self.contraparte.save(update_fields=["email"])
+        response = self._recordatorio(self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 400)
+
+
+class TesoreriaSugerenciasCfdiTests(TestCase):
+    """"La IA propone, el humano aprueba" (10/Sep/2026, Fase 5 de
+    Conciliacion de Facturas) - candidatos por contraparte+monto, sin ligar
+    nada solo."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor sugerencias", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="s@s.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-SUG",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00005", banco="Banorte", alias="BNT")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000077", alias="Cuenta sugerencias", apertura="2026-01-01"
+        )
+        self.flujo = TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-SUG-1", contrato=self.contrato, cuenta=self.cuenta, total_mxp="1000.00"
+        )
+
+    def _sugerencias(self, id_flujo):
+        request = self.factory.get(f"/api/flujos/{id_flujo}/sugerencias_cfdi/")
+        request.effective_scope = self.scope
+        return TesoreriaFlujoViewSet.as_view({"get": "sugerencias_cfdi"})(request, pk=id_flujo)
+
+    def test_propone_factura_por_monto_parecido(self):
+        TesoreriaFactura.objects.create(
+            timbre_uuid="44444444-4444-4444-4444-444444444444",
+            contraparte=self.contraparte,
+            comprobante_total=Decimal("1000.50"),
+        )
+        response = self._sugerencias(self.flujo.id_flujo)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["facturas"]), 1)
+        self.assertEqual(response.data["facturas"][0]["timbre_uuid"], "44444444-4444-4444-4444-444444444444")
+
+    def test_no_propone_factura_fuera_de_tolerancia(self):
+        TesoreriaFactura.objects.create(
+            timbre_uuid="55555555-5555-5555-5555-555555555555",
+            contraparte=self.contraparte,
+            comprobante_total=Decimal("5000.00"),
+        )
+        response = self._sugerencias(self.flujo.id_flujo)
+        self.assertEqual(len(response.data["facturas"]), 0)
+
+    def test_no_propone_factura_ya_ligada_a_otro_flujo(self):
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="66666666-6666-6666-6666-666666666666",
+            contraparte=self.contraparte,
+            comprobante_total=Decimal("1000.00"),
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-SUG-2", contrato=self.contrato, cuenta=self.cuenta, total_mxp="1000.00", factura=factura
+        )
+        response = self._sugerencias(self.flujo.id_flujo)
+        self.assertEqual(len(response.data["facturas"]), 0)
+
+    def test_no_propone_si_el_flujo_ya_tiene_factura(self):
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="77777777-7777-7777-7777-777777777777",
+            contraparte=self.contraparte,
+            comprobante_total=Decimal("1000.00"),
+        )
+        self.flujo.factura = factura
+        self.flujo.save(update_fields=["factura"])
+        otra_factura = TesoreriaFactura.objects.create(
+            timbre_uuid="88888888-8888-8888-8888-888888888888",
+            contraparte=self.contraparte,
+            comprobante_total=Decimal("1000.00"),
+        )
+        response = self._sugerencias(self.flujo.id_flujo)
+        self.assertEqual(len(response.data["facturas"]), 0)
+        self.assertNotIn(otra_factura.timbre_uuid, [f["timbre_uuid"] for f in response.data["facturas"]])
+
+
+class TesoreriaSugerenciasCfdiLoteTests(TestCase):
+    """Aprobacion en lote (10/Sep/2026, "aprobar en lote, no uno por uno") -
+    sugerencias_cfdi_lote solo propone, aprobar_lote es el unico que liga
+    (siempre con la lista ya elegida/confirmada en pantalla)."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer", "tesoreria.editar"))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor lote", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="l@l.com"
+        )
+        self.contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-LOTE",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+            requiere_factura=True,
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00006", banco="Banregio", alias="BRG")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000066", alias="Cuenta lote", apertura="2026-01-01"
+        )
+        self.hoy = timezone.localdate()
+        self.flujo = TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-LOTE-1",
+            contrato=self.contrato,
+            cuenta=self.cuenta,
+            total_mxp="2000.00",
+            fecha_efectiva=self.hoy,
+        )
+        self.factura = TesoreriaFactura.objects.create(
+            timbre_uuid="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            contraparte=self.contraparte,
+            comprobante_folio="F-LOTE-1",
+            comprobante_total=Decimal("2000.00"),
+        )
+
+    def _lote(self, **params):
+        request = self.factory.get("/api/flujos/sugerencias_cfdi_lote/", params)
+        request.effective_scope = self.scope
+        return TesoreriaFlujoViewSet.as_view({"get": "sugerencias_cfdi_lote"})(request)
+
+    def _aprobar(self, items):
+        request = self.factory.post("/api/flujos/aprobar_lote/", {"items": items}, format="json")
+        request.effective_scope = self.scope
+        return TesoreriaFlujoViewSet.as_view({"post": "aprobar_lote"})(request)
+
+    def test_propone_con_confianza_alta_monto_exacto_unico(self):
+        response = self._lote()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id_flujo"], "FLJ-LOTE-1")
+        self.assertEqual(response.data[0]["confianza"], "alta")
+        self.assertEqual(response.data[0]["timbre_uuid"], self.factura.timbre_uuid)
+
+    def test_confianza_media_si_hay_mas_de_un_candidato(self):
+        TesoreriaFactura.objects.create(
+            timbre_uuid="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            contraparte=self.contraparte,
+            comprobante_folio="F-LOTE-2",
+            comprobante_total=Decimal("2000.50"),
+        )
+        response = self._lote()
+        self.assertEqual(response.data[0]["confianza"], "media")
+
+    def test_aprobar_lote_liga_la_factura(self):
+        response = self._aprobar([{"id_flujo": "FLJ-LOTE-1", "tipo": "factura", "timbre_uuid": self.factura.timbre_uuid}])
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["resultados"][0]["ok"])
+        self.flujo.refresh_from_db()
+        self.assertEqual(self.flujo.factura_id, self.factura.timbre_uuid)
+
+    def test_aprobar_lote_uuid_inexistente_reporta_error_sin_tronar(self):
+        response = self._aprobar([{"id_flujo": "FLJ-LOTE-1", "tipo": "factura", "timbre_uuid": "no-existe"}])
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["resultados"][0]["ok"])
 
 
 class TesoreriaFacturaTests(TestCase):
@@ -692,6 +1035,54 @@ class TesoreriaFacturaExportarCsvTests(TestCase):
         contenido = response.content.decode("utf-8")
         self.assertNotIn("uuid-csv-1", contenido)
         self.assertIn("uuid-csv-2", contenido)
+
+
+class TesoreriaFacturaAvisoSaldoPendienteTests(TestCase):
+    """Aviso manual de saldo PPD pendiente (10/Sep/2026, pendiente real de
+    Jenny: "aviso por correo de saldo PPD pendiente") - nunca se dispara
+    solo, solo por este boton."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.editar",))
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor PPD", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="ppd@ejemplo.com"
+        )
+        self.factura = TesoreriaFactura.objects.create(
+            timbre_uuid="uuid-ppd-1",
+            contraparte=self.contraparte,
+            comprobante_folio="F-PPD-1",
+            comprobante_metodo_pago="PPD",
+            comprobante_total=Decimal("1000.00"),
+        )
+        FacturaDoctoRelacionado.objects.create(
+            id_documento="uuid-ppd-1", num_parcialidad=1, imp_saldo_insoluto=Decimal("400.00")
+        )
+
+    def _aviso(self, **body):
+        request = self.factory.post(f"/api/facturas/{self.factura.id}/aviso_saldo_pendiente/", body, format="json")
+        request.effective_scope = self.scope
+        return TesoreriaFacturaViewSet.as_view({"post": "aviso_saldo_pendiente"})(request, pk=self.factura.id)
+
+    @patch("tesoreria.views.enviar_correo_aviso_saldo_ppd", return_value=True)
+    def test_envia_aviso_con_saldo_pendiente(self, mock_enviar):
+        response = self._aviso()
+        self.assertEqual(response.status_code, 200)
+        mock_enviar.assert_called_once()
+        self.assertEqual(mock_enviar.call_args.kwargs["saldo_pendiente"], Decimal("400.00"))
+
+    def test_no_envia_si_no_es_ppd(self):
+        self.factura.comprobante_metodo_pago = "PUE"
+        self.factura.save(update_fields=["comprobante_metodo_pago"])
+        response = self._aviso()
+        self.assertEqual(response.status_code, 400)
+
+    def test_no_envia_si_ya_no_tiene_saldo(self):
+        FacturaDoctoRelacionado.objects.create(
+            id_documento="uuid-ppd-1", num_parcialidad=2, imp_saldo_insoluto=Decimal("0.00")
+        )
+        response = self._aviso()
+        self.assertEqual(response.status_code, 400)
 
 
 class TesoreriaFacturaTicketOrigenTests(TestCase):
@@ -3115,6 +3506,114 @@ class TesoreriaFacturaSincronizarDriveTests(TestCase):
         self.assertIn("Drive", response.data["detail"])
 
 
+class TesoreriaComplementoPagoDriveTests(TestCase):
+    """ver_pdf/ver_xml/sincronizar_drive de ComplementoPago (10/Sep/2026) -
+    mismo patron real que TesoreriaFactura, ver comentario equivalente."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.leer",))
+        self.complemento = TesoreriaComplementoPago.objects.create(timbre_uuid="uuid-comp-drive", folio="C-1")
+
+    def test_ver_pdf_sin_drive_file_id_da_404(self):
+        request = self.factory.get(f"/api/complementos-pago/{self.complemento.pk}/ver_pdf/")
+        request.effective_scope = self.scope
+        view = TesoreriaComplementoPagoViewSet.as_view({"get": "ver_pdf"})
+        response = view(request, pk=self.complemento.pk)
+        self.assertEqual(response.status_code, 404)
+
+    def test_ver_xml_sin_drive_file_id_da_404(self):
+        request = self.factory.get(f"/api/complementos-pago/{self.complemento.pk}/ver_xml/")
+        request.effective_scope = self.scope
+        view = TesoreriaComplementoPagoViewSet.as_view({"get": "ver_xml"})
+        response = view(request, pk=self.complemento.pk)
+        self.assertEqual(response.status_code, 404)
+
+    def test_sincronizar_drive_liga_pdf_y_xml(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {
+            "archivos": [
+                {"file_id": "drive-pdf", "nombre": "complemento.pdf", "mime_type": "application/pdf"},
+                {"file_id": "drive-xml", "nombre": "complemento.xml", "mime_type": "application/xml"},
+            ]
+        }
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            request = self.factory.post(f"/api/complementos-pago/{self.complemento.pk}/sincronizar_drive/")
+            request.effective_scope = self.scope
+            view = TesoreriaComplementoPagoViewSet.as_view({"post": "sincronizar_drive"})
+            response = view(request, pk=self.complemento.pk)
+        self.assertEqual(response.status_code, 200)
+        self.complemento.refresh_from_db()
+        self.assertEqual(self.complemento.drive_file_id_pdf, "drive-pdf")
+        self.assertEqual(self.complemento.drive_file_id_xml, "drive-xml")
+
+    def test_sincronizar_drive_404_si_no_hay_nada(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {"archivos": []}
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            request = self.factory.post(f"/api/complementos-pago/{self.complemento.pk}/sincronizar_drive/")
+            request.effective_scope = self.scope
+            view = TesoreriaComplementoPagoViewSet.as_view({"post": "sincronizar_drive"})
+            response = view(request, pk=self.complemento.pk)
+        self.assertEqual(response.status_code, 404)
+
+
+class TesoreriaNotaCreditoDriveTests(TestCase):
+    """ver_pdf/ver_xml/sincronizar_drive de NotaCredito (10/Sep/2026) -
+    mismo patron real que TesoreriaFactura, ver comentario equivalente."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("facturacion-cfdi.leer",))
+        self.nota = TesoreriaNotaCredito.objects.create(timbre_uuid="uuid-nc-drive", comprobante_folio="N-1")
+
+    def test_ver_pdf_sin_drive_file_id_da_404(self):
+        request = self.factory.get(f"/api/notas-credito/{self.nota.pk}/ver_pdf/")
+        request.effective_scope = self.scope
+        view = TesoreriaNotaCreditoViewSet.as_view({"get": "ver_pdf"})
+        response = view(request, pk=self.nota.pk)
+        self.assertEqual(response.status_code, 404)
+
+    def test_ver_xml_sin_drive_file_id_da_404(self):
+        request = self.factory.get(f"/api/notas-credito/{self.nota.pk}/ver_xml/")
+        request.effective_scope = self.scope
+        view = TesoreriaNotaCreditoViewSet.as_view({"get": "ver_xml"})
+        response = view(request, pk=self.nota.pk)
+        self.assertEqual(response.status_code, 404)
+
+    def test_sincronizar_drive_liga_pdf_y_xml(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {
+            "archivos": [
+                {"file_id": "drive-pdf", "nombre": "nota.pdf", "mime_type": "application/pdf"},
+                {"file_id": "drive-xml", "nombre": "nota.xml", "mime_type": "application/xml"},
+            ]
+        }
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            request = self.factory.post(f"/api/notas-credito/{self.nota.pk}/sincronizar_drive/")
+            request.effective_scope = self.scope
+            view = TesoreriaNotaCreditoViewSet.as_view({"post": "sincronizar_drive"})
+            response = view(request, pk=self.nota.pk)
+        self.assertEqual(response.status_code, 200)
+        self.nota.refresh_from_db()
+        self.assertEqual(self.nota.drive_file_id_pdf, "drive-pdf")
+        self.assertEqual(self.nota.drive_file_id_xml, "drive-xml")
+
+    def test_sincronizar_drive_404_si_no_hay_nada(self):
+        respuesta_falsa = MagicMock()
+        respuesta_falsa.status_code = 200
+        respuesta_falsa.json.return_value = {"archivos": []}
+        with patch("tesoreria.views.requests.get", return_value=respuesta_falsa):
+            request = self.factory.post(f"/api/notas-credito/{self.nota.pk}/sincronizar_drive/")
+            request.effective_scope = self.scope
+            view = TesoreriaNotaCreditoViewSet.as_view({"post": "sincronizar_drive"})
+            response = view(request, pk=self.nota.pk)
+        self.assertEqual(response.status_code, 404)
+
+
 class _RespuestaFalsa:
     """Doble minimo de requests.Response para mockear requests.get/post sin
     levantar servidores reales (drive-service/mail-service)."""
@@ -3448,7 +3947,7 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
 
     def test_conciliar_automatico_no_liga_si_fecha_esta_lejos(self):
         self._crear_flujo("1000.00", "2026-08-01")
-        movimiento = self._crear_movimiento(cargo="1000.00", fecha="2026-09-15")
+        self._crear_movimiento(cargo="1000.00", fecha="2026-09-15")
 
         request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
         request.effective_scope = self.scope_editar

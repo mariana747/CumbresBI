@@ -529,7 +529,16 @@ class TesoreriaComplementoPago(models.Model):
     monto_pagado = models.CharField(max_length=50, blank=True, null=True)
     uuid_relacion = models.CharField(max_length=50, blank=True, null=True)
     tipo_factura = models.CharField(max_length=50, blank=True, null=True)
+    # Documentos reales desde Drive (10/Sep/2026) - mismo patron que
+    # TesoreriaFactura: drive_file_id_pdf/xml son la fuente real cuando el
+    # archivo se selecciono via Motor Documental; link_pdf/link_xml se
+    # llenan solos con el web_view_link para el boton "Abrir en Drive".
     link_pdf = models.TextField(blank=True, null=True)
+    drive_file_id_pdf = models.TextField(blank=True, null=True)
+    mime_type_pdf = models.CharField(max_length=100, blank=True, null=True)
+    link_xml = models.TextField(blank=True, null=True)
+    drive_file_id_xml = models.TextField(blank=True, null=True)
+    mime_type_xml = models.CharField(max_length=100, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -612,6 +621,12 @@ class TesoreriaFactura(models.Model):
     )
     comprobante_sub_total = models.CharField(
         db_column="Comprobante_SubTotal", max_length=50, blank=True, null=True
+    )
+    # comprobante_iva (10/Sep/2026, "en facturas se requiere el sub total
+    # e IVA y total") - antes solo se guardaban Subtotal y Total; sin este
+    # campo no habia forma de saber cuanto de un CFDI era IVA.
+    comprobante_iva = models.DecimalField(
+        db_column="Comprobante_IVA", max_digits=18, decimal_places=2, blank=True, null=True
     )
     comprobante_moneda = models.CharField(
         db_column="Comprobante_Moneda", max_length=50, blank=True, null=True
@@ -784,7 +799,14 @@ class TesoreriaNotaCredito(models.Model):
         db_column="Timbre_NoCertificadoSAT", max_length=30, blank=True, null=True
     )
     tipo_factura = models.CharField(max_length=50, blank=True, null=True)
+    # Documentos reales desde Drive (10/Sep/2026) - mismo patron que
+    # TesoreriaFactura/TesoreriaComplementoPago.
     link_pdf = models.TextField(blank=True, null=True)
+    drive_file_id_pdf = models.TextField(blank=True, null=True)
+    mime_type_pdf = models.CharField(max_length=100, blank=True, null=True)
+    link_xml = models.TextField(blank=True, null=True)
+    drive_file_id_xml = models.TextField(blank=True, null=True)
+    mime_type_xml = models.CharField(max_length=100, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1038,10 +1060,6 @@ class TesoreriaFlujo(models.Model):
         TesoreriaCuenta, db_column="cuenta", on_delete=models.PROTECT, related_name="flujos"
     )
     total_mxp = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
-    # IVA desglosado (09/Sep/2026, pendiente real de Jenny) - captura libre,
-    # no se calcula solo (no todo flujo lleva 16% - hay exentos, tasa 0,
-    # y pagos que ya vienen desglosados distinto en el CFDI real).
-    iva_mxp = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
     autorizacion = models.BooleanField(blank=True, null=True)
     autorizado_por = models.CharField(max_length=100, blank=True, null=True)
     fecha_autorizacion = models.DateField(blank=True, null=True)
@@ -1075,13 +1093,6 @@ class TesoreriaFlujo(models.Model):
         blank=True,
         null=True,
     )
-    # requiere_cfdi (09/Sep/2026, "podemos distinguir los tipos de pago
-    # entre si cfdi, sin cfdi y no requiere") - no todo pago tiene un CFDI
-    # detras (ej. comision bancaria, traspaso interno) - sin este campo,
-    # esos pagos se veian identicos a uno que SI necesita factura/REP/nomina
-    # y todavia no la tiene. default=True porque la mayoria de los pagos
-    # reales si llevan CFDI.
-    requiere_cfdi = models.BooleanField(default=True)
     nomina = models.ForeignKey(
         TesoreriaRecNomina,
         db_column="nomina_uuid",
@@ -1127,22 +1138,6 @@ class TesoreriaFlujo(models.Model):
 
     def __str__(self):
         return self.id_flujo
-
-    # Clasificacion del CFDI (09/Sep/2026, "podemos distinguir los tipos
-    # de pago entre si cfdi, sin cfdi y no requiere") - no se guarda en un
-    # campo propio, se deriva de lo que ya existe (requiere_cfdi + los 3
-    # FK de factura/complemento/nomina), asi nunca se puede desincronizar.
-    TIPO_CFDI_CON = "CON_CFDI"
-    TIPO_CFDI_SIN = "SIN_CFDI"
-    TIPO_CFDI_NO_REQUIERE = "NO_REQUIERE"
-
-    @property
-    def tipo_cfdi(self):
-        if not self.requiere_cfdi:
-            return self.TIPO_CFDI_NO_REQUIERE
-        if self.factura_id or self.complemento_id or self.nomina_id:
-            return self.TIPO_CFDI_CON
-        return self.TIPO_CFDI_SIN
 
 
 class TesoreriaMovimientoBancario(models.Model):
