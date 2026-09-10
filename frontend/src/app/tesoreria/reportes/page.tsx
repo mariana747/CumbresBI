@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
@@ -8,6 +8,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -28,7 +29,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileBarChart, Mail, RefreshCw, X as CloseIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, FileBarChart, Mail, RefreshCw, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
@@ -36,11 +37,13 @@ import {
   ReporteDiario,
   ReporteDiarioCuenta,
   TesoreriaContrato,
+  TesoreriaCuenta,
   arrastrarSaldo,
   createFlujo,
   enviarReporteDiario,
   getReporteDiario,
   listContratos,
+  listCuentas,
 } from "@/lib/tesoreria";
 
 // Reporte diario de saldos (26/Ago/2026, ver documentos/finanzas.md:
@@ -54,6 +57,10 @@ export default function TesoreriaReporteDiarioPage() {
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [sociedadesElegidas, setSociedadesElegidas] = useState<GeneralSociedad[]>([]);
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  // Filtro por cuenta (09/Sep/2026, "en reporte diario, debe hacerse pero
+  // por cuenta") - las opciones salen del reporte ya generado, no de un
+  // catalogo aparte, para no mostrar cuentas de empresas no elegidas.
+  const [filtroCuenta, setFiltroCuenta] = useState("");
   const [reporte, setReporte] = useState<ReporteDiario | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,16 +77,34 @@ export default function TesoreriaReporteDiarioPage() {
   // the option to add a transaction record with the description
   // 'RENDIMIENTOS'... choose the contract to relate it to").
   const [rendimientosCuenta, setRendimientosCuenta] = useState<ReporteDiarioCuenta | null>(null);
+  // Detalle de Flujos por cuenta (09/Sep/2026, "agrega flujos para verlos
+  // en el reporte diario") - antes solo se veia la suma, no cada
+  // transaccion real.
+  const [cuentasExpandidas, setCuentasExpandidas] = useState<Set<string>>(new Set());
+  function toggleCuentaExpandida(id: string) {
+    setCuentasExpandidas((prev) => {
+      const siguiente = new Set(prev);
+      if (siguiente.has(id)) siguiente.delete(id);
+      else siguiente.add(id);
+      return siguiente;
+    });
+  }
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
   const [rendimientosContrato, setRendimientosContrato] = useState("");
   const [rendimientosMonto, setRendimientosMonto] = useState("");
   const [guardandoRendimientos, setGuardandoRendimientos] = useState(false);
   const [rendimientosError, setRendimientosError] = useState<string | null>(null);
+  // Cuentas del catalogo (09/Sep/2026, "debe aparecer antes de generar") -
+  // antes las opciones del filtro salian del reporte ya generado, asi que
+  // el filtro no existia hasta darle "Generar" - ahora se cargan aparte,
+  // igual que en Balanza (saldos/page.tsx).
+  const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
 
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listContratos().then(setContratos).catch(() => setContratos([]));
+    listCuentas().then(setCuentas).catch(() => setCuentas([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
@@ -179,6 +204,22 @@ export default function TesoreriaReporteDiarioPage() {
     return Number(valor).toLocaleString("es-MX", { minimumFractionDigits: 2 });
   }
 
+  // Cuentas del catalogo, acotadas a las empresas elegidas (si hay alguna
+  // elegida) - independiente de si ya se genero el reporte, para que el
+  // filtro exista desde antes de darle "Generar".
+  const cuentasDelReporte = useMemo(() => {
+    if (sociedadesElegidas.length === 0) return cuentas;
+    const rfcs = new Set(sociedadesElegidas.map((s) => s.rfc));
+    return cuentas.filter((c) => c.sociedad && rfcs.has(c.sociedad));
+  }, [cuentas, sociedadesElegidas]);
+  const sociedadesFiltradas = useMemo(() => {
+    if (!reporte) return [];
+    if (!filtroCuenta) return reporte.sociedades;
+    return reporte.sociedades
+      .map((empresa) => ({ ...empresa, cuentas: empresa.cuentas.filter((c) => c.id_cuenta_bancaria === filtroCuenta) }))
+      .filter((empresa) => empresa.cuentas.length > 0);
+  }, [reporte, filtroCuenta]);
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
@@ -217,6 +258,26 @@ export default function TesoreriaReporteDiarioPage() {
             InputLabelProps={{ shrink: true }}
             sx={{ flex: 1, minWidth: 160 }}
           />
+          {cuentasDelReporte.length > 0 && (
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="filtro-cuenta-reporte-label">Filtrar por cuenta</InputLabel>
+              <Select
+                labelId="filtro-cuenta-reporte-label"
+                label="Filtrar por cuenta"
+                value={filtroCuenta}
+                onChange={(e) => setFiltroCuenta(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Todas las cuentas</em>
+                </MenuItem>
+                {cuentasDelReporte.map((c) => (
+                  <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
+                    {c.alias}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
           <Button variant="contained" onClick={generar} disabled={loading} sx={{ flexShrink: 0 }}>
             {loading ? <CircularProgress size={16} /> : "Generar"}
           </Button>
@@ -239,14 +300,14 @@ export default function TesoreriaReporteDiarioPage() {
 
       {reporte && (
         <>
-          {reporte.sociedades.length === 0 ? (
+          {sociedadesFiltradas.length === 0 ? (
             <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
               <Typography variant="body2" color="text.secondary">
-                Sin cuentas activas para las empresas elegidas.
+                {filtroCuenta ? "Sin resultados para la cuenta elegida." : "Sin cuentas activas para las empresas elegidas."}
               </Typography>
             </Paper>
           ) : (
-            reporte.sociedades.map((empresa) => {
+            sociedadesFiltradas.map((empresa) => {
               const nombreEmpresa =
                 sociedades.find((s) => s.rfc === empresa.sociedad)?.alias_sociedad || empresa.sociedad || "Sin empresa";
               return (
@@ -259,6 +320,7 @@ export default function TesoreriaReporteDiarioPage() {
                       <Table size="small">
                         <TableHead>
                           <TableRow>
+                            <TableCell padding="checkbox" />
                             <TableCell>Cuenta</TableCell>
                             <TableCell align="right">Saldo anterior</TableCell>
                             <TableCell align="right">Saldo hoy</TableCell>
@@ -269,8 +331,18 @@ export default function TesoreriaReporteDiarioPage() {
                           </TableRow>
                         </TableHead>
                         <TableBody>
-                          {empresa.cuentas.map((c) => (
-                            <TableRow key={c.id_cuenta_bancaria} hover>
+                          {empresa.cuentas.map((c) => {
+                            const expandida = cuentasExpandidas.has(c.id_cuenta_bancaria);
+                            return (
+                            <Fragment key={c.id_cuenta_bancaria}>
+                            <TableRow hover>
+                              <TableCell padding="checkbox">
+                                {c.transacciones.length > 0 && (
+                                  <IconButton size="small" onClick={() => toggleCuentaExpandida(c.id_cuenta_bancaria)}>
+                                    {expandida ? <ChevronDown size={16} strokeWidth={1.5} /> : <ChevronRight size={16} strokeWidth={1.5} />}
+                                  </IconButton>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 {c.alias}
                                 {c.tipo === "INVERSION" && (
@@ -310,7 +382,35 @@ export default function TesoreriaReporteDiarioPage() {
                                 </Stack>
                               </TableCell>
                             </TableRow>
-                          ))}
+                            {c.transacciones.length > 0 && (
+                              <TableRow>
+                                <TableCell colSpan={8} sx={{ py: 0, borderBottom: expandida ? undefined : "none" }}>
+                                  <Collapse in={expandida} timeout="auto" unmountOnExit>
+                                    <Table size="small" sx={{ my: 1 }}>
+                                      <TableHead>
+                                        <TableRow>
+                                          <TableCell>ID Flujo</TableCell>
+                                          <TableCell>Concepto</TableCell>
+                                          <TableCell align="right">Total MXP</TableCell>
+                                        </TableRow>
+                                      </TableHead>
+                                      <TableBody>
+                                        {c.transacciones.map((t) => (
+                                          <TableRow key={t.id_flujo}>
+                                            <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.id_flujo}</TableCell>
+                                            <TableCell>{t.concepto || "—"}</TableCell>
+                                            <TableCell align="right">{numero(t.total_mxp)}</TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </Collapse>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                            </Fragment>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </TableContainer>

@@ -16,6 +16,7 @@ from .models import (
     TesoreriaCuenta,
     TesoreriaFactura,
     TesoreriaFlujo,
+    TesoreriaMovimientoBancario,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -157,6 +158,12 @@ class TesoreriaCuentaSerializer(serializers.ModelSerializer):
     descuido de este serializer."""
 
     banco_nombre = serializers.CharField(source="banco.banco", read_only=True)
+    # banco_alias (08/Sep/2026, "CTZ/BBVA/1131 CHEQUES CIF TIZARA") - el
+    # codigo corto del banco (ej. "BMX"/"BBVA"), no el nombre completo
+    # (banco_nombre = "Banamex") - el frontend arma la etiqueta completa de
+    # la cuenta con esto + alias_sociedad (de iam-service) + ultimos
+    # digitos de la cuenta/clabe + tipo.
+    banco_alias = serializers.CharField(source="banco.alias", read_only=True)
 
     class Meta:
         model = TesoreriaCuenta
@@ -167,6 +174,7 @@ class TesoreriaCuentaSerializer(serializers.ModelSerializer):
             "tipo",
             "banco",
             "banco_nombre",
+            "banco_alias",
             "cuenta",
             "clabe",
             "alias",
@@ -312,6 +320,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "id_flujo",
             "contrato",
             "contrato_sociedad",
+            "categoria_gasto",
             "id_empleado",
             "id_requisicion",
             "fecha_efectiva",
@@ -421,6 +430,17 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
     # prellenar el destinatario editable, no se manda automatico sin que el
     # usuario lo confirme en pantalla.
     contraparte_email = serializers.CharField(source="contraparte.email", read_only=True)
+    # saldo_pendiente_exhibiciones (09/Sep/2026, "exhibiciones PUE/PPD") -
+    # NO es un modelo propio: una factura PPD real se salda con
+    # Complementos de Pago (REP) independientes, cada uno con su propio
+    # nodo DoctoRelacionado (FacturaDoctoRelacionado, filtrado por
+    # id_documento == este timbre_uuid) - ahi ya vive `num_parcialidad`
+    # (que exhibicion es), `imp_pagado` (cuanto se abono) e
+    # `imp_saldo_insoluto` (cuanto queda). El saldo pendiente real es el
+    # `imp_saldo_insoluto` del ultimo REP registrado, en orden de
+    # parcialidad; si la factura es PUE o todavia no tiene ningun REP
+    # ligado, regresa None (no aplica / no se sabe, distinto de "cero").
+    saldo_pendiente_exhibiciones = serializers.SerializerMethodField()
 
     class Meta:
         model = TesoreriaFactura
@@ -433,6 +453,8 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "contraparte",
             "contraparte_nombre",
             "contraparte_email",
+            "ticket_origen",
+            "categoria_gasto",
             "comprobante_version",
             "comprobante_serie",
             "comprobante_folio",
@@ -440,6 +462,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "comprobante_forma_pago",
             "comprobante_no_certificado",
             "comprobante_sub_total",
+            "comprobante_iva",
             "comprobante_moneda",
             "comprobante_exportacion",
             "comprobante_tipo_cambio",
@@ -471,6 +494,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "mime_type_xml",
             "estado",
             "conceptos",
+            "saldo_pendiente_exhibiciones",
             "created_at",
             "created_by",
             "updated_at",
@@ -493,6 +517,15 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
     def get_conceptos(self, obj):
         conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)
         return FacturaConceptoSerializer(conceptos, many=True).data
+
+    def get_saldo_pendiente_exhibiciones(self, obj):
+        ultima_parcialidad = (
+            FacturaDoctoRelacionado.objects.filter(id_documento=obj.timbre_uuid)
+            .exclude(imp_saldo_insoluto__isnull=True)
+            .order_by("-num_parcialidad")
+            .first()
+        )
+        return ultima_parcialidad.imp_saldo_insoluto if ultima_parcialidad else None
 
 
 class TesoreriaComplementoPagoSerializer(serializers.ModelSerializer):
@@ -545,6 +578,11 @@ class TesoreriaComplementoPagoSerializer(serializers.ModelSerializer):
             "uuid_relacion",
             "tipo_factura",
             "link_pdf",
+            "drive_file_id_pdf",
+            "mime_type_pdf",
+            "link_xml",
+            "drive_file_id_xml",
+            "mime_type_xml",
             "estado",
             "created_at",
             "created_by",
@@ -611,6 +649,11 @@ class TesoreriaNotaCreditoSerializer(serializers.ModelSerializer):
             "timbre_no_certificado_sat",
             "tipo_factura",
             "link_pdf",
+            "drive_file_id_pdf",
+            "mime_type_pdf",
+            "link_xml",
+            "drive_file_id_xml",
+            "mime_type_xml",
             "estado",
             "created_at",
             "created_by",
@@ -669,6 +712,8 @@ class TesoreriaCorteEdcSerializer(serializers.ModelSerializer):
             "tipo",
             "formato",
             "link",
+            "drive_file_id",
+            "mime_type",
             "disponible",
             "created_at",
             "created_by",
@@ -676,8 +721,38 @@ class TesoreriaCorteEdcSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         # Ver comentario en TesoreriaContraparteSerializer - id ya no es
-        # read_only, mismo motivo.
-        read_only_fields = ["created_at", "updated_at"]
+        # read_only, mismo motivo. drive_file_id/mime_type si son read-only
+        # (08/Sep/2026) - los llena solo TesoreriaMovimientoBancarioViewSet.importar,
+        # nadie deberia poder mandarlos a mano via la API.
+        read_only_fields = ["created_at", "updated_at", "drive_file_id", "mime_type"]
+
+
+class TesoreriaMovimientoBancarioSerializer(serializers.ModelSerializer):
+    """Linea del estado de cuenta bancario importada (08/Sep/2026, ver
+    TesoreriaMovimientoBancarioViewSet.importar)."""
+
+    cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
+    flujo_concepto = serializers.CharField(source="flujo.concepto", read_only=True, default=None)
+
+    class Meta:
+        model = TesoreriaMovimientoBancario
+        fields = [
+            "id",
+            "cuenta",
+            "cuenta_alias",
+            "corte_edc",
+            "fecha",
+            "descripcion",
+            "referencia",
+            "cargo",
+            "abono",
+            "saldo",
+            "flujo",
+            "flujo_concepto",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = ["id", "created_at", "created_by"]
 
 
 class TesoreriaSaldoSerializer(serializers.ModelSerializer):
@@ -966,6 +1041,7 @@ class TesoreriaSolicitudPagoSerializer(serializers.ModelSerializer):
             "sociedad",
             "tipo",
             "tipo_label",
+            "categoria_gasto",
             "descripcion",
             "monto",
             "moneda",
@@ -1025,6 +1101,8 @@ class TesoreriaTicketProveedorSerializer(serializers.ModelSerializer):
             "first_used_at",
             "last_used_at",
             "revoked_at",
+            "drive_file_id_pdf",
+            "drive_file_id_xml",
         ]
         read_only_fields = [
             "id_ticket",

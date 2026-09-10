@@ -425,7 +425,7 @@ function TesoreriaContrapartesPageContent() {
     setDocumentosContraparte(c);
     setLoadingDocumentos(true);
     Promise.all([
-      listFacturas(undefined, c.id_contraparte),
+      listFacturas({ contraparte: c.id_contraparte }),
       listComplementosPago(undefined, c.id_contraparte),
       listNotasCredito(undefined, c.id_contraparte),
     ])

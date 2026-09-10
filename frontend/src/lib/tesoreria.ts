@@ -8,6 +8,10 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { DriveArchivo } from "./drive";
 import { GATEWAY_URL } from "./gatewayUrl";
+// TesoreriaCategoriaGasto (09/Sep/2026) - mismo catalogo de 9 categorias
+// que ya vivia solo en Reembolsos (lib/miCumbres.ts), ahora compartido
+// tambien por Flujos/Facturas/Solicitudes de Pago.
+import { TesoreriaCategoriaGasto } from "./miCumbres";
 
 const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
 
@@ -343,6 +347,10 @@ export interface TesoreriaCuenta {
   tipo: TesoreriaCuentaTipo;
   banco: string | null;
   banco_nombre: string | null;
+  // banco_alias (08/Sep/2026) - codigo corto del banco (ej. "BMX"/"BBVA"),
+  // para armar la etiqueta completa de la cuenta "{alias_sociedad}/{banco_alias}/
+  // {ultimos digitos} {tipo} {empresa}" - ver etiquetaCuenta en las pantallas de Saldos.
+  banco_alias: string | null;
   cuenta: string | null;
   clabe: string | null;
   alias: string | null;
@@ -450,6 +458,11 @@ export interface TesoreriaCorteEdc {
   tipo: TesoreriaCorteEdcTipo;
   formato: TesoreriaCorteEdcFormato;
   link: string;
+  // drive_file_id/mime_type (08/Sep/2026) - solo se llenan cuando el corte
+  // se creo desde importarExtractoBancario (sube el archivo real a Drive);
+  // un corte creado a mano con solo "link" pegado los deja null.
+  drive_file_id: string | null;
+  mime_type: string | null;
   disponible: boolean | null;
   created_at: string;
   created_by: string;
@@ -510,6 +523,200 @@ export async function deleteCorteEdc(id: string): Promise<void> {
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
+}
+
+// Conciliación bancaria (08/Sep/2026, primer paso: importar extracto +
+// matching automático fecha+monto - ver
+// tesoreria/views.py::TesoreriaMovimientoBancarioViewSet). Una linea del
+// estado de cuenta importada; `flujo` null significa "sin conciliar
+// todavía", se liga a mano (PATCH normal) o via conciliarAutomatico.
+export interface TesoreriaMovimientoBancario {
+  id: string;
+  cuenta: string;
+  cuenta_alias: string | null;
+  corte_edc: string | null;
+  fecha: string;
+  descripcion: string | null;
+  referencia: string | null;
+  cargo: string | null;
+  abono: string | null;
+  saldo: string | null;
+  flujo: string | null;
+  flujo_concepto: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+export async function listMovimientosBancarios(params?: {
+  cuenta?: string;
+  corteEdc?: string;
+  conciliado?: boolean;
+  search?: string;
+}): Promise<TesoreriaMovimientoBancario[]> {
+  const query = new URLSearchParams();
+  if (params?.cuenta) query.set("cuenta", params.cuenta);
+  if (params?.corteEdc) query.set("corte_edc", params.corteEdc);
+  if (params?.conciliado !== undefined) query.set("conciliado", String(params.conciliado));
+  if (params?.search) query.set("search", params.search);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/?${query.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function importarExtractoBancario(params: {
+  cuenta: string;
+  file: File;
+  createdBy?: string;
+}): Promise<{ corte_edc: string; importados: number; errores: string[] }> {
+  const formData = new FormData();
+  formData.append("cuenta", params.cuenta);
+  formData.append("file", params.file);
+  if (params.createdBy) formData.append("created_by", params.createdBy);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/importar/`,
+    { method: "POST", body: formData }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Liga (o quita, mandando flujo: null) el flujo de un movimiento bancario -
+// PATCH generico del ViewSet, `flujo` no es read-only en el serializer.
+export async function vincularMovimientoBancario(
+  id: string,
+  flujo: string | null
+): Promise<TesoreriaMovimientoBancario> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/${id}/`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ flujo }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface TesoreriaFlujoSugerido {
+  id_flujo: string;
+  concepto: string | null;
+  total_mxp: string | null;
+  fecha_pago: string | null;
+  fecha_efectiva: string | null;
+  contrato: string | null;
+  pagado: boolean | null;
+  score: number;
+  motivos: string[];
+}
+
+export async function sugerenciasMovimientoBancario(id: string): Promise<TesoreriaFlujoSugerido[]> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/${id}/sugerencias/`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface ConciliarAutomaticoResultado {
+  conciliados: number;
+  ambiguos: number;
+  sin_match: number;
+  detalle_ambiguos: { movimiento: string; candidatos: number }[];
+  detalle_sin_match: string[];
+}
+
+export async function conciliarAutomatico(params?: {
+  cuenta?: string;
+  corteEdc?: string;
+  actorUserId?: string;
+}): Promise<ConciliarAutomaticoResultado> {
+  const body: Record<string, string> = {};
+  if (params?.cuenta) body.cuenta = params.cuenta;
+  if (params?.corteEdc) body.corte_edc = params.corteEdc;
+  if (params?.actorUserId) body.actor_user_id = params.actorUserId;
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/conciliar_automatico/`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface ReporteConciliacionFila {
+  id: string;
+  fecha: string;
+  descripcion: string | null;
+  referencia: string | null;
+  monto: string;
+}
+
+export interface ReporteConciliacionConciliado extends ReporteConciliacionFila {
+  id_flujo: string;
+  concepto_flujo: string | null;
+  total_flujo: string;
+  diferencia: string;
+  cuadra: boolean;
+}
+
+export interface ReporteConciliacionFlujoHuerfano {
+  id_flujo: string;
+  concepto: string | null;
+  total_mxp: string | null;
+  fecha_pago: string | null;
+  fecha_efectiva: string | null;
+  pagado: boolean | null;
+}
+
+export interface ReporteConciliacion {
+  cuenta: string;
+  rango: { inicio: string | null; fin: string | null };
+  totales: {
+    total_movimientos_banco: string;
+    total_conciliado: string;
+    total_sin_conciliar_banco: string;
+    total_sin_conciliar_interno: string;
+  };
+  conciliados: ReporteConciliacionConciliado[];
+  sin_conciliar_banco: ReporteConciliacionFila[];
+  sin_conciliar_interno: ReporteConciliacionFlujoHuerfano[];
+}
+
+export async function reporteConciliacion(params: {
+  cuenta: string;
+  corteEdc?: string;
+  fechaInicio?: string;
+  fechaFin?: string;
+}): Promise<ReporteConciliacion> {
+  const query = new URLSearchParams({ cuenta: params.cuenta });
+  if (params.corteEdc) query.set("corte_edc", params.corteEdc);
+  if (params.fechaInicio) query.set("fecha_inicio", params.fechaInicio);
+  if (params.fechaFin) query.set("fecha_fin", params.fechaFin);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/reporte_conciliacion/?${query.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 export type TesoreriaContratoTipo = "INTERNO" | "EXTERNO";
@@ -576,6 +783,18 @@ export async function listContratos(search?: string, contraparteId?: string): Pr
   if (search) params.set("search", search);
   if (contraparteId) params.set("contraparte", contraparteId);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Para el panel de referencias cruzadas (10/Sep/2026, "replica el patron en
+// Facturas y Flujos") - mismo criterio que getContraparte, retrieve directo
+// por PK en vez de buscar en una lista ya cargada (que puede no existir en
+// la pantalla que abre el panel).
+export async function getContrato(idContrato: string): Promise<TesoreriaContrato> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/${encodeURIComponent(idContrato)}/`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
@@ -791,6 +1010,7 @@ export interface TesoreriaFlujo {
   id_flujo: string;
   contrato: string | null;
   contrato_sociedad: string | null;
+  categoria_gasto: TesoreriaCategoriaGasto | null;
   id_empleado: string | null;
   id_requisicion: string | null;
   fecha_efectiva: string | null;
@@ -829,15 +1049,89 @@ export interface TesoreriaFlujo {
   updated_by: string | null;
 }
 
-export async function listFlujos(params?: { search?: string; contrato?: string }): Promise<TesoreriaFlujo[]> {
+export async function listFlujos(params?: {
+  search?: string;
+  contrato?: string;
+  sociedad?: string;
+  contraparte?: string;
+}): Promise<TesoreriaFlujo[]> {
   const query = new URLSearchParams();
   if (params?.search) query.set("search", params.search);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
   return response.json();
+}
+
+// Conciliacion de Facturas (10/Sep/2026, notas de reunion) - clasificacion
+// CON_CFDI/SIN_CFDI/NO_REQUIERE de cada Flujo, calculada en el backend (ver
+// tesoreria/reportes.py::calcular_conciliacion_cfdi). Base de las 3
+// pantallas; esta interfaz cubre las 3 (por_reconocer/reconocido solo
+// vienen llenos en con_cfdi).
+export interface ConciliacionCfdiFila {
+  id_flujo: string;
+  contrato: string | null;
+  // Referencias cruzadas (10/Sep/2026) - folio/nombre de lo ya ligado, para
+  // no mostrar solo un ID crudo en la pantalla de Conciliación de Facturas.
+  contraparte: string | null;
+  contraparte_nombre: string | null;
+  concepto: string | null;
+  total_mxp: string | null;
+  fecha_efectiva: string | null;
+  factura: number | null;
+  factura_folio: string | null;
+  complemento: number | null;
+  complemento_folio: string | null;
+  nomina: number | null;
+  requiere_factura: boolean | null;
+  reconocido?: string | null;
+  por_reconocer?: string | null;
+}
+
+export interface ConciliacionCfdiResponse {
+  con_cfdi: ConciliacionCfdiFila[];
+  sin_cfdi: ConciliacionCfdiFila[];
+  no_requiere: ConciliacionCfdiFila[];
+}
+
+export async function getConciliacionCfdi(params?: {
+  desde?: string;
+  hasta?: string;
+  sociedad?: string;
+  contrato?: string;
+  requiereFactura?: boolean;
+  tipoComprobante?: "I" | "E";
+}): Promise<ConciliacionCfdiResponse> {
+  const query = new URLSearchParams();
+  // Rango de fechas (10/Sep/2026, "no es por periodo debe ser por rango de
+  // fecha o una sola fecha") - mandar solo desde o solo hasta es un limite
+  // abierto; los dos iguales es una sola fecha. Sin ninguno, el mes
+  // corriente por default (lo decide el backend).
+  if (params?.desde) query.set("desde", params.desde);
+  if (params?.hasta) query.set("hasta", params.hasta);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
+  if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
+  if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion/?${query.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Exportar a CSV (09/Sep/2026, "replica el export en Flujos tambien") -
+// mismo patron que urlExportarFacturasCsv.
+export function urlExportarFlujosCsv(opciones?: { search?: string; contrato?: string; sociedad?: string }): string {
+  const params = new URLSearchParams();
+  if (opciones?.search) params.set("search", opciones.search);
+  if (opciones?.contrato) params.set("contrato", opciones.contrato);
+  if (opciones?.sociedad) params.set("sociedad", opciones.sociedad);
+  return `${TESORERIA_API_BASE_URL}/api/flujos/exportar_csv/?${params.toString()}`;
 }
 
 export async function createFlujo(params: {
@@ -1040,6 +1334,114 @@ export async function vincularFlujoAFactura(idFactura: number, idFlujo: string):
     throw await friendlyApiError("TESORERIA", response);
   }
   return response.json();
+}
+
+export interface SugerenciaCfdi {
+  timbre_uuid: string;
+  folio: string | null;
+  total: string;
+  metodo_pago?: string | null;
+  diferencia: string;
+}
+
+export interface SugerenciasCfdiResponse {
+  facturas: SugerenciaCfdi[];
+  complementos: SugerenciaCfdi[];
+}
+
+// "La IA propone, el humano aprueba" (10/Sep/2026, Fase 5 de Conciliacion
+// de Facturas) - candidatos de factura/complemento por contraparte+monto
+// parecido, para el flujo indicado. No liga nada sola, ver vincularFactura.
+export async function getSugerenciasCfdi(idFlujo: string): Promise<SugerenciasCfdiResponse> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/sugerencias_cfdi/`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface SugerenciaCfdiLote {
+  id_flujo: string;
+  contraparte_nombre: string | null;
+  concepto: string | null;
+  total_mxp: string;
+  tipo: "factura" | "complemento";
+  timbre_uuid: string;
+  folio: string | null;
+  confianza: "alta" | "media";
+}
+
+// Sugerencias para TODOS los flujos "Sin CFDI" del filtro actual a la vez
+// (10/Sep/2026, "aprobar en lote, no uno por uno") - mismos filtros que
+// getConciliacionCfdi.
+export async function getSugerenciasCfdiLote(params?: {
+  desde?: string;
+  hasta?: string;
+  sociedad?: string;
+  contrato?: string;
+}): Promise<SugerenciaCfdiLote[]> {
+  const query = new URLSearchParams();
+  if (params?.desde) query.set("desde", params.desde);
+  if (params?.hasta) query.set("hasta", params.hasta);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
+  if (params?.contrato) query.set("contrato", params.contrato);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/sugerencias_cfdi_lote/?${query.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface AprobarLoteResultado {
+  id_flujo: string;
+  ok: boolean;
+  detalle?: string;
+}
+
+// Aplica varias ligas de una vez (10/Sep/2026) - el humano ya eligio/
+// desmarco en pantalla cuales aprobar, esto solo evita abrir cada pago.
+export async function aprobarLoteCfdi(
+  items: { id_flujo: string; tipo: "factura" | "complemento"; timbre_uuid: string }[]
+): Promise<AprobarLoteResultado[]> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/aprobar_lote/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  const data = await response.json();
+  return data.resultados;
+}
+
+// Recordatorio manual de factura pendiente (10/Sep/2026, "Sin CFDI" en
+// Conciliacion de Facturas) - nunca se dispara solo, siempre por este boton.
+export async function enviarRecordatorioFlujo(idFlujo: string, mensaje?: string): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/recordatorio/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mensaje: mensaje || undefined }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
+// Aviso manual de saldo PPD pendiente (10/Sep/2026, "aviso por correo de
+// saldo PPD pendiente") - nunca se dispara solo, siempre por este boton.
+export async function enviarAvisoSaldoPendiente(idFactura: number, mensaje?: string): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${idFactura}/aviso_saldo_pendiente/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mensaje: mensaje || undefined }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
 }
 
 export async function updateContrato(
@@ -1465,6 +1867,7 @@ export interface TesoreriaFactura {
   // Correo por defecto para envio masivo (ver enviarMasivoFacturas) -
   // editable en pantalla, no se manda automatico.
   contraparte_email: string | null;
+  ticket_origen: string | null;
   comprobante_version: string | null;
   comprobante_serie: string | null;
   comprobante_folio: string | null;
@@ -1472,6 +1875,7 @@ export interface TesoreriaFactura {
   comprobante_forma_pago: string | null;
   comprobante_no_certificado: string | null;
   comprobante_sub_total: string | null;
+  comprobante_iva: string | null;
   comprobante_metodo_pago: TesoreriaFacturaMetodoPago | null;
   comprobante_moneda: string | null;
   comprobante_exportacion: string | null;
@@ -1509,10 +1913,58 @@ export interface TesoreriaFactura {
   // - solo cambia via marcarEstadoFactura(), no via update/createFactura.
   estado: TesoreriaFacturaEstado | null;
   conceptos: FacturaConcepto[];
+  // categoria_gasto (09/Sep/2026) - clasificacion de gasto compartida con
+  // Flujos/Reembolsos/Solicitudes de Pago, ver TesoreriaCategoriaGasto.
+  categoria_gasto: TesoreriaCategoriaGasto | null;
+  // saldo_pendiente_exhibiciones (09/Sep/2026) - calculado del lado del
+  // servidor a partir de los Complementos de Pago (REP) ya ligados a esta
+  // factura por UUID (FacturaDoctoRelacionado.imp_saldo_insoluto del
+  // ultimo REP). null = PUE o sin ningun REP ligado todavia (no confundir
+  // con "cero pendiente").
+  saldo_pendiente_exhibiciones: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
   updated_by: string | null;
+}
+
+// Ver PDF/XML reales en streaming (09/Sep/2026, cierra el pendiente "boton
+// que abra directo el documento en Drive, en vez de solo el link crudo") -
+// mismo patron que urlVerTicket/urlVerFactura en lib/miCumbres.ts.
+export function urlVerFacturaPdf(id: number): string {
+  return `${TESORERIA_API_BASE_URL}/api/facturas/${id}/ver_pdf/`;
+}
+
+export function urlVerFacturaXml(id: number): string {
+  return `${TESORERIA_API_BASE_URL}/api/facturas/${id}/ver_xml/`;
+}
+
+// Boton TEMPORAL en Documentos de una factura ya creada (09/Sep/2026, "en
+// factura no veo el actualizar") - mismo criterio que
+// sincronizarDriveTicketProveedor.
+export async function sincronizarDriveFactura(id: number): Promise<TesoreriaFactura> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/sincronizar_drive/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Comprobante bancario de un Flujo (09/Sep/2026, apartado de Documentos).
+export function urlVerComprobanteFlujo(idFlujo: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/ver_comprobante/`;
+}
+
+// PDF que el proveedor ya subio por su ticket - no depende de que exista
+// una factura ni de que el Motor Documental haya corrido.
+export function urlVerTicketProveedorPdf(idTicket: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/${idTicket}/ver_pdf/`;
+}
+
+export function urlVerTicketProveedorXml(idTicket: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/${idTicket}/ver_xml/`;
 }
 
 // receptorRfc (02/Sep/2026, pedido explicito: "receptor debe ser alguna
@@ -1520,20 +1972,53 @@ export interface TesoreriaFactura {
 // recibido de un proveedor) es una sociedad propia de Cumbres, no un
 // TesoreriaContraparte - filtra contra receptor_rfc (RFC de
 // general_sociedades), no contra ?contraparte=.
-export async function listFacturas(
-  search?: string,
-  contraparte?: string,
-  receptorRfc?: string
-): Promise<TesoreriaFactura[]> {
+// 09/Sep/2026 ("filtros combinados... por empresa, proveedor, fechas") -
+// se paso de argumentos posicionales a un objeto de opciones, ya eran 3 y
+// seguir agregando parametros sueltos se vuelve dificil de leer en cada
+// llamada. Los 3 argumentos viejos (search, contraparte, receptorRfc)
+// siguen aqui con los mismos nombres, solo cambio la forma de pasarlos.
+export async function listFacturas(opciones?: {
+  search?: string;
+  contraparte?: string;
+  receptorRfc?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  estado?: TesoreriaFacturaEstado;
+}): Promise<TesoreriaFactura[]> {
   const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  if (contraparte) params.set("contraparte", contraparte);
-  if (receptorRfc) params.set("receptor_rfc", receptorRfc);
+  if (opciones?.search) params.set("search", opciones.search);
+  if (opciones?.contraparte) params.set("contraparte", opciones.contraparte);
+  if (opciones?.receptorRfc) params.set("receptor_rfc", opciones.receptorRfc);
+  if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
+  if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
+  if (opciones?.estado) params.set("estado", opciones.estado);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
   return response.json();
+}
+
+// Exportar a CSV (09/Sep/2026, pendiente real de negocio) - mismos filtros
+// que listFacturas, para exportar exactamente lo que se esta viendo en
+// pantalla. Se abre directo (window.open), como ver_pdf/ver_xml - el
+// navegador manda la cookie de sesion igual que en esos endpoints.
+export function urlExportarFacturasCsv(opciones?: {
+  search?: string;
+  contraparte?: string;
+  receptorRfc?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  estado?: TesoreriaFacturaEstado;
+}): string {
+  const params = new URLSearchParams();
+  if (opciones?.search) params.set("search", opciones.search);
+  if (opciones?.contraparte) params.set("contraparte", opciones.contraparte);
+  if (opciones?.receptorRfc) params.set("receptor_rfc", opciones.receptorRfc);
+  if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
+  if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
+  if (opciones?.estado) params.set("estado", opciones.estado);
+  return `${TESORERIA_API_BASE_URL}/api/facturas/exportar_csv/?${params.toString()}`;
 }
 
 export interface FacturaInput {
@@ -1544,6 +2029,7 @@ export interface FacturaInput {
   comprobanteFormaPago?: string;
   comprobanteNoCertificado?: string;
   comprobanteSubTotal?: string;
+  comprobanteIva?: string;
   comprobanteMetodoPago?: TesoreriaFacturaMetodoPago | "";
   comprobanteMoneda?: string;
   comprobanteExportacion?: string;
@@ -1595,6 +2081,7 @@ function facturaBody(params: FacturaInput) {
     comprobante_forma_pago: params.comprobanteFormaPago || null,
     comprobante_no_certificado: params.comprobanteNoCertificado || null,
     comprobante_sub_total: normalizaDecimal(params.comprobanteSubTotal),
+    comprobante_iva: normalizaDecimal(params.comprobanteIva),
     comprobante_metodo_pago: params.comprobanteMetodoPago || null,
     comprobante_moneda: params.comprobanteMoneda || null,
     comprobante_exportacion: params.comprobanteExportacion || null,
@@ -1624,25 +2111,19 @@ function facturaBody(params: FacturaInput) {
 }
 
 // `archivo` (07/Sep/2026) - mismo criterio que confirmarExtraccionFactura,
-// cubre el caso mas comun en la practica: el proveedor ya subio su PDF/XML
+// cubre el caso mas comun en la practica: el proveedor ya subio su PDF
 // via ticket publico, el Motor Documental lo analizo ANTES de que la
 // factura existiera (handleAutorellenarNuevaFactura solo prellena el
 // formulario) - sin esto, ese camino nunca ligaria el archivo real.
-// `archivoXml` opcional (08/Sep/2026, comparacion PDF vs XML) - cuando el
-// analista compara ambos archivos del ticket antes de dar de alta la
-// factura, se ligan los dos de una sola vez (ver
-// TesoreriaFacturaViewSet._vincular_archivos_drive), no solo el que se
-// analizo con el Motor Documental.
 export async function createFactura(
   params: FacturaInput,
   archivo?: DriveArchivo,
-  archivoXml?: DriveArchivo
+  idTicketOrigen?: string
 ): Promise<TesoreriaFactura> {
-  const archivos = [archivo, archivoXml].filter((a): a is DriveArchivo => Boolean(a));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...facturaBody(params), archivos }),
+    body: JSON.stringify({ ...facturaBody(params), archivo, ticket_origen: idTicketOrigen || null }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1724,6 +2205,7 @@ export const TESORERIA_CAMPOS_CONFIRMABLES = [
   "comprobante_fecha",
   "comprobante_no_certificado",
   "comprobante_sub_total",
+  "comprobante_iva",
   "comprobante_moneda",
   "comprobante_exportacion",
   "comprobante_tipo_cambio",
@@ -1763,14 +2245,12 @@ export const TESORERIA_CAMPOS_CONFIRMABLES_NUEVA = [...TESORERIA_CAMPOS_CONFIRMA
 export async function confirmarExtraccionFactura(
   id: number,
   campos: Record<string, unknown>,
-  archivo?: DriveArchivo,
-  archivoXml?: DriveArchivo
+  archivo?: DriveArchivo
 ): Promise<TesoreriaFactura> {
-  const archivos = [archivo, archivoXml].filter((a): a is DriveArchivo => Boolean(a));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/confirmar_extraccion/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campos, archivos }),
+    body: JSON.stringify({ campos, archivo }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1874,6 +2354,13 @@ export interface TesoreriaComplementoPago {
   uuid_relacion: string | null;
   tipo_factura: string | null;
   link_pdf: string | null;
+  // Documentos reales desde Drive - ver comentario equivalente en
+  // TesoreriaFactura.
+  drive_file_id_pdf: string | null;
+  mime_type_pdf: string | null;
+  link_xml: string | null;
+  drive_file_id_xml: string | null;
+  mime_type_xml: string | null;
   estado: string | null;
   created_at: string;
   created_by: string | null;
@@ -1999,6 +2486,28 @@ export async function deleteComplementoPago(id: number): Promise<void> {
   }
 }
 
+// Ver PDF/XML reales en streaming y sincronizar con Drive - mismo patron
+// que urlVerFacturaPdf/urlVerFacturaXml/sincronizarDriveFactura.
+export function urlVerComplementoPagoPdf(id: number): string {
+  return `${TESORERIA_API_BASE_URL}/api/complementos-pago/${id}/ver_pdf/`;
+}
+
+export function urlVerComplementoPagoXml(id: number): string {
+  return `${TESORERIA_API_BASE_URL}/api/complementos-pago/${id}/ver_xml/`;
+}
+
+export async function sincronizarDriveComplementoPago(id: number): Promise<TesoreriaComplementoPago> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/complementos-pago/${id}/sincronizar_drive/`,
+    { method: "POST" }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export interface TesoreriaNotaCredito {
   id: number;
   contraparte: string | null;
@@ -2035,6 +2544,13 @@ export interface TesoreriaNotaCredito {
   timbre_no_certificado_sat: string | null;
   tipo_factura: string | null;
   link_pdf: string | null;
+  // Documentos reales desde Drive - ver comentario equivalente en
+  // TesoreriaFactura.
+  drive_file_id_pdf: string | null;
+  mime_type_pdf: string | null;
+  link_xml: string | null;
+  drive_file_id_xml: string | null;
+  mime_type_xml: string | null;
   estado: string | null;
   created_at: string;
   created_by: string | null;
@@ -2162,6 +2678,28 @@ export async function deleteNotaCredito(id: number): Promise<void> {
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
+}
+
+// Ver PDF/XML reales en streaming y sincronizar con Drive - mismo patron
+// que urlVerFacturaPdf/urlVerFacturaXml/sincronizarDriveFactura.
+export function urlVerNotaCreditoPdf(id: number): string {
+  return `${TESORERIA_API_BASE_URL}/api/notas-credito/${id}/ver_pdf/`;
+}
+
+export function urlVerNotaCreditoXml(id: number): string {
+  return `${TESORERIA_API_BASE_URL}/api/notas-credito/${id}/ver_xml/`;
+}
+
+export async function sincronizarDriveNotaCredito(id: number): Promise<TesoreriaNotaCredito> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/notas-credito/${id}/sincronizar_drive/`,
+    { method: "POST" }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 export interface TesoreriaRecNomina {
@@ -2463,6 +3001,8 @@ export interface TesoreriaTicketProveedor {
   first_used_at: string | null;
   last_used_at: string | null;
   revoked_at: string | null;
+  drive_file_id_pdf: string | null;
+  drive_file_id_xml: string | null;
 }
 
 export async function listTicketsProveedor(search?: string): Promise<TesoreriaTicketProveedor[]> {
@@ -2520,6 +3060,22 @@ export async function revocarTicketProveedor(idTicket: string, actorUserId?: str
   return response.json();
 }
 
+// Boton TEMPORAL (09/Sep/2026, "eso esta en drive, pon el boton de
+// sincronizacion temporal") - liga el PDF/XML que ya esta en la carpeta de
+// Drive del ticket pero nunca paso por subirFacturaTicketProveedor (ej. se
+// subio a mano directo en drive.google.com).
+export async function sincronizarDriveTicketProveedor(idTicket: string): Promise<TesoreriaTicketProveedor> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/${idTicket}/sincronizar_drive/`,
+    { method: "POST" }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 // Publicos (sin sesion) - los llama /tesoreria-ticket/[token]/page.tsx.
 export async function validarTicketProveedor(token: string): Promise<TesoreriaTicketProveedor> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/tickets-proveedor/validar/`, {
@@ -2533,18 +3089,16 @@ export async function validarTicketProveedor(token: string): Promise<TesoreriaTi
   return response.json();
 }
 
-// `fileXml` opcional (07/Sep/2026, "debe poder subir el PDF y el XML") - el
-// XML es el CFDI real con el 100% de los datos fiscales, a diferencia del
-// PDF que es solo una representacion impresa (puede omitir campos enteros
-// segun la version del esquema, ver hallazgo real con un CFDI de 2013).
-// `xml` en la respuesta viene null si no se mando o si su subida fallo -
-// el PDF sigue siendo lo minimo obligatorio.
 export async function subirFacturaTicketProveedor(params: {
   token: string;
   recaptchaToken: string;
   file: File;
   fileXml?: File;
-}): Promise<{ detail: string; pdf: { file_id: string; web_view_link: string } | null; xml: { file_id: string; web_view_link: string } | null }> {
+}): Promise<{
+  detail: string;
+  pdf: { file_id: string; web_view_link: string } | null;
+  xml: { file_id: string; web_view_link: string } | null;
+}> {
   const formData = new FormData();
   formData.append("token", params.token);
   formData.append("recaptcha_token", params.recaptchaToken);

@@ -16,7 +16,6 @@ import {
   Divider,
   FormControl,
   IconButton,
-  InputAdornment,
   InputLabel,
   ListItemIcon,
   ListItemText,
@@ -38,17 +37,19 @@ import {
 } from "@mui/material";
 import {
   CreditCard,
+  ExternalLink,
   Eye,
   FilePenLine,
   MoreVertical,
   Pencil,
   Plus,
-  Search,
   ShieldCheck,
   Trash2,
   X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
+import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
@@ -170,6 +171,8 @@ function TesoreriaContratosPageContent() {
   // en el menu de tres puntos) - mismo dialogo/formulario, con todo
   // deshabilitado y sin boton de Guardar cuando soloLectura es true.
   const [soloLectura, setSoloLectura] = useState(false);
+  // Referencia cruzada al proveedor
+  const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
   const [form, setForm] = useState(FORM_VACIO);
   // 07/Sep/2026: solo FORMAL_RECURRENTE usa el modelo completo (vigencia,
   // periodicidad, contrato firmado, autorizacion interna) - las otras 3
@@ -491,103 +494,88 @@ function TesoreriaContratosPageContent() {
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack
-          direction={{ xs: "column", md: "row" }}
-          spacing={2}
-          alignItems={{ xs: "stretch", md: "flex-start" }}
-          justifyContent="space-between"
-          sx={{ p: 2 }}
+      <Paper variant="outlined" sx={{ mb: 3 }}>
+        <FiltrosBar
+          flush
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Buscar por ID de contrato o sociedad..."
+          actions={
+            puedeCrear && (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+                sx={{ flexShrink: 0 }}
+              >
+                Nuevo Contrato
+              </Button>
+            )
+          }
         >
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
-            <TextField
-              size="small"
-              placeholder="Buscar por ID de contrato o sociedad..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ minWidth: 240 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search size={16} strokeWidth={1.5} />
-                  </InputAdornment>
-                ),
-              }}
-            />
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="filtro-sociedad-label">Filtrar por sociedad</InputLabel>
-              <Select
-                labelId="filtro-sociedad-label"
-                label="Filtrar por sociedad"
-                value={filtroSociedad}
-                onChange={(e) => setFiltroSociedad(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Todas las sociedades</em>
-                </MenuItem>
-                {sociedades.map((s) => (
-                  <MenuItem key={s.rfc} value={s.rfc}>
-                    {s.razon_social || s.rfc}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="filtro-contraparte-label">Filtrar por contraparte</InputLabel>
-              <Select
-                labelId="filtro-contraparte-label"
-                label="Filtrar por contraparte"
-                value={filtroContraparte}
-                onChange={(e) => setFiltroContraparte(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Todas las contrapartes</em>
-                </MenuItem>
-                {contrapartes.map((c) => (
-                  <MenuItem key={c.id_contraparte} value={c.id_contraparte}>
-                    {c.razon_social}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              label="Filtrar por proyecto"
-              value={filtroProyecto}
-              onChange={(e) => setFiltroProyecto(e.target.value)}
-              sx={{ minWidth: 160 }}
-            />
-            <TextField
-              size="small"
-              type="date"
-              label="Fecha desde"
-              value={filtroFechaDesde}
-              onChange={(e) => setFiltroFechaDesde(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160 }}
-            />
-            <TextField
-              size="small"
-              type="date"
-              label="Fecha hasta"
-              value={filtroFechaHasta}
-              onChange={(e) => setFiltroFechaHasta(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160 }}
-            />
-          </Stack>
-          {puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
-              sx={{ flexShrink: 0 }}
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="filtro-sociedad-label">Filtrar por sociedad</InputLabel>
+            <Select
+              labelId="filtro-sociedad-label"
+              label="Filtrar por sociedad"
+              value={filtroSociedad}
+              onChange={(e) => setFiltroSociedad(e.target.value)}
             >
-              Nuevo Contrato
-            </Button>
-          )}
-        </Stack>
+              <MenuItem value="">
+                <em>Todas las sociedades</em>
+              </MenuItem>
+              {sociedades.map((s) => (
+                <MenuItem key={s.rfc} value={s.rfc}>
+                  {s.razon_social || s.rfc}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="filtro-contraparte-label">Filtrar por contraparte</InputLabel>
+            <Select
+              labelId="filtro-contraparte-label"
+              label="Filtrar por contraparte"
+              value={filtroContraparte}
+              onChange={(e) => setFiltroContraparte(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Todas las contrapartes</em>
+              </MenuItem>
+              {contrapartes.map((c) => (
+                <MenuItem key={c.id_contraparte} value={c.id_contraparte}>
+                  {c.razon_social}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            size="small"
+            label="Filtrar por proyecto"
+            value={filtroProyecto}
+            onChange={(e) => setFiltroProyecto(e.target.value)}
+            sx={{ minWidth: 160 }}
+          />
+          <TextField
+            size="small"
+            type="date"
+            label="Fecha desde"
+            value={filtroFechaDesde}
+            onChange={(e) => setFiltroFechaDesde(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 160 }}
+          />
+          <TextField
+            size="small"
+            type="date"
+            label="Fecha hasta"
+            value={filtroFechaHasta}
+            onChange={(e) => setFiltroFechaHasta(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 160 }}
+          />
+        </FiltrosBar>
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 7 columnas no cabe en un
         telefono sin scroll horizontal incomodo. */}
@@ -787,6 +775,16 @@ function TesoreriaContratosPageContent() {
                 disabled
                 fullWidth
               />
+              {editing && editing.contraparte && (
+                <Button
+                  size="small"
+                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                  onClick={() => setPanelReferencia({ tipo: "proveedor", id: editing.contraparte as string })}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  Ver proveedor
+                </Button>
+              )}
               {/* Categoria (07/Sep/2026) - distingue la naturaleza del
                   gasto/relacion; opcional, sin default forzado (a
                   diferencia de Tipo) porque los contratos viejos no la
@@ -1276,6 +1274,8 @@ function TesoreriaContratosPageContent() {
           )}
         </DialogActions>
       </Dialog>
+
+      <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
     </AppShell>
   );
 }

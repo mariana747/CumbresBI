@@ -2,9 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -18,7 +15,6 @@ import {
   Divider,
   FormControl,
   IconButton,
-  InputAdornment,
   InputLabel,
   List,
   ListItem,
@@ -35,29 +31,32 @@ import {
   Tab,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import {
   CheckCircle2,
-  ChevronDown,
+  Download,
+  Eye,
   ExternalLink,
+  FileCode2,
   FileSearch,
   FileText,
-  Mail,
+  HelpCircle,
   Pencil,
   Plus,
-  Receipt,
-  Search,
+  RefreshCw,
   Trash2,
   X as CloseIcon,
   XCircle,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
+import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
-import TicketsReembolsoAdminPanel from "@/components/TicketsReembolsoAdminPanel";
 import { SessionUser, getSession } from "@/lib/auth";
-import { DriveArchivo, listDriveFiles } from "@/lib/drive";
-import { analyzeDocument, pollAnalysis } from "@/lib/docint";
+import { DriveArchivo } from "@/lib/drive";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   EnvioMasivoResultado,
@@ -75,6 +74,7 @@ import {
   deleteFacturaTraslado,
   enviarMasivoFacturas,
   listFacturaConceptos,
+  enviarAvisoSaldoPendiente,
   listFacturaTraslados,
   listFacturas,
   marcarEstadoFactura,
@@ -84,6 +84,9 @@ import {
   vincularFlujoAFactura,
   TesoreriaContraparte,
   TesoreriaTicketProveedor,
+  urlVerFacturaPdf,
+  urlExportarFacturasCsv,
+  sincronizarDriveFactura,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -95,14 +98,12 @@ const FORM_VACIO = {
   comprobanteFormaPago: "",
   comprobanteNoCertificado: "",
   comprobanteSubTotal: "",
+  comprobanteIva: "",
   comprobanteMoneda: "",
   comprobanteExportacion: "",
   comprobanteTipoCambio: "",
   comprobanteTotal: "",
-  // Catalogo real del SAT (c_TipoDeComprobante) - en esta pantalla siempre
-  // "I" (Ingreso): Egreso/Pago/Nomina ya tienen su propia tabla y pantalla
-  // (Notas de credito, Complementos de pago, Rec-nominas), ver
-  // TesoreriaFacturaMetodoPago en tesoreria.ts.
+  // Catalogo c_TipoDeComprobante del SAT
   comprobanteTipoDeComprobante: "I",
   comprobanteMetodoPago: "" as "" | "PUE" | "PPD",
   comprobanteLugarExpedicion: "",
@@ -125,9 +126,7 @@ const FORM_VACIO = {
   linkXml: "",
 };
 
-// c_TipoRelacion del SAT - solo aplica si esta factura sustituye o se
-// relaciona con otro CFDI ya timbrado (nodo CfdiRelacionados). Subconjunto
-// mas comun, no el catalogo completo.
+// Catalogo c_TipoRelacion del SAT
 const TIPO_RELACION_OPCIONES: { value: string; label: string }[] = [
   { value: "01", label: "01 — Nota de crédito de los documentos relacionados" },
   { value: "03", label: "03 — Devolución de mercancía sobre facturas previas" },
@@ -149,27 +148,31 @@ const ESTADO_COLOR: Record<TesoreriaFacturaEstado, "default" | "info" | "success
   RECHAZADA: "error",
 };
 
-// Pestañas del formulario de factura (07/Sep/2026, "dividir por tabs para
-// tener mayor espacio vertical") - mismo patron que TABS_CONTRATO en
-// tesoreria/contratos/page.tsx, agrupando los 25+ campos del CFDI segun a
-// que parte del comprobante le sirven.
-const TABS_FACTURA = ["Comprobante", "Montos", "Emisor y Receptor", "Timbrado y Enlaces"] as const;
+// Nomenclatura de estados
+const ESTADO_DESCRIPCION: Record<TesoreriaFacturaEstado, string> = {
+  PENDIENTE: "Recién capturada por el Motor Documental, todavía sin revisar.",
+  EN_PROCESO: "Un analista la está revisando.",
+  ACEPTADA: "Revisada y con PDF + XML completos — ya se puede usar sin restricción.",
+  RECHAZADA: "No pasó la revisión — no se puede aceptar así.",
+};
+
+// Link real de Drive a partir del file_id (09/Sep/2026, "la redireccion
+// debe hacer al archivo de drive") - "Abrir en pestaña nueva" debe ir al
+// archivo real, no a nuestro endpoint de streaming.
+function urlDriveWebView(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
+
+// Pestañas del formulario de factura
+const TABS_FACTURA = ["Comprobante", "Montos", "Emisor y Receptor", "Timbrado", "Documentos", "Proceso"] as const;
 type TabFactura = (typeof TABS_FACTURA)[number];
 
-// snake_case (nombres de columna, tal como los pide el prompt
-// "tesoreria.cfdi_factura" en docint/prompts.py) -> camelCase (llaves de
-// `form` arriba) - convertir aqui en vez de duplicar el prompt con nombres
-// de campo distintos a los reales del modelo.
+// snake_case -> camelCase
 function aCamelCase(snake: string): string {
   return snake.replace(/_([a-z])/g, (_, letra) => letra.toUpperCase());
 }
 
-// Conceptos de una factura ya guardada (Sem 20, CRUD real agregado
-// 24/Ago/2026 - antes solo se veian de solo lectura aqui, ver
-// tesoreria/views.py::FacturaConceptoViewSet). Sin FK real hacia
-// TesoreriaFactura en el ERD - el enlace es logico por uuid=timbre_uuid,
-// por eso solo existe una vez que la factura ya tiene timbre_uuid guardado
-// (no se puede agregar un concepto antes de crear la factura).
+// Conceptos de una factura ya guardada
 function PanelConceptos({ uuidFactura, puedeEditar }: { uuidFactura: string; puedeEditar: boolean }) {
   const [items, setItems] = useState<FacturaConcepto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -332,8 +335,7 @@ function PanelConceptos({ uuidFactura, puedeEditar }: { uuidFactura: string; pue
   );
 }
 
-// Lineas de impuesto trasladado - mismo criterio de enlace logico por uuid
-// que Conceptos (ver FacturaTrasladoViewSet).
+// Lineas de impuesto trasladado
 function PanelTraslados({ uuidFactura, puedeEditar }: { uuidFactura: string; puedeEditar: boolean }) {
   const [items, setItems] = useState<FacturaTraslado[]>([]);
   const [loading, setLoading] = useState(true);
@@ -495,74 +497,85 @@ function PanelTraslados({ uuidFactura, puedeEditar }: { uuidFactura: string; pue
   );
 }
 
-// Facturacion CFDI (Sem 20 del cronograma, CRUD real agregado 24/Ago/2026 -
-// ver tesoreria-service/tesoreria/views.py::TesoreriaFacturaViewSet). Alta
-// manual mientras no exista el motor que la llene desde el Motor Documental
-// (lectura de PDF/XML) - por ahora cualquier campo se captura a mano, igual
-// criterio que Contratos. Permiso propio "facturacion-cfdi.crear/.editar".
+
 export default function TesoreriaFacturasPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
+  // Preview embebido del PDF (el ojo conserva su comportamiento de
+  // siempre) - el XML en cambio redirige directo a Drive.
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
+  // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
+  // Flujos") - ver componente PanelReferenciaCruzada.
+  const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
   const [facturas, setFacturas] = useState<TesoreriaFactura[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFactura | null>(null);
+  // Abierto desde el ojito (Ver) - fuerza los campos a solo lectura aunque
+  // el usuario tenga permiso de editar.
+  const [modoSoloLectura, setModoSoloLectura] = useState(false);
+  // Boton temporal de sincronizacion con Drive (09/Sep/2026, "en factura
+  // no veo el actualizar")
+  const [sincronizandoFactura, setSincronizandoFactura] = useState(false);
+  const [errorSincronizarFactura, setErrorSincronizarFactura] = useState<string | null>(null);
+  async function handleSincronizarDriveFactura() {
+    if (!editing) return;
+    setSincronizandoFactura(true);
+    setErrorSincronizarFactura(null);
+    try {
+      const actualizada = await sincronizarDriveFactura(editing.id);
+      setEditing(actualizada);
+      refresh();
+    } catch (err) {
+      setErrorSincronizarFactura(err instanceof Error ? err.message : "Error al sincronizar con Drive");
+    } finally {
+      setSincronizandoFactura(false);
+    }
+  }
   const [form, setForm] = useState(FORM_VACIO);
-  // Proveedor a revisar en "Nueva Factura" > Motor Documental (27/Ago/2026,
-  // pedido de Mariana: "proveedores se dividen dentro por su id") - los
-  // PDF que sube el proveedor via ticket publico quedan en su propia
-  // subcarpeta (Tesoreria/Facturas/FacturasProveedores/<id_contraparte>),
-  // hace falta elegir cual proveedor se va a listar.
+  // Proveedor a revisar en "Nueva Factura" > Motor Documental
   const [proveedores, setProveedores] = useState<TesoreriaContraparte[]>([]);
   const [proveedorBandeja, setProveedorBandeja] = useState("");
-  // Ticket exacto que disparo "Revisar" (08/Sep/2026, "seria por registro de
-  // solicitud... que de la contraparte dentro se creen subcarpetas donde se
-  // iran metiendo cada que se genere una") - una misma contraparte puede
-  // tener varias solicitudes/tickets (distintas unidades de negocio, ej.
-  // IZEL Acuario vs IZEL Restaurante); ya no basta con el id_contraparte
-  // para armar la carpeta a listar, hace falta el id_ticket exacto para que
-  // el analista solo vea los archivos de ESA solicitud, no los de otra.
+  // Ticket exacto que disparo "Revisar"
   const [idTicketBandeja, setIdTicketBandeja] = useState("");
-  // Filtro por receptor (02/Sep/2026, pedido explicito: "en todo donde
-  // aparezca una sociedad agrega el filtro por sociedad o receptor" ->
-  // "receptor debe ser alguna sociedad" - el receptor de una factura de
-  // egreso, la mas comun aqui, es una sociedad propia de Cumbres, NO un
-  // TesoreriaContraparte - se filtra por RFC de general_sociedades, no por
-  // una lista de contrapartes).
-  const [sociedadesFiltro, setSociedadesFiltro] = useState<GeneralSociedad[]>([]);
-  const [filtroReceptor, setFiltroReceptor] = useState("");
-  useEffect(() => {
-    listSociedades()
-      .then(setSociedadesFiltro)
-      .catch(() => setSociedadesFiltro([]));
-  }, []);
-  // Tickets de proveedor (27/Ago/2026, pedido de Mariana: "cuando se manda
-  // la invitación se debe de poner ya en la tabla sin poner nueva
-  // factura") - se muestran mezclados en la MISMA tabla que las facturas
-  // reales, como filas "pendientes" hasta que se confirme la factura de
-  // verdad (que entonces aparece como fila normal, con su propio UUID).
+ 
+
+
+  // Tickets de proveedor
   const [ticketsProveedor, setTicketsProveedor] = useState<TesoreriaTicketProveedor[]>([]);
-  // El ticket no tiene (todavia) un vinculo real a la factura ya creada
-  // (a diferencia de TesoreriaTicketReembolso.factura) - se oculta del lado
-  // del cliente en cuanto el analista captura su factura, para no dejar la
-  // fila diciendo "falta capturar" cuando ya se capturo. Se pierde al
-  // recargar la pagina - limitacion conocida, documentada en memoria de
-  // sesion, arreglo real pendiente: agregar el mismo FK que ya tiene
-  // TesoreriaTicketReembolso.
+  // Tickets ya capturados, ocultos localmente
   const [ticketsOcultos, setTicketsOcultos] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [motorAbierto, setMotorAbierto] = useState(false);
   const [cambiandoEstado, setCambiandoEstado] = useState(false);
   const [estadoError, setEstadoError] = useState<string | null>(null);
-  // Vinculacion factura<->flujo bidireccional (07/Sep/2026) - antes solo se
-  // podia ligar desde la pantalla de Flujos; este es el sentido inverso,
-  // se manda el id_flujo y el backend liga el mismo campo real
-  // (TesoreriaFlujo.factura).
+  // Vinculacion factura<->flujo
   const [idFlujoParaVincular, setIdFlujoParaVincular] = useState("");
   const [vinculandoFlujo, setVinculandoFlujo] = useState(false);
   const [errorVincularFlujo, setErrorVincularFlujo] = useState<string | null>(null);
+
+  // Aviso de saldo PPD pendiente (10/Sep/2026, pendiente real de Jenny) -
+  // nunca se dispara solo, solo con este boton.
+  const [mensajeAvisoSaldo, setMensajeAvisoSaldo] = useState("");
+  const [enviandoAvisoSaldo, setEnviandoAvisoSaldo] = useState(false);
+  const [avisoSaldoEnviado, setAvisoSaldoEnviado] = useState(false);
+  const [errorAvisoSaldo, setErrorAvisoSaldo] = useState<string | null>(null);
+
+  async function handleAvisoSaldoPendiente() {
+    if (!editing) return;
+    setEnviandoAvisoSaldo(true);
+    setErrorAvisoSaldo(null);
+    try {
+      await enviarAvisoSaldoPendiente(editing.id, mensajeAvisoSaldo || undefined);
+      setAvisoSaldoEnviado(true);
+    } catch (err) {
+      setErrorAvisoSaldo(err instanceof Error ? err.message : "Error al enviar el aviso");
+    } finally {
+      setEnviandoAvisoSaldo(false);
+    }
+  }
 
   async function handleVincularFlujo() {
     if (!editing || !idFlujoParaVincular.trim()) return;
@@ -579,21 +592,13 @@ export default function TesoreriaFacturasPage() {
     }
   }
 
-  // Envio masivo por correo (26/Ago/2026, finanzas.md: "Multiple invoices
-  // can be selected to send massively (separately)") - seleccion en la
-  // tabla, un correo INDIVIDUAL por factura al confirmar (ver
-  // TesoreriaFacturaViewSet.enviar_masivo).
+  // Envio masivo por correo
   const [seleccionadas, setSeleccionadas] = useState<Set<number>>(new Set());
   const [envioDialogOpen, setEnvioDialogOpen] = useState(false);
   const [destinatarios, setDestinatarios] = useState<Record<number, string>>({});
   const [enviando, setEnviando] = useState(false);
   const [envioError, setEnvioError] = useState<string | null>(null);
   const [envioResultados, setEnvioResultados] = useState<EnvioMasivoResultado[] | null>(null);
-
-  // Pestaña "Tickets de reembolso" (27/Ago/2026, pedido de Mariana: la
-  // revision de tickets de MiCumbres debe vivir donde Tesoreria ya
-  // trabaja, no en un panel aparte) - ver TicketsReembolsoAdminPanel.
-  const [tab, setTab] = useState(0);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -605,27 +610,37 @@ export default function TesoreriaFacturasPage() {
       .catch(() => undefined);
   }, []);
 
-  function refrescarTicketsProveedor() {
-    listTicketsProveedor()
-      .then(setTicketsProveedor)
-      .catch(() => undefined);
-  }
-  useEffect(refrescarTicketsProveedor, []);
+  // Filtros combinados
+  const [sociedadesFiltro, setSociedadesFiltro] = useState<GeneralSociedad[]>([]);
+  const [filtroReceptor, setFiltroReceptor] = useState("");
+  const [filtroProveedor, setFiltroProveedor] = useState<TesoreriaContraparte | null>(null);
+  const [filtroEstado, setFiltroEstado] = useState<TesoreriaFacturaEstado | "">("");
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
+  const [opcionesProveedor, setOpcionesProveedor] = useState<TesoreriaContraparte[]>([]);
 
-  const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
-  const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
-  // Estado del Proceso (marcar_estado) y confirmar_extraccion del Motor
-  // Documental usan un permiso separado de "editar" a proposito (26/Ago/
-  // 2026, ver views.py TesoreriaFacturaViewSet.get_permissions) - son
-  // acciones del flujo de revision, no edicion manual del CFDI, asi que
-  // TESORERIA_ANALISTA/FINANZAS_MANAGER las conservan aunque perdieron
-  // crear/editar en el corte de "facturas solo-lectura".
-  const puedeAprobar = session?.perm_keys.includes("facturacion-cfdi.aprobar") ?? false;
-  const puedeAbrirDetalle = puedeEditar || puedeAprobar;
+  useEffect(() => {
+    listSociedades()
+      .then(setSociedadesFiltro)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    listContrapartes(undefined, "proveedor")
+      .then(setOpcionesProveedor)
+      .catch(() => setOpcionesProveedor([]));
+  }, []);
 
   function refresh() {
     setLoading(true);
-    listFacturas(search || undefined, undefined, filtroReceptor || undefined)
+    listFacturas({
+      search: search || undefined,
+      contraparte: filtroProveedor?.id_contraparte || undefined,
+      receptorRfc: filtroReceptor || undefined,
+      fechaDesde: filtroFechaDesde || undefined,
+      fechaHasta: filtroFechaHasta || undefined,
+      estado: filtroEstado || undefined,
+    })
       .then(setFacturas)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -635,7 +650,22 @@ export default function TesoreriaFacturasPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroReceptor]);
+  }, [search, filtroReceptor, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroEstado]);
+
+  function refrescarTicketsProveedor() {
+    listTicketsProveedor()
+      .then(setTicketsProveedor)
+      .catch(() => undefined);
+  }
+  useEffect(refrescarTicketsProveedor, []);
+
+  const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
+  const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
+  // Permiso de aprobacion
+  const puedeAprobar = session?.perm_keys.includes("facturacion-cfdi.aprobar") ?? false;
+  const puedeAbrirDetalle = puedeEditar || puedeAprobar;
+
+
 
   function abrirAlta() {
     setEditing(null);
@@ -644,189 +674,33 @@ export default function TesoreriaFacturasPage() {
     setProveedorBandeja("");
     setIdTicketBandeja("");
     setArchivoNuevaFactura(undefined);
-    setArchivoXmlNuevaFactura(undefined);
     setMotorEjecutadoNuevaFactura(false);
     setTabFactura("Comprobante");
     setDialogOpen(true);
   }
 
-  // Fila de ticket ya usada por el proveedor (subio su PDF) - abre
-  // directo "Nueva Factura" con el proveedor ya preseleccionado y el
-  // Motor Documental abierto, sin que el analista tenga que elegir nada
-  // (pedido de Mariana 27/Ago/2026: "cuando se manda la invitacion se
-  // debe de poner ya en la tabla sin poner nueva factura" - la fila ya
-  // esta en la tabla, "Revisar" solo evita repetir los 2 clics extra).
-  function abrirRevisionTicket(ticket: TesoreriaTicketProveedor) {
-    // 07/Sep/2026, "que solo abra nueva factura, no motor documental" -
-    // antes tambien disparaba setMotorAbierto(true) automatico; ahora solo
-    // precarga el proveedor y deja que el analista de clic en "Motor
-    // Documental" el mismo cuando este listo.
-    abrirAlta();
-    setProveedorBandeja(ticket.contraparte);
-    setIdTicketBandeja(ticket.id_ticket);
-  }
-
-  // Comparacion PDF vs XML (08/Sep/2026, "no vamos a aceptar xps, solo
-  // para comparacion PDF y XML y asi vemos cual se guarda") - cuando el
-  // ticket ya tiene los dos archivos, se analizan ambos con el Motor
-  // Documental y se muestran lado a lado antes de decidir cual valor usar
-  // por campo (el XML es la fuente fiscal real, pero el analista puede
-  // preferir el PDF si el XML viene incompleto/raro).
-  const [ticketComparando, setTicketComparando] = useState<TesoreriaTicketProveedor | null>(null);
-  const [carpetaComparando, setCarpetaComparando] = useState("");
-  const [errorComparacion, setErrorComparacion] = useState<string | null>(null);
-  const [camposComparados, setCamposComparados] = useState<
-    { campo: string; valorPdf: string; valorXml: string; usarXml: boolean }[]
-  >([]);
-  // Estado de extraccion INDEPENDIENTE por archivo (08/Sep/2026, "si
-  // primero se extrae y luego compara") - antes un solo fallo (ej. Gemini
-  // saturado con el XML) tiraba tambien el resultado del PDF que si habia
-  // salido bien, obligando a repetir ambos desde cero. Ahora cada archivo
-  // se extrae por su cuenta, se guarda su resultado en cuanto termina, y
-  // solo se arma la comparacion cuando los dos ya estan listos - un fallo
-  // en uno no toca al otro, y "Reintentar" solo repite el que fallo.
-  const [archivoPdfComparado, setArchivoPdfComparado] = useState<DriveArchivo | null>(null);
-  const [archivoXmlComparado, setArchivoXmlComparado] = useState<DriveArchivo | null>(null);
-  const [extraccionPdf, setExtraccionPdf] = useState<{
-    cargando: boolean;
-    error: string | null;
-    datos: Record<string, unknown> | null;
-  }>({ cargando: false, error: null, datos: null });
-  const [extraccionXml, setExtraccionXml] = useState<{
-    cargando: boolean;
-    error: string | null;
-    datos: Record<string, unknown> | null;
-  }>({ cargando: false, error: null, datos: null });
-
-  async function extraerArchivoComparacion(archivo: DriveArchivo, carpeta: string, tipo: "pdf" | "xml") {
-    const setExtraccion = tipo === "pdf" ? setExtraccionPdf : setExtraccionXml;
-    setExtraccion({ cargando: true, error: null, datos: null });
-    try {
-      const { analysisId } = await analyzeDocument({
-        driveFileId: archivo.file_id,
-        carpeta,
-        permKey: "facturacion-cfdi.crear",
-        nombreArchivo: archivo.nombre,
-        mimeType: archivo.mime_type || undefined,
-        expectedDocumentType: "tesoreria.cfdi_factura",
-        internalPromptKey: "tesoreria.cfdi_factura",
-        servicioSolicitante: "tesoreria-service",
-      });
-      const estado = await pollAnalysis(analysisId);
-      if (estado.status === "ERROR" || !estado.result) {
-        setExtraccion({ cargando: false, error: estado.error || "No se pudo analizar el documento.", datos: null });
-        return;
-      }
-      setExtraccion({ cargando: false, error: null, datos: estado.result.extracted_data });
-    } catch (err) {
-      setExtraccion({
-        cargando: false,
-        error: err instanceof Error ? err.message : "Error desconocido.",
-        datos: null,
-      });
-    }
-  }
-
-  // Arma la tabla de comparacion en cuanto AMBOS resultados ya estan
-  // disponibles - no bloquea a que ambas llamadas terminen "juntas", cada
-  // una llega cuando llega (secuencial, ver abrirComparacion).
-  useEffect(() => {
-    if (!extraccionPdf.datos || !extraccionXml.datos) return;
-    const campos = new Set([...Object.keys(extraccionPdf.datos), ...Object.keys(extraccionXml.datos)]);
-    const comparados = Array.from(campos)
-      .filter((campo) => (TESORERIA_CAMPOS_CONFIRMABLES_NUEVA as readonly string[]).includes(campo))
-      .map((campo) => {
-        const valorPdf = String(extraccionPdf.datos![campo] ?? "");
-        const valorXml = String(extraccionXml.datos![campo] ?? "");
-        return { campo, valorPdf, valorXml, usarXml: Boolean(valorXml) };
-      });
-    setCamposComparados(comparados);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extraccionPdf.datos, extraccionXml.datos]);
-
-  async function abrirComparacion(ticket: TesoreriaTicketProveedor) {
-    setTicketComparando(ticket);
-    setErrorComparacion(null);
-    setCamposComparados([]);
-    setExtraccionPdf({ cargando: false, error: null, datos: null });
-    setExtraccionXml({ cargando: false, error: null, datos: null });
-    try {
-      const carpeta = `Tesoreria/Facturas/FacturasProveedores/${ticket.contraparte}/${ticket.id_ticket}`;
-      setCarpetaComparando(carpeta);
-      const archivos = await listDriveFiles(carpeta, "facturacion-cfdi.crear");
-      const pdf = archivos.find((a) => (a.mime_type || "").includes("pdf") || a.nombre.toLowerCase().endsWith(".pdf"));
-      const xml = archivos.find(
-        (a) => (a.mime_type || "").includes("xml") || a.nombre.toLowerCase().endsWith(".xml")
-      );
-      if (!pdf || !xml) {
-        setErrorComparacion(
-          `Falta ${!pdf ? "el PDF" : "el XML"} en esta solicitud — solo hay ${archivos.length} archivo(s), no se puede comparar.`
-        );
-        return;
-      }
-      setArchivoPdfComparado(pdf);
-      setArchivoXmlComparado(xml);
-      // Secuencial, NO en paralelo (08/Sep/2026, hallazgo real: 2 llamadas
-      // simultaneas a Gemini con la clave gratuita de AI Studio dispararon
-      // un 429 "saturado" que tumbo el analisis) - una tras otra evita
-      // duplicar la tasa de solicitudes por minuto contra el mismo modelo.
-      // Ademas cada una ya se guarda por su cuenta (extraerArchivoComparacion),
-      // asi que si el PDF sale bien y el XML falla, el resultado del PDF no
-      // se pierde.
-      await extraerArchivoComparacion(pdf, carpeta, "pdf");
-      await extraerArchivoComparacion(xml, carpeta, "xml");
-    } catch (err) {
-      setErrorComparacion(err instanceof Error ? err.message : "Error desconocido al comparar.");
-    }
-  }
-
-  function handleUsarComparacion() {
-    if (!ticketComparando || !archivoPdfComparado) return;
-    const campos: Record<string, string> = {};
-    for (const fila of camposComparados) {
-      const elegido = fila.usarXml ? fila.valorXml : fila.valorPdf;
-      if (elegido) campos[fila.campo] = elegido;
-    }
-    abrirAlta();
-    setProveedorBandeja(ticketComparando.contraparte);
-    setIdTicketBandeja(ticketComparando.id_ticket);
-    handleAutorellenarNuevaFactura(campos, archivoPdfComparado);
-    setArchivoXmlNuevaFactura(archivoXmlComparado || undefined);
-    setTicketComparando(null);
-  }
-
-  // Clasificacion de un ticket de proveedor (27/Ago/2026) - separa los que
-  // siguen accionables (esperando al proveedor / ya recibido, falta
-  // capturar) de los vencidos (expirado/revocado), que Mariana pidio ver
-  // en una sub-tabla aparte en vez de mezclados con los activos.
+  // Clasificacion de un ticket de proveedor - ya no se muestra en esta
+  // pantalla (10/Sep/2026, "no quiero que se muestre el estado de estas en
+  // facturas, para eso esta Admin"), solo se usa para filtrar el selector
+  // de "Nueva Factura" a los tickets recibidos y sin capturar todavia.
   function estadoTicketFactura(t: TesoreriaTicketProveedor) {
     const recibida = t.uses_count >= t.max_uses;
-    const revocado = !!t.revoked_at;
-    // 07/Sep/2026 (bug real, "la factura no expira, solo el link para
-    // subirla"): antes "expirado" solo miraba la fecha, sin importar si el
-    // proveedor ya subio el archivo - un ticket usado con exito se movia
-    // igual a "vencidos" en cuanto pasaban los 30 min del link, aunque el
-    // PDF ya estuviera esperando en Drive listo para el Motor Documental.
-    // Ahora la vigencia del link SOLO aplica mientras sigue "esperando al
-    // proveedor" - una vez recibida, el archivo no tiene fecha de caducidad
-    // propia, sigue como trabajo pendiente de capturar hasta que Tesoreria
-    // lo procese. Revocar si sigue siendo terminal aunque ya este recibida
-    // (accion explicita del admin, no un artefacto de tiempo).
-    const expirado = !revocado && !recibida && new Date(t.expires_at) < new Date();
-    const vencido = revocado || expirado;
-    const label = revocado ? "Revocado" : recibida ? "Recibida, falta capturar" : expirado ? "Expirado" : "Esperando al proveedor";
-    const color: "default" | "error" | "warning" = vencido ? "error" : recibida ? "warning" : "default";
-    return { recibida, vencido, label, color };
+    // Ya se creo la factura desde este ticket - no importa si el link
+    // despues se reboco o vencio, su ciclo de vida ya termino.
+    const capturada = facturas.some((f) => f.ticket_origen === t.id_ticket);
+    return { recibida, capturada };
   }
 
-  const ticketsVisibles = ticketsProveedor.filter((t) => !ticketsOcultos.has(t.id_ticket));
-  const ticketsActivos = ticketsVisibles.filter((t) => !estadoTicketFactura(t).vencido);
-  const ticketsVencidos = ticketsVisibles.filter((t) => estadoTicketFactura(t).vencido);
+  // Tickets ya recibidos (el proveedor subio su archivo) pero sin factura
+  // capturada todavia (10/Sep/2026, "no quiero que se muestre el estado de
+  // estas en Facturas, para eso esta Admin") - ya no hay tabla/pestana de
+  // tickets en esta pantalla, solo un selector chico dentro de "Nueva
+  // Factura" para elegir de cual ticket viene (ver abrirRevisionTicket).
+  const ticketsParaCapturar = ticketsProveedor.filter(
+    (t) => !ticketsOcultos.has(t.id_ticket) && estadoTicketFactura(t).recibida && !estadoTicketFactura(t).capturada
+  );
 
-  // Extraido de abrirEdicion (24/Ago/2026) para reusarlo tambien despues de
-  // confirmar una extraccion del Motor Documental - mismo mapeo, sin
-  // duplicarlo entre los dos flujos que necesitan refrescar `form` desde
-  // una TesoreriaFactura ya guardada.
+  // Extraido de abrirEdicion
   function formDesdeFactura(f: TesoreriaFactura): typeof FORM_VACIO {
     return {
       timbreUuid: f.timbre_uuid || "",
@@ -837,6 +711,7 @@ export default function TesoreriaFacturasPage() {
       comprobanteFormaPago: f.comprobante_forma_pago || "",
       comprobanteNoCertificado: f.comprobante_no_certificado || "",
       comprobanteSubTotal: f.comprobante_sub_total || "",
+      comprobanteIva: f.comprobante_iva || "",
       comprobanteMoneda: f.comprobante_moneda || "",
       comprobanteExportacion: f.comprobante_exportacion || "",
       comprobanteTipoCambio: f.comprobante_tipo_cambio || "",
@@ -864,20 +739,21 @@ export default function TesoreriaFacturasPage() {
     };
   }
 
-  function abrirEdicion(f: TesoreriaFactura) {
+  function abrirEdicion(f: TesoreriaFactura, soloLectura = false) {
     setEditing(f);
     setForm(formDesdeFactura(f));
     setFormError(null);
     setTabFactura("Comprobante");
     setIdFlujoParaVincular("");
     setErrorVincularFlujo(null);
+    setMensajeAvisoSaldo("");
+    setAvisoSaldoEnviado(false);
+    setErrorAvisoSaldo(null);
+    setModoSoloLectura(soloLectura);
     setDialogOpen(true);
   }
 
-  // Ciclo de vida de la factura (24/Ago/2026, pedido explicito de Mariana) -
-  // ACEPTADA la rechaza el backend con 400 si faltan link_pdf/link_xml
-  // (ver TesoreriaFacturaViewSet.marcar_estado), ese mensaje real se
-  // muestra tal cual via friendlyApiError.
+  // Ciclo de vida de la factura
   async function handleCambiarEstado(nuevoEstado: TesoreriaFacturaEstado) {
     if (!editing) return;
     setCambiandoEstado(true);
@@ -893,11 +769,7 @@ export default function TesoreriaFacturasPage() {
     }
   }
 
-  // Motor Documental (24/Ago/2026) - unico camino que puede escribir en una
-  // factura ya guardada sin pasar por el formulario a mano (ver
-  // TesoreriaFacturaViewSet.confirmar_extraccion). Actualiza `editing`/`form`
-  // con la respuesta real del backend en vez de solo confiar en los datos
-  // que el analista vio en pantalla (ej. si el backend ignoro algun campo).
+  // Motor Documental
   async function handleConfirmarExtraccionFactura(campos: Record<string, unknown>, archivo?: DriveArchivo) {
     if (!editing) return;
     const actualizada = await confirmarExtraccionFactura(editing.id, campos, archivo);
@@ -906,33 +778,13 @@ export default function TesoreriaFacturasPage() {
     refresh();
   }
 
-  // Archivo real analizado antes de que la factura exista (07/Sep/2026,
-  // cierra el hueco de link_pdf/link_xml) - se guarda aparte del form
-  // porque no es un campo de texto editable, se manda tal cual a
-  // createFactura() cuando el analista confirme el alta.
+  // Archivo real analizado antes de que la factura exista
   const [archivoNuevaFactura, setArchivoNuevaFactura] = useState<DriveArchivo | undefined>(undefined);
-  // XML que acompaño al PDF cuando la factura se dio de alta via
-  // "Comparar PDF vs XML" (08/Sep/2026) - se manda junto al PDF en
-  // createFactura() para que ambos queden ligados (ver
-  // TesoreriaFacturaViewSet._vincular_archivos_drive), no solo el que el
-  // Motor Documental analizo.
-  const [archivoXmlNuevaFactura, setArchivoXmlNuevaFactura] = useState<DriveArchivo | undefined>(undefined);
   // Bloquea los campos del CFDI hasta que el Motor Documental ya corrio
-  // una vez (07/Sep/2026, "solo asi podra editar de forma manual") - cierra
-  // el atajo de teclear una factura desde cero saltandose la IA, que
-  // finanzas.md prohibe ("the user cannot create... invoices"): el unico
-  // camino real sigue siendo Motor Documental -> revisar/corregir -> Guardar,
-  // nunca Nueva Factura -> teclear todo -> Guardar directo.
   const [motorEjecutadoNuevaFactura, setMotorEjecutadoNuevaFactura] = useState(false);
   const [tabFactura, setTabFactura] = useState<TabFactura>("Comprobante");
 
-  // Caso de uso real (24/Ago/2026): alguien sube el escaneo/foto de la
-  // factura a Drive ANTES de que exista el registro (a futuro desde
-  // MiCumbres) - aqui todavia no hay id que mandar a confirmar_extraccion,
-  // asi que solo se prellena `form` con lo que salio del analisis; el
-  // analista revisa/corrige y da "Guardar" como si lo hubiera tecleado el
-  // mismo. Sin llamada al backend - createFactura() ya se encarga de
-  // validar/guardar cuando el usuario confirme el formulario.
+  // Prellena `form` cuando el analista sube el escaneo antes de crear la factura
   async function handleAutorellenarNuevaFactura(campos: Record<string, unknown>, archivo?: DriveArchivo) {
     setArchivoNuevaFactura(archivo);
     setMotorEjecutadoNuevaFactura(true);
@@ -959,9 +811,8 @@ export default function TesoreriaFacturasPage() {
       if (editing) {
         await updateFactura(editing.id, form);
       } else {
-        await createFactura(form, archivoNuevaFactura, archivoXmlNuevaFactura);
+        await createFactura(form, archivoNuevaFactura, idTicketBandeja || undefined);
         setArchivoNuevaFactura(undefined);
-        setArchivoXmlNuevaFactura(undefined);
         if (idTicketBandeja) {
           setTicketsOcultos((prev) => new Set(prev).add(idTicketBandeja));
         }
@@ -1024,6 +875,13 @@ export default function TesoreriaFacturasPage() {
     }
   }
 
+  // MUI Select no es un control de formulario nativo - el <fieldset
+  // disabled> de mas abajo (que si deshabilita los TextField en bloque)
+  // no lo alcanza, hay que pasarle disabled explicito.
+  const camposDeshabilitados = editing
+    ? !puedeEditar || modoSoloLectura
+    : !puedeCrear || !motorEjecutadoNuevaFactura;
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
@@ -1035,54 +893,70 @@ export default function TesoreriaFacturasPage() {
         facturas se dan de alta automáticamente desde el Motor Documental.
       </Typography>
 
-      <Tabs
-        value={tab}
-        onChange={(_, v) => setTab(v)}
-        variant="scrollable"
-        scrollButtons="auto"
-        allowScrollButtonsMobile
-        sx={{ mb: 3 }}
-      >
-        <Tab label="Facturas CFDI" icon={<FileText size={16} strokeWidth={1.5} />} iconPosition="start" />
-        <Tab label="Tickets de Reembolso" icon={<Receipt size={16} strokeWidth={1.5} />} iconPosition="start" />
-      </Tabs>
-
-      {tab === 1 && <TicketsReembolsoAdminPanel session={session} />}
-
-      {tab === 0 && (
-        <>
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
         </Alert>
       )}
-
-      <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <TextField
+      <Paper variant="outlined" sx={{ mb: 3 }}>
+      <FiltrosBar
+        flush
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por folio, UUID o nombre..."
+        puedeEditar={puedeEditar}
+        seleccionadas={seleccionadas.size}
+        onEnviarMasivo={abrirEnvioMasivo}
+        onAplicarFiltros={refresh}
+        onLimpiarFiltros={() => {
+          setFiltroReceptor("");
+          setFiltroProveedor(null);
+          setFiltroEstado("");
+          setFiltroFechaDesde("");
+          setFiltroFechaHasta("");
+        }}
+        actions={
+          <Stack direction="row" spacing={1}>
+          {puedeCrear && (
+            <Button size="small" variant="contained" startIcon={<Plus size={14} strokeWidth={2} />} onClick={abrirAlta}>
+              Nueva Factura
+            </Button>
+          )}
+          <Button
             size="small"
-            placeholder="Buscar por folio, UUID o nombre..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel id="filtro-receptor-factura-label">Filtrar por receptor</InputLabel>
+            variant="outlined"
+            startIcon={<Download size={14} strokeWidth={2} />}
+            onClick={() =>
+              window.open(
+                urlExportarFacturasCsv({
+                  search: search || undefined,
+                  contraparte: filtroProveedor?.id_contraparte || undefined,
+                  receptorRfc: filtroReceptor || undefined,
+                  fechaDesde: filtroFechaDesde || undefined,
+                  fechaHasta: filtroFechaHasta || undefined,
+                  estado: filtroEstado || undefined,
+                }),
+                "_blank"
+              )
+            }
+          >
+            Exportar CSV
+          </Button>
+          </Stack>
+        }
+      >
+        <Box>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+            Empresa (receptor)
+          </Typography>
+          <FormControl size="small" fullWidth>
             <Select
-              labelId="filtro-receptor-factura-label"
-              label="Filtrar por receptor"
+              displayEmpty
               value={filtroReceptor}
               onChange={(e) => setFiltroReceptor(e.target.value)}
             >
               <MenuItem value="">
-                <em>Todos los receptores</em>
+                <em>Todas</em>
               </MenuItem>
               {sociedadesFiltro.map((s) => (
                 <MenuItem key={s.rfc} value={s.rfc}>
@@ -1091,23 +965,87 @@ export default function TesoreriaFacturasPage() {
               ))}
             </Select>
           </FormControl>
-          {puedeEditar && seleccionadas.size > 0 && (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<Mail size={14} strokeWidth={2} />}
-              onClick={abrirEnvioMasivo}
-              sx={{ ml: { sm: "auto" } }}
+        </Box>
+        <Box>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+            Proveedor
+          </Typography>
+          <FormControl size="small" fullWidth>
+            <Select
+              displayEmpty
+              value={filtroProveedor?.id_contraparte ?? ""}
+              onChange={(e) =>
+                setFiltroProveedor(
+                  opcionesProveedor.find((c) => c.id_contraparte === e.target.value) || null
+                )
+              }
             >
-              Enviar por correo ({seleccionadas.size})
-            </Button>
-          )}
-        </Stack>
-        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
-        tarjetas apiladas (ver abajo) - una tabla de 8 columnas no cabe en un
-        telefono sin scroll horizontal incomodo. */}
+              <MenuItem value="">
+                <em>Todos</em>
+              </MenuItem>
+              {opcionesProveedor.map((c) => (
+                <MenuItem key={c.id_contraparte} value={c.id_contraparte}>
+                  {c.razon_social || c.id_contraparte}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+        <Box>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+            Estado
+          </Typography>
+          <FormControl size="small" fullWidth>
+            <Select
+              displayEmpty
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value as TesoreriaFacturaEstado | "")}
+            >
+              <MenuItem value="">
+                <em>Todos</em>
+              </MenuItem>
+              {(Object.keys(ESTADO_LABEL) as TesoreriaFacturaEstado[]).map((e) => (
+                <MenuItem key={e} value={e}>
+                  {ESTADO_LABEL[e]}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+        <Box sx={{ gridColumn: { sm: "span 2" } }}>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+            Rango de Fecha
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TextField
+              size="small"
+              type="date"
+              label="Desde"
+              value={filtroFechaDesde}
+              onChange={(e) => setFiltroFechaDesde(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ flex: 1, minWidth: 0 }}
+            />
+            <Typography variant="body2" color="text.secondary">
+              -
+            </Typography>
+            <TextField
+              size="small"
+              type="date"
+              label="Hasta"
+              value={filtroFechaHasta}
+              onChange={(e) => setFiltroFechaHasta(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ flex: 1, minWidth: 0 }}
+            />
+          </Stack>
+        </Box>
+      </FiltrosBar>
+
+      {/* Tabla Principal */}
+        <>
         <Box sx={{ display: { xs: "none", sm: "block" } }}>
-        <TableContainer>
+        <TableContainer sx={{ px: 2 }}>
           <Table size="small">
             <TableHead>
               <TableRow>
@@ -1117,21 +1055,39 @@ export default function TesoreriaFacturasPage() {
                 <TableCell>Emisor</TableCell>
                 <TableCell>Receptor</TableCell>
                 <TableCell>Fecha</TableCell>
+                <TableCell align="right">IVA</TableCell>
                 <TableCell align="right">Total</TableCell>
-                <TableCell>Estado</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>Estado</span>
+                    <Tooltip
+                      title={
+                        <Stack spacing={0.5} sx={{ py: 0.5 }}>
+                          {(Object.keys(ESTADO_LABEL) as TesoreriaFacturaEstado[]).map((e) => (
+                            <Typography key={e} variant="caption" component="div">
+                              <b>{ESTADO_LABEL[e]}</b> — {ESTADO_DESCRIPCION[e]}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      }
+                    >
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
+                </TableCell>
                 <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : facturas.length === 0 && ticketsActivos.length === 0 ? (
+              ) : facturas.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin facturas registradas.
                     </Typography>
@@ -1139,47 +1095,6 @@ export default function TesoreriaFacturasPage() {
                 </TableRow>
               ) : (
                 <>
-                {ticketsActivos.map((t) => {
-                  const estado = estadoTicketFactura(t);
-                  return (
-                    <TableRow key={`ticket-${t.id_ticket}`} hover>
-                      {puedeEditar && <TableCell padding="checkbox" />}
-                      {/* colSpan=4 (07/Sep/2026, "no esta alineado bien") -
-                          cubre UUID+Folio+Emisor+Receptor, las 4 columnas
-                          que este resumen no tiene todavia; con colSpan=3
-                          "Receptor" quedaba fuera y todo lo de la derecha
-                          (fecha/total/estado/acciones) se corria una
-                          columna. */}
-                      <TableCell colSpan={4} sx={{ color: "text.secondary" }}>
-                        {/* id_contraparte visible (07/Sep/2026, "como el
-                            10b3994a") - es el mismo id que nombra la
-                            carpeta real en Drive
-                            (FacturasProveedores/<id_contraparte>). Ademas
-                            (08/Sep/2026) cada solicitud/ticket sube a su
-                            propia subcarpeta por id_ticket, ver
-                            TesoreriaTicketProveedorViewSet.subir_factura. */}
-                        Ticket de proveedor — {t.contraparte_nombre} ({t.contraparte}) — {t.email}
-                      </TableCell>
-                      <TableCell>{new Date(t.issued_at).toLocaleDateString("es-MX")}</TableCell>
-                      <TableCell align="right">—</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={estado.label} color={estado.color} variant="outlined" />
-                      </TableCell>
-                      <TableCell align="right">
-                        {estado.recibida && puedeCrear && (
-                          <Button size="small" onClick={() => abrirRevisionTicket(t)}>
-                            Revisar
-                          </Button>
-                        )}
-                        {estado.recibida && puedeCrear && (
-                          <Button size="small" onClick={() => abrirComparacion(t)}>
-                            Comparar PDF/XML
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
                 {facturas.map((f) => (
                   <TableRow key={f.id} hover selected={seleccionadas.has(f.id)}>
                     {puedeEditar && (
@@ -1195,6 +1110,7 @@ export default function TesoreriaFacturasPage() {
                     <TableCell>{f.emisor_nombre || f.emisor_rfc || "—"}</TableCell>
                     <TableCell>{f.receptor_nombre || f.receptor_rfc || "—"}</TableCell>
                     <TableCell>{f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "—"}</TableCell>
+                    <TableCell align="right">{f.comprobante_iva || "—"}</TableCell>
                     <TableCell align="right">{f.comprobante_total || "—"}</TableCell>
                     <TableCell>
                       {f.estado && (
@@ -1203,26 +1119,19 @@ export default function TesoreriaFacturasPage() {
                     </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                        {f.link_pdf && (
-                          <IconButton
-                            size="small"
-                            aria-label="Ver PDF"
-                            component="a"
-                            href={f.link_pdf}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <ExternalLink size={14} strokeWidth={1.5} />
-                          </IconButton>
-                        )}
                         <IconButton
                           size="small"
-                          aria-label={puedeEditar ? "Editar" : "Ver"}
-                          onClick={() => abrirEdicion(f)}
+                          aria-label="Ver"
+                          onClick={() => abrirEdicion(f, true)}
                           disabled={!puedeAbrirDetalle}
                         >
-                          <Pencil size={14} strokeWidth={1.5} />
+                          <Eye size={14} strokeWidth={1.5} />
                         </IconButton>
+                        {puedeEditar && (
+                          <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)}>
+                            <Pencil size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        )}
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -1233,50 +1142,6 @@ export default function TesoreriaFacturasPage() {
           </Table>
         </TableContainer>
         </Box>
-
-        {/* Tickets vencidos/revocados separados
-        de los activos para no ensuciar la tabla principal con tickets que
-        ya no van a ninguna parte, sin perder el registro de que se pidieron. */}
-        {ticketsVencidos.length > 0 && (
-          <Accordion disableGutters sx={{ mt: 1 }}>
-            <AccordionSummary expandIcon={<ChevronDown size={16} strokeWidth={1.5} />}>
-              <Typography variant="body2" color="text.secondary">
-                Tickets vencidos/revocados ({ticketsVencidos.length})
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ p: 0 }}>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Proveedor</TableCell>
-                      <TableCell>Correo</TableCell>
-                      <TableCell>Generado</TableCell>
-                      <TableCell>Estado</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {ticketsVencidos.map((t) => {
-                      const estado = estadoTicketFactura(t);
-                      return (
-                        <TableRow key={`ticket-vencido-${t.id_ticket}`} hover>
-                          <TableCell>
-                            {t.contraparte_nombre} ({t.contraparte})
-                          </TableCell>
-                          <TableCell>{t.email}</TableCell>
-                          <TableCell>{new Date(t.issued_at).toLocaleDateString("es-MX")}</TableCell>
-                          <TableCell>
-                            <Chip size="small" label={estado.label} color={estado.color} variant="outlined" />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </AccordionDetails>
-          </Accordion>
-        )}
 
         {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
         <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
@@ -1316,21 +1181,19 @@ export default function TesoreriaFacturasPage() {
                   </Stack>
                   </Stack>
                   <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                    {f.link_pdf && (
-                      <IconButton
-                        size="small"
-                        aria-label="Ver PDF"
-                        component="a"
-                        href={f.link_pdf}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <ExternalLink size={14} strokeWidth={1.5} />
+                    <IconButton
+                      size="small"
+                      aria-label="Ver"
+                      onClick={() => abrirEdicion(f, true)}
+                      disabled={!puedeAbrirDetalle}
+                    >
+                      <Eye size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    {puedeEditar && (
+                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)}>
+                        <Pencil size={14} strokeWidth={1.5} />
                       </IconButton>
                     )}
-                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)} disabled={!puedeEditar}>
-                      <Pencil size={14} strokeWidth={1.5} />
-                    </IconButton>
                   </Stack>
                 </Stack>
                 <Stack spacing={0.5} sx={{ mt: 1 }}>
@@ -1342,6 +1205,9 @@ export default function TesoreriaFacturasPage() {
                   </Typography>
                   <Typography variant="body2">
                     <strong>Fecha:</strong> {f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "—"}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>IVA:</strong> {f.comprobante_iva || "—"}
                   </Typography>
                   <Typography variant="body2">
                     <strong>Total:</strong> {f.comprobante_total || "—"}
@@ -1356,11 +1222,14 @@ export default function TesoreriaFacturasPage() {
             ))
           )}
         </Stack>
+        </>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar Factura ${editing.comprobante_folio || editing.timbre_uuid}` : "Nueva Factura"}
+          {editing
+            ? `${modoSoloLectura ? "Ver" : "Editar"} Factura ${editing.comprobante_folio || editing.timbre_uuid}`
+            : "Nueva Factura"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
@@ -1374,29 +1243,40 @@ export default function TesoreriaFacturasPage() {
           {/* 07/Sep/2026, "hay que darle mas espaciado" - spacing 2 -> 3
               entre grupos de campos, mas padding vertical del dialogo. */}
           <Stack spacing={3}>
-            {(editing ? puedeEditar : puedeCrear) && (
+            {(editing ? puedeEditar && !modoSoloLectura : puedeCrear) && (
               <>
                 <Stack direction="row" spacing={2} alignItems="center">
-                  {/* 07/Sep/2026, "quita la pantalla de motor y solo deja el
-                      boton" + "el proveedor debe quedarse solo que no es
-                      editable" - ya no es un selector manual, solo muestra
-                      de donde va a leer el Motor Documental (precargado si
-                      se abrio desde "Revisar" en un ticket de proveedor,
-                      ver abrirRevisionTicket; si no, bandeja general -
-                      mismo fallback de siempre, ver el contexto del Motor
-                      Documental mas abajo). */}
+                  {/* Selector de ticket (10/Sep/2026, "va seguir mediante
+                      tickets para tesoreria para facturas pero no quiero que
+                      se muestre el estado de estas en facturas") - antes se
+                      elegia con "Revisar" en la tabla de tickets (ya
+                      removida de esta pantalla, ver Admin > Invitaciones
+                      para el ciclo de vida del ticket); ahora se elige aqui
+                      mismo, solo entre los ya recibidos y sin factura. */}
                   {!editing && (
-                    <TextField
-                      size="small"
-                      label="Proveedor (factura subida por ticket)"
-                      value={
-                        proveedorBandeja
-                          ? proveedores.find((p) => p.id_contraparte === proveedorBandeja)?.razon_social ?? proveedorBandeja
-                          : "Ninguno (bandeja general)"
-                      }
-                      disabled
-                      sx={{ minWidth: 280 }}
-                    />
+                    <FormControl size="small" sx={{ minWidth: 280 }}>
+                      <InputLabel id="ticket-origen-label">Proveedor (factura subida por ticket)</InputLabel>
+                      <Select
+                        labelId="ticket-origen-label"
+                        label="Proveedor (factura subida por ticket)"
+                        value={idTicketBandeja}
+                        onChange={(e) => {
+                          const idTicket = e.target.value;
+                          const ticket = ticketsParaCapturar.find((t) => t.id_ticket === idTicket);
+                          setIdTicketBandeja(idTicket);
+                          setProveedorBandeja(ticket?.contraparte || "");
+                        }}
+                      >
+                        <MenuItem value="">
+                          <em>Ninguno (bandeja general)</em>
+                        </MenuItem>
+                        {ticketsParaCapturar.map((t) => (
+                          <MenuItem key={t.id_ticket} value={t.id_ticket}>
+                            {t.contraparte_nombre} — {new Date(t.issued_at).toLocaleDateString("es-MX")}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
                   )}
                   <Button
                     size="small"
@@ -1409,17 +1289,7 @@ export default function TesoreriaFacturasPage() {
                 </Stack>
               </>
             )}
-            {/* Campos del CFDI (finanzas.md: "the user cannot create, delete
-                or modify invoices" - 26/Ago/2026, SUPER_ADMIN conserva
-                excepcion operativa por si el Motor Documental o la captura
-                inicial fallan). El fieldset deshabilita en bloque todo el
-                grupo de inputs para quien solo tiene facturacion-cfdi.leer/
-                .aprobar, sin tocar los 40+ TextField uno por uno.
 
-                07/Sep/2026: en "Nueva Factura" ademas se bloquea hasta que
-                el Motor Documental ya corrio una vez - la edicion manual
-                solo se habilita para REVISAR/CORREGIR lo que la IA propuso,
-                nunca para teclear una factura desde cero saltandose la IA. */}
             {!editing && !motorEjecutadoNuevaFactura && puedeCrear && (
               <Alert severity="info" sx={{ mb: 1 }}>
                 Usa el Motor Documental para llenar la factura — la edición manual se habilita después,
@@ -1438,17 +1308,13 @@ export default function TesoreriaFacturasPage() {
               ))}
             </Tabs>
             <fieldset
-              disabled={editing ? !puedeEditar : !puedeCrear || !motorEjecutadoNuevaFactura}
+              disabled={camposDeshabilitados}
               style={{ border: 0, margin: 0, padding: 0, display: "contents" }}
             >
-            {/* 07/Sep/2026, "sigue sin espaciado" - el fieldset de arriba es
-                display:contents (necesario para que "disabled" deshabilite
-                todo en bloque), pero eso hace que no tenga caja propia:
-                el spacing del Stack exterior (que solo ve al fieldset como
-                su unico hijo real) nunca llegaba a los TextField de
-                adentro. Este Stack interno si es hijo real de cada
-                TextField/Stack de fila, asi que el spacing si aplica. */}
-            <Stack spacing={2}>
+            {/* mt manual: el fieldset es display:contents, el margen que le
+            pondria el Stack exterior no tiene efecto sobre el (no genera
+            caja propia) - se aplica aqui, en su hijo real. */}
+            <Stack spacing={2} sx={{ mt: 3 }}>
             {tabFactura === "Comprobante" && (
             <>
             <TextField
@@ -1459,7 +1325,7 @@ export default function TesoreriaFacturasPage() {
               disabled={!!editing}
               fullWidth
             />
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={3}>
               <TextField
                 size="small"
                 label="Serie"
@@ -1501,6 +1367,7 @@ export default function TesoreriaFacturasPage() {
                   label="Tipo de comprobante"
                   value={form.comprobanteTipoDeComprobante}
                   onChange={(e) => setForm({ ...form, comprobanteTipoDeComprobante: e.target.value })}
+                  disabled={camposDeshabilitados}
                 >
                   <MenuItem value="I">Ingreso (I)</MenuItem>
                 </Select>
@@ -1512,6 +1379,7 @@ export default function TesoreriaFacturasPage() {
                   label="Método de pago"
                   value={form.comprobanteMetodoPago}
                   onChange={(e) => setForm({ ...form, comprobanteMetodoPago: e.target.value as "" | "PUE" | "PPD" })}
+                  disabled={camposDeshabilitados}
                 >
                   <MenuItem value="">
                     <em>Sin especificar</em>
@@ -1583,17 +1451,24 @@ export default function TesoreriaFacturasPage() {
               />
               <TextField
                 size="small"
-                label="Tipo de cambio"
-                value={form.comprobanteTipoCambio}
-                onChange={(e) => setForm({ ...form, comprobanteTipoCambio: e.target.value })}
+                label="IVA"
+                value={form.comprobanteIva}
+                onChange={(e) => setForm({ ...form, comprobanteIva: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Total"
+                value={form.comprobanteTotal}
+                onChange={(e) => setForm({ ...form, comprobanteTotal: e.target.value })}
                 fullWidth
               />
             </Stack>
             <TextField
               size="small"
-              label="Total"
-              value={form.comprobanteTotal}
-              onChange={(e) => setForm({ ...form, comprobanteTotal: e.target.value })}
+              label="Tipo de cambio"
+              value={form.comprobanteTipoCambio}
+              onChange={(e) => setForm({ ...form, comprobanteTipoCambio: e.target.value })}
               fullWidth
             />
             </>
@@ -1664,7 +1539,7 @@ export default function TesoreriaFacturasPage() {
             </Stack>
             </>
             )}
-            {tabFactura === "Timbrado y Enlaces" && (
+            {tabFactura === "Timbrado" && (
             <>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
@@ -1708,6 +1583,7 @@ export default function TesoreriaFacturasPage() {
                   label="Tipo de relación (opcional)"
                   value={form.tipoRelacion}
                   onChange={(e) => setForm({ ...form, tipoRelacion: e.target.value })}
+                  disabled={camposDeshabilitados}
                 >
                   <MenuItem value="">
                     <em>No relaciona ningún otro CFDI</em>
@@ -1729,181 +1605,268 @@ export default function TesoreriaFacturasPage() {
                 />
               )}
             </Stack>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-              <TextField
-                size="small"
-                label="Link al PDF (vista previa)"
-                value={form.linkPdf}
-                onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
-                fullWidth
-                InputProps={{
-                  endAdornment: form.linkPdf && (
-                    <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        aria-label="Ver PDF"
-                        component="a"
-                        href={form.linkPdf}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <ExternalLink size={14} strokeWidth={1.5} />
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <TextField
-                size="small"
-                label="Link al XML (comprobante fiscal)"
-                value={form.linkXml}
-                onChange={(e) => setForm({ ...form, linkXml: e.target.value })}
-                fullWidth
-                InputProps={{
-                  endAdornment: form.linkXml && (
-                    <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        aria-label="Ver XML"
-                        component="a"
-                        href={form.linkXml}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <ExternalLink size={14} strokeWidth={1.5} />
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            </Stack>
-            {/* drive_file_id real (07/Sep/2026, "agrega al ui el id de
-                como se guarda en drive") - de solo lectura, nunca se
-                edita a mano (lo llena _vincular_archivo_drive). Util para
-                verificar rapido a que archivo real de Drive esta ligada
-                la factura, sin tener que entrar a la base de datos. */}
-            {editing && (editing.drive_file_id_pdf || editing.drive_file_id_xml) && (
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  size="small"
-                  label="Drive file ID (PDF)"
-                  value={editing.drive_file_id_pdf || "—"}
-                  disabled
-                  fullWidth
-                  sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
-                />
-                <TextField
-                  size="small"
-                  label="Drive file ID (XML)"
-                  value={editing.drive_file_id_xml || "—"}
-                  disabled
-                  fullWidth
-                  sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
-                />
-              </Stack>
-            )}
             </>
             )}
+
             </Stack>
             </fieldset>
-            {editing && (
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
-                <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
-              </Stack>
-            )}
-            {/* Vinculacion factura->flujo (07/Sep/2026, "vinculacion
-                factura<->flujo bidireccional") - antes solo se podia
-                iniciar desde Flujos; este es el sentido inverso. */}
-            {editing && puedeEditar && (
-              <Stack spacing={1}>
-                <Typography variant="subtitle2">Vincular a un Flujo</Typography>
-                {errorVincularFlujo && <Alert severity="error">{errorVincularFlujo}</Alert>}
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                  <TextField
-                    size="small"
-                    label="ID de flujo (ej. FLJ-000123)"
-                    value={idFlujoParaVincular}
-                    onChange={(e) => setIdFlujoParaVincular(e.target.value)}
-                    fullWidth
-                  />
-                  <Button
-                    variant="outlined"
-                    onClick={handleVincularFlujo}
-                    disabled={vinculandoFlujo || !idFlujoParaVincular.trim()}
-                  >
-                    {vinculandoFlujo ? <CircularProgress size={16} /> : "Vincular"}
-                  </Button>
+            {/* Documentos vive FUERA del fieldset a proposito (09/Sep/2026,
+                "solo aparece el ojo para que puedan verlo") - "Ver" no debe
+                depender del permiso de edicion ni del modo solo lectura, el
+                fieldset lo estaba deshabilitando justo cuando mas se
+                necesitaba (al abrir con el ojito). Solo el link manual
+                (unico control editable aqui) se deshabilita a mano. */}
+            {tabFactura === "Documentos" && (
+              <Stack spacing={1.5}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
+                  <Typography variant="caption" color="text.secondary">
+                    Los documentos se traen directo de Drive - no se aceptan links pegados a mano.
+                  </Typography>
+                  {editing && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={sincronizandoFactura ? <CircularProgress size={14} /> : <RefreshCw size={14} strokeWidth={1.5} />}
+                      onClick={handleSincronizarDriveFactura}
+                      disabled={sincronizandoFactura}
+                    >
+                      Sincronizar con Drive
+                    </Button>
+                  )}
                 </Stack>
-              </Stack>
-            )}
-            {editing && (
-              <Stack spacing={1}>
-                <Typography variant="subtitle2">Estado del Proceso</Typography>
-                {estadoError && (
-                  <Alert severity="error" onClose={() => setEstadoError(null)}>
-                    {estadoError}
+                {errorSincronizarFactura && (
+                  <Alert severity="error" onClose={() => setErrorSincronizarFactura(null)}>
+                    {errorSincronizarFactura}
                   </Alert>
                 )}
-                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                  <Chip
-                    size="small"
-                    label={editing.estado ? ESTADO_LABEL[editing.estado] : "—"}
-                    color={editing.estado ? ESTADO_COLOR[editing.estado] : "default"}
-                  />
-                  {puedeAprobar && editing.estado !== "EN_PROCESO" && (
-                    <Button size="small" onClick={() => handleCambiarEstado("EN_PROCESO")} disabled={cambiandoEstado}>
-                      Marcar en proceso
-                    </Button>
-                  )}
-                  {puedeAprobar && editing.estado !== "ACEPTADA" && (
-                    <Button
-                      size="small"
-                      color="success"
-                      startIcon={<CheckCircle2 size={14} strokeWidth={1.5} />}
-                      onClick={() => handleCambiarEstado("ACEPTADA")}
-                      disabled={cambiandoEstado}
-                    >
-                      Aceptar
-                    </Button>
-                  )}
-                  {puedeAprobar && editing.estado !== "RECHAZADA" && (
-                    <Button
-                      size="small"
-                      color="error"
-                      startIcon={<XCircle size={14} strokeWidth={1.5} />}
-                      onClick={() => handleCambiarEstado("RECHAZADA")}
-                      disabled={cambiandoEstado}
-                    >
-                      Rechazar
-                    </Button>
-                  )}
-                </Stack>
-                {editing.estado !== "ACEPTADA" && (!editing.link_pdf || !editing.link_xml) && (
-                  <Typography variant="caption" color="text.secondary">
-                    Para aceptar hace falta cargar el link al PDF y al XML.
-                  </Typography>
-                )}
+                {(["pdf", "xml"] as const).map((tipo) => {
+                  const driveFileId = tipo === "pdf" ? editing?.drive_file_id_pdf : editing?.drive_file_id_xml;
+                  const pendienteDeGuardar = !editing && tipo === "pdf" && Boolean(archivoNuevaFactura);
+                  return (
+                    <Paper key={tipo} variant="outlined" sx={{ p: 1.5 }}>
+                      <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          {tipo === "pdf" ? (
+                            <FileText size={18} strokeWidth={1.5} />
+                          ) : (
+                            <FileCode2 size={18} strokeWidth={1.5} />
+                          )}
+                          <Typography variant="body2">{tipo === "pdf" ? "Factura (PDF)" : "Comprobante Fiscal (XML)"}</Typography>
+                        </Stack>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <IconButton
+                            size="small"
+                            aria-label={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
+                            title={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
+                            disabled={!driveFileId}
+                            onClick={() => {
+                              if (!editing || !driveFileId) return;
+                              if (tipo === "pdf") {
+                                setPreviewDoc({
+                                  url: urlVerFacturaPdf(editing.id),
+                                  titulo: `Factura ${editing.comprobante_folio || editing.timbre_uuid} — PDF`,
+                                  urlExterna: urlDriveWebView(driveFileId),
+                                });
+                              } else {
+                                window.open(urlDriveWebView(driveFileId), "_blank", "noopener,noreferrer");
+                              }
+                            }}
+                          >
+                            {tipo === "pdf" ? (
+                              <Eye size={16} strokeWidth={1.5} />
+                            ) : (
+                              <ExternalLink size={16} strokeWidth={1.5} />
+                            )}
+                          </IconButton>
+                          <Chip
+                            size="small"
+                            color={driveFileId ? "success" : pendienteDeGuardar ? "warning" : "default"}
+                            label={
+                              driveFileId
+                                ? "Disponible en Drive"
+                                : pendienteDeGuardar
+                                  ? "Analizado — se vincula al guardar"
+                                  : "Sin archivo"
+                            }
+                          />
+                        </Stack>
+                      </Stack>
+                    </Paper>
+                  );
+                })}
               </Stack>
             )}
-            {editing && (
-              <>
-                <Divider sx={{ pt: 1 }} />
-                <PanelConceptos uuidFactura={editing.timbre_uuid} puedeEditar={puedeEditar} />
-                <PanelTraslados uuidFactura={editing.timbre_uuid} puedeEditar={puedeEditar} />
-              </>
+            {tabFactura === "Proceso" && editing && (
+              <Stack spacing={2.5}>
+                {editing.contraparte && (
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography variant="body2" sx={{ flex: 1 }}>
+                      <strong>Proveedor:</strong> {editing.contraparte_nombre || editing.emisor_nombre || "—"}
+                    </Typography>
+                    <Button
+                      size="small"
+                      startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                      onClick={() => setPanelReferencia({ tipo: "proveedor", id: editing.contraparte as string })}
+                    >
+                      Ver proveedor
+                    </Button>
+                  </Stack>
+                )}
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Stack spacing={1}>
+                    <Typography variant="subtitle2">Estado del Proceso</Typography>
+                    {estadoError && (
+                      <Alert severity="error" onClose={() => setEstadoError(null)}>
+                        {estadoError}
+                      </Alert>
+                    )}
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                      <Chip
+                        size="small"
+                        label={editing.estado ? ESTADO_LABEL[editing.estado] : "—"}
+                        color={editing.estado ? ESTADO_COLOR[editing.estado] : "default"}
+                      />
+                      {!modoSoloLectura && puedeAprobar && editing.estado !== "EN_PROCESO" && (
+                        <Button size="small" onClick={() => handleCambiarEstado("EN_PROCESO")} disabled={cambiandoEstado}>
+                          Marcar en proceso
+                        </Button>
+                      )}
+                      {!modoSoloLectura && puedeAprobar && editing.estado !== "ACEPTADA" && (
+                        <Button
+                          size="small"
+                          color="success"
+                          startIcon={<CheckCircle2 size={14} strokeWidth={1.5} />}
+                          onClick={() => handleCambiarEstado("ACEPTADA")}
+                          disabled={cambiandoEstado}
+                        >
+                          Aceptar
+                        </Button>
+                      )}
+                      {!modoSoloLectura && puedeAprobar && editing.estado !== "RECHAZADA" && (
+                        <Button
+                          size="small"
+                          color="error"
+                          startIcon={<XCircle size={14} strokeWidth={1.5} />}
+                          onClick={() => handleCambiarEstado("RECHAZADA")}
+                          disabled={cambiandoEstado}
+                        >
+                          Rechazar
+                        </Button>
+                      )}
+                    </Stack>
+                    {!modoSoloLectura &&
+                      editing.estado !== "ACEPTADA" &&
+                      !((editing.drive_file_id_pdf || editing.link_pdf) && (editing.drive_file_id_xml || editing.link_xml)) && (
+                      <Typography variant="caption" color="text.secondary">
+                        Para aceptar hace falta que el PDF y el XML ya estén en Drive.
+                      </Typography>
+                    )}
+                  </Stack>
+                </Paper>
+                {/* Aviso de saldo PPD pendiente (10/Sep/2026, pendiente
+                real de Jenny: "aviso por correo de saldo PPD pendiente") -
+                solo aplica si es PPD y todavia le queda saldo. */}
+                {editing.comprobante_metodo_pago === "PPD" &&
+                  editing.saldo_pendiente_exhibiciones != null &&
+                  Number(editing.saldo_pendiente_exhibiciones) > 0 && (
+                    <Paper variant="outlined" sx={{ p: 2 }}>
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle2">Saldo PPD pendiente</Typography>
+                        {errorAvisoSaldo && (
+                          <Alert severity="error" onClose={() => setErrorAvisoSaldo(null)}>
+                            {errorAvisoSaldo}
+                          </Alert>
+                        )}
+                        <Typography variant="body2" color="text.secondary">
+                          Todavía debe {Number(editing.saldo_pendiente_exhibiciones).toLocaleString("es-MX", {
+                            style: "currency",
+                            currency: "MXN",
+                          })}{" "}
+                          por cubrir con su complemento de pago.
+                        </Typography>
+                        {avisoSaldoEnviado ? (
+                          <Alert severity="success">Aviso enviado.</Alert>
+                        ) : (
+                          puedeEditar &&
+                          !modoSoloLectura && (
+                            <>
+                              <TextField
+                                size="small"
+                                multiline
+                                minRows={2}
+                                label="Mensaje (opcional)"
+                                value={mensajeAvisoSaldo}
+                                onChange={(e) => setMensajeAvisoSaldo(e.target.value)}
+                              />
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                disabled={enviandoAvisoSaldo}
+                                onClick={handleAvisoSaldoPendiente}
+                                sx={{ alignSelf: "flex-start" }}
+                              >
+                                {enviandoAvisoSaldo ? <CircularProgress size={14} /> : "Enviar aviso de saldo pendiente"}
+                              </Button>
+                            </>
+                          )
+                        )}
+                      </Stack>
+                    </Paper>
+                  )}
+                {/* Vinculacion factura->flujo - sentido inverso al que ya
+                    existia desde Flujos. */}
+                {puedeEditar && !modoSoloLectura && (
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2">Vincular a un Flujo</Typography>
+                      {errorVincularFlujo && <Alert severity="error">{errorVincularFlujo}</Alert>}
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                        <TextField
+                          size="small"
+                          label="ID de flujo (ej. FLJ-000123)"
+                          value={idFlujoParaVincular}
+                          onChange={(e) => setIdFlujoParaVincular(e.target.value)}
+                          fullWidth
+                        />
+                        <Button
+                          variant="outlined"
+                          onClick={handleVincularFlujo}
+                          disabled={vinculandoFlujo || !idFlujoParaVincular.trim()}
+                        >
+                          {vinculandoFlujo ? <CircularProgress size={16} /> : "Vincular"}
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  </Paper>
+                )}
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <TextField size="small" label="Registrado por" value={editing.created_by || "—"} disabled fullWidth />
+                    <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
+                  </Stack>
+                </Paper>
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Stack spacing={2}>
+                    <PanelConceptos uuidFactura={editing.timbre_uuid} puedeEditar={puedeEditar} />
+                    <Divider />
+                    <PanelTraslados uuidFactura={editing.timbre_uuid} puedeEditar={puedeEditar} />
+                  </Stack>
+                </Paper>
+              </Stack>
             )}
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            onClick={handleGuardar}
-            disabled={saving || (!editing && !motorEjecutadoNuevaFactura)}
-          >
-            {saving ? <CircularProgress size={16} /> : "Guardar"}
-          </Button>
+          <Button onClick={() => setDialogOpen(false)}>{modoSoloLectura ? "Cerrar" : "Cancelar"}</Button>
+          {!modoSoloLectura && (
+            <Button
+              variant="contained"
+              onClick={handleGuardar}
+              disabled={saving || (!editing && !motorEjecutadoNuevaFactura)}
+            >
+              {saving ? <CircularProgress size={16} /> : "Guardar"}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -2011,105 +1974,14 @@ export default function TesoreriaFacturasPage() {
               }
         }
       />
-
-      {/* Comparacion PDF vs XML (08/Sep/2026) - ver abrirComparacion. */}
-      <Dialog open={Boolean(ticketComparando)} onClose={() => setTicketComparando(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Comparar PDF vs XML — {ticketComparando?.contraparte_nombre}
-          <IconButton
-            onClick={() => setTicketComparando(null)}
-            sx={{ position: "absolute", right: 8, top: 8 }}
-          >
-            <CloseIcon size={18} />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent>
-          {errorComparacion && <Alert severity="error">{errorComparacion}</Alert>}
-          {/* Estado por archivo (08/Sep/2026, "si primero se extrae y
-          luego compara") - cada uno avanza/falla por su cuenta; un fallo
-          en uno no esconde el resultado del otro. */}
-          {!errorComparacion && archivoPdfComparado && archivoXmlComparado && (
-            <Stack spacing={1} sx={{ mb: 2 }}>
-              {[
-                { label: "PDF", archivo: archivoPdfComparado, extraccion: extraccionPdf, tipo: "pdf" as const },
-                { label: "XML", archivo: archivoXmlComparado, extraccion: extraccionXml, tipo: "xml" as const },
-              ].map(({ label, archivo, extraccion, tipo }) => (
-                <Stack key={label} direction="row" spacing={1} alignItems="center">
-                  {extraccion.cargando && <CircularProgress size={16} />}
-                  {extraccion.datos && <CheckCircle2 size={16} color="green" />}
-                  {extraccion.error && <XCircle size={16} color="red" />}
-                  <Typography variant="body2">
-                    {label}: {extraccion.cargando ? "analizando…" : extraccion.datos ? "listo" : extraccion.error || "pendiente"}
-                  </Typography>
-                  {extraccion.error && (
-                    <Button size="small" onClick={() => extraerArchivoComparacion(archivo, carpetaComparando, tipo)}>
-                      Reintentar
-                    </Button>
-                  )}
-                </Stack>
-              ))}
-            </Stack>
-          )}
-          {camposComparados.length > 0 && (
-            <Stack spacing={1.5}>
-              <Typography variant="body2" color="text.secondary">
-                Por default se usa el XML (fuente fiscal completa) en los campos donde difiere del PDF.
-                Cambia el que prefieras antes de continuar.
-              </Typography>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Campo</TableCell>
-                      <TableCell>PDF</TableCell>
-                      <TableCell>XML</TableCell>
-                      <TableCell align="right">Usar</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {camposComparados.map((fila, i) => {
-                      const difieren = fila.valorPdf !== fila.valorXml;
-                      return (
-                        <TableRow key={fila.campo} sx={difieren ? { bgcolor: "warning.50" } : undefined}>
-                          <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{fila.campo}</TableCell>
-                          <TableCell>{fila.valorPdf || "—"}</TableCell>
-                          <TableCell>{fila.valorXml || "—"}</TableCell>
-                          <TableCell align="right">
-                            {difieren ? (
-                              <Button
-                                size="small"
-                                onClick={() =>
-                                  setCamposComparados((prev) =>
-                                    prev.map((f, j) => (j === i ? { ...f, usarXml: !f.usarXml } : f))
-                                  )
-                                }
-                              >
-                                {fila.usarXml ? "XML" : "PDF"}
-                              </Button>
-                            ) : (
-                              <Typography variant="caption" color="text.secondary">
-                                igual
-                              </Typography>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Stack>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setTicketComparando(null)}>Cancelar</Button>
-          <Button variant="contained" disabled={camposComparados.length === 0} onClick={handleUsarComparacion}>
-            Usar estos datos y continuar
-          </Button>
-        </DialogActions>
-      </Dialog>
-        </>
-      )}
+      <DocumentoPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={previewDoc?.url ?? null}
+        titulo={previewDoc?.titulo ?? ""}
+        urlExterna={previewDoc?.urlExterna}
+      />
+      <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
     </AppShell>
   );
 }

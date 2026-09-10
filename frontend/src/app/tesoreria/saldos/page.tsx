@@ -31,6 +31,7 @@ import {
 import { Copy, Pencil, PiggyBank, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   TesoreriaCuenta,
   TesoreriaSaldo,
@@ -69,6 +70,7 @@ export default function TesoreriaSaldosPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [saldos, setSaldos] = useState<TesoreriaSaldo[]>([]);
   const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -77,6 +79,7 @@ export default function TesoreriaSaldosPage() {
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroCuenta, setFiltroCuenta] = useState("");
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
@@ -84,6 +87,7 @@ export default function TesoreriaSaldosPage() {
   useEffect(() => {
     getSession().then(setSession);
     listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
@@ -102,26 +106,53 @@ export default function TesoreriaSaldosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtroCuenta]);
 
+  // Etiqueta completa de la cuenta (08/Sep/2026, pedido explícito: "CTZ/BBVA/1131
+  // CHEQUES CIF TIZARA" - abreviatura de sociedad / banco / últimos dígitos de
+  // cuenta, tipo, nombre completo de la empresa). Cae a lo que haya disponible
+  // si falta algún dato (sin sociedad conocida, sin alias de banco, etc.) en
+  // vez de romper la pantalla - los datos capturados a mano no siempre están
+  // completos.
   function aliasCuenta(idCuentaBancaria: string): string {
     const c = cuentas.find((x) => x.id_cuenta_bancaria === idCuentaBancaria);
-    return c ? c.alias || c.clabe || idCuentaBancaria : idCuentaBancaria;
+    if (!c) return idCuentaBancaria;
+    const sociedad = sociedades.find((s) => s.rfc === c.sociedad);
+    const abreviatura = sociedad?.alias_sociedad;
+    const bancoAlias = c.banco_alias || c.banco_nombre;
+    const numeroCuenta = c.cuenta || c.clabe;
+    const ultimosDigitos = numeroCuenta ? numeroCuenta.slice(-4) : null;
+    const empresa = sociedad?.razon_social;
+
+    const prefijo = [abreviatura, bancoAlias, ultimosDigitos].filter(Boolean).join("/");
+    const sufijo = [c.tipo, empresa].filter(Boolean).join(" ");
+    const etiqueta = [prefijo, sufijo].filter(Boolean).join(" ");
+    return etiqueta || c.alias || c.clabe || idCuentaBancaria;
   }
 
   // Agrupados por fecha (mas reciente primero, ya viene ordenado -fecha
   // desde el backend) - mismo agrupamiento que el panel real de AppSheet.
   // El rango de fecha se filtra aqui, del lado del cliente (listSaldos no
   // tiene parametro de fecha en el backend, solo ?cuenta=).
+  // Cuentas de la empresa elegida (09/Sep/2026, "filtro por empresa,
+  // mostrando las cuentas de los distintos bancos de esa empresa") - el
+  // filtro de cuenta ya no muestra TODAS las cuentas del catalogo, solo
+  // las de la empresa elegida (o todas si no se elige ninguna).
+  const cuentasDeEmpresa = useMemo(
+    () => (filtroEmpresa ? cuentas.filter((c) => c.sociedad === filtroEmpresa) : cuentas),
+    [cuentas, filtroEmpresa]
+  );
+
   const gruposPorFecha = useMemo(() => {
     const mapa = new Map<string, TesoreriaSaldo[]>();
     for (const s of saldos) {
       if (filtroFechaDesde && s.fecha < filtroFechaDesde) continue;
       if (filtroFechaHasta && s.fecha > filtroFechaHasta) continue;
+      if (filtroEmpresa && !cuentasDeEmpresa.some((c) => c.id_cuenta_bancaria === s.cuenta)) continue;
       const grupo = mapa.get(s.fecha) || [];
       grupo.push(s);
       mapa.set(s.fecha, grupo);
     }
     return Array.from(mapa.entries());
-  }, [saldos, filtroFechaDesde, filtroFechaHasta]);
+  }, [saldos, filtroFechaDesde, filtroFechaHasta, filtroEmpresa, cuentasDeEmpresa]);
 
   function abrirAlta() {
     setDetalle(null);
@@ -224,6 +255,27 @@ export default function TesoreriaSaldosPage() {
         sx={{ mb: 3 }}
       >
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
+            <Select
+              labelId="filtro-empresa-label"
+              label="Filtrar por empresa"
+              value={filtroEmpresa}
+              onChange={(e) => {
+                setFiltroEmpresa(e.target.value);
+                setFiltroCuenta("");
+              }}
+            >
+              <MenuItem value="">
+                <em>Todas las empresas</em>
+              </MenuItem>
+              {sociedades.map((s) => (
+                <MenuItem key={s.rfc} value={s.rfc}>
+                  {s.alias_sociedad || s.razon_social || s.rfc}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
             <Select
@@ -235,7 +287,7 @@ export default function TesoreriaSaldosPage() {
               <MenuItem value="">
                 <em>Todas las cuentas</em>
               </MenuItem>
-              {cuentas.map((c) => (
+              {cuentasDeEmpresa.map((c) => (
                 <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
                   {c.alias || c.clabe || c.id_cuenta_bancaria}
                 </MenuItem>

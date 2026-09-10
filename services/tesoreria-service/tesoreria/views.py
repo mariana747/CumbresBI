@@ -1,12 +1,15 @@
+import csv
 import datetime
+import io
 import json
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import requests
+from openpyxl import load_workbook
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
-from django.db.models import ProtectedError
+from django.db.models import ProtectedError, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -24,12 +27,20 @@ from rest_framework.viewsets import ModelViewSet, ViewSet
 from . import recaptcha
 from .audit_utils import emitir_evento_auditoria
 from .mail_utils import (
+    enviar_correo_aviso_saldo_ppd,
     enviar_correo_documento_faltante,
+    enviar_correo_recordatorio_factura,
     enviar_correo_ticket_proveedor,
     enviar_factura,
     enviar_reporte_diario,
 )
-from .reportes import calcular_reporte_diario
+from .reportes import (
+    calcular_conciliacion_cfdi,
+    calcular_reporte_conciliacion,
+    calcular_reporte_diario,
+    sugerir_cfdi_en_lote,
+    sugerir_cfdi_para_flujo,
+)
 from .ticket_utils import generate_token, hash_token
 from .models import (
     _short_id,
@@ -49,6 +60,7 @@ from .models import (
     TesoreriaDocumentoTicket,
     TesoreriaFactura,
     TesoreriaFlujo,
+    TesoreriaMovimientoBancario,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -72,6 +84,7 @@ from .serializers import (
     TesoreriaDiaFestivoSerializer,
     TesoreriaFacturaSerializer,
     TesoreriaFlujoSerializer,
+    TesoreriaMovimientoBancarioSerializer,
     TesoreriaNotaCreditoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
@@ -726,6 +739,32 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
     ]
 
 
+def _aplicar_filtro_fecha_conciliacion(request, queryset):
+    """Rango de fechas de Conciliacion de Facturas (10/Sep/2026, "no es por
+    periodo debe ser por rango de fecha o una sola fecha") - compartido
+    entre conciliacion/ y sugerencias_cfdi_lote/ (mismo filtro base en las
+    2). ?desde=/?hasta=, cualquiera de los dos es opcional (mandar solo uno
+    = limite abierto); sin ninguno, el mes corriente por default."""
+    desde_param = request.query_params.get("desde")
+    hasta_param = request.query_params.get("hasta")
+    if desde_param or hasta_param:
+        try:
+            if desde_param:
+                queryset = queryset.filter(fecha_efectiva__gte=datetime.date.fromisoformat(desde_param))
+            if hasta_param:
+                queryset = queryset.filter(fecha_efectiva__lte=datetime.date.fromisoformat(hasta_param))
+        except ValueError:
+            raise ValidationError({"desde": ["Formato esperado: YYYY-MM-DD."]})
+    else:
+        fecha_inicio = timezone.localdate().replace(day=1)
+        if fecha_inicio.month == 12:
+            fecha_fin = fecha_inicio.replace(year=fecha_inicio.year + 1, month=1)
+        else:
+            fecha_fin = fecha_inicio.replace(month=fecha_inicio.month + 1)
+        queryset = queryset.filter(fecha_efectiva__gte=fecha_inicio, fecha_efectiva__lt=fecha_fin)
+    return queryset
+
+
 class TesoreriaFlujoViewSet(ModelViewSet):
     """Flujo de caja - un movimiento real de
     dinero (pago a proveedor, reembolso, nomina) ligado a un contrato.
@@ -772,6 +811,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             "vincular_factura",
             "subir_comprobante",
             "confirmar_conciliacion",
+            "recordatorio",
+            "aprobar_lote",
         ):
             return [require_permission("tesoreria.editar")()]
         if self.action in ("aprobar", "rechazar"):
@@ -781,13 +822,89 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     def get_queryset(self):
         queryset = (
             TesoreriaFlujo.objects.for_scope(self.request.effective_scope)
-            .select_related("contrato", "cuenta")
+            .select_related("contrato", "contrato__contraparte", "cuenta")
             .order_by("-created_at")
         )
         contrato_id = self.request.query_params.get("contrato")
         if contrato_id:
             queryset = queryset.filter(contrato_id=contrato_id)
+        # ?cuenta= y ?categoria_gasto= (09/Sep/2026, feedback de Jenny +
+        # "clasificar y rastrear movimientos") - mismo criterio que el
+        # resto de filtros de este metodo.
+        cuenta_id = self.request.query_params.get("cuenta")
+        if cuenta_id:
+            queryset = queryset.filter(cuenta_id=cuenta_id)
+        categoria_gasto = self.request.query_params.get("categoria_gasto")
+        if categoria_gasto:
+            queryset = queryset.filter(categoria_gasto=categoria_gasto)
+        # ?sociedad= (09/Sep/2026, "filtro por empresa") - el flujo no
+        # tiene sociedad directa, se filtra via el contrato (misma fuente
+        # de verdad que TesoreriaContrato.sociedad).
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(contrato__sociedad=sociedad)
+        # ?contraparte= (10/Sep/2026, "en proveedores los flujos") - el
+        # panel de referencia de Conciliacion de Facturas muestra todos los
+        # flujos de un proveedor, sin importar de cual de sus contratos.
+        contraparte_id = self.request.query_params.get("contraparte")
+        if contraparte_id:
+            queryset = queryset.filter(contrato__contraparte_id=contraparte_id)
         return queryset
+
+    @action(detail=False, methods=["get"])
+    def exportar_csv(self, request):
+        """Exportar a CSV (09/Sep/2026, pendiente real de negocio) - mismo
+        patron que TesoreriaFacturaViewSet.exportar_csv, mismos filtros
+        que la lista via filter_queryset."""
+        queryset = self.filter_queryset(self.get_queryset())
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="flujos.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría"]
+        )
+        for f in queryset:
+            writer.writerow(
+                [
+                    f.id_flujo,
+                    f.contrato_id,
+                    f.cuenta_id,
+                    f.concepto or "",
+                    f.total_mxp or "",
+                    f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
+                    f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
+                    "Sí" if f.pagado else "No",
+                    f.categoria_gasto or "",
+                ]
+            )
+        return response
+
+    @action(detail=False, methods=["get"])
+    def conciliacion(self, request):
+        """Conciliacion de Facturas (10/Sep/2026, notas de reunion) - base
+        de las 3 pantallas (Ligado a CFDI / Sin CFDI / No requiere CFDI).
+        Reusa los filtros de empresa/contrato de get_queryset() y agrega los
+        propios de esta vista: ?desde=/?hasta= (YYYY-MM-DD, rango de
+        fecha_efectiva - mandar solo uno de los dos equivale a una sola
+        fecha; sin ninguno, el mes corriente por default),
+        ?requiere_factura= (true/false, del contrato) y ?tipo_comprobante=
+        (I/E - Ingreso/Egreso, del catalogo SAT en la factura/complemento
+        ligado; un flujo sin ninguno de los dos no puede filtrarse por
+        esto y queda fuera si se manda el parametro)."""
+        queryset = _aplicar_filtro_fecha_conciliacion(request, self.filter_queryset(self.get_queryset()))
+
+        requiere_factura = request.query_params.get("requiere_factura")
+        if requiere_factura is not None:
+            queryset = queryset.filter(contrato__requiere_factura=(requiere_factura.lower() == "true"))
+
+        tipo_comprobante = request.query_params.get("tipo_comprobante")
+        if tipo_comprobante:
+            queryset = queryset.filter(
+                Q(factura__comprobante_tipo_de_comprobante=tipo_comprobante)
+                | Q(complemento__tipo_de_comprobante=tipo_comprobante)
+            )
+
+        return Response(calcular_conciliacion_cfdi(queryset))
 
     def perform_create(self, serializer):
         # id_flujo = "FLJ-{consecutivo global de 6 digitos}" (ver ejemplo
@@ -933,6 +1050,77 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         )
         return Response(self.get_serializer(flujo).data)
 
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_comprobante(self, request, pk=None):
+        """Preview embebido del comprobante bancario (09/Sep/2026, apartado
+        de Documentos en Flujos - mismo patron que
+        TesoreriaSolicitudPagoViewSet.ver_comprobante/
+        TesoreriaTicketReembolsoViewSet.ver_ticket): streaming autenticado
+        en vez del link crudo de Drive. TesoreriaFlujo no tiene
+        mime_type_comprobante propio (a diferencia de SolicitudPago) - se
+        deja que drive-service resuelva el tipo real."""
+        flujo = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=flujo.drive_file_id_comprobante,
+            mime_type=None,
+            nombre_archivo=f"comprobante-{flujo.id_flujo}",
+            carpeta=f"Tesoreria/Flujos/{flujo.id_flujo}",
+        )
+
+    @action(detail=True, methods=["get"])
+    def sugerencias_cfdi(self, request, pk=None):
+        """"La IA propone, el humano aprueba" (10/Sep/2026, Fase 5 de
+        Conciliacion de Facturas) - candidatos de factura/complemento para
+        este flujo (misma contraparte + monto parecido), sin ligar nada
+        solo. El analista confirma con vincular_factura, arriba."""
+        flujo = self.get_object()
+        return Response(sugerir_cfdi_para_flujo(flujo))
+
+    @action(detail=False, methods=["get"])
+    def sugerencias_cfdi_lote(self, request):
+        """Sugerencias para TODOS los flujos "Sin CFDI" del filtro actual a
+        la vez (10/Sep/2026, "aprobar en lote, no uno por uno") - mismos
+        filtros que conciliacion/ (empresa, contrato, rango de fecha).
+        Sigue sin ligar nada sola - ver aprobar_lote para el paso que si
+        liga, siempre con confirmacion explicita del analista en pantalla."""
+        queryset = self.filter_queryset(self.get_queryset())
+        queryset = _aplicar_filtro_fecha_conciliacion(request, queryset)
+        return Response(sugerir_cfdi_en_lote(queryset))
+
+    @action(detail=False, methods=["post"])
+    def aprobar_lote(self, request):
+        """Aplica varias ligas de una vez (10/Sep/2026, "aprobar en lote") -
+        recibe una lista de {id_flujo, tipo, timbre_uuid} ya elegida en
+        pantalla (el analista pudo haber desmarcado algunas antes de
+        mandar esto) y llama el mismo camino de siempre por cada una
+        (mismo criterio que vincular_factura, una por una en el momento del
+        POST) - nunca es la IA sola quien decide, este endpoint solo evita
+        que el analista abra cada pago uno por uno."""
+        items = request.data.get("items", [])
+        resultados = []
+        for item in items:
+            id_flujo = item.get("id_flujo")
+            tipo = item.get("tipo")
+            timbre_uuid = item.get("timbre_uuid")
+            try:
+                flujo = TesoreriaFlujo.objects.for_scope(request.effective_scope).get(id_flujo=id_flujo)
+            except TesoreriaFlujo.DoesNotExist:
+                resultados.append({"id_flujo": id_flujo, "ok": False, "detalle": "No existe o fuera de alcance."})
+                continue
+            try:
+                if tipo == "complemento":
+                    flujo.complemento = TesoreriaComplementoPago.objects.get(timbre_uuid=timbre_uuid)
+                    flujo.save(update_fields=["complemento"])
+                else:
+                    flujo.factura = TesoreriaFactura.objects.get(timbre_uuid=timbre_uuid)
+                    flujo.save(update_fields=["factura"])
+                resultados.append({"id_flujo": id_flujo, "ok": True})
+            except (TesoreriaFactura.DoesNotExist, TesoreriaComplementoPago.DoesNotExist):
+                resultados.append({"id_flujo": id_flujo, "ok": False, "detalle": "El comprobante ya no existe."})
+        return Response({"resultados": resultados})
+
     @action(detail=True, methods=["post"])
     def vincular_factura(self, request, pk=None):
         """Liga el flujo a una factura/complemento ya emitidos
@@ -966,6 +1154,28 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
         flujo.save(update_fields=update_fields)
         return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["post"])
+    def recordatorio(self, request, pk=None):
+        """Recordatorio manual de factura pendiente (10/Sep/2026, "el
+        recordatorio de facturas se envia manualmente...debe presionar el
+        boton") - se manda al correo de la contraparte del contrato del
+        flujo. Nunca se dispara solo/programado, solo desde este boton en
+        la pantalla de Conciliacion de Facturas (bandeja "Sin CFDI")."""
+        flujo = self.get_object()
+        if not flujo.contrato_id or not flujo.contrato.contraparte.email:
+            return Response({"detail": "Este flujo no tiene un contacto de correo al cual avisar."}, status=400)
+        enviado = enviar_correo_recordatorio_factura(
+            request,
+            email=flujo.contrato.contraparte.email,
+            contraparte_nombre=flujo.contrato.contraparte.razon_social,
+            id_flujo=flujo.id_flujo,
+            concepto=flujo.concepto,
+            mensaje=request.data.get("mensaje") or None,
+        )
+        if not enviado:
+            return Response({"detail": "No se pudo enviar el recordatorio, intenta de nuevo."}, status=502)
+        return Response({"detail": "Recordatorio enviado."})
 
     @action(detail=True, methods=["post"])
     def confirmar_conciliacion(self, request, pk=None):
@@ -1461,6 +1671,9 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
             queryset = queryset.filter(sociedad=sociedad)
+        categoria_gasto = self.request.query_params.get("categoria_gasto")
+        if categoria_gasto:
+            queryset = queryset.filter(categoria_gasto=categoria_gasto)
         return queryset
 
     def perform_create(self, serializer):
@@ -1677,6 +1890,21 @@ def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, c
     return response
 
 
+class _ArchivoEnMemoria:
+    """Envoltura minima (08/Sep/2026) para reusar `_subir_a_drive` cuando el
+    contenido del archivo ya se leyo a memoria antes (ej. porque tambien
+    hay que parsearlo, como el extracto bancario) - un archivo de
+    request.FILES solo admite un `.read()` sin volver a hacer seek."""
+
+    def __init__(self, name, content_type, contenido):
+        self.name = name
+        self.content_type = content_type
+        self._contenido = contenido
+
+    def read(self):
+        return self._contenido
+
+
 def _subir_a_drive(request, archivo, carpeta):
     """Helper compartido: sube un archivo a drive-service bajo `carpeta`.
     Regresa (resultado_dict, None) si funciono, o (None, Response) con el
@@ -1714,6 +1942,47 @@ def _subir_a_drive(request, archivo, carpeta):
             status=upstream.status_code,
         )
     return upstream.json(), None
+
+
+def _listar_drive(request, carpeta):
+    """Helper compartido: lista los archivos que ya estan en `carpeta` de
+    Drive (09/Sep/2026, boton temporal de "Sincronizar" - cubre el caso
+    real donde alguien subio el PDF/XML directo en drive.google.com, sin
+    pasar por subir_factura(), asi que nunca se guardo el file_id aqui).
+    Regresa (lista, None) o (None, Response-de-error)."""
+    headers, cookies = forward_auth_headers(request)
+    if settings.DRIVE_INTERNAL_SECRET:
+        headers["X-Internal-Secret"] = settings.DRIVE_INTERNAL_SECRET
+    try:
+        upstream = requests.get(
+            f"{settings.DRIVE_SERVICE_URL}/api/list/",
+            params={"perm": "tesoreria.editar", "carpeta": carpeta},
+            headers=headers,
+            cookies=cookies,
+            timeout=30,
+        )
+    except requests.RequestException:
+        logger.warning("drive-service no respondio al listar %s", carpeta, exc_info=True)
+        return None, Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+    if upstream.status_code != 200:
+        return None, Response(
+            upstream.json() if upstream.content else {"detail": "Error al listar Drive"},
+            status=upstream.status_code,
+        )
+    return upstream.json().get("archivos", []), None
+
+
+def _primer_archivo_por_tipo(archivos, extension):
+    """De la lista de _listar_drive, el primero cuyo nombre/mime_type
+    coincide con `extension` (ej. "pdf", "xml") - mismo criterio de
+    deteccion que _vincular_archivo_drive."""
+    for archivo in archivos:
+        nombre = (archivo.get("nombre") or "").lower()
+        mime_type = (archivo.get("mime_type") or "").lower()
+        if nombre.endswith(f".{extension}") or extension in mime_type:
+            return archivo
+    return None
 
 
 class TesoreriaTicketProveedorViewSet(ModelViewSet):
@@ -1842,19 +2111,11 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
 
     @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
     def subir_factura(self, request):
-        """Formulario publico del proveedor: sube su factura sin sesion,
-        canjeando el token del link. Protegido por reCAPTCHA.
-
-        "file" (PDF) sigue siendo obligatorio - es lo minimo para poder
-        procesar la factura. "file_xml" es opcional (07/Sep/2026, "debe
-        poder subir el PDF y el XML" - antes solo se aceptaba un archivo):
-        el XML es el CFDI real, con el 100% de los datos fiscales; el PDF
-        es solo una representacion impresa que puede omitir campos enteros
-        segun la version del esquema (ver hallazgo real con un CFDI de
-        2013, memoria de sesion). Ambos se suben a la MISMA carpeta para
-        que el Motor Documental los encuentre juntos al dar de alta la
-        factura - no crea la factura por si sola, ver
-        TesoreriaFacturaViewSet.confirmar_extraccion/create."""
+        """Formulario publico del proveedor: sube su factura (PDF) y,
+        opcionalmente, su XML (09/Sep/2026, "que el ticket del proveedor
+        tambien acepte subir el XML" - antes solo el PDF, el XML siempre
+        se pegaba a mano despues). Campo 'file' (PDF, obligatorio) +
+        'file_xml' (opcional). Protegido por reCAPTCHA."""
         ticket, error = self._resolver_ticket(request.data.get("token"))
         if error:
             return error
@@ -1890,36 +2151,113 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
 
         resultado_xml = None
         if archivo_xml:
-            resultado_xml, drive_error_xml = _subir_a_drive(request, archivo_xml, carpeta)
-            # El XML es opcional - si falla su subida no se tumba el envio
-            # completo (el PDF ya se subio y es lo minimo indispensable),
-            # solo se avisa en la respuesta para que el proveedor sepa que
-            # le falto ese archivo.
-            if drive_error_xml:
-                resultado_xml = None
+            resultado_xml, drive_error = _subir_a_drive(request, archivo_xml, carpeta)
+            if drive_error:
+                return drive_error
 
         now = timezone.now()
         ticket.uses_count += 1
         ticket.last_used_at = now
         if ticket.first_used_at is None:
             ticket.first_used_at = now
-        ticket.save(update_fields=["uses_count", "last_used_at", "first_used_at"])
+        # Guarda el file_id real (09/Sep/2026) - antes se descartaba, y
+        # "ver documento" solo servia hasta que el Motor Documental
+        # confirmaba la extraccion (perform_create -> _vincular_archivo_
+        # drive), aunque el archivo ya estuviera en Drive desde este mismo
+        # POST.
+        ticket.drive_file_id_pdf = resultado_pdf.get("file_id")
+        ticket.mime_type_pdf = resultado_pdf.get("mime_type")
+        campos_actualizados = ["uses_count", "last_used_at", "first_used_at", "drive_file_id_pdf", "mime_type_pdf"]
+        if resultado_xml:
+            ticket.drive_file_id_xml = resultado_xml.get("file_id")
+            ticket.mime_type_xml = resultado_xml.get("mime_type")
+            campos_actualizados += ["drive_file_id_xml", "mime_type_xml"]
+        ticket.save(update_fields=campos_actualizados)
 
         emitir_evento_auditoria(
             "tesoreria_ticket_proveedor.subir_factura",
             "tesoreria_ticket_proveedor",
             ticket.id_ticket,
             actor_user_id="externo",
-            valores_nuevos={
-                "nombre_archivo": archivo_pdf.name,
-                "nombre_archivo_xml": archivo_xml.name if archivo_xml else None,
-                "xml_subido": resultado_xml is not None,
-            },
+            valores_nuevos={"nombre_archivo": archivo_pdf.name, "nombre_archivo_xml": archivo_xml.name if archivo_xml else None},
         )
-        detalle = "Factura subida correctamente. Tesorería la va a procesar en breve."
-        if archivo_xml and resultado_xml is None:
-            detalle = "El PDF se subió, pero el XML no se pudo subir. Vuelve a intentarlo solo con el XML si puedes."
-        return Response({"detail": detalle, "pdf": resultado_pdf, "xml": resultado_xml})
+        return Response(
+            {
+                "detail": "Factura subida correctamente. Tesorería la va a procesar en breve.",
+                "pdf": resultado_pdf,
+                "xml": resultado_xml,
+            }
+        )
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_pdf(self, request, pk=None):
+        """Preview del PDF que el proveedor ya subio (09/Sep/2026) - no
+        depende de que exista una TesoreriaFactura ni de que el Motor
+        Documental haya corrido, el archivo ya esta en Drive desde
+        subir_factura()."""
+        ticket = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=ticket.drive_file_id_pdf,
+            mime_type=ticket.mime_type_pdf,
+            nombre_archivo=f"ticket-{ticket.id_ticket}",
+            carpeta=f"Tesoreria/Facturas/FacturasProveedores/{ticket.contraparte_id}/{ticket.id_ticket}",
+        )
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_xml(self, request, pk=None):
+        """Preview del XML que el proveedor ya subio (09/Sep/2026) - mismo
+        criterio que ver_pdf."""
+        ticket = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=ticket.drive_file_id_xml,
+            mime_type=ticket.mime_type_xml,
+            nombre_archivo=f"ticket-{ticket.id_ticket}",
+            carpeta=f"Tesoreria/Facturas/FacturasProveedores/{ticket.contraparte_id}/{ticket.id_ticket}",
+        )
+
+    @action(detail=True, methods=["post"])
+    def sincronizar_drive(self, request, pk=None):
+        """Boton TEMPORAL (09/Sep/2026, "eso esta en drive, pon el boton de
+        sincronizacion temporal") - cubre los tickets/archivos que ya
+        estan en Drive pero nunca pasaron por subir_factura() (ej. alguien
+        los subio a mano directo en drive.google.com antes de que este
+        campo existiera). Lista la carpeta real del ticket y liga el
+        primer PDF/XML que encuentre - no reemplaza subir_factura(), que
+        sigue siendo el camino normal para proveedores nuevos."""
+        ticket = self.get_object()
+        carpeta = f"Tesoreria/Facturas/FacturasProveedores/{ticket.contraparte_id}/{ticket.id_ticket}"
+        archivos, error = _listar_drive(request, carpeta)
+        if error:
+            return error
+
+        pdf = _primer_archivo_por_tipo(archivos, "pdf")
+        xml = _primer_archivo_por_tipo(archivos, "xml")
+        if not pdf and not xml:
+            return Response({"detail": "No se encontró ningún PDF ni XML en la carpeta de Drive."}, status=404)
+
+        campos_actualizados = []
+        if pdf:
+            ticket.drive_file_id_pdf = pdf.get("file_id")
+            ticket.mime_type_pdf = pdf.get("mime_type")
+            campos_actualizados += ["drive_file_id_pdf", "mime_type_pdf"]
+        if xml:
+            ticket.drive_file_id_xml = xml.get("file_id")
+            ticket.mime_type_xml = xml.get("mime_type")
+            campos_actualizados += ["drive_file_id_xml", "mime_type_xml"]
+        ticket.save(update_fields=campos_actualizados)
+
+        emitir_evento_auditoria(
+            "tesoreria_ticket_proveedor.sincronizar_drive",
+            "tesoreria_ticket_proveedor",
+            ticket.id_ticket,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"pdf": bool(pdf), "xml": bool(xml)},
+        )
+        return Response(self.get_serializer(ticket).data)
 
 
 class FacturaConceptoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -1985,13 +2323,7 @@ def _vincular_archivo_drive(factura, archivo) -> bool:
     manda DriveArchivo del frontend, o None/vacio si no aplica (ej. alta
     manual sin pasar por el Motor Documental). PDF vs XML se detecta por
     mime_type o por la extension del nombre; cualquier otro tipo se ignora
-    en silencio. Regresa True si de verdad se guardo algo.
-
-    NOTA (08/Sep/2026): se probo aceptar XPS como alternativa al XML
-    (algunos proveedores, ej. gncys.com, lo entregan en su lugar), pero se
-    descarto - Gemini no lee XPS (formato de IMPRESION propietario de
-    Microsoft, no el CFDI fiscal real), asi que no sirve para el Motor
-    Documental ni para comparar contra el PDF. Solo se aceptan PDF y XML."""
+    en silencio. Regresa True si de verdad se guardo algo."""
     if not isinstance(archivo, dict) or not archivo.get("file_id"):
         return False
     mime_type = (archivo.get("mime_type") or "").lower()
@@ -2002,30 +2334,10 @@ def _vincular_archivo_drive(factura, archivo) -> bool:
         factura.mime_type_pdf = archivo.get("mime_type")
         factura.link_pdf = archivo.get("web_view_link") or factura.link_pdf
         campos_actualizados = ["drive_file_id_pdf", "mime_type_pdf", "link_pdf"]
-    elif "xml" in mime_type or nombre.endswith(".xml"):
-        factura.drive_file_id_xml = archivo["file_id"]
-        factura.mime_type_xml = archivo.get("mime_type")
-        factura.link_xml = archivo.get("web_view_link") or factura.link_xml
-        campos_actualizados = ["drive_file_id_xml", "mime_type_xml", "link_xml"]
     if not campos_actualizados:
         return False
     factura.save(update_fields=campos_actualizados)
     return True
-
-
-def _vincular_archivos_drive(factura, data) -> int:
-    """Version plural de _vincular_archivo_drive (08/Sep/2026, comparacion
-    PDF vs XML) - antes solo se podia ligar UN archivo por llamada
-    (el que el analista analizo con el Motor Documental), asi que el
-    "otro" archivo (ej. el XML, cuando se comparo contra el PDF) nunca
-    quedaba ligado a menos que se confirmara una segunda vez. Acepta
-    "archivos" (lista de 0-2 archivos) o, por compatibilidad, el singular
-    "archivo" de siempre. Regresa cuantos se ligaron de verdad."""
-    archivos = data.get("archivos")
-    if not isinstance(archivos, list):
-        archivo_unico = data.get("archivo")
-        archivos = [archivo_unico] if archivo_unico else []
-    return sum(1 for archivo in archivos if _vincular_archivo_drive(factura, archivo))
 
 
 class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
@@ -2055,19 +2367,189 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         receptor_rfc = self.request.query_params.get("receptor_rfc")
         if receptor_rfc:
             queryset = queryset.filter(receptor_rfc=receptor_rfc)
+        categoria_gasto = self.request.query_params.get("categoria_gasto")
+        if categoria_gasto:
+            queryset = queryset.filter(categoria_gasto=categoria_gasto)
+        # ?fecha_desde=/?fecha_hasta= (09/Sep/2026, "filtros combinados...
+        # por empresa, proveedor, fechas") - sobre comprobante_fecha (la
+        # fecha real del CFDI, no created_at). comprobante_fecha es
+        # DateTimeField - se compara solo por fecha (date__gte/lte) para
+        # que "hasta 09/09" incluya toda esa fecha, no solo hasta medianoche.
+        fecha_desde = self.request.query_params.get("fecha_desde")
+        if fecha_desde:
+            queryset = queryset.filter(comprobante_fecha__date__gte=fecha_desde)
+        fecha_hasta = self.request.query_params.get("fecha_hasta")
+        if fecha_hasta:
+            queryset = queryset.filter(comprobante_fecha__date__lte=fecha_hasta)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset
+
+    @action(detail=False, methods=["get"])
+    def exportar_csv(self, request):
+        """Exportar a CSV (09/Sep/2026, pendiente real de negocio) - mismos
+        filtros que la lista (search + combinados, via filter_queryset),
+        para exportar exactamente lo que el analista ya esta viendo en
+        pantalla, no todo el catalogo."""
+        queryset = self.filter_queryset(self.get_queryset())
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="facturas.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            ["UUID", "Folio", "Emisor", "RFC Emisor", "Receptor", "Fecha", "Total", "Estado", "Categoría"]
+        )
+        for f in queryset:
+            writer.writerow(
+                [
+                    f.timbre_uuid,
+                    f"{f.comprobante_serie or ''}{f.comprobante_folio or ''}",
+                    f.emisor_nombre or "",
+                    f.emisor_rfc or "",
+                    f.receptor_nombre or "",
+                    f.comprobante_fecha.strftime("%Y-%m-%d") if f.comprobante_fecha else "",
+                    f.comprobante_total or "",
+                    f.estado or "",
+                    f.categoria_gasto or "",
+                ]
+            )
+        return response
+
+    @staticmethod
+    def _carpeta_documento(factura, tipo):
+        """Si el archivo se copio del ticket de origen (perform_create, ver
+        abajo), vive fisicamente en la carpeta del ticket, no en la de la
+        factura - solo importa en modo simulado de Drive (dev), donde la
+        carpeta se usa para ubicar el archivo local."""
+        drive_file_id = factura.drive_file_id_pdf if tipo == "pdf" else factura.drive_file_id_xml
+        drive_file_id_ticket = (
+            factura.ticket_origen.drive_file_id_pdf if tipo == "pdf" else factura.ticket_origen.drive_file_id_xml
+        ) if factura.ticket_origen_id else None
+        if factura.ticket_origen_id and drive_file_id == drive_file_id_ticket:
+            return f"Tesoreria/Facturas/FacturasProveedores/{factura.ticket_origen.contraparte_id}/{factura.ticket_origen_id}"
+        return f"Tesoreria/Facturas/{factura.timbre_uuid}"
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_pdf(self, request, pk=None):
+        """Preview embebido del PDF real (09/Sep/2026, cierra el pendiente
+        "boton que abra directo el documento en Drive, en vez de solo el
+        link crudo") - mismo patron que
+        TesoreriaTicketReembolsoViewSet.ver_factura, streaming a traves de
+        este servicio en vez del link crudo de Google Drive (cuyo acceso lo
+        decidia el ACL de Drive, no el permiso de CumbresBI)."""
+        factura = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=factura.drive_file_id_pdf,
+            mime_type=factura.mime_type_pdf,
+            nombre_archivo=f"factura-{factura.timbre_uuid}",
+            carpeta=self._carpeta_documento(factura, "pdf"),
+        )
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_xml(self, request, pk=None):
+        """Apartado de XML visible - mismo streaming que ver_pdf; ahora
+        tambien se puede subir real via el ticket del proveedor (09/Sep/2026,
+        "que el ticket del proveedor tambien acepte subir el XML"), ya no
+        depende exclusivamente del link manual."""
+        factura = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=factura.drive_file_id_xml,
+            mime_type=factura.mime_type_xml,
+            nombre_archivo=f"factura-{factura.timbre_uuid}",
+            carpeta=self._carpeta_documento(factura, "xml"),
+        )
+
+    @action(detail=True, methods=["post"])
+    def sincronizar_drive(self, request, pk=None):
+        """Boton TEMPORAL en la pestaña Documentos de una factura ya
+        creada (09/Sep/2026, "en factura no veo el actualizar" - mismo
+        boton que ya existe en la fila del ticket, ahora tambien aqui).
+        Revisa primero la carpeta propia de la factura
+        (Tesoreria/Facturas/<uuid>, donde el analista sube el PDF/XML a
+        mano en drive.google.com antes del Motor Documental) y, si no
+        encuentra nada ahi, la carpeta del ticket de origen (si existe)."""
+        factura = self.get_object()
+        carpetas = [f"Tesoreria/Facturas/{factura.timbre_uuid}"]
+        if factura.ticket_origen_id:
+            carpetas.append(
+                f"Tesoreria/Facturas/FacturasProveedores/"
+                f"{factura.ticket_origen.contraparte_id}/{factura.ticket_origen_id}"
+            )
+
+        pdf = xml = None
+        errores = []
+        for carpeta in carpetas:
+            archivos, error = _listar_drive(request, carpeta)
+            if error:
+                # No se descarta en silencio (09/Sep/2026, hallazgo real:
+                # un error real de Drive -permiso, cuota, 502- se veia
+                # igual que "no hay archivos", ocultando la causa real).
+                errores.append((carpeta, error))
+                continue
+            pdf = pdf or _primer_archivo_por_tipo(archivos, "pdf")
+            xml = xml or _primer_archivo_por_tipo(archivos, "xml")
+            if pdf and xml:
+                break
+
+        if not pdf and not xml:
+            if errores and len(errores) == len(carpetas):
+                _, primer_error = errores[0]
+                return primer_error
+            return Response({"detail": "No se encontró ningún PDF ni XML en Drive."}, status=404)
+
+        campos_actualizados = []
+        if pdf:
+            factura.drive_file_id_pdf = pdf.get("file_id")
+            factura.mime_type_pdf = pdf.get("mime_type")
+            campos_actualizados += ["drive_file_id_pdf", "mime_type_pdf"]
+        if xml:
+            factura.drive_file_id_xml = xml.get("file_id")
+            factura.mime_type_xml = xml.get("mime_type")
+            campos_actualizados += ["drive_file_id_xml", "mime_type_xml"]
+        factura.save(update_fields=campos_actualizados)
+
+        emitir_evento_auditoria(
+            "tesoreria_facturas.sincronizar_drive",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"pdf": bool(pdf), "xml": bool(xml)},
+        )
+        return Response(self.get_serializer(factura).data)
 
     def perform_create(self, serializer):
         instance = serializer.save()
         _vincular_contraparte_por_rfc(instance)
         # Mismo "archivo" opcional que confirmar_extraccion (07/Sep/2026) -
         # cubre el caso real donde la factura NO existia todavia cuando el
-        # Motor Documental analizo el PDF/XML (handleAutorellenarNuevaFactura
+        # Motor Documental analizo el PDF (handleAutorellenarNuevaFactura
         # en el frontend: primero se prellena el formulario, la factura se
         # crea hasta que el analista da "Guardar"). Sin esto, ese camino
         # (el mas comun - proveedor sube por ticket, analista abre "Nueva
         # Factura" apuntando a esa carpeta) nunca ligaria el archivo real.
-        _vincular_archivos_drive(instance, self.request.data)
+        vinculado = _vincular_archivo_drive(instance, self.request.data.get("archivo"))
+        # Respaldo con el archivo del ticket (09/Sep/2026, "los documentos
+        # ya estan en Drive deben traerse de ahi") - si por lo que sea no
+        # llego un "archivo" explicito (ej. el analista no volvio a correr
+        # el Motor Documental justo antes de guardar), pero la factura si
+        # viene de un ticket que YA recibio el PDF real, se copia de ahi en
+        # vez de dejar el apartado de Documentos vacio.
+        if not vinculado and instance.ticket_origen_id and instance.ticket_origen.drive_file_id_pdf:
+            instance.drive_file_id_pdf = instance.ticket_origen.drive_file_id_pdf
+            instance.mime_type_pdf = instance.ticket_origen.mime_type_pdf
+            instance.save(update_fields=["drive_file_id_pdf", "mime_type_pdf"])
+        # Mismo respaldo para el XML (09/Sep/2026, "que el ticket del
+        # proveedor tambien acepte subir el XML") - el Motor Documental
+        # nunca analiza el XML, asi que aqui SIEMPRE es el unico camino
+        # real (no hay un "archivo" explicito equivalente que compita).
+        if instance.ticket_origen_id and instance.ticket_origen.drive_file_id_xml and not instance.drive_file_id_xml:
+            instance.drive_file_id_xml = instance.ticket_origen.drive_file_id_xml
+            instance.mime_type_xml = instance.ticket_origen.mime_type_xml
+            instance.save(update_fields=["drive_file_id_xml", "mime_type_xml"])
 
     # Whitelist de columnas que confirmar_extraccion puede escribir - mismo
     # criterio que PldContraparteKycViewSet.CAMPOS_CONFIRMABLES (ver
@@ -2083,6 +2565,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         "comprobante_fecha",
         "comprobante_no_certificado",
         "comprobante_sub_total",
+        "comprobante_iva",
         "comprobante_moneda",
         "comprobante_exportacion",
         "comprobante_tipo_cambio",
@@ -2117,7 +2600,36 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         # invoices", 26/Ago/2026 - ver permission_matrix.py).
         if self.action in ("confirmar_extraccion", "marcar_estado", "enviar_masivo"):
             return [require_permission("facturacion-cfdi.aprobar")()]
+        if self.action == "aviso_saldo_pendiente":
+            return [require_permission("facturacion-cfdi.editar")()]
         return super().get_permissions()
+
+    @action(detail=True, methods=["post"])
+    def aviso_saldo_pendiente(self, request, pk=None):
+        """Aviso manual de saldo PPD pendiente (10/Sep/2026, pendiente real
+        de Jenny) - solo tiene sentido si la factura es PPD y todavia le
+        queda saldo (ver TesoreriaFacturaSerializer.saldo_pendiente_
+        exhibiciones); nunca se dispara solo/programado, solo desde este
+        boton."""
+        factura = self.get_object()
+        if factura.comprobante_metodo_pago != "PPD":
+            return Response({"detail": "Esta factura no es PPD."}, status=400)
+        saldo = self.get_serializer(factura).data.get("saldo_pendiente_exhibiciones")
+        if saldo is None or Decimal(saldo) <= 0:
+            return Response({"detail": "Esta factura no tiene saldo pendiente."}, status=400)
+        if not factura.contraparte_id or not factura.contraparte.email:
+            return Response({"detail": "Esta factura no tiene un contacto de correo al cual avisar."}, status=400)
+        enviado = enviar_correo_aviso_saldo_ppd(
+            request,
+            email=factura.contraparte.email,
+            contraparte_nombre=factura.contraparte.razon_social,
+            factura_folio=factura.comprobante_folio or factura.timbre_uuid,
+            saldo_pendiente=Decimal(saldo),
+            mensaje=request.data.get("mensaje") or None,
+        )
+        if not enviado:
+            return Response({"detail": "No se pudo enviar el aviso, intenta de nuevo."}, status=502)
+        return Response({"detail": "Aviso enviado."})
 
     @action(detail=False, methods=["post"])
     def enviar_masivo(self, request):
@@ -2162,17 +2674,23 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         (PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA, ver
         TesoreriaFactura.ESTADO_CHOICES) - pedido explicito de Mariana
         (24/Ago/2026). Pasar a ACEPTADA exige que ya esten cargados los dos
-        archivos esenciales (link_pdf = vista previa en PDF, link_xml =
-        comprobante fiscal digital) - sin eso no queda forma de comprobar
-        despues que el CFDI aceptado es el correcto. Mismo permiso que
-        editar la factura (facturacion-cfdi.editar) - a diferencia de
-        TesoreriaFlujo, aqui no se segrega captura de aprobacion."""
+        archivos esenciales, PDF y XML - sin eso no queda forma de
+        comprobar despues que el CFDI aceptado es el correcto. Acepta
+        drive_file_id_pdf/xml (el archivo real, via Drive) O link_pdf/
+        link_xml (09/Sep/2026, "no se aceptan de links manuales, todo de
+        drive" - ya no se puede CAPTURAR un link manual desde la UI, pero
+        estos campos siguen sirviendo para facturas viejas que ya lo
+        tenian asi). Mismo permiso que editar la factura
+        (facturacion-cfdi.editar) - a diferencia de TesoreriaFlujo, aqui no
+        se segrega captura de aprobacion."""
         nuevo_estado = request.data.get("estado")
         if nuevo_estado not in dict(TesoreriaFactura.ESTADO_CHOICES):
             return Response({"estado": ["Estado inválido."]}, status=400)
 
         factura = self.get_object()
-        if nuevo_estado == TesoreriaFactura.ESTADO_ACEPTADA and not (factura.link_pdf and factura.link_xml):
+        tiene_pdf = bool(factura.drive_file_id_pdf or factura.link_pdf)
+        tiene_xml = bool(factura.drive_file_id_xml or factura.link_xml)
+        if nuevo_estado == TesoreriaFactura.ESTADO_ACEPTADA and not (tiene_pdf and tiene_xml):
             return Response(
                 {"detail": "Para aceptar la factura hace falta cargar el PDF y el XML."}, status=400
             )
@@ -2198,15 +2716,9 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         (07/Sep/2026, cierra el hueco real: antes link_pdf/link_xml nunca
         se llenaban solos, ni por el ticket publico del proveedor ni por
         el Motor Documental - quedaban como texto libre pegado a mano para
-        siempre). Se detecta PDF vs XML por mime_type/extension del
-        nombre; cualquier otro tipo se ignora en silencio (ej. el analista
-        selecciono una imagen suelta, no el CFDI).
-
-        Tambien acepta "archivos" (lista, 0-2 elementos con la misma forma
-        que "archivo") - 08/Sep/2026, comparacion PDF vs XML: cuando el
-        analista compara ambos archivos del ticket antes de confirmar, se
-        pueden ligar los dos de una sola vez en vez de solo el que se
-        analizo. Ver _vincular_archivos_drive."""
+        siempre). Se detecta PDF por mime_type/extension del nombre;
+        cualquier otro tipo se ignora en silencio (ej. el analista
+        selecciono una imagen suelta, no el CFDI)."""
         campos = request.data.get("campos")
         if not isinstance(campos, dict) or not campos:
             return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
@@ -2224,14 +2736,14 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         serializer.save()
         _vincular_contraparte_por_rfc(factura)
 
-        archivos_vinculados = _vincular_archivos_drive(factura, request.data)
+        archivo_vinculado = _vincular_archivo_drive(factura, request.data.get("archivo"))
 
         emitir_evento_auditoria(
             "tesoreria_facturas.confirmar_extraccion",
             "tesoreria_facturas",
             factura.timbre_uuid,
             actor_user_id=request.data.get("actor_user_id"),
-            valores_nuevos={"campos": datos_validos, "archivos_vinculados": archivos_vinculados},
+            valores_nuevos={"campos": datos_validos, "archivo_vinculado": archivo_vinculado},
         )
         return Response(self.get_serializer(factura).data)
 
@@ -2288,6 +2800,65 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
         instance = serializer.save()
         _vincular_contraparte_por_rfc(instance)
 
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_pdf(self, request, pk=None):
+        """Ver comentario equivalente en TesoreriaFacturaViewSet."""
+        complemento = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=complemento.drive_file_id_pdf,
+            mime_type=complemento.mime_type_pdf,
+            nombre_archivo=f"complemento-pago-{complemento.timbre_uuid}",
+            carpeta=f"Tesoreria/ComplementosPago/{complemento.timbre_uuid}",
+        )
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_xml(self, request, pk=None):
+        """Ver comentario equivalente en TesoreriaFacturaViewSet."""
+        complemento = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=complemento.drive_file_id_xml,
+            mime_type=complemento.mime_type_xml,
+            nombre_archivo=f"complemento-pago-{complemento.timbre_uuid}",
+            carpeta=f"Tesoreria/ComplementosPago/{complemento.timbre_uuid}",
+        )
+
+    @action(detail=True, methods=["post"])
+    def sincronizar_drive(self, request, pk=None):
+        """Ver comentario equivalente en TesoreriaFacturaViewSet."""
+        complemento = self.get_object()
+        carpeta = f"Tesoreria/ComplementosPago/{complemento.timbre_uuid}"
+        archivos, error = _listar_drive(request, carpeta)
+        if error:
+            return error
+        pdf = _primer_archivo_por_tipo(archivos, "pdf")
+        xml = _primer_archivo_por_tipo(archivos, "xml")
+        if not pdf and not xml:
+            return Response({"detail": "No se encontró ningún PDF ni XML en Drive."}, status=404)
+
+        campos_actualizados = []
+        if pdf:
+            complemento.drive_file_id_pdf = pdf.get("file_id")
+            complemento.mime_type_pdf = pdf.get("mime_type")
+            campos_actualizados += ["drive_file_id_pdf", "mime_type_pdf"]
+        if xml:
+            complemento.drive_file_id_xml = xml.get("file_id")
+            complemento.mime_type_xml = xml.get("mime_type")
+            campos_actualizados += ["drive_file_id_xml", "mime_type_xml"]
+        complemento.save(update_fields=campos_actualizados)
+
+        emitir_evento_auditoria(
+            "tesoreria_complementos_pago.sincronizar_drive",
+            "tesoreria_complementos_pago",
+            complemento.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"pdf": bool(pdf), "xml": bool(xml)},
+        )
+        return Response(self.get_serializer(complemento).data)
+
 
 class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     """Nota de credito - ajuste fiscal sobre una factura ya emitida
@@ -2314,6 +2885,65 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     def perform_create(self, serializer):
         instance = serializer.save()
         _vincular_contraparte_por_rfc(instance)
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_pdf(self, request, pk=None):
+        """Ver comentario equivalente en TesoreriaFacturaViewSet."""
+        nota = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=nota.drive_file_id_pdf,
+            mime_type=nota.mime_type_pdf,
+            nombre_archivo=f"nota-credito-{nota.timbre_uuid}",
+            carpeta=f"Tesoreria/NotasCredito/{nota.timbre_uuid}",
+        )
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_xml(self, request, pk=None):
+        """Ver comentario equivalente en TesoreriaFacturaViewSet."""
+        nota = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=nota.drive_file_id_xml,
+            mime_type=nota.mime_type_xml,
+            nombre_archivo=f"nota-credito-{nota.timbre_uuid}",
+            carpeta=f"Tesoreria/NotasCredito/{nota.timbre_uuid}",
+        )
+
+    @action(detail=True, methods=["post"])
+    def sincronizar_drive(self, request, pk=None):
+        """Ver comentario equivalente en TesoreriaFacturaViewSet."""
+        nota = self.get_object()
+        carpeta = f"Tesoreria/NotasCredito/{nota.timbre_uuid}"
+        archivos, error = _listar_drive(request, carpeta)
+        if error:
+            return error
+        pdf = _primer_archivo_por_tipo(archivos, "pdf")
+        xml = _primer_archivo_por_tipo(archivos, "xml")
+        if not pdf and not xml:
+            return Response({"detail": "No se encontró ningún PDF ni XML en Drive."}, status=404)
+
+        campos_actualizados = []
+        if pdf:
+            nota.drive_file_id_pdf = pdf.get("file_id")
+            nota.mime_type_pdf = pdf.get("mime_type")
+            campos_actualizados += ["drive_file_id_pdf", "mime_type_pdf"]
+        if xml:
+            nota.drive_file_id_xml = xml.get("file_id")
+            nota.mime_type_xml = xml.get("mime_type")
+            campos_actualizados += ["drive_file_id_xml", "mime_type_xml"]
+        nota.save(update_fields=campos_actualizados)
+
+        emitir_evento_auditoria(
+            "tesoreria_notas_credito.sincronizar_drive",
+            "tesoreria_notas_credito",
+            nota.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"pdf": bool(pdf), "xml": bool(xml)},
+        )
+        return Response(self.get_serializer(nota).data)
 
 
 class TesoreriaContraparteRelacionViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -2350,6 +2980,390 @@ class TesoreriaCorteEdcViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         if cuenta_id:
             queryset = queryset.filter(cuenta_id=cuenta_id)
         return queryset
+
+
+# Encabezados aceptados por columna del extracto bancario (08/Sep/2026,
+# primer paso de la conciliacion bancaria real - ver finanzas.md
+# "Generate reconciliation reports (transactions vs. invoices)"). No hay un
+# formato unico de estado de cuenta entre bancos, asi que se acepta
+# cualquiera de estos alias por columna en vez de exigir un nombre exacto.
+_ENCABEZADOS_MOVIMIENTO = {
+    "fecha": ("fecha", "date"),
+    "descripcion": ("descripcion", "concepto", "description"),
+    "referencia": ("referencia", "ref", "reference"),
+    "cargo": ("cargo", "debito", "retiro", "debit"),
+    "abono": ("abono", "credito", "deposito", "credit"),
+    "saldo": ("saldo", "balance"),
+}
+
+
+def _valor_columna(fila: dict, campo: str):
+    normalizada = {str(k).strip().lower(): v for k, v in fila.items() if k}
+    for alias in _ENCABEZADOS_MOVIMIENTO[campo]:
+        if alias in normalizada and normalizada[alias] not in (None, ""):
+            return normalizada[alias]
+    return None
+
+
+def _parsear_fecha_movimiento(valor):
+    if valor in (None, ""):
+        return None
+    if isinstance(valor, datetime.datetime):
+        return valor.date()
+    if isinstance(valor, datetime.date):
+        return valor
+    texto = str(valor).strip()
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"):
+        try:
+            return datetime.datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    parseada = parse_date(texto)
+    if parseada:
+        return parseada
+    raise ValueError(f"fecha invalida: '{texto}'")
+
+
+def _parsear_monto_movimiento(valor):
+    if valor in (None, ""):
+        return None
+    if isinstance(valor, (int, float, Decimal)):
+        return Decimal(str(valor))
+    texto = str(valor).strip().replace("$", "").replace(",", "")
+    if texto in ("", "-"):
+        return None
+    try:
+        return Decimal(texto)
+    except InvalidOperation:
+        raise ValueError(f"monto invalido: '{valor}'")
+
+
+def _parsear_filas_extracto(nombre_archivo: str, contenido: bytes) -> list[dict]:
+    """Regresa una lista de dicts {encabezado_original: valor} por fila de
+    datos - CSV con encabezados o Excel (.xlsx) con encabezados en la
+    primera fila. No hay soporte de OFX/PDF por ahora (pendiente, igual que
+    el resto de integraciones de escaneo/Drive del proyecto)."""
+    nombre = nombre_archivo.lower()
+    if nombre.endswith(".csv"):
+        texto = contenido.decode("utf-8-sig", errors="replace")
+        return list(csv.DictReader(io.StringIO(texto)))
+    if nombre.endswith(".xlsx") or nombre.endswith(".xlsm"):
+        libro = load_workbook(io.BytesIO(contenido), data_only=True)
+        hoja = libro.active
+        filas_iter = hoja.iter_rows(values_only=True)
+        try:
+            encabezados = [str(h).strip() if h is not None else "" for h in next(filas_iter)]
+        except StopIteration:
+            return []
+        filas = []
+        for valores in filas_iter:
+            if valores is None or all(v is None for v in valores):
+                continue
+            filas.append(dict(zip(encabezados, valores)))
+        return filas
+    raise ValidationError("Formato no soportado. Sube un archivo CSV o Excel (.xlsx).")
+
+
+def _monto_movimiento_bancario(movimiento) -> Decimal:
+    """Monto firmado del movimiento (abono - cargo), mismo criterio de
+    finanzas.md que ya usa el reporte diario para TesoreriaFlujo.total_mxp:
+    "transaction positive = credit to the account, negative = debit"."""
+    return (movimiento.abono or Decimal("0")) - (movimiento.cargo or Decimal("0"))
+
+
+def _sugerir_flujos_para_movimiento(movimiento, limite=5):
+    """Propone candidatos de TesoreriaFlujo para conciliar un
+    TesoreriaMovimientoBancario (08/Sep/2026, matching automatico -
+    siguiente paso de la conciliacion bancaria real, ver
+    TesoreriaMovimientoBancarioViewSet.importar). Misma heuristica de
+    puntaje que _sugerir_facturas_para_flujo: no es un modelo de ML, es
+    monto + fecha con tolerancia, ordenado por score. El monto se compara
+    en valor absoluto a proposito (no todo `total_mxp` capturado hasta hoy
+    sigue el signo exacto de finanzas.md) - la fecha y el monto exacto ya
+    bastan para acotar bien los candidatos reales.
+
+    Excluye flujos que ya tiene ligado OTRO movimiento bancario (un mismo
+    flujo no debe proponerse dos veces para lineas de banco distintas) y
+    flujos de otra cuenta (el banco no cuadra un pago que salio de otra
+    cuenta)."""
+    monto = _monto_movimiento_bancario(movimiento)
+    if monto == 0:
+        return []
+
+    TOLERANCIA_MONTO = Decimal("1.00")
+    TOLERANCIA_DIAS = 10
+
+    candidatos = (
+        TesoreriaFlujo.objects.filter(cuenta=movimiento.cuenta, total_mxp__isnull=False)
+        .exclude(movimientos_bancarios__isnull=False)
+        .select_related("contrato")
+    )
+    candidatos = candidatos.filter(
+        total_mxp__gte=abs(monto) - TOLERANCIA_MONTO, total_mxp__lte=abs(monto) + TOLERANCIA_MONTO
+    ) | candidatos.filter(
+        total_mxp__gte=-abs(monto) - TOLERANCIA_MONTO, total_mxp__lte=-abs(monto) + TOLERANCIA_MONTO
+    )
+
+    sugerencias = []
+    for flujo in candidatos:
+        fecha_flujo = flujo.fecha_pago or flujo.fecha_efectiva
+        score = 0
+        motivos = []
+        if abs(flujo.total_mxp) == abs(monto):
+            score += 2
+            motivos.append("mismo monto exacto")
+        else:
+            score += 1
+            motivos.append("monto muy cercano")
+        if fecha_flujo:
+            dias_diferencia = abs((fecha_flujo - movimiento.fecha).days)
+            if dias_diferencia > TOLERANCIA_DIAS:
+                continue
+            if dias_diferencia <= 1:
+                score += 2
+                motivos.append("misma fecha (o un dia de diferencia)")
+            else:
+                score += 1
+                motivos.append(f"fecha cercana ({dias_diferencia} días)")
+        if flujo.pagado:
+            score += 1
+            motivos.append("ya marcado como pagado")
+        sugerencias.append((score, flujo, motivos))
+
+    sugerencias.sort(key=lambda t: t[0], reverse=True)
+    return [
+        {
+            "id_flujo": flujo.id_flujo,
+            "concepto": flujo.concepto,
+            "total_mxp": flujo.total_mxp,
+            "fecha_pago": flujo.fecha_pago,
+            "fecha_efectiva": flujo.fecha_efectiva,
+            "contrato": flujo.contrato_id,
+            "pagado": flujo.pagado,
+            "score": score,
+            "motivos": motivos,
+        }
+        for score, flujo, motivos in sugerencias[:limite]
+    ]
+
+
+class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Lineas del estado de cuenta bancario (08/Sep/2026, primer paso de la
+    conciliacion bancaria real) - se cargan via `importar` (CSV/Excel), no
+    se capturan una por una a mano. Filtros ?cuenta=, ?corte_edc= y
+    ?conciliado=true/false (flujo asignado o no).
+
+    Vincular manualmente un flujo ya funciona con el PATCH generico del
+    ModelViewSet ({"flujo": "<id_flujo>"}) - `flujo` no es read-only en el
+    serializer. `sugerencias` (08/Sep/2026) propone candidatos por
+    monto+fecha para que el analista elija (mismo patron "IA/heuristica
+    propone, humano confirma" del resto del servicio); `conciliar_automatico`
+    aplica solo los matches de alta confianza (monto exacto + fecha muy
+    cercana + candidato unico), deja el resto para revision manual via
+    `sugerencias`."""
+
+    serializer_class = TesoreriaMovimientoBancarioSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["descripcion", "referencia"]
+
+    def get_permissions(self):
+        if self.action == "importar":
+            return [require_permission("tesoreria.crear")()]
+        if self.action in ("sugerencias", "conciliar_automatico", "reporte_conciliacion"):
+            return [require_permission("tesoreria.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        queryset = TesoreriaMovimientoBancario.objects.select_related("cuenta", "flujo").order_by("-fecha")
+        cuenta_id = self.request.query_params.get("cuenta")
+        if cuenta_id:
+            queryset = queryset.filter(cuenta_id=cuenta_id)
+        corte_edc_id = self.request.query_params.get("corte_edc")
+        if corte_edc_id:
+            queryset = queryset.filter(corte_edc_id=corte_edc_id)
+        conciliado = self.request.query_params.get("conciliado")
+        if conciliado == "true":
+            queryset = queryset.filter(flujo__isnull=False)
+        elif conciliado == "false":
+            queryset = queryset.filter(flujo__isnull=True)
+        return queryset
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def importar(self, request):
+        """Sube y parsea un extracto bancario completo: crea un
+        TesoreriaCorteEdc como encabezado del lote (con el archivo original
+        subido a Drive, ver `_subir_a_drive`, 08/Sep/2026 - antes quedaba
+        `link=""`) y una TesoreriaMovimientoBancario por cada fila con
+        fecha valida."""
+        archivo = request.FILES.get("file")
+        cuenta_id = request.data.get("cuenta")
+        if not archivo or not cuenta_id:
+            raise ValidationError("Se requiere 'cuenta' y 'file'.")
+        try:
+            cuenta = TesoreriaCuenta.objects.get(pk=cuenta_id)
+        except TesoreriaCuenta.DoesNotExist:
+            raise ValidationError("Cuenta no encontrada.")
+
+        # Se lee el archivo UNA vez a memoria - se necesita tanto para
+        # parsear las filas como para subirlo a Drive, y un archivo de
+        # request.FILES solo se puede leer una vez sin volver a hacer seek.
+        contenido = archivo.read()
+        try:
+            filas = _parsear_filas_extracto(archivo.name, contenido)
+        except ValidationError:
+            raise
+        except Exception as exc:
+            raise ValidationError(f"No se pudo leer el archivo: {exc}")
+
+        movimientos = []
+        errores = []
+        fechas = []
+        for numero_fila, fila in enumerate(filas, start=2):
+            try:
+                fecha = _parsear_fecha_movimiento(_valor_columna(fila, "fecha"))
+                if fecha is None:
+                    continue
+                cargo = _parsear_monto_movimiento(_valor_columna(fila, "cargo"))
+                abono = _parsear_monto_movimiento(_valor_columna(fila, "abono"))
+                saldo = _parsear_monto_movimiento(_valor_columna(fila, "saldo"))
+            except ValueError as exc:
+                errores.append(f"Fila {numero_fila}: {exc}")
+                continue
+            descripcion = _valor_columna(fila, "descripcion")
+            referencia = _valor_columna(fila, "referencia")
+            fechas.append(fecha)
+            movimientos.append(
+                TesoreriaMovimientoBancario(
+                    cuenta=cuenta,
+                    fecha=fecha,
+                    descripcion=str(descripcion)[:255] if descripcion else None,
+                    referencia=str(referencia)[:100] if referencia else None,
+                    cargo=cargo,
+                    abono=abono,
+                    saldo=saldo,
+                    created_by=(request.data.get("created_by") or "")[:100],
+                )
+            )
+
+        if not movimientos:
+            detalle = " " + "; ".join(errores) if errores else ""
+            raise ValidationError("El archivo no tiene filas validas para importar." + detalle)
+
+        # Subida a Drive best-effort (08/Sep/2026) - igual que el XML
+        # opcional del ticket de proveedor: si drive-service no responde,
+        # no se tumba la importacion completa (ya se leyeron las filas
+        # reales, eso es lo que de verdad importa hoy); el corte solo se
+        # queda sin `link`/`drive_file_id`, recuperable subiendo el archivo
+        # de nuevo despues si hiciera falta.
+        resultado_drive, _drive_error = _subir_a_drive(
+            request,
+            _ArchivoEnMemoria(archivo.name, archivo.content_type, contenido),
+            f"Tesoreria/Conciliacion/{cuenta.id_cuenta_bancaria}",
+        )
+
+        corte = TesoreriaCorteEdc.objects.create(
+            cuenta=cuenta,
+            fecha_final=max(fechas),
+            tipo=TesoreriaCorteEdc.TIPO_ESTADO_CUENTA,
+            formato=TesoreriaCorteEdc.FORMATO_CSV if archivo.name.lower().endswith(".csv") else TesoreriaCorteEdc.FORMATO_EXCEL,
+            link=(resultado_drive or {}).get("web_view_link", ""),
+            drive_file_id=(resultado_drive or {}).get("file_id"),
+            mime_type=(resultado_drive or {}).get("mime_type"),
+            disponible=True,
+            created_by=(request.data.get("created_by") or "")[:8],
+            updated_by=(request.data.get("created_by") or "")[:8],
+        )
+        for movimiento in movimientos:
+            movimiento.corte_edc = corte
+        TesoreriaMovimientoBancario.objects.bulk_create(movimientos)
+
+        return Response(
+            {"corte_edc": corte.id, "importados": len(movimientos), "errores": errores},
+            status=201,
+        )
+
+    @action(detail=True, methods=["get"])
+    def sugerencias(self, request, pk=None):
+        """Candidatos de TesoreriaFlujo para este movimiento (08/Sep/2026),
+        ver _sugerir_flujos_para_movimiento. Solo lectura - el analista
+        vincula con un PATCH normal {"flujo": "<id_flujo>"} sobre este
+        mismo recurso, esto solo propone."""
+        movimiento = self.get_object()
+        return Response(_sugerir_flujos_para_movimiento(movimiento))
+
+    @action(detail=False, methods=["post"])
+    def conciliar_automatico(self, request):
+        """Aplica solo los matches de alta confianza: candidato UNICO con
+        monto exacto y fecha a lo mas 1 dia de diferencia. Todo lo demas
+        (varios candidatos posibles, o ninguno) se deja para revision
+        manual via `sugerencias` - nunca adivina cuando hay ambiguedad.
+
+        Body opcional: {"cuenta": "<id>"} y/o {"corte_edc": "<id>"} para
+        acotar el lote; sin filtro corre sobre todos los movimientos sin
+        conciliar."""
+        queryset = TesoreriaMovimientoBancario.objects.filter(flujo__isnull=True)
+        cuenta_id = request.data.get("cuenta")
+        if cuenta_id:
+            queryset = queryset.filter(cuenta_id=cuenta_id)
+        corte_edc_id = request.data.get("corte_edc")
+        if corte_edc_id:
+            queryset = queryset.filter(corte_edc_id=corte_edc_id)
+
+        conciliados = []
+        ambiguos = []
+        sin_match = []
+        for movimiento in queryset.select_related("cuenta"):
+            candidatos = _sugerir_flujos_para_movimiento(movimiento, limite=2)
+            alta_confianza = [
+                c
+                for c in candidatos
+                if "mismo monto exacto" in c["motivos"] and "misma fecha (o un dia de diferencia)" in c["motivos"]
+            ]
+            if len(alta_confianza) == 1:
+                movimiento.flujo_id = alta_confianza[0]["id_flujo"]
+                movimiento.save(update_fields=["flujo"])
+                conciliados.append({"movimiento": movimiento.id, "flujo": movimiento.flujo_id})
+            elif candidatos:
+                ambiguos.append({"movimiento": movimiento.id, "candidatos": len(candidatos)})
+            else:
+                sin_match.append(movimiento.id)
+
+        if conciliados:
+            emitir_evento_auditoria(
+                "tesoreria_movimientos_bancarios.conciliar_automatico",
+                "tesoreria_movimientos_bancarios",
+                f"{len(conciliados)} movimientos",
+                actor_user_id=request.data.get("actor_user_id"),
+                valores_nuevos={"conciliados": conciliados},
+            )
+        return Response(
+            {
+                "conciliados": len(conciliados),
+                "ambiguos": len(ambiguos),
+                "sin_match": len(sin_match),
+                "detalle_ambiguos": ambiguos,
+                "detalle_sin_match": sin_match,
+            }
+        )
+
+    @action(detail=False, methods=["get"])
+    def reporte_conciliacion(self, request):
+        """Reporte transaccion-por-transaccion (08/Sep/2026, finanzas.md
+        "reconciliation reports: transactions vs. invoices") - distinto del
+        cuadre agregado de TesoreriaSaldoViewSet.reporte_diario. Requiere
+        ?cuenta=<id>; opcionales ?corte_edc=<id>, ?fecha_inicio=,
+        ?fecha_fin= (YYYY-MM-DD). Calculo real en reportes.py (probado
+        aparte, mismo patron que calcular_reporte_diario)."""
+        cuenta_id = request.query_params.get("cuenta")
+        if not cuenta_id:
+            raise ValidationError("Se requiere '?cuenta='.")
+        reporte = calcular_reporte_conciliacion(
+            cuenta_id,
+            corte_edc_id=request.query_params.get("corte_edc"),
+            fecha_inicio=request.query_params.get("fecha_inicio"),
+            fecha_fin=request.query_params.get("fecha_fin"),
+        )
+        return Response(reporte)
 
 
 class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):

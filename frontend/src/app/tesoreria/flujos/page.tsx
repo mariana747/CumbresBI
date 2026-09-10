@@ -16,7 +16,6 @@ import {
   FormControl,
   FormHelperText,
   IconButton,
-  InputAdornment,
   InputLabel,
   ListItemIcon,
   ListItemText,
@@ -34,19 +33,22 @@ import {
   TableRow,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import {
   Banknote,
   Check,
   Copy,
+  Download,
+  ExternalLink,
   Eye,
   FileCheck2,
+  HelpCircle,
   Link2,
   MoreVertical,
   Pencil,
   Plus,
-  Search,
   Sparkles,
   ThumbsUp,
   Undo2,
@@ -55,6 +57,10 @@ import {
   X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -78,6 +84,8 @@ import {
   rechazarFlujo,
   registrarPagoFlujo,
   subirComprobanteFlujo,
+  urlVerComprobanteFlujo,
+  urlExportarFlujosCsv,
   updateFlujo,
   vincularFactura,
 } from "@/lib/tesoreria";
@@ -116,13 +124,31 @@ const FORM_VACIO = {
 // complemento/nomina se ligan aparte con vincular_factura, no aqui - solo
 // se muestra donde va eso), Control = seguimiento/permisos internos, casi
 // todo de solo lectura porque lo llenan aprobar/rechazar/registrar_pago.
-const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Control"] as const;
+// "Documentos" (09/Sep/2026, pedido explicito: "debe haber un apartado de
+// documentos en facturas y flujos", "algo como esta en pld") - antes el
+// comprobante bancario solo vivia como un campo de texto suelto en
+// Detalles, sin boton de ver real (streaming) ni vista consolidada de a
+// que CFDI esta ligado el flujo.
+const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Documentos", "Control"] as const;
 type TabFlujo = (typeof TABS_FLUJO)[number];
+
+// Link real de Drive a partir del file_id - "Abrir en pestaña nueva" debe
+// ir al archivo real, no a nuestro endpoint de streaming.
+function urlDriveWebView(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
 
 const VALIDACION_COLOR: Record<TesoreriaValidacionEstado, "warning" | "success" | "error"> = {
   PENDIENTE: "warning",
   APROBADA: "success",
   RECHAZADA: "error",
+};
+
+// Glosario de Estado/Pagado
+const VALIDACION_DESCRIPCION: Record<TesoreriaValidacionEstado, string> = {
+  PENDIENTE: "Todavía nadie lo autoriza.",
+  APROBADA: "Ya autorizado, listo para registrar el pago.",
+  RECHAZADA: "No se autoriza, no se puede pagar así.",
 };
 
 // Flujos de caja (24/Ago/2026, Sem 21 del cronograma) - un movimiento real
@@ -140,6 +166,8 @@ export default function TesoreriaFlujosPage() {
   const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
   const [search, setSearch] = useState("");
   const [filtroContrato, setFiltroContrato] = useState("");
+  const [filtroEmpresa, setFiltroEmpresa] = useState("");
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   const [loading, setLoading] = useState(true);
@@ -151,6 +179,11 @@ export default function TesoreriaFlujosPage() {
   // se mueve al menu de tres puntos) - mismo dialogo/formulario, con todo
   // deshabilitado y sin boton de Guardar cuando soloLectura es true.
   const [soloLectura, setSoloLectura] = useState(false);
+  // Preview embebido del comprobante (09/Sep/2026, apartado de Documentos)
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
+  // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
+  // Flujos") - ver componente PanelReferenciaCruzada.
+  const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
   const [form, setForm] = useState(FORM_VACIO);
   const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -223,7 +256,7 @@ export default function TesoreriaFlujosPage() {
     if (!vinculando) return;
     setBuscandoFactura(true);
     const timeout = setTimeout(() => {
-      listFacturas(buscaFactura || undefined)
+      listFacturas({ search: buscaFactura || undefined })
         .then(setOpcionesFactura)
         .catch(() => setOpcionesFactura([]))
         .finally(() => setBuscandoFactura(false));
@@ -249,6 +282,7 @@ export default function TesoreriaFlujosPage() {
     getSession().then(setSession);
     listContratos().then(setContratos).catch(() => setContratos([]));
     listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listFacturas().then(setFacturas).catch(() => setFacturas([]));
     listComplementosPago().then(setComplementos).catch(() => setComplementos([]));
   }, []);
@@ -355,7 +389,11 @@ export default function TesoreriaFlujosPage() {
 
   function refresh() {
     setLoading(true);
-    listFlujos({ search: search || undefined, contrato: filtroContrato || undefined })
+    listFlujos({
+      search: search || undefined,
+      contrato: filtroContrato || undefined,
+      sociedad: filtroEmpresa || undefined,
+    })
       .then(setFlujos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -365,7 +403,7 @@ export default function TesoreriaFlujosPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroContrato]);
+  }, [search, filtroContrato, filtroEmpresa]);
 
   // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
   // del cliente: listFlujos no tiene parametro de fecha en el backend
@@ -649,78 +687,107 @@ export default function TesoreriaFlujosPage() {
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack
-          direction={{ xs: "column", md: "row" }}
-          spacing={2}
-          alignItems={{ xs: "stretch", md: "flex-start" }}
-          justifyContent="space-between"
-          sx={{ p: 2 }}
-        >
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
-            <TextField
-              size="small"
-              placeholder="Buscar por ID de flujo o concepto..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ minWidth: 240 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search size={16} strokeWidth={1.5} />
-                  </InputAdornment>
-                ),
-              }}
-            />
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
-              <Select
-                labelId="filtro-contrato-label"
-                label="Filtrar por contrato"
-                value={filtroContrato}
-                onChange={(e) => setFiltroContrato(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Todos los contratos</em>
-                </MenuItem>
-                {contratos.map((c) => (
-                  <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                    {c.id_contrato} — {c.contraparte_nombre}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              type="date"
-              label="Fecha desde"
-              value={filtroFechaDesde}
-              onChange={(e) => setFiltroFechaDesde(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160 }}
-            />
-            <TextField
-              size="small"
-              type="date"
-              label="Fecha hasta"
-              value={filtroFechaHasta}
-              onChange={(e) => setFiltroFechaHasta(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160 }}
-            />
-          </Stack>
-          {puedeCrear && (
+      <Paper variant="outlined" sx={{ mb: 3 }}>
+      <FiltrosBar
+        flush
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por ID de flujo o concepto..."
+        actions={
+          <Stack direction="row" spacing={1}>
             <Button
               size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
+              variant="outlined"
+              startIcon={<Download size={14} strokeWidth={2} />}
+              onClick={() =>
+                window.open(
+                  urlExportarFlujosCsv({
+                    search: search || undefined,
+                    contrato: filtroContrato || undefined,
+                    sociedad: filtroEmpresa || undefined,
+                  }),
+                  "_blank"
+                )
+              }
               sx={{ flexShrink: 0 }}
             >
-              Nuevo Flujo
+              Exportar CSV
             </Button>
-          )}
-        </Stack>
+            {puedeCrear && (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+                sx={{ flexShrink: 0 }}
+              >
+                Nuevo Flujo
+              </Button>
+            )}
+          </Stack>
+        }
+      >
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
+          <Select
+            labelId="filtro-empresa-label"
+            label="Filtrar por empresa"
+            value={filtroEmpresa}
+            onChange={(e) => {
+              setFiltroEmpresa(e.target.value);
+              setFiltroContrato("");
+            }}
+          >
+            <MenuItem value="">
+              <em>Todas las empresas</em>
+            </MenuItem>
+            {sociedades.map((s) => (
+              <MenuItem key={s.rfc} value={s.rfc}>
+                {s.alias_sociedad || s.razon_social || s.rfc}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
+          <Select
+            labelId="filtro-contrato-label"
+            label="Filtrar por contrato"
+            value={filtroContrato}
+            onChange={(e) => setFiltroContrato(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Todos los contratos</em>
+            </MenuItem>
+            {contratos
+              .filter((c) => !filtroEmpresa || c.sociedad === filtroEmpresa)
+              .map((c) => (
+              <MenuItem key={c.id_contrato} value={c.id_contrato}>
+                {c.id_contrato} — {c.contraparte_nombre}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField
+          size="small"
+          type="date"
+          label="Fecha desde"
+          value={filtroFechaDesde}
+          onChange={(e) => setFiltroFechaDesde(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+        <TextField
+          size="small"
+          type="date"
+          label="Fecha hasta"
+          value={filtroFechaHasta}
+          onChange={(e) => setFiltroFechaHasta(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+      </FiltrosBar>
+
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 10 columnas no cabe en
         un telefono sin scroll horizontal incomodo. */}
@@ -737,8 +804,32 @@ export default function TesoreriaFlujosPage() {
 
                 <TableCell align="right">Total MXP</TableCell>
                 <TableCell>CFDI vinculado</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell>Pagado</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>Estado</span>
+                    <Tooltip
+                      title={
+                        <Stack spacing={0.5} sx={{ py: 0.5 }}>
+                          {(Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]).map((e) => (
+                            <Typography key={e} variant="caption" component="div">
+                              <b>{e}</b> — {VALIDACION_DESCRIPCION[e]}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      }
+                    >
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
+                </TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>Pagado</span>
+                    <Tooltip title="Si ya se registró el pago real (Registrar pago), con comprobante o sin él.">
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
+                </TableCell>
                 <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
@@ -966,6 +1057,16 @@ export default function TesoreriaFlujosPage() {
                   </FormHelperText>
                 )}
               </FormControl>
+              {editing && editing.contrato && (
+                <Button
+                  size="small"
+                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                  onClick={() => setPanelReferencia({ tipo: "contrato", id: editing.contrato as string })}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  Ver contrato
+                </Button>
+              )}
               {editing && editing.descripcion_pago && (
                 <TextField size="small" label="Descripción de pago" value={editing.descripcion_pago} disabled fullWidth />
               )}
@@ -1141,8 +1242,111 @@ export default function TesoreriaFlujosPage() {
             </Stack>
           )}
 
+          {tab === "Documentos" && (
+            <Stack spacing={1.5}>
+              <Typography variant="caption" color="text.secondary">
+                El comprobante se trae directo de Drive - se sube desde "Registrar pago" o el menú de
+                tres puntos de la fila.
+              </Typography>
+              <Paper variant="outlined" sx={{ p: 1.5 }}>
+                <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <FileCheck2 size={18} strokeWidth={1.5} />
+                    <Typography variant="body2">Comprobante de pago</Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <IconButton
+                      size="small"
+                      aria-label="Ver comprobante"
+                      title="Ver comprobante"
+                      disabled={!editing?.drive_file_id_comprobante}
+                      onClick={() => {
+                        if (!editing?.drive_file_id_comprobante) return;
+                        setPreviewDoc({
+                          url: urlVerComprobanteFlujo(editing.id_flujo),
+                          titulo: `Flujo ${editing.id_flujo} — Comprobante`,
+                          urlExterna: urlDriveWebView(editing.drive_file_id_comprobante),
+                        });
+                      }}
+                    >
+                      <Eye size={16} strokeWidth={1.5} />
+                    </IconButton>
+                    <Chip
+                      size="small"
+                      color={editing?.drive_file_id_comprobante ? "success" : "default"}
+                      label={editing?.drive_file_id_comprobante ? "Disponible en Drive" : "Sin archivo"}
+                    />
+                  </Stack>
+                </Stack>
+              </Paper>
+            </Stack>
+          )}
+
           {tab === "Control" && (
-            <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+            <Stack spacing={2}>
+              {/* Panel de acciones (10/Sep/2026, "esta parte no se ve muy
+              bien...que sea como panel de control") - antes vivian sueltas
+              en el menu de 3 puntos de la fila; ahora se ven aqui, dentro
+              del mismo dialogo de edicion, junto con el resto del estado
+              de control. */}
+              {editing && !soloLectura && (
+                <Stack spacing={1}>
+                  <Typography variant="overline" color="text.secondary">
+                    Acciones
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    {puedeEditar && (
+                      <Button size="small" startIcon={<Link2 size={14} strokeWidth={1.5} />} onClick={() => abrirVinculo(editing)}>
+                        Vincular factura/complemento
+                      </Button>
+                    )}
+                    {puedeEditar && editing.link_comprobante_banco && (
+                      <Button size="small" startIcon={<Sparkles size={14} strokeWidth={1.5} />} onClick={() => setMotorFlujo(editing)}>
+                        Conciliar con IA
+                      </Button>
+                    )}
+                    {puedeAprobar && editing.validacion_estado !== "APROBADA" && (
+                      <Button
+                        size="small"
+                        color="success"
+                        startIcon={<ThumbsUp size={14} strokeWidth={1.5} />}
+                        disabled={accionando === editing.id_flujo}
+                        onClick={() => handleAprobar(editing)}
+                      >
+                        Aprobar
+                      </Button>
+                    )}
+                    {puedeAprobar && editing.validacion_estado !== "RECHAZADA" && (
+                      <Button
+                        size="small"
+                        color="error"
+                        startIcon={<X size={14} strokeWidth={1.5} />}
+                        disabled={accionando === editing.id_flujo}
+                        onClick={() => handleRechazar(editing)}
+                      >
+                        Rechazar
+                      </Button>
+                    )}
+                    {puedeEditar && !editing.pagado && (
+                      <Button
+                        size="small"
+                        startIcon={<Check size={14} strokeWidth={1.5} />}
+                        disabled={!editing.autorizacion}
+                        onClick={() => abrirDialogoPago(editing)}
+                      >
+                        {editing.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}
+                      </Button>
+                    )}
+                    {puedeEditar && editing.pagado && (
+                      <Button size="small" startIcon={<Upload size={14} strokeWidth={1.5} />} onClick={() => abrirDialogoPago(editing)}>
+                        {editing.link_comprobante_banco ? "Reemplazar comprobante" : "Subir comprobante"}
+                      </Button>
+                    )}
+                  </Stack>
+                  <Divider />
+                </Stack>
+              )}
+              <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
                 label="Comprobación asignada a"
@@ -1236,6 +1440,7 @@ export default function TesoreriaFlujosPage() {
                   <TextField size="small" label="Modificado por" value={editing.updated_by || "—"} disabled fullWidth />
                 </Stack>
               )}
+              </Stack>
             </Stack>
           )}
         </DialogContent>
@@ -1368,96 +1573,6 @@ export default function TesoreriaFlujosPage() {
             </ListItemIcon>
             <ListItemText>Duplicar</ListItemText>
           </MenuItem>,
-          <MenuItem
-            key="vincular"
-            disabled={!puedeEditar}
-            onClick={() => {
-              abrirVinculo(menuFlujo);
-              setMenuAnchor(null);
-            }}
-          >
-            <ListItemIcon>
-              <Link2 size={16} strokeWidth={1.5} />
-            </ListItemIcon>
-            <ListItemText>Vincular factura/complemento</ListItemText>
-          </MenuItem>,
-          puedeEditar && menuFlujo.link_comprobante_banco && (
-            <MenuItem
-              key="conciliar-ia"
-              onClick={() => {
-                setMotorFlujo(menuFlujo);
-                setMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <Sparkles size={16} strokeWidth={1.5} />
-              </ListItemIcon>
-              <ListItemText>Conciliar con IA</ListItemText>
-            </MenuItem>
-          ),
-          puedeAprobar && menuFlujo.validacion_estado !== "APROBADA" && (
-            <MenuItem
-              key="aprobar"
-              disabled={accionando === menuFlujo.id_flujo}
-              onClick={() => {
-                handleAprobar(menuFlujo);
-                setMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <ThumbsUp size={16} strokeWidth={1.5} color="var(--mui-palette-success-main, #2e7d32)" />
-              </ListItemIcon>
-              <ListItemText>Aprobar</ListItemText>
-            </MenuItem>
-          ),
-          puedeAprobar && menuFlujo.validacion_estado !== "RECHAZADA" && (
-            <MenuItem
-              key="rechazar"
-              disabled={accionando === menuFlujo.id_flujo}
-              onClick={() => {
-                handleRechazar(menuFlujo);
-                setMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <X size={16} strokeWidth={1.5} color="var(--mui-palette-error-main, #d32f2f)" />
-              </ListItemIcon>
-              <ListItemText>Rechazar</ListItemText>
-            </MenuItem>
-          ),
-          puedeEditar && !menuFlujo.pagado && (
-            <MenuItem
-              key="registrar-pago"
-              disabled={!menuFlujo.autorizacion}
-              onClick={() => {
-                abrirDialogoPago(menuFlujo);
-                setMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <Check size={16} strokeWidth={1.5} />
-              </ListItemIcon>
-              <ListItemText>
-                {menuFlujo.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}
-              </ListItemText>
-            </MenuItem>
-          ),
-          puedeEditar && menuFlujo.pagado && (
-            <MenuItem
-              key="subir-comprobante"
-              onClick={() => {
-                abrirDialogoPago(menuFlujo);
-                setMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <Upload size={16} strokeWidth={1.5} />
-              </ListItemIcon>
-              <ListItemText>
-                {menuFlujo.link_comprobante_banco ? "Reemplazar comprobante" : "Subir comprobante"}
-              </ListItemText>
-            </MenuItem>
-          ),
         ]}
       </Menu>
 
@@ -1531,6 +1646,14 @@ export default function TesoreriaFlujosPage() {
             : undefined
         }
       />
+      <DocumentoPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={previewDoc?.url ?? null}
+        titulo={previewDoc?.titulo ?? ""}
+        urlExterna={previewDoc?.urlExterna}
+      />
+      <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
     </AppShell>
   );
 }

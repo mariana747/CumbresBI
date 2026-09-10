@@ -395,6 +395,119 @@ def enviar_correo_documento_faltante(
     return True
 
 
+def enviar_correo_recordatorio_factura(
+    request, email: str, contraparte_nombre: str, id_flujo: str, concepto: str | None, mensaje: str | None = None
+) -> bool:
+    """Recordatorio manual de factura pendiente (10/Sep/2026, "Recordatorio
+    de facturas se envia manualmente desde el sistema, debe presionar el
+    boton") - a diferencia de enviar_correo_documento_faltante (que es para
+    un contrato entero), este es puntual por pago (Flujo) que ya se hizo
+    pero todavia no tiene su CFDI ligado (bandeja "Sin CFDI" de Conciliacion
+    de Facturas). Nunca se dispara solo/programado, solo por este boton.
+
+    `mensaje` (10/Sep/2026, "el recordatorio debe poder poner un mensaje la
+    persona que lo envia") - opcional, texto libre que el analista escribe
+    en pantalla antes de enviar; se muestra tal cual, sin plantilla fija."""
+    headers, cookies = forward_auth_headers(request)
+    # Sin CTA/liga a proposito (a diferencia de _renderizar_correo, que
+    # exige una) - este recordatorio no trae un link de subida propio, solo
+    # avisa; el proveedor responde por su via habitual con el contacto.
+    concepto_html = f" por concepto de <strong>{escape(concepto)}</strong>" if concepto else ""
+    mensaje_html = (
+        f"""
+    <div style="font-size:14.5px;color:#23252B;background:#F7F7F8;border-radius:7px;
+                padding:12px 14px;margin:0 0 20px;white-space:pre-wrap;">{escape(mensaje)}</div>"""
+        if mensaje
+        else ""
+    )
+    html_body = f"""
+<div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;background:#FFFFFF;border-radius:12px;
+              border:1px solid #E1E4E9;padding:36px 34px 30px;">
+    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 14px;">Todavía nos falta tu factura (CFDI)</h1>
+    <p style="color:#4B4F58;font-size:14.5px;line-height:1.65;margin:0 0 20px;">
+      Ya realizamos el pago{concepto_html}, pero todavía no recibimos el CFDI correspondiente.
+      Por favor envíanos tu factura lo antes posible.
+    </p>{mensaje_html}
+    <div style="font-size:12.5px;color:#8A8F99;background:#F7F7F8;border-radius:7px;padding:10px 12px;">
+      Referencia interna: {escape(id_flujo)}.
+    </div>
+  </div>
+</div>
+""".strip()
+    try:
+        respuesta = requests.post(
+            f"{settings.MAIL_SERVICE_URL}/api/send/",
+            params={"perm": "tesoreria.editar"},
+            json={
+                "to": email,
+                "subject": f"Recordatorio: factura pendiente — {contraparte_nombre}",
+                "html_body": html_body,
+            },
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_SEGUNDOS,
+        )
+    except requests.RequestException:
+        logger.warning("mail-service no respondio al recordatorio de factura de %s a %s", id_flujo, email, exc_info=True)
+        return False
+    if respuesta.status_code != 201:
+        logger.warning("mail-service rechazo el recordatorio de factura de %s para %s: %s", id_flujo, email, respuesta.text)
+        return False
+    return True
+
+
+def enviar_correo_aviso_saldo_ppd(
+    request, email: str, contraparte_nombre: str, factura_folio: str, saldo_pendiente, mensaje: str | None = None
+) -> bool:
+    """Aviso de saldo pendiente en una factura PPD (10/Sep/2026, pendiente
+    real de Jenny: "aviso por correo de saldo PPD pendiente") - una PPD se
+    salda con uno o varios Complementos de Pago (REP); mientras el ultimo
+    REP registrado siga con `imp_saldo_insoluto` > 0, sigue quedando debe.
+    Igual que el recordatorio de CFDI faltante: nunca se dispara solo, solo
+    por este boton (ver TesoreriaFacturaViewSet.aviso_saldo_pendiente)."""
+    headers, cookies = forward_auth_headers(request)
+    mensaje_html = (
+        f"""
+    <div style="font-size:14.5px;color:#23252B;background:#F7F7F8;border-radius:7px;
+                padding:12px 14px;margin:0 0 20px;white-space:pre-wrap;">{escape(mensaje)}</div>"""
+        if mensaje
+        else ""
+    )
+    html_body = f"""
+<div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;background:#FFFFFF;border-radius:12px;
+              border:1px solid #E1E4E9;padding:36px 34px 30px;">
+    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 14px;">Todavía tenemos un saldo pendiente contigo</h1>
+    <p style="color:#4B4F58;font-size:14.5px;line-height:1.65;margin:0 0 20px;">
+      La factura <strong>{escape(factura_folio)}</strong> es a plazos (PPD) y todavía tiene un saldo pendiente
+      de <strong>${saldo_pendiente:,.2f} MXN</strong> por cubrir con su complemento de pago correspondiente.
+    </p>{mensaje_html}
+  </div>
+</div>
+""".strip()
+    try:
+        respuesta = requests.post(
+            f"{settings.MAIL_SERVICE_URL}/api/send/",
+            params={"perm": "facturacion-cfdi.editar"},
+            json={
+                "to": email,
+                "subject": f"Aviso: saldo pendiente PPD — {contraparte_nombre}",
+                "html_body": html_body,
+            },
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_SEGUNDOS,
+        )
+    except requests.RequestException:
+        logger.warning("mail-service no respondio al aviso de saldo PPD de %s a %s", factura_folio, email, exc_info=True)
+        return False
+    if respuesta.status_code != 201:
+        logger.warning("mail-service rechazo el aviso de saldo PPD de %s para %s: %s", factura_folio, email, respuesta.text)
+        return False
+    return True
+
+
 def enviar_correo_ticket_proveedor(request, email: str, token: str) -> bool:
     """Envia el link del ticket publico de proveedor por correo via
     mail-service (Gmail API) - mismo patron y diseño que
