@@ -37,8 +37,12 @@ FLUJO_DEMO = {
     "requiere_complemento": False,
     "estado_cfdi": "SIN PENDIENTES DE CFDI",
     "comprobacion_asignada_a": "demo.captura@cypcumbres.mx",
-    "aprobacion_lista": False,
-    "validacion_estado": "PENDIENTE",
+    # validacion_estado/aprobacion_lista: el original venia en PENDIENTE
+    # pese a estar pagado - inconsistente con el flujo real de la app
+    # (aprobar() siempre pone autorizacion+validacion_estado juntos), asi
+    # que aqui se corrige a APROBADA en vez de copiarlo tal cual (10/Sep/2026).
+    "aprobacion_lista": True,
+    "validacion_estado": "APROBADA",
     "permiso_enviar_pago": "N",
     "permiso": "CORP02",
     "created_by": "demo.captura@cypcumbres.mx",

@@ -1135,6 +1135,18 @@ class TesoreriaFlujo(models.Model):
 
     class Meta:
         db_table = "tesoreria_flujos"
+        # Guardrail (10/Sep/2026): un flujo pagado solo puede llegar ahi
+        # habiendo pasado por aprobar() (autorizacion=True + validacion_estado
+        # APROBADA se ponen juntos, ver TesoreriaFlujoViewSet.aprobar/
+        # registrar_pago) - un registro con pagado=True y validacion_estado
+        # distinto de APROBADA es dato inconsistente (encontrado en un seed
+        # de demo, ver migracion 0045_fix_validacion_estado_flujos_pagados).
+        constraints = [
+            models.CheckConstraint(
+                check=~models.Q(pagado=True) | models.Q(validacion_estado="APROBADA"),
+                name="tesoreria_flujo_pagado_requiere_aprobada",
+            ),
+        ]
 
     def __str__(self):
         return self.id_flujo
