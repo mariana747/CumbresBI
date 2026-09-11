@@ -2182,6 +2182,27 @@ class ReporteDiarioSaldosTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 400)
 
+    def test_enviar_reporte_con_diferencia_da_400(self):
+        # Jenny, junta 09/Sep: "no enviar el reporte diario si hay
+        # diferencia" - se rechaza en el backend, no solo deshabilitando el
+        # boton del lado del cliente.
+        TesoreriaSaldo.objects.create(id="s10", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        TesoreriaSaldo.objects.create(id="s11", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10800.00")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000003", contrato=self.contrato, cuenta=self.cuenta,
+            fecha_efectiva="2026-08-25", total_mxp="500.00",
+        )
+        request = self.factory.post(
+            "/api/saldos/enviar_reporte/",
+            {"sociedades": [RFC_TIZARA], "fecha": "2026-08-25", "destinatarios": ["a@a.com"]},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaSaldoViewSet.as_view({"post": "enviar_reporte"})
+        response = view(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Cuenta operativa", response.data["detail"])
+
 
 class TesoreriaContraparteVistaPorProveedorTests(TestCase):
     """Vista por proveedor (25/Ago/2026) - Factura/ComplementoPago/

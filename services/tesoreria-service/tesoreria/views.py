@@ -3668,6 +3668,26 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
             return Response({"detail": "Se requiere al menos un destinatario."}, status=400)
 
         reporte = calcular_reporte_diario(sociedades, fecha)
+
+        # Bloquear envio si alguna cuenta no cuadra (Jenny, junta 09/Sep:
+        # "no enviar el reporte diario si hay diferencia") - se valida aqui,
+        # no solo en el frontend, para que no se pueda saltar deshabilitando
+        # el boton.
+        cuentas_con_diferencia = [
+            c["alias"]
+            for s in reporte.get("sociedades", [])
+            for c in s.get("cuentas", [])
+            if c.get("cuadra") is False
+        ]
+        if cuentas_con_diferencia:
+            return Response(
+                {
+                    "detail": "No se puede enviar: hay diferencia sin resolver en "
+                    + ", ".join(cuentas_con_diferencia) + ".",
+                },
+                status=400,
+            )
+
         enviado = enviar_reporte_diario(request, destinatarios, reporte)
         return Response({"enviado": enviado})
 
