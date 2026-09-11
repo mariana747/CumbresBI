@@ -158,6 +158,13 @@ def _calcular_corte(cuentas, fecha) -> dict:
         fila = {
             "id_cuenta_bancaria": cuenta.id_cuenta_bancaria,
             "alias": cuenta.alias or cuenta.id_cuenta_bancaria,
+            # banco_nombre/clabe (11/Sep/2026, pendiente de Jenny: "correo
+            # con nombre completo de cuenta, hoy usa alias, no banco+
+            # numero") - el alias sigue siendo lo que usa la pantalla (mismo
+            # criterio de siempre), esto es solo para que el correo pueda
+            # mostrar banco real + CLABE en vez del alias libre.
+            "banco_nombre": cuenta.banco.banco if cuenta.banco_id else None,
+            "clabe": cuenta.clabe,
             "tipo": cuenta.tipo,
             "saldo_anterior": monto_anterior,
             "saldo_hoy": monto_hoy,

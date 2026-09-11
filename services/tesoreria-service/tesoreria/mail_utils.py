@@ -1,6 +1,7 @@
 import base64
 import datetime
 import logging
+from urllib.parse import quote
 
 import requests
 from cumbresbi_scope import forward_auth_headers
@@ -114,6 +115,16 @@ def _chip_tipo_movimiento_html(monto) -> str:
     return f'<span style="display:inline-block;padding:1px 8px;border-radius:100px;font-size:10.5px;font-weight:700;background:#E4F3E8;color:{_VERDE};">INGRESO</span>'
 
 
+def _nombre_completo_cuenta(fila: dict) -> str:
+    """Banco real + CLABE (11/Sep/2026, pendiente de Jenny: "correo con
+    nombre completo de cuenta, hoy usa alias, no banco+numero") - el alias
+    sigue siendo el fallback si falta banco o clabe (cuentas capturadas
+    antes de que esos campos fueran obligatorios)."""
+    if fila.get("banco_nombre") and fila.get("clabe"):
+        return f"{fila['banco_nombre']} — {fila['clabe']}"
+    return fila["alias"]
+
+
 def _fila_cuenta_html(numero: int, fila: dict) -> str:
     cambio_texto = f"{fila['cambio']:,.2f}" if fila["cambio"] is not None else "—"
     # cambio_pct (11/Sep/2026, formato del reporte legado de Wall-E Homes) -
@@ -125,7 +136,7 @@ def _fila_cuenta_html(numero: int, fila: dict) -> str:
     # el corte, no se reinicia por empresa.
     filas_html = f"""
     <tr>
-      <td style="padding:10px;border-bottom:1px solid #EEEFF1;">({numero}) {escape(fila['alias'])}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;">({numero}) {escape(_nombre_completo_cuenta(fila))}</td>
       <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;">{saldo_texto}</td>
       <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;">{cambio_texto}</td>
       <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;">{cambio_pct_texto}</td>
@@ -162,16 +173,23 @@ def _fila_cuenta_html(numero: int, fila: dict) -> str:
     return filas_html
 
 
-def _tabla_corte_html(corte: dict) -> str:
+def _tabla_corte_html(corte: dict, nombres_sociedades: dict[str, str]) -> str:
     """Una tabla de saldos por empresa/cuenta (con su desglose de
     transacciones y "Otros cargos/abonos") + el consolidado, para un solo
     corte (dia anterior u hoy) - calcada del reporte legado de Wall-E
     Homes ("Resumen de saldos al día...", empresa como fila de color,
-    cuentas indentadas debajo) - ver _renderizar_reporte."""
+    cuentas indentadas debajo) - ver _renderizar_reporte.
+
+    nombres_sociedades: {rfc: razon_social} (11/Sep/2026, "que se muestre
+    el nombre de la empresa no la abreviatura") - `empresa["sociedad"]` es
+    solo el RFC (tesoreria-service no tiene general_sociedades, ver
+    TesoreriaCuenta.sociedad); sin nombre resuelto cae al RFC tal cual."""
     numero = 0
     filas_html = ""
     for i, empresa in enumerate(corte["sociedades"]):
-        filas_html += _fila_empresa_html(empresa["sociedad"] or "Sin empresa", _COLORES_EMPRESA[i % len(_COLORES_EMPRESA)])
+        rfc = empresa["sociedad"] or ""
+        nombre_empresa = nombres_sociedades.get(rfc) or rfc or "Sin empresa"
+        filas_html += _fila_empresa_html(nombre_empresa, _COLORES_EMPRESA[i % len(_COLORES_EMPRESA)])
         for fila in empresa["cuentas"]:
             numero += 1
             filas_html += _fila_cuenta_html(numero, fila)
@@ -211,15 +229,15 @@ def _tabla_corte_html(corte: dict) -> str:
     </table>"""
 
 
-def _renderizar_reporte(reporte: dict) -> str:
+def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str]) -> str:
     """Dos cortes (11/Sep/2026, redisenio sobre el formato legado de Wall-E
     Homes - documento "20240521_GWE_DFPE_DT_Registro diario de saldos
     vencidos - Reporte de saldos": "1.1 Resumen de saldos al día anterior"
     + "1.2 Resumen de saldos al día") - el correo trae ambas tablas, no
     solo la del dia elegido, cada una agrupada por empresa (fila de color)
     con las cuentas y su desglose de transacciones debajo."""
-    tabla_anterior = _tabla_corte_html(reporte["corte_anterior"])
-    tabla_hoy = _tabla_corte_html(reporte)
+    tabla_anterior = _tabla_corte_html(reporte["corte_anterior"], nombres_sociedades)
+    tabla_hoy = _tabla_corte_html(reporte, nombres_sociedades)
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
   <div style="max-width:920px;margin:0 auto;background:#FFFFFF;border-radius:12px;
@@ -403,6 +421,39 @@ def enviar_factura(request, destinatario: str, factura) -> bool:
     return True
 
 
+def _resolver_nombres_sociedades(headers, cookies, rfcs: set[str]) -> dict[str, str]:
+    """{rfc: razon_social} via iam-service (11/Sep/2026, "que se muestre el
+    nombre de la empresa no la abreviatura") - tesoreria-service no tiene
+    general_sociedades (ver TesoreriaCuenta.sociedad, referencia laxa al
+    RFC), mismo patron que pld-service/pld/views.py::_validar_sociedad_rfc.
+    Fail-open por RFC: uno que no responda simplemente cae al RFC crudo en
+    el correo (ver _tabla_corte_html), no tumba el envio del reporte."""
+    nombres: dict[str, str] = {}
+    for rfc in rfcs:
+        if not rfc:
+            continue
+        try:
+            # quote (11/Sep/2026, bug real en produccion: los RFC de prueba
+            # traen "#", que en una URL es un fragmento - sin escapar,
+            # requests corta la ruta ahi y termina pegandole al endpoint de
+            # LISTA en vez del de detalle, regresando un list en vez de un
+            # dict) - mismo fix que pld-service/pld/views.py.
+            respuesta = requests.get(
+                f"{settings.IAM_SERVICE_URL}/api/sociedades/{quote(rfc, safe='')}/",
+                headers=headers,
+                cookies=cookies,
+                timeout=_TIMEOUT_SEGUNDOS,
+            )
+        except requests.RequestException:
+            logger.warning("iam-service no respondio al resolver la sociedad %s", rfc, exc_info=True)
+            continue
+        if respuesta.status_code == 200:
+            razon_social = respuesta.json().get("razon_social")
+            if razon_social:
+                nombres[rfc] = razon_social
+    return nombres
+
+
 def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> bool:
     """Envia el reporte diario de saldos por correo via mail-service (Gmail
     API) - mismo patron que pld-service/pld/mail_utils.py::enviar_correo_ticket_cliente.
@@ -410,7 +461,9 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
     generacion del reporte en si (el frontend lo sigue mostrando en
     pantalla aunque el correo falle)."""
     headers, cookies = forward_auth_headers(request)
-    html_body = _renderizar_reporte(reporte)
+    rfcs = {e["sociedad"] for e in reporte["sociedades"]} | {e["sociedad"] for e in reporte["corte_anterior"]["sociedades"]}
+    nombres_sociedades = _resolver_nombres_sociedades(headers, cookies, rfcs)
+    html_body = _renderizar_reporte(reporte, nombres_sociedades)
 
     ok_total = True
     for destinatario in destinatarios:

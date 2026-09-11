@@ -77,6 +77,13 @@ AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080"
 # config/settings.py.
 MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
 
+# iam-service - solo para resolver razon_social de una sociedad por su RFC
+# en el correo del reporte diario (11/Sep/2026, "que se muestre el nombre
+# de la empresa no la abreviatura") - tesoreria-service no tiene esa tabla
+# (general_sociedades vive en iam-service, ver TesoreriaCuenta.sociedad),
+# mismo patron que pld-service/pld/views.py::_validar_sociedad_rfc.
+IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
+
 # drive-service - subida real de comprobantes/PDF/XML (finanzas.md, decision
 # 26/Ago/2026), ver tesoreria/views.py::TesoreriaFlujoViewSet.subir_comprobante.
 # Mismo default de desarrollo que pld-service/config/settings.py. Sin carpeta
