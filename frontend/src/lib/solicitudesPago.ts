@@ -58,11 +58,13 @@ export async function listSolicitudesPago(params?: {
   proyecto?: string;
   sociedad?: string;
   search?: string;
+  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaSolicitudPago[]> {
   const qs = new URLSearchParams();
   if (params?.proyecto) qs.set("proyecto", params.proyecto);
   if (params?.sociedad) qs.set("sociedad", params.sociedad);
   if (params?.search) qs.set("search", params.search);
+  if (params?.categoriaGasto) qs.set("categoria_gasto", params.categoriaGasto);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/solicitudes-pago/?${qs.toString()}`);
   if (!response.ok) throw await friendlyApiError("TESORERIA", response);
   return response.json();
@@ -76,6 +78,7 @@ export async function crearSolicitudPago(params: {
   monto: string;
   moneda?: string;
   comentarios?: string;
+  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaSolicitudPago> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/solicitudes-pago/`, {
     method: "POST",
@@ -88,6 +91,7 @@ export async function crearSolicitudPago(params: {
       monto: params.monto,
       moneda: params.moneda || "MXP",
       comentarios: params.comentarios || null,
+      categoria_gasto: params.categoriaGasto || null,
     }),
   });
   if (!response.ok) throw await friendlyApiError("TESORERIA", response);

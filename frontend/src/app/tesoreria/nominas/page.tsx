@@ -5,6 +5,7 @@ import {
   Alert,
   Autocomplete,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -12,6 +13,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormControlLabel,
   FormHelperText,
   IconButton,
   InputLabel,
@@ -31,18 +33,24 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Eye, MoreVertical, Pencil, Plus, Users, X as CloseIcon } from "lucide-react";
+import { Eye, MoreVertical, Pencil, Plus, Users, X as CloseIcon, Zap } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import FiltrosBar from "@/components/FiltrosBar";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import { RrhhPuesto, listPuestos } from "@/lib/rrhh";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
+  TesoreriaCuenta,
   TesoreriaNomina,
   TesoreriaNominaStatus,
   TesoreriaNominaTipo,
+  createFlujo,
   createNomina,
+  getContratoGenericoNomina,
+  listCuentas,
+  listFlujos,
   listNominas,
   updateNomina,
 } from "@/lib/tesoreria";
@@ -73,6 +81,25 @@ function fechaISO(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Numero de semana ISO-8601 (11/Sep/2026, "Semanal va en semana 37" -
+// pendiente real de negocio: Jenny/Dylan hablan en numero de semana del
+// año, no solo en fechas). Algoritmo estandar: jueves de la semana define
+// a que semana ISO pertenece.
+function numeroSemanaISO(fecha: Date): number {
+  const d = new Date(Date.UTC(fecha.getFullYear(), fecha.getMonth(), fecha.getDate()));
+  const diaISO = d.getUTCDay() || 7; // domingo=0 -> 7
+  d.setUTCDate(d.getUTCDate() + 4 - diaISO);
+  const inicioAnio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - inicioAnio.getTime()) / 86400000 + 1) / 7);
+}
+
+// Numero de quincena del año (11/Sep/2026, "Quincenal va en periodo 17") -
+// 2 quincenas por mes, secuencial: Enero 1ra=1, 2da=2, Febrero 1ra=3... asi
+// Septiembre 1ra quincena = 17.
+function numeroQuincenaAnio(mes: number, esPrimeraQuincena: boolean): number {
+  return mes * 2 + (esPrimeraQuincena ? 1 : 2);
+}
+
 // Periodo quincenal (10/Sep/2026, "como va ser semanal o quincena debe
 // poder en esos tiempos") - convencion estandar mexicana: 1-15 y 16-fin de
 // mes. Se calcula sobre `hoy` para poder probar "cual es la quincena
@@ -84,10 +111,11 @@ function calcularPeriodoQuincenal(hoy: Date): { fechaInicio: string; fechaFin: s
   const esPrimeraQuincena = hoy.getDate() <= 15;
   const inicio = new Date(anio, mes, esPrimeraQuincena ? 1 : 16);
   const fin = esPrimeraQuincena ? new Date(anio, mes, 15) : new Date(anio, mes + 1, 0); // dia 0 del sig. mes = ultimo del actual
+  const periodo = numeroQuincenaAnio(mes, esPrimeraQuincena);
   return {
     fechaInicio: fechaISO(inicio),
     fechaFin: fechaISO(fin),
-    serie: `Quincena ${esPrimeraQuincena ? 1 : 2} - ${MESES[mes]} ${anio}`,
+    serie: `Periodo ${periodo} - Quincena ${esPrimeraQuincena ? 1 : 2} ${MESES[mes]} ${anio}`,
   };
 }
 
@@ -101,10 +129,11 @@ function calcularPeriodoSemanal(hoy: Date): { fechaInicio: string; fechaFin: str
   lunes.setDate(hoy.getDate() + offsetLunes);
   const viernes = new Date(lunes);
   viernes.setDate(lunes.getDate() + 4);
+  const semanaIso = numeroSemanaISO(lunes);
   return {
     fechaInicio: fechaISO(lunes),
     fechaFin: fechaISO(viernes),
-    serie: `Semana del ${lunes.getDate()} al ${viernes.getDate()} de ${MESES[viernes.getMonth()]} ${viernes.getFullYear()}`,
+    serie: `Semana ${semanaIso} - del ${lunes.getDate()} al ${viernes.getDate()} de ${MESES[viernes.getMonth()]} ${viernes.getFullYear()}`,
   };
 }
 
@@ -133,6 +162,11 @@ export default function TesoreriaNominasPage() {
   const [filtroProyecto, setFiltroProyecto] = useState("");
   const [filtroCentro, setFiltroCentro] = useState("");
   const [filtroTipo, setFiltroTipo] = useState<TesoreriaNominaTipo | "">("");
+  // Filtro por Serie (11/Sep/2026, "filtro de nominas por concepto=serie" -
+  // pendiente real de negocio) - filtro exacto dedicado, distinto de la
+  // busqueda de texto libre de arriba (esa hace substring sobre id+serie).
+  // Serie es tambien el concepto que hereda cada Flujo hijo.
+  const [filtroSerie, setFiltroSerie] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaNomina | null>(null);
   const [soloLectura, setSoloLectura] = useState(false);
@@ -145,12 +179,105 @@ export default function TesoreriaNominasPage() {
   // referencias cruzadas") - mismo Drawer que Facturas/Flujos, en vez de
   // navegar a /tesoreria/flujos.
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
+  // Generacion automatica de lineas por empleado activo (11/Sep/2026,
+  // pendiente real de negocio, desbloqueado ahora que rrhh-service expone
+  // GET /api/puestos/?sociedad=&proyecto=&vigente=true) - un Flujo por cada
+  // Puesto vigente de la sociedad/proyecto de la Nomina, con un monto
+  // ESTIMADO (salario_diario x dias del periodo, sin ISR/IMSS ni otras
+  // deducciones reales de nomina) que Tesoreria debe revisar/ajustar en
+  // cada Flujo antes de pagar - no reemplaza el calculo real de nomina.
+  const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
+  const [generandoPara, setGenerandoPara] = useState<TesoreriaNomina | null>(null);
+  const [puestosVigentes, setPuestosVigentes] = useState<RrhhPuesto[]>([]);
+  const [empleadosConFlujo, setEmpleadosConFlujo] = useState<Set<string>>(new Set());
+  const [cargandoPuestos, setCargandoPuestos] = useState(false);
+  const [seleccionPuestos, setSeleccionPuestos] = useState<Set<string>>(new Set());
+  const [cuentaGeneracion, setCuentaGeneracion] = useState("");
+  const [generando, setGenerando] = useState(false);
+  const [errorGeneracion, setErrorGeneracion] = useState<string | null>(null);
+  const [resultadoGeneracion, setResultadoGeneracion] = useState<string | null>(null);
 
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listProyectos().then(setProyectos).catch(() => setProyectos([]));
+    listCuentas().then(setCuentas).catch(() => setCuentas([]));
   }, []);
+
+  function diasDelPeriodo(n: TesoreriaNomina): number {
+    if (!n.fecha_inicio || !n.fecha_fin) return 0;
+    const ms = new Date(n.fecha_fin).getTime() - new Date(n.fecha_inicio).getTime();
+    return Math.round(ms / 86400000) + 1;
+  }
+
+  function abrirGenerarLineas(n: TesoreriaNomina) {
+    setGenerandoPara(n);
+    setErrorGeneracion(null);
+    setResultadoGeneracion(null);
+    setCuentaGeneracion("");
+    setCargandoPuestos(true);
+    Promise.all([
+      listPuestos({ sociedad: n.sociedad, proyecto: n.proyecto || undefined, vigente: true }),
+      listFlujos({ nomina: n.id_nomina }),
+    ])
+      .then(([puestos, flujos]) => {
+        setPuestosVigentes(puestos);
+        const yaTienenFlujo = new Set(flujos.map((f) => f.id_empleado).filter((id): id is string => !!id));
+        setEmpleadosConFlujo(yaTienenFlujo);
+        setSeleccionPuestos(new Set(puestos.filter((p) => p.empleado && !yaTienenFlujo.has(p.empleado)).map((p) => p.id_puesto)));
+      })
+      .catch(() => {
+        setPuestosVigentes([]);
+        setEmpleadosConFlujo(new Set());
+      })
+      .finally(() => setCargandoPuestos(false));
+  }
+
+  function toggleSeleccionPuesto(idPuesto: string) {
+    setSeleccionPuestos((prev) => {
+      const copia = new Set(prev);
+      if (copia.has(idPuesto)) copia.delete(idPuesto);
+      else copia.add(idPuesto);
+      return copia;
+    });
+  }
+
+  async function handleGenerarLineas() {
+    if (!generandoPara || !cuentaGeneracion) {
+      setErrorGeneracion("Elige la cuenta bancaria de la que saldrá el pago.");
+      return;
+    }
+    setGenerando(true);
+    setErrorGeneracion(null);
+    try {
+      const { id_contrato } = await getContratoGenericoNomina(generandoPara.id_nomina);
+      const dias = diasDelPeriodo(generandoPara);
+      const puestos = puestosVigentes.filter((p) => seleccionPuestos.has(p.id_puesto));
+      let creados = 0;
+      for (const puesto of puestos) {
+        const salario = puesto.salario_diario ? Number(puesto.salario_diario) : 0;
+        const total = dias > 0 && salario > 0 ? (salario * dias).toFixed(2) : undefined;
+        await createFlujo({
+          contrato: id_contrato,
+          cuenta: cuentaGeneracion,
+          periodoNomina: generandoPara.id_nomina,
+          concepto: generandoPara.serie,
+          totalMxp: total,
+          fechaEfectiva: generandoPara.fecha_fin || generandoPara.fecha_inicio || undefined,
+          idEmpleado: puesto.empleado || undefined,
+        });
+        creados += 1;
+      }
+      setResultadoGeneracion(
+        `Se generaron ${creados} línea${creados === 1 ? "" : "s"}. Monto estimado (salario diario × días del periodo) — revisa y ajusta cada Flujo antes de pagar.`
+      );
+      setSeleccionPuestos(new Set());
+    } catch (err) {
+      setErrorGeneracion(err instanceof Error ? err.message : "Error al generar las líneas");
+    } finally {
+      setGenerando(false);
+    }
+  }
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
@@ -174,10 +301,21 @@ export default function TesoreriaNominasPage() {
   }, [filtroSociedad, filtroProyecto, filtroCentro, filtroTipo]);
 
   const nominasFiltradas = useMemo(() => {
+    let resultado = nominas;
+    if (filtroSerie) {
+      resultado = resultado.filter((n) => n.serie === filtroSerie);
+    }
     const busqueda = search.trim().toLowerCase();
-    if (!busqueda) return nominas;
-    return nominas.filter((n) => `${n.id_nomina} ${n.serie}`.toLowerCase().includes(busqueda));
-  }, [nominas, search]);
+    if (busqueda) {
+      resultado = resultado.filter((n) => `${n.id_nomina} ${n.serie}`.toLowerCase().includes(busqueda));
+    }
+    return resultado;
+  }, [nominas, search, filtroSerie]);
+
+  const opcionesSerie = useMemo(
+    () => Array.from(new Set(nominas.map((n) => n.serie))).sort(),
+    [nominas]
+  );
 
   // Aviso de "falta crear la nomina de este periodo" (10/Sep/2026,
   // "recordatorio/aviso para crear la siguiente Nomina a tiempo") - chequeo
@@ -328,9 +466,7 @@ export default function TesoreriaNominasPage() {
         </Stack>
       )}
 
-      <Paper variant="outlined" sx={{ mb: 3 }}>
-        <FiltrosBar
-          flush
+      <FiltrosBar
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Buscar por ID de nómina o serie..."
@@ -408,8 +544,17 @@ export default function TesoreriaNominasPage() {
             renderInput={(params) => <TextField {...params} label="Centro" />}
             sx={{ minWidth: 140 }}
           />
+          <Autocomplete
+            size="small"
+            options={opcionesSerie}
+            value={filtroSerie || null}
+            onChange={(_, value) => setFiltroSerie(value || "")}
+            renderInput={(params) => <TextField {...params} label="Serie" />}
+            sx={{ minWidth: 180 }}
+          />
         </FiltrosBar>
 
+      <Paper variant="outlined">
         {loading ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
             <CircularProgress size={24} />
@@ -502,6 +647,18 @@ export default function TesoreriaNominasPage() {
             <Eye size={16} strokeWidth={1.5} />
           </ListItemIcon>
           <ListItemText>Ver Flujos</ListItemText>
+        </MenuItem>
+        <MenuItem
+          disabled={!puedeCrear}
+          onClick={() => {
+            if (menuNomina) abrirGenerarLineas(menuNomina);
+            setMenuAnchor(null);
+          }}
+        >
+          <ListItemIcon>
+            <Zap size={16} strokeWidth={1.5} />
+          </ListItemIcon>
+          <ListItemText>Generar líneas por empleado activo</ListItemText>
         </MenuItem>
       </Menu>
 
@@ -649,6 +806,94 @@ export default function TesoreriaNominasPage() {
             </Button>
           </DialogActions>
         )}
+      </Dialog>
+
+      <Dialog open={!!generandoPara} onClose={() => setGenerandoPara(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Generar líneas — {generandoPara?.serie}
+          <IconButton onClick={() => setGenerandoPara(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Crea un Flujo por cada Puesto vigente de {generandoPara && aliasSociedad(generandoPara.sociedad)}
+            {generandoPara?.proyecto ? ` — ${aliasProyecto(generandoPara.proyecto)}` : ""}. El monto es un{" "}
+            <strong>estimado</strong> (salario diario × días del periodo), sin ISR/IMSS ni otras deducciones —
+            revisa y ajusta cada Flujo antes de pagar.
+          </Typography>
+          {errorGeneracion && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {errorGeneracion}
+            </Alert>
+          )}
+          {resultadoGeneracion && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {resultadoGeneracion}
+            </Alert>
+          )}
+          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+            <InputLabel id="cuenta-generacion-label">Cuenta bancaria</InputLabel>
+            <Select
+              labelId="cuenta-generacion-label"
+              label="Cuenta bancaria"
+              value={cuentaGeneracion}
+              onChange={(e) => setCuentaGeneracion(e.target.value)}
+            >
+              {cuentas.map((c) => (
+                <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
+                  {c.alias || c.clabe}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {cargandoPuestos ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : puestosVigentes.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No hay Puestos vigentes para esta sociedad/proyecto en rrhh-service.
+            </Typography>
+          ) : (
+            <Stack spacing={0.5}>
+              {puestosVigentes.map((p) => {
+                const yaTiene = p.empleado ? empleadosConFlujo.has(p.empleado) : false;
+                const dias = diasDelPeriodo(generandoPara as TesoreriaNomina);
+                const estimado = p.salario_diario && dias > 0 ? (Number(p.salario_diario) * dias).toFixed(2) : "—";
+                return (
+                  <FormControlLabel
+                    key={p.id_puesto}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={seleccionPuestos.has(p.id_puesto)}
+                        onChange={() => toggleSeleccionPuesto(p.id_puesto)}
+                        disabled={yaTiene}
+                      />
+                    }
+                    label={
+                      <Typography variant="body2">
+                        {p.empleado_nombre || p.empleado || "—"} — {p.puesto || "Sin puesto"} — ${estimado}
+                        {yaTiene && " (ya tiene un Flujo en esta nómina)"}
+                      </Typography>
+                    }
+                  />
+                );
+              })}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setGenerandoPara(null)}>Cerrar</Button>
+          <Button
+            variant="contained"
+            onClick={handleGenerarLineas}
+            disabled={generando || seleccionPuestos.size === 0 || !cuentaGeneracion}
+          >
+            {generando ? <CircularProgress size={16} /> : `Generar ${seleccionPuestos.size} línea(s)`}
+          </Button>
+        </DialogActions>
       </Dialog>
 
       <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />

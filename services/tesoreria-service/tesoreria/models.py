@@ -1135,6 +1135,13 @@ class TesoreriaRecNomina(models.Model):
     )
     tipo_factura = models.CharField(max_length=50, blank=True, null=True)
     link_pdf = models.TextField(blank=True, null=True)
+    # comprobante (11/Sep/2026, "subir comprobante no XML") - distinto de
+    # link_pdf de arriba (ese es el PDF del CFDI timbrado). Aqui va la
+    # evidencia de pago real (recibo firmado, foto, etc.), mismo patron que
+    # TesoreriaSolicitudPago.link_comprobante.
+    link_comprobante = models.TextField(blank=True, null=True)
+    drive_file_id_comprobante = models.TextField(blank=True, null=True)
+    mime_type_comprobante = models.CharField(max_length=100, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=100, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)

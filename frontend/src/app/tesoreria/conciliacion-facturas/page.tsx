@@ -30,7 +30,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { ExternalLink, Eye, X as CloseIcon } from "lucide-react";
+import { Download, ExternalLink, Eye, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -49,6 +49,7 @@ import {
   SugerenciaCfdiLote,
   SugerenciasCfdiResponse,
   TesoreriaContrato,
+  urlExportarConciliacionCfdiCsv,
   urlVerFacturaPdf,
   vincularFactura,
 } from "@/lib/tesoreria";
@@ -318,6 +319,28 @@ export default function ConciliacionFacturasPage() {
             setFiltroContrato("");
             setFiltroTipoComprobante("");
           }}
+          actions={
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Download size={14} strokeWidth={2} />}
+              onClick={() =>
+                window.open(
+                  urlExportarConciliacionCfdiCsv({
+                    desde: desde || undefined,
+                    hasta: hasta || undefined,
+                    sociedad: filtroEmpresa || undefined,
+                    contrato: filtroContrato || undefined,
+                    tipoComprobante: filtroTipoComprobante || undefined,
+                  }),
+                  "_blank"
+                )
+              }
+              sx={{ flexShrink: 0 }}
+            >
+              Exportar CSV
+            </Button>
+          }
         >
           <TextField
             size="small"
@@ -564,6 +587,19 @@ export default function ConciliacionFacturasPage() {
                     >
                       Ver PDF
                     </Button>
+                  </Stack>
+                )}
+                {detalle.factura && (
+                  <Stack direction="row" spacing={2}>
+                    <Typography variant="body2">
+                      <strong>Importe:</strong> {numero(detalle.factura_subtotal)}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>IVA:</strong> {numero(detalle.factura_iva)}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Total:</strong> {numero(detalle.factura_total)}
+                    </Typography>
                   </Stack>
                 )}
                 {detalle.complemento && (

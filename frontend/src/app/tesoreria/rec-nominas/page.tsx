@@ -12,7 +12,6 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  InputAdornment,
   Paper,
   Stack,
   Table,
@@ -24,8 +23,10 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Wallet2, Pencil, Plus, Search, X as CloseIcon } from "lucide-react";
+import { Eye, Wallet2, Pencil, Plus, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   TesoreriaFlujo,
@@ -33,7 +34,9 @@ import {
   createRecNomina,
   listFlujos,
   listRecNominas,
+  subirComprobanteRecNomina,
   updateRecNomina,
+  urlVerComprobanteRecNomina,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -74,6 +77,24 @@ export default function TesoreriaRecNominasPage() {
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Comprobante de pago (11/Sep/2026, "subir comprobante no XML") - mismo
+  // patron que Solicitudes de Pago: subida opcional + preview embebido,
+  // distinto del PDF del CFDI (link_pdf).
+  const [subiendoComprobante, setSubiendoComprobante] = useState<number | null>(null);
+  const [previewComprobante, setPreviewComprobante] = useState<TesoreriaRecNomina | null>(null);
+
+  async function handleSubirComprobante(id: number, archivo: File) {
+    setSubiendoComprobante(id);
+    setError(null);
+    try {
+      await subirComprobanteRecNomina(id, archivo);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al subir el comprobante");
+    } finally {
+      setSubiendoComprobante(null);
+    }
+  }
 
   useEffect(() => {
     getSession().then(setSession);
@@ -169,34 +190,26 @@ export default function TesoreriaRecNominasPage() {
         </Alert>
       )}
 
+      <FiltrosBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Buscar por folio, UUID o nombre..."
+          actions={
+            puedeCrear ? (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+                sx={{ flexShrink: 0 }}
+              >
+                Nuevo Recibo
+              </Button>
+            ) : undefined
+          }
+        />
+
       <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por folio, UUID o nombre..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          {puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
-            >
-              Nuevo Recibo
-            </Button>
-          )}
-        </Stack>
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 8 columnas no cabe en un
         telefono sin scroll horizontal incomodo. */}
@@ -213,19 +226,20 @@ export default function TesoreriaRecNominasPage() {
                 <TableCell align="right">Total</TableCell>
                 <TableCell>Estado</TableCell>
                 <TableCell>Vinculado a</TableCell>
+                <TableCell align="center">Comprobante</TableCell>
                 <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin recibos de nómina registrados.
                     </Typography>
@@ -247,6 +261,40 @@ export default function TesoreriaRecNominasPage() {
                       ) : (
                         "—"
                       )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack direction="row" spacing={0.5} justifyContent="center">
+                        {n.link_comprobante && (
+                          <IconButton size="small" aria-label="Ver comprobante" onClick={() => setPreviewComprobante(n)}>
+                            <Eye size={16} strokeWidth={1.5} />
+                          </IconButton>
+                        )}
+                        {puedeEditar && (
+                          <IconButton
+                            component="label"
+                            size="small"
+                            aria-label={n.link_comprobante ? "Reemplazar comprobante" : "Subir comprobante"}
+                            disabled={subiendoComprobante === n.id}
+                          >
+                            <Upload size={16} strokeWidth={1.5} />
+                            <input
+                              type="file"
+                              hidden
+                              accept="image/*,application/pdf"
+                              onChange={(e) => {
+                                const archivo = e.target.files?.[0];
+                                if (archivo) handleSubirComprobante(n.id, archivo);
+                                e.target.value = "";
+                              }}
+                            />
+                          </IconButton>
+                        )}
+                        {!n.link_comprobante && !puedeEditar && (
+                          <Typography variant="caption" color="text.secondary">
+                            —
+                          </Typography>
+                        )}
+                      </Stack>
                     </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(n)} disabled={!puedeEditar}>
@@ -316,6 +364,33 @@ export default function TesoreriaRecNominasPage() {
                       sx={{ alignSelf: "flex-start" }}
                     />
                   )}
+                  <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                    {puedeEditar && (
+                      <Button
+                        component="label"
+                        size="small"
+                        startIcon={<Upload size={14} strokeWidth={1.5} />}
+                        disabled={subiendoComprobante === n.id}
+                      >
+                        {n.link_comprobante ? "Reemplazar comprobante" : "Subir comprobante"}
+                        <input
+                          type="file"
+                          hidden
+                          accept="image/*,application/pdf"
+                          onChange={(e) => {
+                            const archivo = e.target.files?.[0];
+                            if (archivo) handleSubirComprobante(n.id, archivo);
+                            e.target.value = "";
+                          }}
+                        />
+                      </Button>
+                    )}
+                    {n.link_comprobante && (
+                      <Button size="small" startIcon={<Eye size={14} strokeWidth={1.5} />} onClick={() => setPreviewComprobante(n)}>
+                        Ver comprobante
+                      </Button>
+                    )}
+                  </Stack>
                 </Stack>
               </Paper>
             ))
@@ -461,6 +536,13 @@ export default function TesoreriaRecNominasPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <DocumentoPreviewDialog
+        open={!!previewComprobante}
+        onClose={() => setPreviewComprobante(null)}
+        url={previewComprobante ? urlVerComprobanteRecNomina(previewComprobante.id) : null}
+        titulo={previewComprobante ? `Comprobante ${previewComprobante.folio || previewComprobante.timbre_uuid}` : ""}
+      />
     </AppShell>
   );
 }

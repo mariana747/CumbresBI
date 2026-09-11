@@ -907,6 +907,11 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         nomina_id = self.request.query_params.get("nomina")
         if nomina_id:
             queryset = queryset.filter(periodo_nomina_id=nomina_id)
+        # ?id_empleado= (11/Sep/2026, "filtro por Empleado" en Nominas) -
+        # id_empleado es referencia logica a rrhh_empleados, no FK real.
+        id_empleado = self.request.query_params.get("id_empleado")
+        if id_empleado:
+            queryset = queryset.filter(id_empleado=id_empleado)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -963,6 +968,59 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             )
 
         return Response(calcular_conciliacion_cfdi(queryset))
+
+    @action(detail=False, methods=["get"])
+    def conciliacion_csv(self, request):
+        """Exportar a CSV (11/Sep/2026, pendiente real de negocio) - mismos
+        filtros que conciliacion() de arriba, una sola descarga con las 3
+        clasificaciones juntas (columna "Clasificacion"), distinto de
+        exportar_csv (ese exporta todos los Flujos sin clasificar)."""
+        queryset = _aplicar_filtro_fecha_conciliacion(request, self.filter_queryset(self.get_queryset()))
+
+        requiere_factura = request.query_params.get("requiere_factura")
+        if requiere_factura is not None:
+            queryset = queryset.filter(contrato__requiere_factura=(requiere_factura.lower() == "true"))
+
+        tipo_comprobante = request.query_params.get("tipo_comprobante")
+        if tipo_comprobante:
+            queryset = queryset.filter(
+                Q(factura__comprobante_tipo_de_comprobante=tipo_comprobante)
+                | Q(complemento__tipo_de_comprobante=tipo_comprobante)
+            )
+
+        resultado = calcular_conciliacion_cfdi(queryset)
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="conciliacion.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "Clasificación", "ID Flujo", "Contrato", "Proveedor", "Concepto", "Fecha efectiva",
+                "Total del pago", "Factura", "Complemento", "Importe", "IVA", "Total factura",
+                "Reconocido", "Por reconocer",
+            ]
+        )
+        etiquetas = {"con_cfdi": "Ligado a CFDI", "sin_cfdi": "Sin CFDI", "no_requiere": "No requiere CFDI"}
+        for clave, etiqueta in etiquetas.items():
+            for fila in resultado[clave]:
+                writer.writerow(
+                    [
+                        etiqueta,
+                        fila["id_flujo"],
+                        fila["contrato"] or "",
+                        fila["contraparte_nombre"] or "",
+                        fila["concepto"] or "",
+                        fila["fecha_efectiva"] or "",
+                        fila["total_mxp"] or "",
+                        fila["factura_folio"] or "",
+                        fila["complemento_folio"] or "",
+                        fila["factura_subtotal"] or "",
+                        fila["factura_iva"] or "",
+                        fila["factura_total"] or "",
+                        fila.get("reconocido") or "",
+                        fila.get("por_reconocer") or "",
+                    ]
+                )
+        return response
 
     def perform_create(self, serializer):
         # id_flujo = "FLJ-{consecutivo global de 6 digitos}" (ver ejemplo
@@ -1421,6 +1479,15 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
             queryset = queryset.filter(sociedad=sociedad)
+        # ?categoria_gasto= (11/Sep/2026, "filtro en las 4 pantallas") -
+        # a diferencia de Flujo/Factura/SolicitudPago, aqui la categoria
+        # vive en TesoreriaTicketReembolsoConcepto (un ticket puede tener
+        # varios conceptos con categorias distintas), asi que se filtra por
+        # "algun concepto de este ticket tiene esta categoria" (distinct
+        # para no duplicar el ticket si mas de un concepto matchea).
+        categoria_gasto = self.request.query_params.get("categoria_gasto")
+        if categoria_gasto:
+            queryset = queryset.filter(conceptos__categoria_gasto=categoria_gasto).distinct()
         return queryset
 
     def perform_create(self, serializer):
@@ -3074,9 +3141,12 @@ class TesoreriaCorteEdcViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
 # formato unico de estado de cuenta entre bancos, asi que se acepta
 # cualquiera de estos alias por columna en vez de exigir un nombre exacto.
 _ENCABEZADOS_MOVIMIENTO = {
-    "fecha": ("fecha", "date"),
+    # "fecha operacion"/"fecha operación" (11/Sep/2026, formato real de
+    # CRCM compartido por Jenny) - normalizada ya viene sin acentos raros
+    # de encoding pero se dejan ambas formas por si acaso.
+    "fecha": ("fecha", "date", "fecha operacion", "fecha operación"),
     "descripcion": ("descripcion", "concepto", "description"),
-    "referencia": ("referencia", "ref", "reference"),
+    "referencia": ("referencia", "ref", "reference", "referencia ampliada"),
     "cargo": ("cargo", "debito", "retiro", "debit"),
     "abono": ("abono", "credito", "deposito", "credit"),
     "saldo": ("saldo", "balance"),
@@ -3124,30 +3194,51 @@ def _parsear_monto_movimiento(valor):
         raise ValueError(f"monto invalido: '{valor}'")
 
 
+_ALIAS_ENCABEZADO_CONOCIDOS = {alias for aliases in _ENCABEZADOS_MOVIMIENTO.values() for alias in aliases}
+
+
+def _indice_fila_encabezado(filas_crudas: list[list]) -> int:
+    """Detecta cual fila cruda es la de encabezados reales (11/Sep/2026,
+    "Subida de archivos CRCM" - el estado de cuenta real trae filas de
+    metadata antes, ej. "Cuenta  0124071131", que no son el encabezado).
+    Se queda con la primera fila que reconoce al menos 3 de las columnas
+    esperadas (fecha/concepto/cargo/abono/saldo) en vez de asumir que
+    siempre es la fila 1."""
+    for indice, fila in enumerate(filas_crudas):
+        normalizada = {str(v).strip().lower() for v in fila if v not in (None, "")}
+        if len(normalizada & _ALIAS_ENCABEZADO_CONOCIDOS) >= 3:
+            return indice
+    return 0
+
+
 def _parsear_filas_extracto(nombre_archivo: str, contenido: bytes) -> list[dict]:
     """Regresa una lista de dicts {encabezado_original: valor} por fila de
-    datos - CSV con encabezados o Excel (.xlsx) con encabezados en la
-    primera fila. No hay soporte de OFX/PDF por ahora (pendiente, igual que
-    el resto de integraciones de escaneo/Drive del proyecto)."""
+    datos - CSV con encabezados o Excel (.xlsx), buscando la fila real de
+    encabezados en vez de asumir que es siempre la primera (ver
+    _indice_fila_encabezado). No hay soporte de OFX/PDF por ahora
+    (pendiente, igual que el resto de integraciones de escaneo/Drive del
+    proyecto)."""
     nombre = nombre_archivo.lower()
     if nombre.endswith(".csv"):
         texto = contenido.decode("utf-8-sig", errors="replace")
-        return list(csv.DictReader(io.StringIO(texto)))
-    if nombre.endswith(".xlsx") or nombre.endswith(".xlsm"):
+        filas_crudas = list(csv.reader(io.StringIO(texto)))
+    elif nombre.endswith(".xlsx") or nombre.endswith(".xlsm"):
         libro = load_workbook(io.BytesIO(contenido), data_only=True)
         hoja = libro.active
-        filas_iter = hoja.iter_rows(values_only=True)
-        try:
-            encabezados = [str(h).strip() if h is not None else "" for h in next(filas_iter)]
-        except StopIteration:
-            return []
-        filas = []
-        for valores in filas_iter:
-            if valores is None or all(v is None for v in valores):
-                continue
-            filas.append(dict(zip(encabezados, valores)))
-        return filas
-    raise ValidationError("Formato no soportado. Sube un archivo CSV o Excel (.xlsx).")
+        filas_crudas = [list(fila) for fila in hoja.iter_rows(values_only=True)]
+    else:
+        raise ValidationError("Formato no soportado. Sube un archivo CSV o Excel (.xlsx).")
+
+    if not filas_crudas:
+        return []
+    indice_encabezado = _indice_fila_encabezado(filas_crudas)
+    encabezados = [str(h).strip() if h not in (None, "") else "" for h in filas_crudas[indice_encabezado]]
+    filas = []
+    for valores in filas_crudas[indice_encabezado + 1 :]:
+        if valores is None or all(v in (None, "") for v in valores):
+            continue
+        filas.append(dict(zip(encabezados, valores)))
+    return filas
 
 
 def _monto_movimiento_bancario(movimiento) -> Decimal:
@@ -3255,7 +3346,7 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
     def get_permissions(self):
         if self.action == "importar":
             return [require_permission("tesoreria.crear")()]
-        if self.action in ("sugerencias", "conciliar_automatico", "reporte_conciliacion"):
+        if self.action in ("sugerencias", "conciliar_automatico", "reporte_conciliacion", "crear_flujo"):
             return [require_permission("tesoreria.editar")()]
         return super().get_permissions()
 
@@ -3432,6 +3523,51 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
             }
         )
 
+    @action(detail=True, methods=["post"])
+    def crear_flujo(self, request, pk=None):
+        """Precarga un Flujo nuevo a partir de un movimiento sin conciliar
+        (11/Sep/2026, "Subida de archivos CRCM para precargar Flujos" -
+        pendiente real de negocio). `importar`/`sugerencias`/
+        `conciliar_automatico` de arriba solo LIGAN un movimiento a un Flujo
+        YA existente (capturado a mano); esto cubre el caso contrario -
+        el movimiento no tiene ningun Flujo interno que le corresponda
+        todavia, asi que se crea uno nuevo con cuenta/concepto/monto ya
+        precargados desde el estado de cuenta, y el analista solo necesita
+        elegir el contrato (obligatorio en TesoreriaFlujo, el extracto
+        bancario no lo puede inferir) para terminar de completarlo."""
+        movimiento = self.get_object()
+        if movimiento.flujo_id:
+            return Response({"detail": "Este movimiento ya está conciliado con un Flujo."}, status=400)
+        contrato_id = request.data.get("contrato")
+        if not contrato_id:
+            return Response({"detail": "Se requiere 'contrato'."}, status=400)
+        try:
+            contrato = TesoreriaContrato.objects.get(pk=contrato_id)
+        except TesoreriaContrato.DoesNotExist:
+            return Response({"detail": "Contrato no encontrado."}, status=400)
+
+        consecutivo = TesoreriaFlujo.objects.count() + 1
+        flujo = TesoreriaFlujo.objects.create(
+            id_flujo=f"FLJ-{consecutivo:06d}",
+            contrato=contrato,
+            cuenta=movimiento.cuenta,
+            concepto=movimiento.descripcion,
+            total_mxp=(movimiento.abono or Decimal("0")) - (movimiento.cargo or Decimal("0")),
+            fecha_efectiva=movimiento.fecha,
+            link_referencia=movimiento.referencia,
+            created_by=(request.data.get("actor_user_id") or "")[:100],
+        )
+        movimiento.flujo = flujo
+        movimiento.save(update_fields=["flujo"])
+        emitir_evento_auditoria(
+            "tesoreria_movimientos_bancarios.crear_flujo",
+            "tesoreria_movimientos_bancarios",
+            movimiento.id,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"flujo": flujo.id_flujo},
+        )
+        return Response(TesoreriaFlujoSerializer(flujo).data, status=201)
+
     @action(detail=False, methods=["get"])
     def reporte_conciliacion(self, request):
         """Reporte transaccion-por-transaccion (08/Sep/2026, finanzas.md
@@ -3532,6 +3668,26 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
             return Response({"detail": "Se requiere al menos un destinatario."}, status=400)
 
         reporte = calcular_reporte_diario(sociedades, fecha)
+
+        # Bloquear envio si alguna cuenta no cuadra (Jenny, junta 09/Sep:
+        # "no enviar el reporte diario si hay diferencia") - se valida aqui,
+        # no solo en el frontend, para que no se pueda saltar deshabilitando
+        # el boton.
+        cuentas_con_diferencia = [
+            c["alias"]
+            for s in reporte.get("sociedades", [])
+            for c in s.get("cuentas", [])
+            if c.get("cuadra") is False
+        ]
+        if cuentas_con_diferencia:
+            return Response(
+                {
+                    "detail": "No se puede enviar: hay diferencia sin resolver en "
+                    + ", ".join(cuentas_con_diferencia) + ".",
+                },
+                status=400,
+            )
+
         enviado = enviar_reporte_diario(request, destinatarios, reporte)
         return Response({"enviado": enviado})
 
@@ -3605,3 +3761,54 @@ class TesoreriaRecNominaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     serializer_class = TesoreriaRecNominaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "nom_receptor_num_empleado"]
+
+    def get_permissions(self):
+        if self.action == "subir_comprobante":
+            return [require_permission("facturacion-cfdi.editar")()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_comprobante(self, request, pk=None):
+        """Comprobante de pago (11/Sep/2026, "subir comprobante no XML" -
+        pendiente real de negocio) - distinto del PDF del CFDI (link_pdf),
+        es la evidencia de que el pago al empleado se realizo. Mismo patron
+        que TesoreriaSolicitudPagoViewSet.subir_comprobante."""
+        rec_nomina = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        resultado, error = _subir_a_drive(
+            request, archivo, f"Tesoreria/RecibosNomina/{rec_nomina.timbre_uuid or rec_nomina.id}"
+        )
+        if error:
+            return error
+
+        rec_nomina.link_comprobante = resultado["web_view_link"]
+        rec_nomina.drive_file_id_comprobante = resultado["file_id"]
+        rec_nomina.mime_type_comprobante = resultado.get("mime_type")
+        rec_nomina.save(
+            update_fields=["link_comprobante", "drive_file_id_comprobante", "mime_type_comprobante"]
+        )
+        emitir_evento_auditoria(
+            "tesoreria_rec_nominas.subir_comprobante",
+            "tesoreria_rec_nominas",
+            str(rec_nomina.id),
+            actor_user_id=request.effective_scope.identity_user_id,
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(rec_nomina).data)
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_comprobante(self, request, pk=None):
+        """Preview embebido del comprobante - mismo patron que
+        TesoreriaSolicitudPagoViewSet.ver_comprobante."""
+        rec_nomina = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=rec_nomina.drive_file_id_comprobante,
+            mime_type=rec_nomina.mime_type_comprobante,
+            nombre_archivo=f"comprobante-{rec_nomina.timbre_uuid or rec_nomina.id}",
+            carpeta=f"Tesoreria/RecibosNomina/{rec_nomina.timbre_uuid or rec_nomina.id}",
+        )

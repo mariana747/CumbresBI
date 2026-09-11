@@ -15,7 +15,6 @@ import {
   Divider,
   FormControl,
   IconButton,
-  InputAdornment,
   InputLabel,
   MenuItem,
   Paper,
@@ -30,9 +29,10 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileMinus, Pencil, Plus, Search, Trash2, X as CloseIcon, Eye, ExternalLink, FileText, FileCode2, RefreshCw } from "lucide-react";
+import { FileMinus, Pencil, Plus, Trash2, X as CloseIcon, Eye, ExternalLink, FileText, FileCode2, RefreshCw } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
@@ -439,23 +439,25 @@ export default function TesoreriaNotasCreditoPage() {
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por folio, UUID o nombre..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+      <FiltrosBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Buscar por folio, UUID o nombre..."
+          actions={
+            puedeCrear ? (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+                sx={{ flexShrink: 0 }}
+              >
+                Nueva Nota de Crédito
+              </Button>
+            ) : undefined
+          }
+        >
+          <FormControl size="small" fullWidth>
             <InputLabel id="filtro-receptor-nota-label">Filtrar por receptor</InputLabel>
             <Select
               labelId="filtro-receptor-nota-label"
@@ -473,18 +475,9 @@ export default function TesoreriaNotasCreditoPage() {
               ))}
             </Select>
           </FormControl>
-          {puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
-            >
-              Nueva Nota de Crédito
-            </Button>
-          )}
-        </Stack>
+        </FiltrosBar>
+
+      <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 8 columnas no cabe en un
         telefono sin scroll horizontal incomodo. */}

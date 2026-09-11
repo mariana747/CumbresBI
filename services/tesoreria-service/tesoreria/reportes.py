@@ -23,6 +23,7 @@ from .models import (
     TesoreriaFactura,
     TesoreriaFlujo,
     TesoreriaMovimientoBancario,
+    TesoreriaNomina,
     TesoreriaSaldo,
 )
 
@@ -75,6 +76,13 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
             "complemento_folio": flujo.complemento.folio if flujo.complemento_id else None,
             "nomina": flujo.nomina_id,
             "requiere_factura": requiere_factura,
+            # factura_subtotal/iva/total (11/Sep/2026, "columnas separadas
+            # importe/IVA/total en conciliacion, para Cat") - solo tiene
+            # sentido si ya hay factura ligada; complementos/recibos de
+            # nomina no desglosan IVA en este esquema.
+            "factura_subtotal": flujo.factura.comprobante_sub_total if flujo.factura_id else None,
+            "factura_iva": flujo.factura.comprobante_iva if flujo.factura_id else None,
+            "factura_total": flujo.factura.comprobante_total if flujo.factura_id else None,
         }
         if requiere_factura is False:
             no_requiere.append(fila)
@@ -108,14 +116,28 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
     saldo_anterior_total = Decimal("0")
     saldo_hoy_total = Decimal("0")
     hay_saldo_hoy_en_alguna = False
+    # nomina_total_* (11/Sep/2026, "el reporte diario debe reflejar tambien
+    # la nomina de ambos tipos") - consolidado del dia completo, para verlo
+    # sin tener que expandir cuenta por cuenta.
+    nomina_total_quincenal = Decimal("0")
+    nomina_total_semanal = Decimal("0")
 
     for cuenta in cuentas:
         saldo_hoy_obj = TesoreriaSaldo.objects.filter(cuenta=cuenta.id_cuenta_bancaria, fecha=fecha).first()
         saldo_anterior_obj = (
             TesoreriaSaldo.objects.filter(cuenta=cuenta.id_cuenta_bancaria, fecha__lt=fecha).order_by("-fecha").first()
         )
-        transacciones = TesoreriaFlujo.objects.filter(cuenta=cuenta, fecha_efectiva=fecha).order_by("id_flujo")
+        transacciones = (
+            TesoreriaFlujo.objects.filter(cuenta=cuenta, fecha_efectiva=fecha)
+            .select_related("periodo_nomina")
+            .order_by("id_flujo")
+        )
         suma_transacciones = sum((t.total_mxp or Decimal("0")) for t in transacciones)
+        for t in transacciones:
+            if t.periodo_nomina_id and t.periodo_nomina.tipo == TesoreriaNomina.TIPO_QUINCENAL:
+                nomina_total_quincenal += t.total_mxp or Decimal("0")
+            elif t.periodo_nomina_id and t.periodo_nomina.tipo == TesoreriaNomina.TIPO_SEMANAL:
+                nomina_total_semanal += t.total_mxp or Decimal("0")
 
         monto_anterior = saldo_anterior_obj.saldo if saldo_anterior_obj else Decimal("0")
         monto_hoy = saldo_hoy_obj.saldo if saldo_hoy_obj else None
@@ -138,8 +160,18 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
             "suma_transacciones": suma_transacciones,
             "diferencia": diferencia,
             "cuadra": diferencia == Decimal("0") if diferencia is not None else None,
+            # nomina_tipo (11/Sep/2026, "el reporte diario debe reflejar
+            # tambien la nomina de ambos tipos") - el Flujo ya se sumaba y
+            # listaba como cualquier otro (misma cuenta/fecha_efectiva), pero
+            # no se distinguia visualmente que fuera un pago de nomina ni de
+            # que tipo (Quincenal/Semanal).
             "transacciones": [
-                {"id_flujo": t.id_flujo, "concepto": t.concepto, "total_mxp": t.total_mxp}
+                {
+                    "id_flujo": t.id_flujo,
+                    "concepto": t.concepto,
+                    "total_mxp": t.total_mxp,
+                    "nomina_tipo": t.periodo_nomina.tipo if t.periodo_nomina_id else None,
+                }
                 for t in transacciones
             ],
         }
@@ -155,6 +187,8 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
             # desaparecio) - se deja None y el frontend lo muestra como "—".
             "saldo_hoy_total": saldo_hoy_total if hay_saldo_hoy_en_alguna else None,
             "cambio_neto": (saldo_hoy_total - saldo_anterior_total) if hay_saldo_hoy_en_alguna else None,
+            "nomina_total_quincenal": nomina_total_quincenal,
+            "nomina_total_semanal": nomina_total_semanal,
         },
     }
 

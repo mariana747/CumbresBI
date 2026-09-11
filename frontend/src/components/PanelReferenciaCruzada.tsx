@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Box, Button, Chip, CircularProgress, Collapse, Divider, Drawer, IconButton, Stack, Typography } from "@mui/material";
+import { useEffect, useMemo, useState } from "react";
+import { Autocomplete, Box, Button, Chip, CircularProgress, Collapse, Divider, Drawer, IconButton, Stack, TextField, Typography } from "@mui/material";
 import { ChevronDown, ChevronRight, Eye, Maximize2, Minimize2, X as CloseIcon } from "lucide-react";
 import {
   TesoreriaNomina,
@@ -13,6 +13,7 @@ import {
   TesoreriaContrato,
   TesoreriaFlujo,
 } from "@/lib/tesoreria";
+import { RrhhEmpleado, listEmpleados } from "@/lib/rrhh";
 
 function numero(valor: string | null | undefined): string {
   if (valor === null || valor === undefined) return "—";
@@ -50,6 +51,11 @@ export default function PanelReferenciaCruzada({
   const [flujos, setFlujos] = useState<TesoreriaFlujo[]>([]);
   const [cargandoFlujos, setCargandoFlujos] = useState(false);
   const [flujoExpandido, setFlujoExpandido] = useState<string | null>(null);
+  // Filtro por Empleado (11/Sep/2026, pendiente de negocio) - solo aplica
+  // dentro de "Ver Flujos" de una Nomina, unico caso donde los flujos
+  // listados representan pagos a distintos empleados.
+  const [empleados, setEmpleados] = useState<RrhhEmpleado[]>([]);
+  const [filtroEmpleado, setFiltroEmpleado] = useState<string | null>(null);
 
   useEffect(() => {
     if (!referencia) return;
@@ -58,6 +64,7 @@ export default function PanelReferenciaCruzada({
     setDatosContrato(null);
     setDatosProveedor(null);
     setDatosNomina(null);
+    setFiltroEmpleado(null);
     setCargando(true);
     setCargandoFlujos(true);
     if (referencia.tipo === "contrato") {
@@ -87,8 +94,26 @@ export default function PanelReferenciaCruzada({
         .then(setFlujos)
         .catch(() => setFlujos([]))
         .finally(() => setCargandoFlujos(false));
+      listEmpleados().then(setEmpleados).catch(() => setEmpleados([]));
     }
   }, [referencia]);
+
+  // Re-filtra al elegir empleado, sin re-pedir datos del contrato/proveedor
+  // (solo aplica cuando referencia.tipo === "nomina").
+  useEffect(() => {
+    if (!referencia || referencia.tipo !== "nomina") return;
+    setCargandoFlujos(true);
+    listFlujos({ nomina: referencia.id, id_empleado: filtroEmpleado || undefined })
+      .then(setFlujos)
+      .catch(() => setFlujos([]))
+      .finally(() => setCargandoFlujos(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroEmpleado]);
+
+  const nombreEmpleado = useMemo(() => {
+    const mapa = new Map(empleados.map((e) => [e.id_empleado, e.nombre_completo]));
+    return (idEmpleado: string | null) => (idEmpleado ? mapa.get(idEmpleado) || idEmpleado : "—");
+  }, [empleados]);
 
   return (
     <Drawer
@@ -224,6 +249,17 @@ export default function PanelReferenciaCruzada({
             <Typography variant="subtitle2" sx={{ mb: 1 }}>
               Flujos asociados {flujos.length > 0 && `(${flujos.length})`}
             </Typography>
+            {referencia.tipo === "nomina" && (
+              <Autocomplete
+                size="small"
+                options={empleados}
+                getOptionLabel={(e) => e.nombre_completo}
+                value={empleados.find((e) => e.id_empleado === filtroEmpleado) || null}
+                onChange={(_, value) => setFiltroEmpleado(value?.id_empleado || null)}
+                renderInput={(params) => <TextField {...params} label="Filtrar por empleado" />}
+                sx={{ mb: 1.5 }}
+              />
+            )}
             {cargandoFlujos ? (
               <CircularProgress size={16} />
             ) : flujos.length === 0 ? (
@@ -265,6 +301,11 @@ export default function PanelReferenciaCruzada({
                           <Typography variant="caption">
                             <strong>Cuenta:</strong> {f.cuenta_alias || f.cuenta}
                           </Typography>
+                          {referencia.tipo === "nomina" && (
+                            <Typography variant="caption">
+                              <strong>Empleado:</strong> {nombreEmpleado(f.id_empleado)}
+                            </Typography>
+                          )}
                           <Typography variant="caption">
                             <strong>Categoría de gasto:</strong> {f.categoria_gasto || "—"}
                           </Typography>

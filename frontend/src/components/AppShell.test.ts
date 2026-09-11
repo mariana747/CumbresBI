@@ -212,23 +212,25 @@ describe("buildNavItems - Tesorería", () => {
   });
 });
 
-// "buildNavItems - placeholders 'en desarrollo'" (CASOS: rrhh) se elimino
-// por completo (08/Sep/2026) - "compras" ya se habia quitado el 24/Ago
-// (dominio real propio) y ahora "rrhh" tambien se oculta del nav (prioridad
-// Tesorería, ver test siguiente); un describe con CASOS vacio no corre
-// ningun test y vitest lo marca como suite fallida.
-
-// OCULTO del nav (08/Sep/2026, prioridad Tesorería) - RRHH ya no aparece
-// aunque el rol tenga permiso rrhh.*. Revertir junto con el "false &&" de
-// AppShell.tsx.
-describe("buildNavItems - RRHH (oculto temporalmente, prioridad Tesorería)", () => {
-  it("ningun perm de rrhh muestra /rrhh mientras esta oculto", () => {
+// RRHH y Talento (11/Sep/2026, reactivado como apartado propio - ver
+// AppShell.tsx) - antes "Empleados" colgaba de Tesoreria > Operaciones
+// mientras este bloque seguia oculto; ahora tiene su propio item, sin
+// children (unica pantalla real por ahora es Empleados).
+describe("buildNavItems - RRHH y Talento", () => {
+  it("algun perm de rrhh.* muestra el apartado", () => {
     for (const roleKey of Object.keys(ROLES)) {
       const tieneAlguno = ROLES[roleKey].some((p) => p.startsWith("rrhh."));
       if (!tieneAlguno) continue;
       const items = buildNavItems(sesionDe(roleKey));
-      expect(buscar(items, "/rrhh"), `${roleKey} NO deberia ver /rrhh (oculto)`).toBeUndefined();
+      const rrhh = buscar(items, "/rrhh/empleados");
+      expect(rrhh, `${roleKey} deberia ver RRHH y Talento`).toBeDefined();
+      expect(rrhh?.enabled).toBe(true);
     }
+  });
+
+  it("sin rrhh.* no aparece el apartado", () => {
+    const items = buildNavItems(sesionDe("FINANZAS_MANAGER"));
+    expect(buscar(items, "/rrhh/empleados")).toBeUndefined();
   });
 });
 
@@ -266,7 +268,7 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
     // "compras" ya tiene apartado real (02/Sep/2026, Fase 4B) - ver
     // buildNavItems en AppShell.tsx.
     compras: "/compras/solicitudes",
-    rrhh: "/rrhh",
+    rrhh: "/rrhh/empleados",
     audit: "Bitácora (dentro de Admin(IAM)/Auditar, no un item propio)",
   };
 
@@ -274,10 +276,11 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
 
   // Ocultos temporalmente del nav (08/Sep/2026, prioridad Tesorería) - SI
   // tienen apartado real en AppShell.tsx (obra/materiales -> "Obra",
-  // compras -> "Compras", rrhh -> "/rrhh"), solo esta detras de un
-  // "false &&" mientras dura la prioridad. Quitar de aqui junto con el
-  // "false &&" de AppShell.tsx cuando se reactiven.
-  const OCULTOS_TEMPORALMENTE = new Set(["obra", "materiales", "compras", "rrhh"]);
+  // compras -> "Compras"), solo esta detras de un "false &&" mientras dura
+  // la prioridad. "rrhh" ya se reactivo (11/Sep/2026), se quita de aqui.
+  // Quitar el resto de esta lista junto con su "false &&" cuando se
+  // reactiven.
+  const OCULTOS_TEMPORALMENTE = new Set(["obra", "materiales", "compras"]);
 
   it("todo servicio de la matriz tiene un apartado dueno en el sidebar (o esta en SIN_DUEÑO_A_PROPOSITO)", () => {
     const sinDueno: string[] = [];

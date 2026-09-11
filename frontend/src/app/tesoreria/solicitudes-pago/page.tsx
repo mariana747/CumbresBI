@@ -39,6 +39,7 @@ import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import { getSession, SessionUser } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import { CATEGORIA_GASTO_LABELS, TesoreriaCategoriaGasto } from "@/lib/miCumbres";
 import { TesoreriaFlujo, listFlujos } from "@/lib/tesoreria";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
@@ -92,6 +93,9 @@ export default function SolicitudesPagoPage() {
   const [filtroSociedad, setFiltroSociedad] = useState("");
   const [filtroTipo, setFiltroTipo] = useState<SolicitudPagoTipo | "">("");
   const [filtroEstado, setFiltroEstado] = useState<SolicitudPagoEstado | "">("");
+  // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas") -
+  // mismo criterio client-side que tipo/estado de arriba.
+  const [filtroCategoriaGasto, setFiltroCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
 
   function cargar() {
     setLoading(true);
@@ -110,9 +114,12 @@ export default function SolicitudesPagoPage() {
   const solicitudesFiltradas = useMemo(
     () =>
       solicitudes.filter(
-        (s) => (!filtroTipo || s.tipo === filtroTipo) && (!filtroEstado || s.estado === filtroEstado)
+        (s) =>
+          (!filtroTipo || s.tipo === filtroTipo) &&
+          (!filtroEstado || s.estado === filtroEstado) &&
+          (!filtroCategoriaGasto || s.categoria_gasto === filtroCategoriaGasto)
       ),
-    [solicitudes, filtroTipo, filtroEstado]
+    [solicitudes, filtroTipo, filtroEstado, filtroCategoriaGasto]
   );
 
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
@@ -136,6 +143,7 @@ export default function SolicitudesPagoPage() {
   const [descripcion, setDescripcion] = useState("");
   const [monto, setMonto] = useState("");
   const [moneda, setMoneda] = useState("MXP");
+  const [categoriaGasto, setCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
   const [guardando, setGuardando] = useState(false);
   const [errorAlta, setErrorAlta] = useState<string | null>(null);
 
@@ -147,6 +155,7 @@ export default function SolicitudesPagoPage() {
     setDescripcion("");
     setMonto("");
     setMoneda("MXP");
+    setCategoriaGasto("");
     setErrorAlta(null);
   }
 
@@ -165,6 +174,7 @@ export default function SolicitudesPagoPage() {
         descripcion,
         monto,
         moneda,
+        categoriaGasto: categoriaGasto || undefined,
       });
       cerrarNuevo();
       cargar();
@@ -289,9 +299,7 @@ export default function SolicitudesPagoPage() {
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ mb: 3 }}>
       <FiltrosBar
-        flush
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Buscar por ID o descripción..."
@@ -388,8 +396,27 @@ export default function SolicitudesPagoPage() {
             ))}
           </Select>
         </FormControl>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="filtro-categoria-gasto-label">Categoría de gasto</InputLabel>
+          <Select
+            labelId="filtro-categoria-gasto-label"
+            label="Categoría de gasto"
+            value={filtroCategoriaGasto}
+            onChange={(e) => setFiltroCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
+          >
+            <MenuItem value="">
+              <em>Todas</em>
+            </MenuItem>
+            {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
+              <MenuItem key={c} value={c}>
+                {CATEGORIA_GASTO_LABELS[c]}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </FiltrosBar>
 
+      <Paper variant="outlined">
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
           <CircularProgress size={24} />
@@ -634,6 +661,24 @@ export default function SolicitudesPagoPage() {
                 </Select>
               </FormControl>
             </Stack>
+            <FormControl fullWidth>
+              <InputLabel id="categoria-gasto-solicitud-label">Categoría de gasto</InputLabel>
+              <Select
+                labelId="categoria-gasto-solicitud-label"
+                label="Categoría de gasto"
+                value={categoriaGasto}
+                onChange={(e) => setCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
+              >
+                <MenuItem value="">
+                  <em>Sin categoría</em>
+                </MenuItem>
+                {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
+                  <MenuItem key={c} value={c}>
+                    {CATEGORIA_GASTO_LABELS[c]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <FormControl fullWidth>
               <InputLabel id="sociedad-solicitud-label">Sociedad</InputLabel>
               <Select

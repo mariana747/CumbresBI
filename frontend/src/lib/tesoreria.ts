@@ -609,6 +609,27 @@ export async function vincularMovimientoBancario(
   return response.json();
 }
 
+// Precarga un Flujo nuevo desde un movimiento sin conciliar (11/Sep/2026,
+// "Subida de archivos CRCM para precargar Flujos" - vincularMovimientoBancario
+// de arriba solo liga a un Flujo YA existente; esto crea uno nuevo con
+// cuenta/concepto/monto ya tomados del estado de cuenta, solo falta el
+// contrato (obligatorio, el extracto no lo puede inferir).
+export async function crearFlujoDesdeMovimiento(idMovimiento: string, contrato: string): Promise<TesoreriaFlujo> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/${idMovimiento}/crear_flujo/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contrato }),
+    }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export interface TesoreriaFlujoSugerido {
   id_flujo: string;
   concepto: string | null;
@@ -1072,6 +1093,8 @@ export async function listFlujos(params?: {
   sociedad?: string;
   contraparte?: string;
   nomina?: string;
+  id_empleado?: string;
+  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaFlujo[]> {
   const query = new URLSearchParams();
   if (params?.search) query.set("search", params.search);
@@ -1079,6 +1102,8 @@ export async function listFlujos(params?: {
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contraparte) query.set("contraparte", params.contraparte);
   if (params?.nomina) query.set("nomina", params.nomina);
+  if (params?.id_empleado) query.set("id_empleado", params.id_empleado);
+  if (params?.categoriaGasto) query.set("categoria_gasto", params.categoriaGasto);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1107,6 +1132,12 @@ export interface ConciliacionCfdiFila {
   complemento_folio: string | null;
   nomina: number | null;
   requiere_factura: boolean | null;
+  // factura_subtotal/iva/total (11/Sep/2026, "columnas separadas importe/
+  // IVA/total en conciliacion, para Cat") - solo hay dato si ya hay factura
+  // ligada (factura_subtotal viene como texto, heredado del ERD legado).
+  factura_subtotal: string | null;
+  factura_iva: string | null;
+  factura_total: string | null;
   reconocido?: string | null;
   por_reconocer?: string | null;
 }
@@ -1153,6 +1184,27 @@ export function urlExportarFlujosCsv(opciones?: { search?: string; contrato?: st
   return `${TESORERIA_API_BASE_URL}/api/flujos/exportar_csv/?${params.toString()}`;
 }
 
+// Exportar a CSV de Conciliacion de Facturas (11/Sep/2026, pendiente real
+// de negocio) - mismos filtros que getConciliacionCfdi, una sola descarga
+// con las 3 clasificaciones (columna "Clasificación").
+export function urlExportarConciliacionCfdiCsv(params?: {
+  desde?: string;
+  hasta?: string;
+  sociedad?: string;
+  contrato?: string;
+  requiereFactura?: boolean;
+  tipoComprobante?: "I" | "E";
+}): string {
+  const query = new URLSearchParams();
+  if (params?.desde) query.set("desde", params.desde);
+  if (params?.hasta) query.set("hasta", params.hasta);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
+  if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
+  if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
+  return `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion_csv/?${query.toString()}`;
+}
+
 export async function createFlujo(params: {
   contrato: string;
   cuenta: string;
@@ -1175,6 +1227,7 @@ export async function createFlujo(params: {
   comentarios?: string;
   fechaPagoOriginal?: string;
   linkComprobanteBanco?: string;
+  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/`, {
     method: "POST",
@@ -1201,6 +1254,7 @@ export async function createFlujo(params: {
       fecha_pago_original: params.fechaPagoOriginal || null,
       link_comprobante_banco: params.linkComprobanteBanco || null,
       comentarios: params.comentarios || null,
+      categoria_gasto: params.categoriaGasto || null,
     }),
   });
   if (!response.ok) {
@@ -1219,6 +1273,7 @@ export async function updateFlujo(
     comentarios: string;
     fechaPagoOriginal: string;
     linkComprobanteBanco: string;
+    categoriaGasto: TesoreriaCategoriaGasto | "";
   }>
 ): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`, {
@@ -1232,6 +1287,7 @@ export async function updateFlujo(
       comentarios: params.comentarios,
       fecha_pago_original: params.fechaPagoOriginal,
       link_comprobante_banco: params.linkComprobanteBanco,
+      ...(params.categoriaGasto !== undefined ? { categoria_gasto: params.categoriaGasto || null } : {}),
     }),
   });
   if (!response.ok) {
@@ -2154,6 +2210,7 @@ export async function listFacturas(opciones?: {
   fechaDesde?: string;
   fechaHasta?: string;
   estado?: TesoreriaFacturaEstado;
+  categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaFactura[]> {
   const params = new URLSearchParams();
   if (opciones?.search) params.set("search", opciones.search);
@@ -2162,6 +2219,7 @@ export async function listFacturas(opciones?: {
   if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
   if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
   if (opciones?.estado) params.set("estado", opciones.estado);
+  if (opciones?.categoriaGasto) params.set("categoria_gasto", opciones.categoriaGasto);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -2225,6 +2283,7 @@ export interface FacturaInput {
   tipoFactura?: string;
   linkPdf?: string;
   linkXml?: string;
+  categoriaGasto?: TesoreriaCategoriaGasto | "";
   // NO incluye "estado" - es de solo lectura en el backend (ver
   // TesoreriaFacturaSerializer), se cambia unicamente via
   // marcarEstadoFactura(). Mandarlo aqui no truena, el backend lo ignora
@@ -2277,6 +2336,7 @@ function facturaBody(params: FacturaInput) {
     tipo_factura: params.tipoFactura || null,
     link_pdf: params.linkPdf || null,
     link_xml: params.linkXml || null,
+    categoria_gasto: params.categoriaGasto || null,
   };
 }
 
@@ -2891,6 +2951,9 @@ export interface TesoreriaRecNomina {
   timbre_fecha_timbrado: string | null;
   tipo_factura: string | null;
   link_pdf: string | null;
+  link_comprobante: string | null;
+  drive_file_id_comprobante: string | null;
+  mime_type_comprobante: string | null;
   estado: string | null;
   created_at: string;
   created_by: string | null;
@@ -2974,6 +3037,25 @@ export async function updateRecNomina(id: number, params: RecNominaInput): Promi
     throw await friendlyApiError("TESORERIA", response);
   }
   return response.json();
+}
+
+// Comprobante de pago (11/Sep/2026, "subir comprobante no XML") - distinto
+// del PDF del CFDI (link_pdf); mismo patron que
+// lib/solicitudesPago.ts::subirComprobanteSolicitudPago/urlVerComprobanteSolicitudPago.
+export async function subirComprobanteRecNomina(id: number, archivo: File): Promise<TesoreriaRecNomina> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/rec-nominas/${id}/subir_comprobante/`,
+    { method: "POST", body: formData }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  return response.json();
+}
+
+export function urlVerComprobanteRecNomina(id: number): string {
+  return `${TESORERIA_API_BASE_URL}/api/rec-nominas/${id}/ver_comprobante/`;
 }
 
 export async function deleteRecNomina(id: number): Promise<void> {
@@ -3081,6 +3163,7 @@ export interface ReporteDiarioTransaccion {
   id_flujo: string;
   concepto: string | null;
   total_mxp: string | null;
+  nomina_tipo: TesoreriaNominaTipo | null;
 }
 
 export interface ReporteDiarioCuenta {
@@ -3109,6 +3192,8 @@ export interface ReporteDiario {
     saldo_anterior_total: string;
     saldo_hoy_total: string | null;
     cambio_neto: string | null;
+    nomina_total_quincenal: string;
+    nomina_total_semanal: string;
   };
 }
 

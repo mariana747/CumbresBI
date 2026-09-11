@@ -109,6 +109,15 @@ export default function TesoreriaReporteDiarioPage() {
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
 
+  // Bloquear envio si hay diferencia (Jenny, junta 09/Sep: "no enviar el
+  // reporte diario si hay diferencia") - el backend ya lo rechaza, esto
+  // solo evita el viaje redondo cuando ya se sabe que va a fallar.
+  const cuentasConDiferencia = useMemo(
+    () =>
+      (reporte?.sociedades ?? []).flatMap((s) => s.cuentas.filter((c) => c.cuadra === false).map((c) => c.alias)),
+    [reporte]
+  );
+
   function generar() {
     if (sociedadesElegidas.length === 0) {
       setError("Elige al menos una empresa.");
@@ -237,7 +246,13 @@ export default function TesoreriaReporteDiarioPage() {
       )}
 
       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "flex-end" }}>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          alignItems={{ xs: "stretch", sm: "flex-end" }}
+          flexWrap="wrap"
+          useFlexGap
+        >
           <Autocomplete
             multiple
             size="small"
@@ -247,7 +262,7 @@ export default function TesoreriaReporteDiarioPage() {
             getOptionLabel={(s) => s.alias_sociedad || s.razon_social || s.rfc}
             isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
             renderInput={(params) => <TextField {...params} label="Empresas" placeholder="Elige una o más" />}
-            sx={{ flex: 2, minWidth: 240 }}
+            sx={{ flex: { xs: "1 1 auto", sm: "1 1 240px" } }}
           />
           <TextField
             size="small"
@@ -256,10 +271,10 @@ export default function TesoreriaReporteDiarioPage() {
             value={fecha}
             onChange={(e) => setFecha(e.target.value)}
             InputLabelProps={{ shrink: true }}
-            sx={{ flex: 1, minWidth: 160 }}
+            sx={{ flex: { xs: "1 1 auto", sm: "1 1 160px" } }}
           />
           {cuentasDelReporte.length > 0 && (
-            <FormControl size="small" sx={{ minWidth: 200 }}>
+            <FormControl size="small" sx={{ flex: { xs: "1 1 auto", sm: "1 1 200px" } }}>
               <InputLabel id="filtro-cuenta-reporte-label">Filtrar por cuenta</InputLabel>
               <Select
                 labelId="filtro-cuenta-reporte-label"
@@ -290,6 +305,7 @@ export default function TesoreriaReporteDiarioPage() {
                 setEnvioOk(false);
                 setEnvioError(null);
               }}
+              disabled={cuentasConDiferencia.length > 0}
               sx={{ flexShrink: 0 }}
             >
               Enviar por correo
@@ -398,7 +414,19 @@ export default function TesoreriaReporteDiarioPage() {
                                         {c.transacciones.map((t) => (
                                           <TableRow key={t.id_flujo}>
                                             <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.id_flujo}</TableCell>
-                                            <TableCell>{t.concepto || "—"}</TableCell>
+                                            <TableCell>
+                                              <Stack direction="row" spacing={0.75} alignItems="center">
+                                                <span>{t.concepto || "—"}</span>
+                                                {t.nomina_tipo && (
+                                                  <Chip
+                                                    size="small"
+                                                    variant="outlined"
+                                                    label={t.nomina_tipo === "QUINCENAL" ? "Nómina Quincenal" : "Nómina Semanal"}
+                                                    sx={{ borderRadius: 0.5 }}
+                                                  />
+                                                )}
+                                              </Stack>
+                                            </TableCell>
                                             <TableCell align="right">{numero(t.total_mxp)}</TableCell>
                                           </TableRow>
                                         ))}
@@ -418,7 +446,9 @@ export default function TesoreriaReporteDiarioPage() {
 
                   {/* Tarjetas - solo celular (xs), mismo criterio que el resto de Tesoreria. */}
                   <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
-                    {empresa.cuentas.map((c) => (
+                    {empresa.cuentas.map((c) => {
+                      const expandida = cuentasExpandidas.has(c.id_cuenta_bancaria);
+                      return (
                       <Paper key={c.id_cuenta_bancaria} variant="outlined" sx={{ p: 2 }}>
                         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                           <Typography variant="subtitle2">
@@ -460,8 +490,50 @@ export default function TesoreriaReporteDiarioPage() {
                             </Button>
                           )}
                         </Stack>
+                        {/* Flujos del dia (11/Sep/2026, "en 320px no se pueden
+                        ver los flujos") - la vista de tarjetas mostraba los
+                        totales pero no daba forma de expandir el detalle por
+                        transaccion como si pasa en la tabla de escritorio. */}
+                        {c.transacciones.length > 0 && (
+                          <>
+                            <Button
+                              size="small"
+                              onClick={() => toggleCuentaExpandida(c.id_cuenta_bancaria)}
+                              startIcon={expandida ? <ChevronDown size={14} strokeWidth={1.5} /> : <ChevronRight size={14} strokeWidth={1.5} />}
+                              sx={{ mt: 1, alignSelf: "flex-start" }}
+                            >
+                              Flujos ({c.transacciones.length})
+                            </Button>
+                            <Collapse in={expandida} timeout="auto" unmountOnExit>
+                              <Stack spacing={1} sx={{ mt: 1 }}>
+                                {c.transacciones.map((t) => (
+                                  <Box key={t.id_flujo} sx={{ pl: 1, borderLeft: "2px solid", borderColor: "divider" }}>
+                                    <Typography variant="caption" sx={{ fontFamily: "var(--font-mono, monospace)", display: "block" }}>
+                                      {t.id_flujo}
+                                    </Typography>
+                                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                                      <Typography variant="body2">{t.concepto || "—"}</Typography>
+                                      {t.nomina_tipo && (
+                                        <Chip
+                                          size="small"
+                                          variant="outlined"
+                                          label={t.nomina_tipo === "QUINCENAL" ? "Nómina Quincenal" : "Nómina Semanal"}
+                                          sx={{ borderRadius: 0.5 }}
+                                        />
+                                      )}
+                                    </Stack>
+                                    <Typography variant="body2" fontWeight={600}>
+                                      {numero(t.total_mxp)}
+                                    </Typography>
+                                  </Box>
+                                ))}
+                              </Stack>
+                            </Collapse>
+                          </>
+                        )}
                       </Paper>
-                    ))}
+                      );
+                    })}
                   </Stack>
                 </Paper>
               );
@@ -477,6 +549,21 @@ export default function TesoreriaReporteDiarioPage() {
                 <strong>Cambio neto:</strong> {numero(reporte.consolidado.cambio_neto)}
               </Typography>
             </Stack>
+            {/* Nomina del dia (11/Sep/2026, "en el reporte diario debe
+            reflejar tambien la nomina") - ambos tipos, solo si hubo pagos de
+            nomina ese dia (ya se sumaban dentro de cada cuenta, esto solo lo
+            hace visible sin tener que expandir cuenta por cuenta). */}
+            {(Number(reporte.consolidado.nomina_total_quincenal) !== 0 ||
+              Number(reporte.consolidado.nomina_total_semanal) !== 0) && (
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mt: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  <strong>Nómina Quincenal:</strong> {numero(reporte.consolidado.nomina_total_quincenal)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  <strong>Nómina Semanal:</strong> {numero(reporte.consolidado.nomina_total_semanal)}
+                </Typography>
+              </Stack>
+            )}
           </Paper>
         </>
       )}
@@ -500,6 +587,11 @@ export default function TesoreriaReporteDiarioPage() {
               Reporte enviado.
             </Alert>
           )}
+          {cuentasConDiferencia.length > 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              No se puede enviar: hay diferencia sin resolver en {cuentasConDiferencia.join(", ")}.
+            </Alert>
+          )}
           <TextField
             size="small"
             label="Destinatarios (separados por coma)"
@@ -511,7 +603,7 @@ export default function TesoreriaReporteDiarioPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEnvioAbierto(false)}>Cerrar</Button>
-          <Button variant="contained" onClick={handleEnviar} disabled={enviando}>
+          <Button variant="contained" onClick={handleEnviar} disabled={enviando || cuentasConDiferencia.length > 0}>
             {enviando ? <CircularProgress size={16} /> : "Enviar"}
           </Button>
         </DialogActions>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -13,9 +13,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   IconButton,
+  InputLabel,
   Link as MuiLink,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -29,6 +33,7 @@ import {
 } from "@mui/material";
 import { CheckCircle2, Eye, ReceiptText as TicketIcon, Sparkles, Upload, X as CloseIcon, XCircle } from "lucide-react";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
+import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog, { MotorDocumentalContexto } from "@/components/MotorDocumentalDialog";
 import { SessionUser } from "@/lib/auth";
 import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
@@ -41,6 +46,7 @@ import {
   rechazarTicket,
   subirFacturaTicket,
   vincularFacturaTicket,
+  TesoreriaCategoriaGasto,
   TesoreriaTicketEstado,
   TesoreriaTicketReembolso,
 } from "@/lib/miCumbres";
@@ -97,12 +103,16 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
   const [tickets, setTickets] = useState<TesoreriaTicketReembolso[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Buscador (11/Sep/2026, "usa los componentes reutilizables" - esta
+  // pantalla nunca tuvo FiltrosBar, se adopta aqui junto con el filtro de
+  // categoria de gasto en vez de dejar un Select suelto).
+  const [search, setSearch] = useState("");
 
   async function cargar() {
     setLoading(true);
     setError(null);
     try {
-      setTickets(await listTicketsReembolso());
+      setTickets(await listTicketsReembolso(search || undefined));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar tickets");
     } finally {
@@ -110,8 +120,24 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
     }
   }
   useEffect(() => {
-    cargar();
-  }, []);
+    const timeout = setTimeout(cargar, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas")
+  // - la categoria vive en cada concepto del ticket, no en el ticket
+  // mismo (un ticket puede tener varios conceptos con categorias
+  // distintas); se filtra "algun concepto de este ticket tiene esta
+  // categoria", mismo criterio que TesoreriaTicketReembolsoViewSet.get_queryset.
+  const [filtroCategoriaGasto, setFiltroCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
+  const ticketsFiltrados = useMemo(
+    () =>
+      filtroCategoriaGasto
+        ? tickets.filter((t) => t.conceptos.some((c) => c.categoria_gasto === filtroCategoriaGasto))
+        : tickets,
+    [tickets, filtroCategoriaGasto]
+  );
 
   // El ticket solo guarda el RFC de la sociedad (referencia laxa, mismo
   // criterio que TesoreriaContrato.sociedad) - mostrarlo crudo no le dice
@@ -302,11 +328,36 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
         </Alert>
       )}
 
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por ID de ticket o descripción..."
+      >
+        <FormControl size="small" fullWidth>
+          <InputLabel id="filtro-categoria-gasto-reembolsos-label">Categoría de gasto</InputLabel>
+          <Select
+            labelId="filtro-categoria-gasto-reembolsos-label"
+            label="Categoría de gasto"
+            value={filtroCategoriaGasto}
+            onChange={(e) => setFiltroCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
+          >
+            <MenuItem value="">
+              <em>Todas</em>
+            </MenuItem>
+            {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
+              <MenuItem key={c} value={c}>
+                {CATEGORIA_GASTO_LABELS[c]}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </FiltrosBar>
+
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
           <CircularProgress size={24} />
         </Box>
-      ) : tickets.length === 0 ? (
+      ) : ticketsFiltrados.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
           Sin tickets todavía.
         </Typography>
@@ -315,7 +366,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
         // apiladas") - mismo patron que micumbres/tickets/page.tsx: la
         // tabla de 9 columnas no cabe comoda en una pantalla angosta.
         <Stack spacing={1.5}>
-          {tickets.map((t) => (
+          {ticketsFiltrados.map((t) => (
             <Card key={t.id_ticket} variant="outlined">
               <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
@@ -398,7 +449,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
               </TableRow>
             </TableHead>
             <TableBody>
-              {tickets.map((t) => (
+              {ticketsFiltrados.map((t) => (
                 <TableRow key={t.id_ticket} hover>
                   <TableCell>{t.id_ticket}</TableCell>
                   <TableCell>{nombreEmpleado(t.id_empleado)}</TableCell>
