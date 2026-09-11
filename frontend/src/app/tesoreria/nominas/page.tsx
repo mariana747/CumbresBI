@@ -77,6 +77,21 @@ const MESES = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ];
 
+const MESES_ABREV = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+// Rango del periodo compacto (11/Sep/2026, "en periodo ponlo como ago 1-15
+// ese formato") - antes se mostraban las 2 fechas ISO completas
+// (2026-08-01 — 2026-08-15), redundante con la serie.
+function formatoPeriodo(fechaInicio: string | null, fechaFin: string | null): string {
+  if (!fechaInicio) return "—";
+  const inicio = new Date(`${fechaInicio}T00:00:00`);
+  if (!fechaFin) return `${MESES_ABREV[inicio.getMonth()]} ${inicio.getDate()}`;
+  const fin = new Date(`${fechaFin}T00:00:00`);
+  const mismoMes = inicio.getMonth() === fin.getMonth() && inicio.getFullYear() === fin.getFullYear();
+  if (mismoMes) return `${MESES_ABREV[inicio.getMonth()]} ${inicio.getDate()}-${fin.getDate()}`;
+  return `${MESES_ABREV[inicio.getMonth()]} ${inicio.getDate()} - ${MESES_ABREV[fin.getMonth()]} ${fin.getDate()}`;
+}
+
 function fechaISO(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
@@ -115,7 +130,10 @@ function calcularPeriodoQuincenal(hoy: Date): { fechaInicio: string; fechaFin: s
   return {
     fechaInicio: fechaISO(inicio),
     fechaFin: fechaISO(fin),
-    serie: `Periodo ${periodo} - Quincena ${esPrimeraQuincena ? 1 : 2} ${MESES[mes]} ${anio}`,
+    // Serie compacta (11/Sep/2026, "debe ser Q172026") - Q + numero de
+    // quincena del año + año, sin espacios ni texto. Las fechas (que si
+    // llevan el detalle Enero/Quincena 1/etc.) ya lo dejan claro.
+    serie: `Q${periodo}${anio}`,
   };
 }
 
@@ -133,7 +151,9 @@ function calcularPeriodoSemanal(hoy: Date): { fechaInicio: string; fechaFin: str
   return {
     fechaInicio: fechaISO(lunes),
     fechaFin: fechaISO(viernes),
-    serie: `Semana ${semanaIso} - del ${lunes.getDate()} al ${viernes.getDate()} de ${MESES[viernes.getMonth()]} ${viernes.getFullYear()}`,
+    // Serie compacta (11/Sep/2026, "debe ser S372026") - S + numero de
+    // semana ISO + año, sin espacios ni texto.
+    serie: `S${semanaIso}${viernes.getFullYear()}`,
   };
 }
 
@@ -588,9 +608,7 @@ export default function TesoreriaNominasPage() {
                     <TableCell>{aliasSociedad(n.sociedad)}</TableCell>
                     <TableCell>{n.proyecto ? aliasProyecto(n.proyecto) : "—"}</TableCell>
                     <TableCell>{n.serie}</TableCell>
-                    <TableCell>
-                      {n.fecha_inicio || "—"} {n.fecha_fin ? `— ${n.fecha_fin}` : ""}
-                    </TableCell>
+                    <TableCell>{formatoPeriodo(n.fecha_inicio, n.fecha_fin)}</TableCell>
                     <TableCell>
                       <Chip
                         size="small"
@@ -676,7 +694,7 @@ export default function TesoreriaNominasPage() {
             </Alert>
           )}
           <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-            <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth disabled={soloLectura}>
               <InputLabel id="tipo-label">Tipo</InputLabel>
               <Select
                 labelId="tipo-label"
@@ -716,7 +734,7 @@ export default function TesoreriaNominasPage() {
                 ))}
               </Select>
             </FormControl>
-            <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth disabled={soloLectura}>
               <InputLabel id="proyecto-label">Proyecto</InputLabel>
               <Select
                 labelId="proyecto-label"
@@ -742,6 +760,7 @@ export default function TesoreriaNominasPage() {
               value={form.centro || null}
               onInputChange={(_, value) => setForm({ ...form, centro: value })}
               renderInput={(params) => <TextField {...params} label="Centro" />}
+              disabled={soloLectura}
               fullWidth
             />
             <TextField
@@ -749,7 +768,7 @@ export default function TesoreriaNominasPage() {
               label="Serie"
               value={form.serie}
               onChange={(e) => setForm({ ...form, serie: e.target.value })}
-              placeholder="Q1 2026, S1 2026..."
+              placeholder="Q172026, S372026..."
               helperText="También es el concepto que se sugiere en cada Flujo hijo."
               fullWidth
             />
@@ -774,7 +793,7 @@ export default function TesoreriaNominasPage() {
               />
             </Stack>
             {editing && (
-              <FormControl size="small" fullWidth>
+              <FormControl size="small" fullWidth disabled={soloLectura}>
                 <InputLabel id="status-label">Status</InputLabel>
                 <Select
                   labelId="status-label"
