@@ -596,7 +596,7 @@ export default function TesoreriaNominasPage() {
                   <TableCell>Proyecto</TableCell>
                   <TableCell>Serie</TableCell>
                   <TableCell>Periodo</TableCell>
-                  <TableCell>Status</TableCell>
+                  <TableCell>Estado</TableCell>
                   <TableCell align="right">Acciones</TableCell>
                 </TableRow>
               </TableHead>

@@ -38,7 +38,7 @@ import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import { getSession, SessionUser } from "@/lib/auth";
-import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import { CATEGORIA_GASTO_LABELS, TesoreriaCategoriaGasto } from "@/lib/miCumbres";
 import { TesoreriaFlujo, listFlujos } from "@/lib/tesoreria";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
@@ -126,6 +126,19 @@ export default function SolicitudesPagoPage() {
   useEffect(() => {
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
+
+  // Nickname del solicitante, no el ID (11/Sep/2026, pendiente de negocio:
+  // "Mostrar el nickname del solicitante, no el ID") - solicitado_por
+  // guarda el identity_user_id crudo (ver TesoreriaSolicitudPago.perform_create);
+  // mismo patron que TicketsReembolsoAdminPanel.tsx::nombreEmpleado.
+  const [usuarios, setUsuarios] = useState<IamUser[]>([]);
+  useEffect(() => {
+    listUsers().then(setUsuarios).catch(() => setUsuarios([]));
+  }, []);
+  function nombreSolicitante(idUsuario: string): string {
+    const usuario = usuarios.find((u) => u.user_id === idUsuario);
+    return usuario?.display_name || usuario?.primary_email || idUsuario;
+  }
 
   // Proyecto como lista desplegable (04/Sep/2026, pedido de Mariana) -
   // mismo catalogo compartido que Obra/Compras (ver lib/vivienda.ts,
@@ -445,7 +458,7 @@ export default function SolicitudesPagoPage() {
                   <strong>{TIPO_SOLICITUD_PAGO_LABELS[s.tipo]}:</strong> ${s.monto} {s.moneda}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Solicitado por {s.solicitado_por}
+                  Solicitado por {nombreSolicitante(s.solicitado_por)}
                 </Typography>
                 {puedeAprobar && s.estado === "PENDIENTE" && (
                   <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
@@ -528,7 +541,7 @@ export default function SolicitudesPagoPage() {
                   <TableCell sx={{ fontFamily: "var(--font-dm-mono, monospace)" }}>
                     ${s.monto} {s.moneda}
                   </TableCell>
-                  <TableCell>{s.solicitado_por}</TableCell>
+                  <TableCell>{nombreSolicitante(s.solicitado_por)}</TableCell>
                   <TableCell>
                     <Chip size="small" label={ESTADO_SOLICITUD_PAGO_LABELS[s.estado]} color={ESTADO_COLOR[s.estado]} />
                   </TableCell>
