@@ -58,6 +58,7 @@ import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { SessionUser, getSession } from "@/lib/auth";
 import { DriveArchivo } from "@/lib/drive";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import { CATEGORIA_GASTO_LABELS, TesoreriaCategoriaGasto } from "@/lib/miCumbres";
 import {
   EnvioMasivoResultado,
   FacturaConcepto,
@@ -126,6 +127,7 @@ const FORM_VACIO = {
   tipoFactura: "",
   linkPdf: "",
   linkXml: "",
+  categoriaGasto: "" as TesoreriaCategoriaGasto | "",
 };
 
 // Catalogo c_TipoRelacion del SAT
@@ -625,6 +627,8 @@ export default function TesoreriaFacturasPage() {
   const [filtroEstado, setFiltroEstado] = useState<TesoreriaFacturaEstado | "">("");
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
+  // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas")
+  const [filtroCategoriaGasto, setFiltroCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
   const [opcionesProveedor, setOpcionesProveedor] = useState<TesoreriaContraparte[]>([]);
 
   useEffect(() => {
@@ -648,6 +652,7 @@ export default function TesoreriaFacturasPage() {
       fechaDesde: filtroFechaDesde || undefined,
       fechaHasta: filtroFechaHasta || undefined,
       estado: filtroEstado || undefined,
+      categoriaGasto: filtroCategoriaGasto || undefined,
     })
       .then(setFacturas)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
@@ -658,7 +663,7 @@ export default function TesoreriaFacturasPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroReceptor, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroEstado]);
+  }, [search, filtroReceptor, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroEstado, filtroCategoriaGasto]);
 
   function refrescarTicketsProveedor() {
     listTicketsProveedor()
@@ -744,6 +749,7 @@ export default function TesoreriaFacturasPage() {
       tipoFactura: f.tipo_factura || "",
       linkPdf: f.link_pdf || "",
       linkXml: f.link_xml || "",
+      categoriaGasto: f.categoria_gasto || "",
     };
   }
 
@@ -914,9 +920,7 @@ export default function TesoreriaFacturasPage() {
           {error}
         </Alert>
       )}
-      <Paper variant="outlined" sx={{ mb: 3 }}>
       <FiltrosBar
-        flush
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Buscar por folio, UUID o nombre..."
@@ -1028,6 +1032,27 @@ export default function TesoreriaFacturasPage() {
             </Select>
           </FormControl>
         </Box>
+        <Box>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+            Categoría de gasto
+          </Typography>
+          <FormControl size="small" fullWidth>
+            <Select
+              displayEmpty
+              value={filtroCategoriaGasto}
+              onChange={(e) => setFiltroCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
+            >
+              <MenuItem value="">
+                <em>Todas</em>
+              </MenuItem>
+              {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
+                <MenuItem key={c} value={c}>
+                  {CATEGORIA_GASTO_LABELS[c]}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
         <Box sx={{ gridColumn: { sm: "span 2" } }}>
           <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
             Rango de Fecha
@@ -1058,6 +1083,7 @@ export default function TesoreriaFacturasPage() {
         </Box>
       </FiltrosBar>
 
+      <Paper variant="outlined">
       {/* Tabla Principal */}
         <>
         <Box sx={{ display: { xs: "none", sm: "block" } }}>
@@ -1487,6 +1513,24 @@ export default function TesoreriaFacturasPage() {
               onChange={(e) => setForm({ ...form, comprobanteTipoCambio: e.target.value })}
               fullWidth
             />
+            <FormControl size="small" fullWidth>
+              <InputLabel id="factura-categoria-gasto-label">Categoría de gasto</InputLabel>
+              <Select
+                labelId="factura-categoria-gasto-label"
+                label="Categoría de gasto"
+                value={form.categoriaGasto}
+                onChange={(e) => setForm({ ...form, categoriaGasto: e.target.value as TesoreriaCategoriaGasto | "" })}
+              >
+                <MenuItem value="">
+                  <em>Sin categoría</em>
+                </MenuItem>
+                {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
+                  <MenuItem key={c} value={c}>
+                    {CATEGORIA_GASTO_LABELS[c]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             </>
             )}
             {tabFactura === "Emisor y Receptor" && (

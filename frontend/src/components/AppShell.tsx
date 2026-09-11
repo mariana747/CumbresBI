@@ -298,12 +298,6 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         // Nomina" (el CFDI individual, ver group FACTURACION Y COMPROBANTES
         // abajo).
         { label: "Nóminas", href: "/tesoreria/nominas", icon: Users, group: "OPERACIONES" },
-        // Empleados/Puestos (10/Sep/2026, Fase 2 del modulo de Nominas) -
-        // vive en rrhh-service de verdad, pero se enlaza aqui porque el
-        // item "RRHH y Talento" del sidebar sigue oculto a proposito
-        // (linea "if (false && ...)" abajo) mientras Tesoreria sea la
-        // prioridad - alimenta a Nominas (empleado/sueldo vigente).
-        { label: "Empleados", href: "/rrhh/empleados", icon: UserCheck, group: "OPERACIONES" },
 
         {
           label: "Facturas",
@@ -410,10 +404,15 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       ],
     });
   }
-  // OCULTO del nav (08/Sep/2026, misma decision de arriba) - quitar el
-  // "false &&" para reactivar cuando Tesoreria este cerrada.
-  if (false && tieneAlgunPermiso(session, ["rrhh"])) {
-    items.push({ label: "RRHH y Talento", href: "/rrhh", icon: Users, enabled: true });
+  // RRHH y Talento (11/Sep/2026, reactivado como apartado propio) - antes
+  // colgaba de Tesoreria > Operaciones ("Empleados" enlazaba a
+  // /rrhh/empleados mientras este bloque seguia oculto); ahora que Fase 2
+  // del modulo de Nominas ya tiene API+pantalla real, se separa como su
+  // propio modulo. Sin children (a diferencia de Tesoreria/Obra) porque
+  // por ahora solo existe una pantalla real (Empleados - Puestos se maneja
+  // inline ahi, sin ruta propia); agregar children cuando haya mas de una.
+  if (tieneAlgunPermiso(session, ["rrhh"])) {
+    items.push({ label: "RRHH y Talento", href: "/rrhh/empleados", icon: UserCheck, enabled: true });
   }
   // Tickets/Rentas quitados del sidebar (19/Ago/2026, pedido de Mariana) -
   // ninguno de los dos tiene backend real todavia, quedaban como

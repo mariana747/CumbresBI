@@ -398,7 +398,19 @@ export default function TesoreriaReporteDiarioPage() {
                                         {c.transacciones.map((t) => (
                                           <TableRow key={t.id_flujo}>
                                             <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.id_flujo}</TableCell>
-                                            <TableCell>{t.concepto || "—"}</TableCell>
+                                            <TableCell>
+                                              <Stack direction="row" spacing={0.75} alignItems="center">
+                                                <span>{t.concepto || "—"}</span>
+                                                {t.nomina_tipo && (
+                                                  <Chip
+                                                    size="small"
+                                                    variant="outlined"
+                                                    label={t.nomina_tipo === "QUINCENAL" ? "Nómina Quincenal" : "Nómina Semanal"}
+                                                    sx={{ borderRadius: 0.5 }}
+                                                  />
+                                                )}
+                                              </Stack>
+                                            </TableCell>
                                             <TableCell align="right">{numero(t.total_mxp)}</TableCell>
                                           </TableRow>
                                         ))}
@@ -477,6 +489,21 @@ export default function TesoreriaReporteDiarioPage() {
                 <strong>Cambio neto:</strong> {numero(reporte.consolidado.cambio_neto)}
               </Typography>
             </Stack>
+            {/* Nomina del dia (11/Sep/2026, "en el reporte diario debe
+            reflejar tambien la nomina") - ambos tipos, solo si hubo pagos de
+            nomina ese dia (ya se sumaban dentro de cada cuenta, esto solo lo
+            hace visible sin tener que expandir cuenta por cuenta). */}
+            {(Number(reporte.consolidado.nomina_total_quincenal) !== 0 ||
+              Number(reporte.consolidado.nomina_total_semanal) !== 0) && (
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mt: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  <strong>Nómina Quincenal:</strong> {numero(reporte.consolidado.nomina_total_quincenal)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  <strong>Nómina Semanal:</strong> {numero(reporte.consolidado.nomina_total_semanal)}
+                </Typography>
+              </Stack>
+            )}
           </Paper>
         </>
       )}

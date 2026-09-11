@@ -494,9 +494,7 @@ function TesoreriaContratosPageContent() {
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ mb: 3 }}>
-        <FiltrosBar
-          flush
+      <FiltrosBar
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Buscar por ID de contrato o sociedad..."
@@ -576,6 +574,8 @@ function TesoreriaContratosPageContent() {
             sx={{ minWidth: 160 }}
           />
         </FiltrosBar>
+
+      <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 7 columnas no cabe en un
         telefono sin scroll horizontal incomodo. */}

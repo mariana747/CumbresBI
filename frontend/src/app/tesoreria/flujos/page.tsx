@@ -61,6 +61,7 @@ import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import { CATEGORIA_GASTO_LABELS, TesoreriaCategoriaGasto } from "@/lib/miCumbres";
 import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { ToggleCard } from "@/components/ToggleCard";
@@ -79,6 +80,7 @@ import {
   aprobarFlujo,
   confirmarConciliacionFlujo,
   createFlujo,
+  createRecNomina,
   getContratoGenericoNomina,
   getContratoGenericoReembolsoPorSociedad,
   listComplementosPago,
@@ -113,6 +115,7 @@ const FORM_VACIO = {
   comentarios: "",
   fechaPagoOriginal: "",
   linkComprobanteBanco: "",
+  categoriaGasto: "" as TesoreriaCategoriaGasto | "",
   // Referencias
   idEmpleado: "",
   idRequisicion: "",
@@ -208,6 +211,9 @@ function TesoreriaFlujosPageContent() {
   const [filtroContrato, setFiltroContrato] = useState("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroNomina, setFiltroNomina] = useState(searchParams.get("nomina") || "");
+  // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas" -
+  // el campo ya existia en modelo/API desde 09/Sep, sin usarse en frontend).
+  const [filtroCategoriaGasto, setFiltroCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
@@ -240,6 +246,21 @@ function TesoreriaFlujosPageContent() {
   // Factura/Complemento.
   const [recNominas, setRecNominas] = useState<TesoreriaRecNomina[]>([]);
   const [vinculoNomina, setVinculoNomina] = useState<TesoreriaRecNomina | null>(null);
+  // Crear recibo de nomina inline (11/Sep/2026, "crear/vincular recibo
+  // desde el lado de Flujos sin cambiar de pantalla") - antes solo se
+  // podia elegir un TesoreriaRecNomina ya existente (creado en
+  // /tesoreria/rec-nominas); este mini-formulario cubre el alta minima sin
+  // salir del dialogo de "Vincular CFDI".
+  const [creandoRecibo, setCreandoRecibo] = useState(false);
+  const [nuevoRecibo, setNuevoRecibo] = useState({
+    timbreUuid: "",
+    folio: "",
+    total: "",
+    nomReceptorNumEmpleado: "",
+    nominaFechaPago: "",
+  });
+  const [guardandoNuevoRecibo, setGuardandoNuevoRecibo] = useState(false);
+  const [errorNuevoRecibo, setErrorNuevoRecibo] = useState<string | null>(null);
   const [buscaFactura, setBuscaFactura] = useState("");
   const [buscaComplemento, setBuscaComplemento] = useState("");
   const [opcionesFactura, setOpcionesFactura] = useState<TesoreriaFactura[]>([]);
@@ -374,6 +395,28 @@ function TesoreriaFlujosPageContent() {
     setBuscaFactura("");
     setBuscaComplemento("");
     setVinculoError(null);
+    setCreandoRecibo(false);
+    setNuevoRecibo({ timbreUuid: "", folio: "", total: "", nomReceptorNumEmpleado: "", nominaFechaPago: "" });
+    setErrorNuevoRecibo(null);
+  }
+
+  async function handleCrearRecibo() {
+    if (!nuevoRecibo.timbreUuid) {
+      setErrorNuevoRecibo("El UUID de timbrado es obligatorio.");
+      return;
+    }
+    setGuardandoNuevoRecibo(true);
+    setErrorNuevoRecibo(null);
+    try {
+      const creado = await createRecNomina(nuevoRecibo);
+      setRecNominas((prev) => [creado, ...prev]);
+      setVinculoNomina(creado);
+      setCreandoRecibo(false);
+    } catch (err) {
+      setErrorNuevoRecibo(err instanceof Error ? err.message : "Error al crear el recibo");
+    } finally {
+      setGuardandoNuevoRecibo(false);
+    }
   }
 
   async function handleGuardarVinculo() {
@@ -459,6 +502,7 @@ function TesoreriaFlujosPageContent() {
       contrato: filtroContrato || undefined,
       sociedad: filtroEmpresa || undefined,
       nomina: filtroNomina || undefined,
+      categoriaGasto: filtroCategoriaGasto || undefined,
     })
       .then(setFlujos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
@@ -469,7 +513,23 @@ function TesoreriaFlujosPageContent() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroContrato, filtroEmpresa, filtroNomina]);
+  }, [search, filtroContrato, filtroEmpresa, filtroNomina, filtroCategoriaGasto]);
+
+  // Redirigido desde Conciliación Bancaria tras "Crear Flujo" (11/Sep/2026,
+  // "quiero que muestre lo importado y para mostrar y redirigir") - abre
+  // de una vez el Flujo recien precargado para "terminar de completar el
+  // registro" (contrato ya elegido, falta lo demas). Se limpia el query
+  // param al abrir para no reabrirlo en cada refresh() posterior.
+  useEffect(() => {
+    const idAAbrir = searchParams.get("abrir");
+    if (!idAAbrir || flujos.length === 0) return;
+    const flujo = flujos.find((f) => f.id_flujo === idAAbrir);
+    if (flujo) {
+      abrirEdicion(flujo);
+      router.replace("/tesoreria/flujos");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flujos]);
 
   // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
   // del cliente: listFlujos no tiene parametro de fecha en el backend
@@ -520,6 +580,7 @@ function TesoreriaFlujosPageContent() {
       informacionEnvio: f.informacion_envio || "",
       fechaPagoOriginal: f.fecha_pago_original || "",
       linkComprobanteBanco: f.link_comprobante_banco || "",
+      categoriaGasto: f.categoria_gasto || "",
     });
     setTab("Detalles");
     setFormError(null);
@@ -556,6 +617,7 @@ function TesoreriaFlujosPageContent() {
       informacionEnvio: "",
       fechaPagoOriginal: "",
       linkComprobanteBanco: "",
+      categoriaGasto: f.categoria_gasto || "",
     });
     setTab("Detalles");
     setFormError(null);
@@ -586,6 +648,7 @@ function TesoreriaFlujosPageContent() {
           comentarios: form.comentarios || undefined,
           fechaPagoOriginal: form.fechaPagoOriginal || undefined,
           linkComprobanteBanco: form.linkComprobanteBanco || undefined,
+          categoriaGasto: form.categoriaGasto,
         });
       } else {
         await createFlujo({
@@ -610,6 +673,7 @@ function TesoreriaFlujosPageContent() {
           comentarios: form.comentarios || undefined,
           fechaPagoOriginal: form.fechaPagoOriginal || undefined,
           linkComprobanteBanco: form.linkComprobanteBanco || undefined,
+          categoriaGasto: form.categoriaGasto || undefined,
         });
       }
       setDialogOpen(false);
@@ -756,9 +820,7 @@ function TesoreriaFlujosPageContent() {
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ mb: 3 }}>
       <FiltrosBar
-        flush
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Buscar por ID de flujo o concepto..."
@@ -813,6 +875,24 @@ function TesoreriaFlujosPageContent() {
             {sociedades.map((s) => (
               <MenuItem key={s.rfc} value={s.rfc}>
                 {s.alias_sociedad || s.razon_social || s.rfc}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="filtro-categoria-gasto-label">Categoría de gasto</InputLabel>
+          <Select
+            labelId="filtro-categoria-gasto-label"
+            label="Categoría de gasto"
+            value={filtroCategoriaGasto}
+            onChange={(e) => setFiltroCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
+          >
+            <MenuItem value="">
+              <em>Todas las categorías</em>
+            </MenuItem>
+            {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
+              <MenuItem key={c} value={c}>
+                {CATEGORIA_GASTO_LABELS[c]}
               </MenuItem>
             ))}
           </Select>
@@ -875,6 +955,7 @@ function TesoreriaFlujosPageContent() {
         />
       </FiltrosBar>
 
+      <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 10 columnas no cabe en
         un telefono sin scroll horizontal incomodo. */}
@@ -1280,6 +1361,24 @@ function TesoreriaFlujosPageContent() {
                 onChange={(e) => setForm({ ...form, concepto: e.target.value })}
                 fullWidth
               />
+              <FormControl size="small" fullWidth>
+                <InputLabel id="categoria-gasto-label">Categoría de gasto</InputLabel>
+                <Select
+                  labelId="categoria-gasto-label"
+                  label="Categoría de gasto"
+                  value={form.categoriaGasto}
+                  onChange={(e) => setForm({ ...form, categoriaGasto: e.target.value as TesoreriaCategoriaGasto | "" })}
+                >
+                  <MenuItem value="">
+                    <em>Sin categoría</em>
+                  </MenuItem>
+                  {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
+                    <MenuItem key={c} value={c}>
+                      {CATEGORIA_GASTO_LABELS[c]}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <ToggleCard
                 icon={Undo2}
                 title="Es un reembolso"
@@ -1795,7 +1894,7 @@ function TesoreriaFlujosPageContent() {
                 />
               )}
             />
-            {vinculando?.periodo_nomina && (
+            {vinculando?.periodo_nomina && !creandoRecibo && (
               <Autocomplete
                 openOnFocus
                 size="small"
@@ -1813,6 +1912,73 @@ function TesoreriaFlujosPageContent() {
                   />
                 )}
               />
+            )}
+            {vinculando?.periodo_nomina && !creandoRecibo && (
+              <Button size="small" onClick={() => setCreandoRecibo(true)} sx={{ alignSelf: "flex-start" }}>
+                El recibo no existe todavía — crearlo aquí
+              </Button>
+            )}
+            {vinculando?.periodo_nomina && creandoRecibo && (
+              <Stack spacing={1.5} sx={{ border: 1, borderColor: "divider", borderRadius: 0, p: 1.5 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Alta mínima del recibo de nómina (CFDI) — el detalle completo de percepciones/deducciones se sigue
+                  capturando desde Recibos de Nómina si hace falta.
+                </Typography>
+                {errorNuevoRecibo && (
+                  <Alert severity="error" sx={{ py: 0 }}>
+                    {errorNuevoRecibo}
+                  </Alert>
+                )}
+                <TextField
+                  size="small"
+                  label="UUID de timbrado"
+                  value={nuevoRecibo.timbreUuid}
+                  onChange={(e) => setNuevoRecibo({ ...nuevoRecibo, timbreUuid: e.target.value })}
+                  fullWidth
+                />
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    size="small"
+                    label="Folio"
+                    value={nuevoRecibo.folio}
+                    onChange={(e) => setNuevoRecibo({ ...nuevoRecibo, folio: e.target.value })}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Total"
+                    value={nuevoRecibo.total}
+                    onChange={(e) => setNuevoRecibo({ ...nuevoRecibo, total: e.target.value })}
+                    fullWidth
+                  />
+                </Stack>
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    size="small"
+                    label="No. de empleado"
+                    value={nuevoRecibo.nomReceptorNumEmpleado}
+                    onChange={(e) => setNuevoRecibo({ ...nuevoRecibo, nomReceptorNumEmpleado: e.target.value })}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    type="date"
+                    label="Fecha de pago"
+                    value={nuevoRecibo.nominaFechaPago}
+                    onChange={(e) => setNuevoRecibo({ ...nuevoRecibo, nominaFechaPago: e.target.value })}
+                    InputLabelProps={{ shrink: true }}
+                    fullWidth
+                  />
+                </Stack>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" onClick={() => setCreandoRecibo(false)}>
+                    Cancelar
+                  </Button>
+                  <Button size="small" variant="contained" onClick={handleCrearRecibo} disabled={guardandoNuevoRecibo}>
+                    {guardandoNuevoRecibo ? <CircularProgress size={16} /> : "Crear y vincular"}
+                  </Button>
+                </Stack>
+              </Stack>
             )}
           </Stack>
         </DialogContent>

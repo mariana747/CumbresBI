@@ -17,7 +17,6 @@ import {
   FormControl,
   FormControlLabel,
   IconButton,
-  InputAdornment,
   InputLabel,
   ListItemIcon,
   ListItemText,
@@ -43,13 +42,13 @@ import {
   MoreVertical,
   Pencil,
   Plus,
-  Search,
   Shield,
   Trash2,
   Users,
   X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import {
@@ -521,23 +520,25 @@ function TesoreriaContrapartesPageContent() {
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por razón social, RFC o contacto..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+      <FiltrosBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Buscar por razón social, RFC o contacto..."
+          actions={
+            puedeCrear ? (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+                sx={{ flexShrink: 0 }}
+              >
+                Nueva Contraparte
+              </Button>
+            ) : undefined
+          }
+        >
+          <FormControl size="small" fullWidth>
             <InputLabel id="filtro-sociedad-contraparte-label">Filtrar por sociedad</InputLabel>
             <Select
               labelId="filtro-sociedad-contraparte-label"
@@ -565,18 +566,9 @@ function TesoreriaContrapartesPageContent() {
             }
             label={`Pendientes de revisión (IA)${totalPendientesIA > 0 ? ` (${totalPendientesIA})` : ""}`}
           />
-          {puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
-            >
-              Nueva Contraparte
-            </Button>
-          )}
-        </Stack>
+        </FiltrosBar>
+
+      <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 6+ columnas no cabe en
         un telefono sin scroll horizontal incomodo. */}

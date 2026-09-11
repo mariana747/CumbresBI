@@ -6,6 +6,9 @@ interface FiltrosBarProps {
   search: string;
   onSearchChange: (value: string) => void;
   searchPlaceholder?: string;
+  /** Oculta el buscador de texto libre - para pantallas que solo filtran
+  (ej. un reporte por cuenta/fecha, sin nada que buscar por texto). */
+  hideSearch?: boolean;
   /** Filtros adicionales */
   children?: ReactNode;
   /** Aplica los filtros */
@@ -34,6 +37,7 @@ export default function FiltrosBar({
   puedeEditar = false,
   actions,
   flush = false,
+  hideSearch = false,
 }: FiltrosBarProps) {
   // Boton de enviar por correo
   const botonEnviarMasivo = puedeEditar && onEnviarMasivo && seleccionadas > 0 && (
@@ -64,20 +68,22 @@ export default function FiltrosBar({
         sx={{ p: 2 }}
       >
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
-          <TextField
-            size="small"
-            placeholder={searchPlaceholder}
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
+          {!hideSearch && (
+            <TextField
+              size="small"
+              placeholder={searchPlaceholder}
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              sx={{ flex: 1, maxWidth: 320 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search size={16} strokeWidth={1.5} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          )}
           {!children && botonEnviarMasivo}
         </Stack>
 
