@@ -104,14 +104,20 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
     return {"con_cfdi": con_cfdi, "sin_cfdi": sin_cfdi, "no_requiere": no_requiere}
 
 
-def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
-    """sociedades vacio = todas las sociedades (sin filtrar) - el frontend
-    siempre manda al menos una, pero el backend no lo exige para poder
-    probarlo/usarlo sin esa restriccion."""
-    cuentas = TesoreriaCuenta.objects.filter(activa=True).select_related("banco").order_by("sociedad", "alias")
-    if sociedades:
-        cuentas = cuentas.filter(sociedad__in=sociedades)
+def _porcentaje_cambio(cambio, base) -> Decimal | None:
+    """Cambio (%) igual al del reporte legado (Wall-E Homes, formato
+    origen del rediseño 11/Sep/2026) - sin base contra que comparar (cuenta
+    nueva, saldo anterior en 0) no hay porcentaje que reportar."""
+    if cambio is None or not base:
+        return None
+    return (cambio / base) * Decimal("100")
 
+
+def _calcular_corte(cuentas, fecha) -> dict:
+    """Un solo corte (una fecha) del reporte diario: saldo de esa fecha vs.
+    el ultimo saldo capturado antes de ella, por cuenta. Factorizado de
+    calcular_reporte_diario para poder pedir dos cortes (dia anterior y
+    dia de hoy, como el reporte legado) sin duplicar la logica."""
     empresas: dict[str, list[dict]] = {}
     saldo_anterior_total = Decimal("0")
     saldo_hoy_total = Decimal("0")
@@ -157,6 +163,7 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
             "saldo_hoy": monto_hoy,
             "tiene_saldo_hoy": monto_hoy is not None,
             "cambio": cambio,
+            "cambio_pct": _porcentaje_cambio(cambio, monto_anterior),
             "suma_transacciones": suma_transacciones,
             "diferencia": diferencia,
             "cuadra": diferencia == Decimal("0") if diferencia is not None else None,
@@ -169,6 +176,12 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
                 {
                     "id_flujo": t.id_flujo,
                     "concepto": t.concepto,
+                    # descripcion_pago (11/Sep/2026, "comentario por
+                    # transaccion como en el reporte legado") - campo ya
+                    # existente en TesoreriaFlujo, no uno nuevo; aqui solo se
+                    # expone en el reporte, igual que "PARA IMPUESTOS" o
+                    # "GEORGIA" en el formato de origen.
+                    "descripcion_pago": t.descripcion_pago,
                     "total_mxp": t.total_mxp,
                     "nomina_tipo": t.periodo_nomina.tipo if t.periodo_nomina_id else None,
                 }
@@ -187,9 +200,46 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
             # desaparecio) - se deja None y el frontend lo muestra como "—".
             "saldo_hoy_total": saldo_hoy_total if hay_saldo_hoy_en_alguna else None,
             "cambio_neto": (saldo_hoy_total - saldo_anterior_total) if hay_saldo_hoy_en_alguna else None,
+            "cambio_neto_pct": _porcentaje_cambio(
+                (saldo_hoy_total - saldo_anterior_total) if hay_saldo_hoy_en_alguna else None,
+                saldo_anterior_total,
+            ),
             "nomina_total_quincenal": nomina_total_quincenal,
             "nomina_total_semanal": nomina_total_semanal,
         },
+    }
+
+
+def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
+    """sociedades vacio = todas las sociedades (sin filtrar) - el frontend
+    siempre manda al menos una, pero el backend no lo exige para poder
+    probarlo/usarlo sin esa restriccion.
+
+    Trae dos cortes (11/Sep/2026, rediseño sobre el formato legado de Wall-E
+    Homes: "1.1 Resumen del dia anterior" + "1.2 Resumen del dia") - el de
+    `fecha` (backward-compatible en las llaves de siempre "sociedades"/
+    "consolidado", que ya consumen el email y el bloqueo de envio por
+    diferencia) y el de `fecha` menos un dia bajo "corte_anterior", cada uno
+    con su propio desglose por empresa/cuenta."""
+    import datetime
+
+    # fecha llega como str (YYYY-MM-DD) desde la vista - se parsea aqui para
+    # poder restarle un dia; si ya viene como date (llamado directo en
+    # pruebas) se usa tal cual.
+    fecha_date = fecha if isinstance(fecha, datetime.date) else datetime.date.fromisoformat(fecha)
+    fecha_anterior = fecha_date - datetime.timedelta(days=1)
+
+    cuentas = TesoreriaCuenta.objects.filter(activa=True).select_related("banco").order_by("sociedad", "alias")
+    if sociedades:
+        cuentas = cuentas.filter(sociedad__in=sociedades)
+    cuentas = list(cuentas)
+
+    corte_hoy = _calcular_corte(cuentas, fecha)
+    corte_anterior = _calcular_corte(cuentas, fecha_anterior)
+
+    return {
+        **corte_hoy,
+        "corte_anterior": corte_anterior,
     }
 
 

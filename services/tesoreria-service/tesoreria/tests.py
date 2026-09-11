@@ -2113,6 +2113,28 @@ class ReporteDiarioSaldosTests(TestCase):
         self.assertEqual(reporte["consolidado"]["nomina_total_quincenal"], Decimal("1000.00"))
         self.assertEqual(reporte["consolidado"]["nomina_total_semanal"], Decimal("300.00"))
 
+    def test_incluye_cambio_pct_y_corte_del_dia_anterior(self):
+        # 11/Sep/2026, redisenio sobre el formato legado de Wall-E Homes:
+        # cambio (%) por cuenta + un segundo corte (dia - 1) con su propio
+        # desglose, ademas del comentario libre (descripcion_pago) por
+        # transaccion.
+        TesoreriaSaldo.objects.create(id="s8", fecha="2026-08-23", cuenta=self.cuenta.id_cuenta_bancaria, saldo="9000.00")
+        TesoreriaSaldo.objects.create(id="s9", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        TesoreriaSaldo.objects.create(id="s10", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10500.00")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000003", contrato=self.contrato, cuenta=self.cuenta,
+            fecha_efectiva="2026-08-25", total_mxp="500.00", descripcion_pago="PARA IMPUESTOS",
+        )
+        reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
+        fila_hoy = reporte["sociedades"][0]["cuentas"][0]
+        self.assertEqual(fila_hoy["cambio_pct"], Decimal("5"))
+        self.assertEqual(fila_hoy["transacciones"][0]["descripcion_pago"], "PARA IMPUESTOS")
+
+        self.assertEqual(reporte["corte_anterior"]["fecha"], date(2026, 8, 24))
+        fila_ayer = reporte["corte_anterior"]["sociedades"][0]["cuentas"][0]
+        self.assertEqual(fila_ayer["saldo_hoy"], Decimal("10000.00"))
+        self.assertEqual(fila_ayer["cambio_pct"], Decimal("1000") / Decimal("9000") * Decimal("100"))
+
     def test_filtra_solo_cuentas_activas_de_la_sociedad_elegida(self):
         TesoreriaCuenta.objects.create(
             banco=self.banco, clabe="002180000000000002", alias="Otra sociedad", apertura="2026-01-01",

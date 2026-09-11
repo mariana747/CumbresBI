@@ -1,4 +1,5 @@
 import base64
+import datetime
 import logging
 
 import requests
@@ -71,70 +72,169 @@ def _renderizar_correo(
 """.strip()
 
 
-def _fila_cuenta_html(fila: dict) -> str:
-    diferencia = fila["diferencia"]
-    if diferencia is None:
-        texto_diferencia = "Sin saldo capturado"
-        color_diferencia = "#9BA0AB"
-    elif diferencia == 0:
-        texto_diferencia = "0.00"
-        color_diferencia = _VERDE
-    else:
-        texto_diferencia = f"{diferencia:,.2f}"
-        color_diferencia = _ROJO
-    cambio_texto = f"{fila['cambio']:,.2f}" if fila["cambio"] is not None else "—"
+def _texto_pct(valor) -> str:
+    return f"{valor:,.1f}%" if valor is not None else "—"
+
+
+_DIAS_SEMANA_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def _fecha_larga_es(valor) -> str:
+    """"día de la semana, día de mes de año" (11/Sep/2026, mismo formato
+    que "Generado al" en el reporte legado de Wall-E Homes: "martes, 21 de
+    mayo de 2024"). `valor` llega como str (YYYY-MM-DD) o como date segun
+    el corte (ver calcular_reporte_diario en reportes.py)."""
+    fecha = valor if isinstance(valor, datetime.date) else datetime.date.fromisoformat(valor)
+    return f"{_DIAS_SEMANA_ES[fecha.weekday()]}, {fecha.day} de {_MESES_ES[fecha.month - 1]} de {fecha.year}"
+
+
+# Colores de fondo por empresa (11/Sep/2026, "en colores azules") - todos
+# en tonos de azul (variando la intensidad), en vez de la paleta multicolor
+# original; rotan si hay mas empresas que colores.
+_COLORES_EMPRESA = ["#DCEBF7", "#C7E0F4", "#B3D5F0", "#9FC9EC"]
+
+
+def _fila_empresa_html(nombre_empresa: str, color: str) -> str:
     return f"""
-    <tr>
-      <td style="padding:8px 10px;border-bottom:1px solid #EEEFF1;">{escape(fila['alias'])}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #EEEFF1;text-align:right;">{fila['saldo_anterior']:,.2f}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #EEEFF1;text-align:right;">{cambio_texto}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #EEEFF1;text-align:right;">{fila['suma_transacciones']:,.2f}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #EEEFF1;text-align:right;color:{color_diferencia};font-weight:700;">
-        {texto_diferencia}
-      </td>
+    <tr style="background:{color};">
+      <td colspan="5" style="padding:6px 10px;font-weight:700;color:{_CHARCOAL};">{escape(nombre_empresa)}</td>
     </tr>"""
 
 
-def _renderizar_reporte(reporte: dict) -> str:
-    filas_html = "".join(
-        _fila_cuenta_html(fila) for empresa in reporte["sociedades"] for fila in empresa["cuentas"]
-    )
-    consolidado = reporte["consolidado"]
+def _chip_tipo_movimiento_html(monto) -> str:
+    """Tipo del movimiento con color (11/Sep/2026, "los tipos con colores")
+    - EGRESO en rojo, INGRESO en verde, igual que el resto del reporte
+    pinta positivo/negativo."""
+    if monto is not None and monto < 0:
+        return f'<span style="display:inline-block;padding:1px 8px;border-radius:100px;font-size:10.5px;font-weight:700;background:#FBE7E5;color:{_ROJO};">EGRESO</span>'
+    return f'<span style="display:inline-block;padding:1px 8px;border-radius:100px;font-size:10.5px;font-weight:700;background:#E4F3E8;color:{_VERDE};">INGRESO</span>'
+
+
+def _fila_cuenta_html(numero: int, fila: dict) -> str:
+    cambio_texto = f"{fila['cambio']:,.2f}" if fila["cambio"] is not None else "—"
+    # cambio_pct (11/Sep/2026, formato del reporte legado de Wall-E Homes) -
+    # el backend manda None sin base contra que comparar.
+    cambio_pct_texto = _texto_pct(fila.get("cambio_pct"))
+    saldo_texto = f"{fila['saldo_hoy']:,.2f}" if fila["saldo_hoy"] is not None else "Sin saldo capturado"
+    # numero (11/Sep/2026, "la numeracion de cuentas" del reporte legado:
+    # "(1) INBUR 3585", "(2) AMEX 2004"...) - continua a lo largo de TODO
+    # el corte, no se reinicia por empresa.
+    filas_html = f"""
+    <tr>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;">({numero}) {escape(fila['alias'])}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;">{saldo_texto}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;">{cambio_texto}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;">{cambio_pct_texto}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;"></td>
+    </tr>"""
+    # Desglose de transacciones (11/Sep/2026, formato legado: cada
+    # movimiento del dia sale como su propia fila indentada, con su
+    # comentario libre - descripcion_pago) - solo si hubo alguna.
+    for t in fila["transacciones"]:
+        monto = t["total_mxp"]
+        monto_texto = f"{monto:,.2f}" if monto is not None else "—"
+        color_monto = _ROJO if monto is not None and monto < 0 else _VERDE
+        filas_html += f"""
+    <tr>
+      <td style="padding:4px 10px 4px 24px;border-bottom:1px solid #EEEFF1;color:{_INK_MUTED};font-size:12px;">{escape(t['concepto'] or t['id_flujo'])}</td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;"></td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;text-align:right;font-size:12px;color:{color_monto};font-weight:600;">{monto_texto}</td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;">{_chip_tipo_movimiento_html(monto)}</td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;font-size:12px;color:{_INK_MUTED};">{escape(t['descripcion_pago'] or '')}</td>
+    </tr>"""
+    # "Otros cargos/abonos" (11/Sep/2026, formato legado) - lo que el
+    # cambio de saldo no explica ninguna transaccion capturada; en rojo si
+    # no cuadra, igual que la diferencia se pintaba antes.
+    if fila["diferencia"] not in (None, 0):
+        color_diferencia = _ROJO if not fila["cuadra"] else _VERDE
+        filas_html += f"""
+    <tr>
+      <td style="padding:4px 10px 4px 24px;border-bottom:1px solid #EEEFF1;color:{_INK_MUTED};font-size:12px;">Otros cargos/abonos</td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;"></td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;text-align:right;font-size:12px;color:{color_diferencia};font-weight:700;">{fila['diferencia']:,.2f}</td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;"></td>
+      <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;"></td>
+    </tr>"""
+    return filas_html
+
+
+def _tabla_corte_html(corte: dict) -> str:
+    """Una tabla de saldos por empresa/cuenta (con su desglose de
+    transacciones y "Otros cargos/abonos") + el consolidado, para un solo
+    corte (dia anterior u hoy) - calcada del reporte legado de Wall-E
+    Homes ("Resumen de saldos al día...", empresa como fila de color,
+    cuentas indentadas debajo) - ver _renderizar_reporte."""
+    numero = 0
+    filas_html = ""
+    for i, empresa in enumerate(corte["sociedades"]):
+        filas_html += _fila_empresa_html(empresa["sociedad"] or "Sin empresa", _COLORES_EMPRESA[i % len(_COLORES_EMPRESA)])
+        for fila in empresa["cuentas"]:
+            numero += 1
+            filas_html += _fila_cuenta_html(numero, fila)
+
+    consolidado = corte["consolidado"]
     saldo_hoy_texto = (
         f"{consolidado['saldo_hoy_total']:,.2f}" if consolidado["saldo_hoy_total"] is not None else "—"
     )
     cambio_neto_texto = (
         f"{consolidado['cambio_neto']:,.2f}" if consolidado["cambio_neto"] is not None else "—"
     )
+    cambio_neto_pct_texto = _texto_pct(consolidado.get("cambio_neto_pct"))
+    return f"""
+    <div style="font-size:13.5px;font-weight:700;color:{_CHARCOAL};margin:28px 0 10px;">
+      Resumen de saldos al día: {corte['fecha']}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;color:#4B4F58;">
+      <thead>
+        <tr style="text-align:left;">
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;">Cuenta</th>
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;text-align:right;">Saldo al día</th>
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;text-align:right;">Cambio ($)</th>
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;text-align:right;">Cambio (%)</th>
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;">Comentarios</th>
+        </tr>
+      </thead>
+      <tbody>{filas_html}</tbody>
+      <tfoot>
+        <tr style="background:#F7F7F8;font-weight:700;color:#23252B;">
+          <td style="padding:10px;border-top:2px solid #E1E4E9;">Saldo total al: {corte['fecha']}</td>
+          <td style="padding:10px;border-top:2px solid #E1E4E9;text-align:right;">{saldo_hoy_texto}</td>
+          <td style="padding:10px;border-top:2px solid #E1E4E9;text-align:right;">{cambio_neto_texto}</td>
+          <td style="padding:10px;border-top:2px solid #E1E4E9;text-align:right;">{cambio_neto_pct_texto}</td>
+          <td style="padding:10px;border-top:2px solid #E1E4E9;"></td>
+        </tr>
+      </tfoot>
+    </table>"""
+
+
+def _renderizar_reporte(reporte: dict) -> str:
+    """Dos cortes (11/Sep/2026, redisenio sobre el formato legado de Wall-E
+    Homes - documento "20240521_GWE_DFPE_DT_Registro diario de saldos
+    vencidos - Reporte de saldos": "1.1 Resumen de saldos al día anterior"
+    + "1.2 Resumen de saldos al día") - el correo trae ambas tablas, no
+    solo la del dia elegido, cada una agrupada por empresa (fila de color)
+    con las cuentas y su desglose de transacciones debajo."""
+    tabla_anterior = _tabla_corte_html(reporte["corte_anterior"])
+    tabla_hoy = _tabla_corte_html(reporte)
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
-  <div style="max-width:640px;margin:0 auto;background:#FFFFFF;border-radius:12px;
-              border:1px solid #E1E4E9;padding:36px 34px 30px;">
+  <div style="max-width:920px;margin:0 auto;background:#FFFFFF;border-radius:12px;
+              border:1px solid #E1E4E9;padding:36px 40px 30px;">
     <div style="font-size:15px;font-weight:800;letter-spacing:-0.01em;color:{_CHARCOAL};
-                margin-bottom:8px;">
+                margin-bottom:18px;">
       <span style="display:inline-block;width:22px;height:22px;border-radius:6px;
                     background:{_AZUL};color:#fff;font-size:12px;font-weight:800;
                     text-align:center;line-height:22px;margin-right:8px;">C</span>CumbresBI
     </div>
-    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 20px;
-               letter-spacing:-0.01em;">Reporte diario de saldos — {reporte['fecha']}</h1>
-    <table style="width:100%;border-collapse:collapse;font-size:13px;color:#4B4F58;">
-      <thead>
-        <tr style="text-align:left;">
-          <th style="padding:8px 10px;border-bottom:2px solid #E1E4E9;">Cuenta</th>
-          <th style="padding:8px 10px;border-bottom:2px solid #E1E4E9;text-align:right;">Saldo anterior</th>
-          <th style="padding:8px 10px;border-bottom:2px solid #E1E4E9;text-align:right;">Cambio</th>
-          <th style="padding:8px 10px;border-bottom:2px solid #E1E4E9;text-align:right;">Transacciones</th>
-          <th style="padding:8px 10px;border-bottom:2px solid #E1E4E9;text-align:right;">Diferencia</th>
-        </tr>
-      </thead>
-      <tbody>{filas_html}</tbody>
-    </table>
-    <div style="margin-top:20px;padding-top:16px;border-top:2px solid #E1E4E9;
-                display:flex;justify-content:space-between;font-size:14px;color:#23252B;">
-      <div><strong>Saldo consolidado:</strong> {saldo_hoy_texto}</div>
-      <div><strong>Cambio neto:</strong> {cambio_neto_texto}</div>
-    </div>
+    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 8px;
+               letter-spacing:-0.01em;">Registro diario de saldos finales en cuentas bancarias</h1>
+    <div style="font-size:13px;color:{_INK_MUTED};margin:0 0 16px;">Generado al: {_fecha_larga_es(reporte['fecha'])}</div>
+    {tabla_anterior}
+    {tabla_hoy}
     <div style="margin-top:26px;padding-top:16px;border-top:1px solid #EEEFF1;
                 font-size:11.5px;color:#9BA0AB;">
       Consultoría y Proyectos Cumbres · este correo se generó automáticamente, no respondas a él.
