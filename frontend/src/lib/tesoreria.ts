@@ -3162,6 +3162,7 @@ export async function deleteSaldo(id: string): Promise<void> {
 export interface ReporteDiarioTransaccion {
   id_flujo: string;
   concepto: string | null;
+  descripcion_pago: string | null;
   total_mxp: string | null;
   nomina_tipo: TesoreriaNominaTipo | null;
 }
@@ -3174,6 +3175,7 @@ export interface ReporteDiarioCuenta {
   saldo_hoy: string | null;
   tiene_saldo_hoy: boolean;
   cambio: string | null;
+  cambio_pct: string | null;
   suma_transacciones: string;
   diferencia: string | null;
   cuadra: boolean | null;
@@ -3185,16 +3187,27 @@ export interface ReporteDiarioSociedad {
   cuentas: ReporteDiarioCuenta[];
 }
 
-export interface ReporteDiario {
+export interface ReporteDiarioConsolidado {
+  saldo_anterior_total: string;
+  saldo_hoy_total: string | null;
+  cambio_neto: string | null;
+  cambio_neto_pct: string | null;
+  nomina_total_quincenal: string;
+  nomina_total_semanal: string;
+}
+
+export interface ReporteDiarioCorte {
   fecha: string;
   sociedades: ReporteDiarioSociedad[];
-  consolidado: {
-    saldo_anterior_total: string;
-    saldo_hoy_total: string | null;
-    cambio_neto: string | null;
-    nomina_total_quincenal: string;
-    nomina_total_semanal: string;
-  };
+  consolidado: ReporteDiarioConsolidado;
+}
+
+// corte_anterior (11/Sep/2026, redisenio sobre el formato legado de
+// Wall-E Homes: "1.1 dia anterior" + "1.2 dia de hoy") - mismo corte que
+// el de arriba (fecha/sociedades/consolidado, que se dejan a nivel raiz
+// por compatibilidad) pero de la fecha - 1 dia.
+export interface ReporteDiario extends ReporteDiarioCorte {
+  corte_anterior: ReporteDiarioCorte;
 }
 
 export async function getReporteDiario(sociedades: string[], fecha: string): Promise<ReporteDiario> {
