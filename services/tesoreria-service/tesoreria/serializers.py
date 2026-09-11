@@ -922,13 +922,16 @@ class TesoreriaRecNominaSerializer(serializers.ModelSerializer):
             "timbre_fecha_timbrado",
             "tipo_factura",
             "link_pdf",
+            "link_comprobante",
+            "drive_file_id_comprobante",
+            "mime_type_comprobante",
             "estado",
             "created_at",
             "created_by",
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "link_comprobante", "drive_file_id_comprobante"]
 
 
 class TesoreriaDiaFestivoSerializer(serializers.ModelSerializer):
