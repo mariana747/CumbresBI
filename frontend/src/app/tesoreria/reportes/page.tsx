@@ -202,8 +202,11 @@ export default function TesoreriaReporteDiarioPage() {
       );
     }
     return lista.map((empresa) => {
+      // Nombre completo, no abreviatura (11/Sep/2026, "en la ui se muestre
+      // el nombre de la empresa no la abreviatura") - razon_social antes
+      // que alias_sociedad, igual que el filtro de arriba.
       const nombreEmpresa =
-        sociedades.find((s) => s.rfc === empresa.sociedad)?.alias_sociedad || empresa.sociedad || "Sin empresa";
+        sociedades.find((s) => s.rfc === empresa.sociedad)?.razon_social || empresa.sociedad || "Sin empresa";
       return (
         <Paper key={`${editable ? "hoy" : "ayer"}-${empresa.sociedad}`} variant="outlined" sx={{ mb: 3 }}>
           <Typography variant="subtitle1" fontWeight={600} sx={{ p: 2, pb: 1 }}>
@@ -457,7 +460,7 @@ export default function TesoreriaReporteDiarioPage() {
             options={sociedades}
             value={sociedadesElegidas}
             onChange={(_, valor) => setSociedadesElegidas(valor)}
-            getOptionLabel={(s) => s.alias_sociedad || s.razon_social || s.rfc}
+            getOptionLabel={(s) => s.razon_social || s.alias_sociedad || s.rfc}
             isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
             renderInput={(params) => <TextField {...params} label="Empresas" placeholder="Elige una o más" />}
             sx={{ flex: { xs: "1 1 auto", sm: "1 1 240px" } }}
