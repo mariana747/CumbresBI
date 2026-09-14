@@ -79,8 +79,48 @@ Verificado con `SHOW GRANTS FOR 'docint_app'@'%';` / `SHOW GRANTS FOR 'audit_app
 los dos conserva `ALL PRIVILEGES ON *.*` (solo queda el `GRANT USAGE ON *.*` implícito de MySQL, que no
 es un privilegio real, más el `GRANT ALL PRIVILEGES` acotado a su propia base).
 
+## Bases y usuarios creados (14/Sep/2026)
+
+Mariana creó desde la consola (mismo charset/cotejamiento `utf8mb4`/`utf8mb4_0900_ai_ci`, usuario con
+host `%`, sin acceso a Cloud Shell/root): `cumbresbi_iam_service` (`iam_app`), `cumbresbi_pld_service`
+(`pld_app`), `cumbresbi_tesoreria_service` (`tesoreria_app`), `cumbresbi_vivienda_service`
+(`vivienda_app`), `cumbresbi_compras_tesoreria_service` (`compras_tesoreria_app`),
+`cumbresbi_rrhh_service` (`rrhh_app`), `cumbresbi_rentas_service` (`rentas_app`),
+`cumbresbi_obra_service` (`obra_app`), `cumbresbi_materiales_service` (`materiales_app`).
+Contraseñas ya subidas a Secret Manager (`<SERVICIO>_DB_PASSWORD`).
+
+## Acotamiento de los 9 usuarios nuevos (14/Sep/2026) — RESUELTO
+
+Los 9 usuarios de arriba quedaron con el default de la consola (`cloudsqlsuperuser`, alcance de TODA
+la instancia) al crearse - Arturo corrió el REVOKE/GRANT acotado por Cloud Shell/root (mismo patrón
+que `docint_app`/`audit_app` arriba), uno por servicio. Confirmado 14/Sep/2026.
+
+La consola de Mariana no tiene la pestaña "Roles de bases de datos" (custom DB roles) para acotar esto
+sin SQL - confirmado 14/Sep/2026.
+
+Intentado por Mariana vía Cloud SQL Studio (14/Sep/2026) con el usuario nativo `mariana-dev` y también
+con su identidad de Google (`mariana@cypcumbres.mx`, rol de proyecto "Administrador de Cloud SQL") -
+ninguno de los dos tiene privilegios de MySQL suficientes (`Access denied ... a la base 'sys'`,
+Error 3879): el rol IAM de proyecto controla la API de administración de Cloud SQL (crear/borrar
+instancias, bases, usuarios), no los privilegios del usuario DENTRO del motor MySQL - son cosas
+distintas. No existe un usuario `root` visible en la instancia para resetearle la contraseña. Se
+decidió que Arturo lo corra (mismo patrón que `docint_app`/`audit_app`), en vez de crear un usuario
+admin temporal nuevo.
+
+## Bandera de instancia: `log_bin_trust_function_creators` (14/Sep/2026)
+
+Al correr `manage.py migrate` de `audit-service` contra Cloud Run (Cloud Run Job), la migración fallo
+con `OperationalError 1419: You do not have the SUPER privilege and binary logging is enabled` (alguna
+migración crea un trigger/función, y el usuario de app no tiene SUPER). Se activó la bandera
+`log_bin_trust_function_creators=on` en la instancia completa - verificado antes que la instancia no
+tenía NINGUNA bandera configurada (`gcloud sql instances describe db-cypcumbres --format="value(settings.databaseFlags)"`
+vacío), así que fue seguro aplicarla sin sobreescribir configuración de otro servicio (`--database-flags`
+en `gcloud sql instances patch` REEMPLAZA toda la lista, no es aditivo - ojo si en el futuro ya hay
+otras banderas, hay que incluirlas todas en el mismo comando). Es una bandera dinámica de MySQL, no
+debería requerir reinicio de la instancia.
+
 ## Pendiente
 
-`iam-service` no tiene todavía base ni usuario en Cloud SQL — se crea (`cumbresbi_iam_service` + su
-usuario, con el mismo acotamiento de privilegios que arriba) cuando arranque formalmente la Fase 1. Ver
-[`iam-service.md`](iam-service.md).
+Ninguno de los otros servicios (`vivienda`, `compras-tesoreria`, `rrhh`, `rentas`, `obra`, `materiales`)
+tiene todavía su primer deploy real en Cloud Run (Fase 4) - ver `docs/despliegue-cloud-run-progreso-13sep.md`
+(nota: ese archivo es local, no versionado en git a propósito - ver `.gitignore`).
