@@ -104,14 +104,64 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
     return {"con_cfdi": con_cfdi, "sin_cfdi": sin_cfdi, "no_requiere": no_requiere}
 
 
-def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
-    """sociedades vacio = todas las sociedades (sin filtrar) - el frontend
-    siempre manda al menos una, pero el backend no lo exige para poder
-    probarlo/usarlo sin esa restriccion."""
-    cuentas = TesoreriaCuenta.objects.filter(activa=True).select_related("banco").order_by("sociedad", "alias")
-    if sociedades:
-        cuentas = cuentas.filter(sociedad__in=sociedades)
+# Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente pendiente tras
+# el cierre real de Nomina) - mismo patron reconocido/por_reconocer que
+# calcular_conciliacion_cfdi, pero acotado a Flujos de nomina
+# (periodo_nomina_id no nulo) y contra `flujo.nomina` (TesoreriaRecNomina,
+# el CFDI individual del empleado), no contra factura/complemento. Los
+# contratos GEN-NOMINA-<sociedad> tienen requiere_factura=False (ver
+# contrato_generico_nomina), por eso calcular_conciliacion_cfdi de arriba
+# los manda todos a "no_requiere" y nunca calcula este cruce.
+def calcular_conciliacion_nomina(queryset) -> dict:
+    """queryset ya viene filtrado (scope, fecha, empresa/proyecto/centro,
+    periodo_nomina) por el llamador (ver
+    TesoreriaFlujoViewSet.conciliacion_nomina) - aqui solo se separa en
+    con_recibo/sin_recibo y, para los que ya tienen recibo, se calcula
+    reconocido/por_reconocer.
 
+    - CON_RECIBO: el flujo ya tiene un recibo de nomina (CFDI) vinculado.
+      reconocido = recibo.total, por_reconocer = reconocido - total_mxp
+      del flujo.
+    - SIN_RECIBO: el flujo de nomina todavia no tiene ningun recibo
+      vinculado."""
+    queryset = queryset.select_related("periodo_nomina", "nomina")
+
+    con_recibo, sin_recibo = [], []
+    for flujo in queryset:
+        fila = {
+            "id_flujo": flujo.id_flujo,
+            "periodo_nomina": flujo.periodo_nomina_id,
+            "periodo_nomina_serie": flujo.periodo_nomina.serie if flujo.periodo_nomina_id else None,
+            "id_empleado": flujo.id_empleado,
+            "concepto": flujo.concepto,
+            "total_mxp": flujo.total_mxp,
+            "fecha_efectiva": flujo.fecha_efectiva,
+            "nomina": flujo.nomina_id,
+        }
+        if not flujo.nomina_id:
+            sin_recibo.append(fila)
+            continue
+        reconocido = flujo.nomina.total
+        por_reconocer = (reconocido - flujo.total_mxp) if reconocido is not None and flujo.total_mxp is not None else None
+        con_recibo.append({**fila, "reconocido": reconocido, "por_reconocer": por_reconocer})
+
+    return {"con_recibo": con_recibo, "sin_recibo": sin_recibo}
+
+
+def _porcentaje_cambio(cambio, base) -> Decimal | None:
+    """Cambio (%) igual al del reporte legado (Wall-E Homes, formato
+    origen del rediseño 11/Sep/2026) - sin base contra que comparar (cuenta
+    nueva, saldo anterior en 0) no hay porcentaje que reportar."""
+    if cambio is None or not base:
+        return None
+    return (cambio / base) * Decimal("100")
+
+
+def _calcular_corte(cuentas, fecha) -> dict:
+    """Un solo corte (una fecha) del reporte diario: saldo de esa fecha vs.
+    el ultimo saldo capturado antes de ella, por cuenta. Factorizado de
+    calcular_reporte_diario para poder pedir dos cortes (dia anterior y
+    dia de hoy, como el reporte legado) sin duplicar la logica."""
     empresas: dict[str, list[dict]] = {}
     saldo_anterior_total = Decimal("0")
     saldo_hoy_total = Decimal("0")
@@ -152,11 +202,19 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
         fila = {
             "id_cuenta_bancaria": cuenta.id_cuenta_bancaria,
             "alias": cuenta.alias or cuenta.id_cuenta_bancaria,
+            # banco_nombre/clabe (11/Sep/2026, pendiente de Jenny: "correo
+            # con nombre completo de cuenta, hoy usa alias, no banco+
+            # numero") - el alias sigue siendo lo que usa la pantalla (mismo
+            # criterio de siempre), esto es solo para que el correo pueda
+            # mostrar banco real + CLABE en vez del alias libre.
+            "banco_nombre": cuenta.banco.banco if cuenta.banco_id else None,
+            "clabe": cuenta.clabe,
             "tipo": cuenta.tipo,
             "saldo_anterior": monto_anterior,
             "saldo_hoy": monto_hoy,
             "tiene_saldo_hoy": monto_hoy is not None,
             "cambio": cambio,
+            "cambio_pct": _porcentaje_cambio(cambio, monto_anterior),
             "suma_transacciones": suma_transacciones,
             "diferencia": diferencia,
             "cuadra": diferencia == Decimal("0") if diferencia is not None else None,
@@ -169,6 +227,12 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
                 {
                     "id_flujo": t.id_flujo,
                     "concepto": t.concepto,
+                    # descripcion_pago (11/Sep/2026, "comentario por
+                    # transaccion como en el reporte legado") - campo ya
+                    # existente en TesoreriaFlujo, no uno nuevo; aqui solo se
+                    # expone en el reporte, igual que "PARA IMPUESTOS" o
+                    # "GEORGIA" en el formato de origen.
+                    "descripcion_pago": t.descripcion_pago,
                     "total_mxp": t.total_mxp,
                     "nomina_tipo": t.periodo_nomina.tipo if t.periodo_nomina_id else None,
                 }
@@ -187,10 +251,30 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
             # desaparecio) - se deja None y el frontend lo muestra como "—".
             "saldo_hoy_total": saldo_hoy_total if hay_saldo_hoy_en_alguna else None,
             "cambio_neto": (saldo_hoy_total - saldo_anterior_total) if hay_saldo_hoy_en_alguna else None,
+            "cambio_neto_pct": _porcentaje_cambio(
+                (saldo_hoy_total - saldo_anterior_total) if hay_saldo_hoy_en_alguna else None,
+                saldo_anterior_total,
+            ),
             "nomina_total_quincenal": nomina_total_quincenal,
             "nomina_total_semanal": nomina_total_semanal,
         },
     }
+
+
+def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
+    """sociedades vacio = todas las sociedades (sin filtrar) - el frontend
+    siempre manda al menos una, pero el backend no lo exige para poder
+    probarlo/usarlo sin esa restriccion.
+
+    Un solo corte, el de `fecha` (14/Sep/2026, "se quitara el dia anterior
+    tanto en la ui y el correo" - revierte el rediseño de dos cortes del
+    11/Sep sobre el formato legado de Wall-E Homes)."""
+    cuentas = TesoreriaCuenta.objects.filter(activa=True).select_related("banco").order_by("sociedad", "alias")
+    if sociedades:
+        cuentas = cuentas.filter(sociedad__in=sociedades)
+    cuentas = list(cuentas)
+
+    return _calcular_corte(cuentas, fecha)
 
 
 def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=None, fecha_fin=None) -> dict:

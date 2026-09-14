@@ -33,11 +33,12 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { Camera, Eye, Plus, ReceiptText as TicketIcon, Trash2, Upload, X as CloseIcon } from "lucide-react";
+import { Camera, Eye, HardDrive, Plus, ReceiptText as TicketIcon, Trash2, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import EscanerDocumento from "@/components/EscanerDocumento";
 import { getSession, SessionUser } from "@/lib/auth";
+import { elegirArchivoDrive, MIME_TYPES_COMPROBANTE } from "@/lib/googleDriveFilePicker";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   crearTicketReembolso,
@@ -191,6 +192,27 @@ export default function MiCumbresTicketsPage() {
   const [fotoParaEscanear, setFotoParaEscanear] = useState<File | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [errorAlta, setErrorAlta] = useState<string | null>(null);
+  // Desde Drive (14/Sep/2026, "igual para subir el comprobante subir desde
+  // la pc o desde el drive, esto ya lo habíamos hecho antes") - mismo
+  // Picker que Conciliación Bancaria/Solicitudes de Pago (ver
+  // lib/googleDriveFilePicker.ts), ruteado igual que "Elegir archivo": una
+  // imagen pasa por el escaner de recorte, un PDF se adjunta directo.
+  const [errorPickerDrive, setErrorPickerDrive] = useState<string | null>(null);
+
+  async function handleElegirDesdeDrive() {
+    setErrorPickerDrive(null);
+    try {
+      const elegido = await elegirArchivoDrive(MIME_TYPES_COMPROBANTE, "Elige el comprobante");
+      if (!elegido) return;
+      if (elegido.type.startsWith("image/")) {
+        setFotoParaEscanear(elegido);
+      } else {
+        setArchivoTicket(elegido);
+      }
+    } catch (err) {
+      setErrorPickerDrive(err instanceof Error ? err.message : "No se pudo elegir el archivo de Drive.");
+    }
+  }
 
   function cerrarNuevo() {
     setOpenNuevo(false);
@@ -689,7 +711,15 @@ export default function MiCumbresTicketsPage() {
                   }}
                 />
               </Button>
+              <Button variant="outlined" startIcon={<HardDrive size={16} strokeWidth={1.5} />} onClick={handleElegirDesdeDrive}>
+                Desde Drive
+              </Button>
             </Stack>
+            {errorPickerDrive && (
+              <Alert severity="error" onClose={() => setErrorPickerDrive(null)}>
+                {errorPickerDrive}
+              </Alert>
+            )}
             {archivoTicket && (
               <Typography variant="caption" color="text.secondary">
                 Adjunto: {archivoTicket.name}

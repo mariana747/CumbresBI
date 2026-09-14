@@ -423,7 +423,7 @@ export default function RrhhEmpleadosPage() {
                               />
                             </Stack>
                             <Typography variant="caption" color="text.secondary">
-                              {p.proyecto ? `Proyecto ${aliasProyecto(p.proyecto)} — ` : ""}
+                              {p.proyecto ? `Proyecto ${aliasProyecto(p.proyecto)}` : "SIN PROYECTO"} —{" "}
                               Sueldo diario: {p.salario_diario ? `$${p.salario_diario}` : "—"}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
@@ -476,7 +476,7 @@ export default function RrhhEmpleadosPage() {
                       onChange={(e) => setFormPuesto({ ...formPuesto, proyecto: e.target.value })}
                     >
                       <MenuItem value="">
-                        <em>Ninguno (corporativo)</em>
+                        <em>SIN PROYECTO (corporativo)</em>
                       </MenuItem>
                       {proyectos.map((p) => (
                         <MenuItem key={p.id_proyecto} value={p.id_proyecto}>

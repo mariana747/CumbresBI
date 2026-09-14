@@ -18,6 +18,7 @@ from .models import (
     TesoreriaFlujo,
     TesoreriaMovimientoBancario,
     TesoreriaNomina,
+    TesoreriaNominaSociedad,
     TesoreriaNotaCredito,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -264,14 +265,27 @@ class TesoreriaNominaSerializer(serializers.ModelSerializer):
     """Periodo/agrupador de nomina (10/Sep/2026, modulo de Nominas Fase 1) -
     ver TesoreriaNomina.__doc__. `id_nomina` se genera en el backend (ver
     TesoreriaNominaViewSet.perform_create), mismo criterio de consecutivo
-    global que TesoreriaFlujo.id_flujo (FLJ-######)."""
+    global que TesoreriaFlujo.id_flujo (FLJ-######).
+
+    sociedades (14/Sep/2026, "pueden estar contratados por dos sociedades")
+    - lista de RFCs en vez de un CharField `sociedad` unico; no es un campo
+    del modelo (vive en TesoreriaNominaSociedad, relacion inversa), por eso
+    create/update se sobrescriben para sincronizar esas filas a mano."""
+
+    # write_only (14/Sep/2026, fix real: sin esto DRF intenta serializar
+    # `instance.sociedades` solo (el related manager de
+    # TesoreriaNominaSociedad) como si ya fuera la lista de strings, y
+    # truena con "RelatedManager object is not iterable") - la lectura la
+    # arma a mano to_representation de abajo, esto solo declara la forma
+    # de ESCRITURA (create/update).
+    sociedades = serializers.ListField(child=serializers.CharField(max_length=13), allow_empty=False, write_only=True)
 
     class Meta:
         model = TesoreriaNomina
         fields = [
             "id_nomina",
             "tipo",
-            "sociedad",
+            "sociedades",
             "proyecto",
             "centro",
             "serie",
@@ -285,6 +299,31 @@ class TesoreriaNominaSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         read_only_fields = ["id_nomina", "created_at", "updated_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["sociedades"] = list(instance.sociedades.order_by("id").values_list("sociedad", flat=True))
+        return data
+
+    def create(self, validated_data):
+        sociedades = validated_data.pop("sociedades")
+        instance = TesoreriaNomina.objects.create(**validated_data)
+        TesoreriaNominaSociedad.objects.bulk_create(
+            [TesoreriaNominaSociedad(nomina=instance, sociedad=s) for s in dict.fromkeys(sociedades)]
+        )
+        return instance
+
+    def update(self, instance, validated_data):
+        sociedades = validated_data.pop("sociedades", None)
+        for atributo, valor in validated_data.items():
+            setattr(instance, atributo, valor)
+        instance.save()
+        if sociedades is not None:
+            instance.sociedades.all().delete()
+            TesoreriaNominaSociedad.objects.bulk_create(
+                [TesoreriaNominaSociedad(nomina=instance, sociedad=s) for s in dict.fromkeys(sociedades)]
+            )
+        return instance
 
 
 class TesoreriaContratoDocumentoSerializer(serializers.ModelSerializer):

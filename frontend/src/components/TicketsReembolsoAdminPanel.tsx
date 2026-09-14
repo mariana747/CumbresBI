@@ -27,18 +27,32 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tooltip,
   Typography,
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { CheckCircle2, Eye, ReceiptText as TicketIcon, Sparkles, Upload, X as CloseIcon, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Eye,
+  FileSpreadsheet,
+  HardDrive,
+  HelpCircle,
+  ReceiptText as TicketIcon,
+  Sparkles,
+  Upload,
+  X as CloseIcon,
+  XCircle,
+} from "lucide-react";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog, { MotorDocumentalContexto } from "@/components/MotorDocumentalDialog";
 import { SessionUser } from "@/lib/auth";
+import { elegirArchivoDrive, MIME_TYPES_COMPROBANTE } from "@/lib/googleDriveFilePicker";
 import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import {
   aprobarTicket,
+  exportarTicketsReembolsoSheets,
   urlVerFactura,
   urlVerTicket,
   CATEGORIA_GASTO_LABELS,
@@ -51,6 +65,7 @@ import {
   TesoreriaTicketReembolso,
 } from "@/lib/miCumbres";
 import { createFactura, TESORERIA_CAMPOS_CONFIRMABLES_NUEVA } from "@/lib/tesoreria";
+import { useExportarSheets } from "@/lib/useExportarSheets";
 
 // Revision de Tesoreria sobre los tickets de reembolso que suben los
 // empleados desde MiCumbres (27/Ago/2026, pantalla PROVISIONAL - ver
@@ -83,6 +98,15 @@ const ESTADO_LABEL: Record<TesoreriaTicketEstado, string> = {
   APROBADO: "Aprobado — falta facturar",
   VINCULADO: "Facturado",
   RECHAZADO: "Rechazado",
+};
+
+// Glosario de estados (14/Sep/2026, pendiente.md > Reembolsos) - mismo
+// criterio que el glosario de Solicitudes de Pago.
+const ESTADO_DESCRIPCION: Record<TesoreriaTicketEstado, string> = {
+  PENDIENTE: "Recién subido por el empleado, todavía nadie lo revisa.",
+  APROBADO: "Ya autorizado, falta subir/validar la factura real para facturarlo.",
+  VINCULADO: "Ya facturado y ligado a la factura real — falta el pago en Flujos.",
+  RECHAZADO: "No se autoriza, no se reembolsa.",
 };
 
 // snake_case (como vienen extracted_data/campos del Motor Documental,
@@ -124,6 +148,15 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  // Exportar a Google Sheets (14/Sep/2026, pendiente.md > Reembolsos
+  // "Exportar desde 'Ticket'") - mismo patron que Flujos/Solicitudes de
+  // Pago, ver lib/useExportarSheets.ts.
+  const {
+    exportando,
+    error: errorExportarSheets,
+    exportar: handleExportarSheets,
+  } = useExportarSheets((carpetaId) => exportarTicketsReembolsoSheets(search || undefined, carpetaId));
 
   // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas")
   // - la categoria vive en cada concepto del ticket, no en el ticket
@@ -214,6 +247,22 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
       await cargar();
     } catch (err) {
       setErrorDetalle(err instanceof Error ? err.message : "Error al subir la factura");
+    }
+  }
+
+  // Desde Drive (14/Sep/2026, "igual para subir el comprobante subir desde
+  // la pc o desde el drive, esto ya lo habíamos hecho antes") - mismo
+  // Picker que Conciliación Bancaria/Solicitudes de Pago/MiCumbres, ver
+  // lib/googleDriveFilePicker.ts.
+  const [errorPickerDrive, setErrorPickerDrive] = useState<string | null>(null);
+
+  async function handleElegirDesdeDrive() {
+    setErrorPickerDrive(null);
+    try {
+      const elegido = await elegirArchivoDrive(MIME_TYPES_COMPROBANTE, "Elige la factura");
+      if (elegido) await handleSubirFactura(elegido);
+    } catch (err) {
+      setErrorPickerDrive(err instanceof Error ? err.message : "No se pudo elegir el archivo de Drive.");
     }
   }
 
@@ -327,11 +376,28 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
           {error}
         </Alert>
       )}
+      {errorExportarSheets && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {errorExportarSheets}
+        </Alert>
+      )}
 
       <FiltrosBar
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Buscar por ID de ticket o descripción..."
+        actions={
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={exportando ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+            disabled={exportando}
+            onClick={handleExportarSheets}
+            sx={{ flexShrink: 0 }}
+          >
+            Exportar a Google Sheets
+          </Button>
+        }
       >
         <FormControl size="small" fullWidth>
           <InputLabel id="filtro-categoria-gasto-reembolsos-label">Categoría de gasto</InputLabel>
@@ -392,12 +458,12 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                     <Eye size={14} strokeWidth={1.5} />
                   </IconButton>
                 </Stack>
-                <Chip
-                  size="small"
-                  label={ESTADO_LABEL[t.estado]}
-                  color={ESTADO_COLOR[t.estado]}
-                  sx={{ alignSelf: "flex-start", mt: 0.5 }}
-                />
+                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
+                  <Chip size="small" label={ESTADO_LABEL[t.estado]} color={ESTADO_COLOR[t.estado]} />
+                  <Tooltip title={ESTADO_DESCRIPCION[t.estado]}>
+                    <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                  </Tooltip>
+                </Stack>
                 <Divider sx={{ my: 1 }} />
                 <Stack spacing={0.5}>
                   <Typography variant="body2">
@@ -442,7 +508,24 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                 <TableCell>Descripción</TableCell>
                 <TableCell>Monto</TableCell>
                 <TableCell>Fecha del gasto</TableCell>
-                <TableCell>Estado</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>Estado</span>
+                    <Tooltip
+                      title={
+                        <Stack spacing={0.5} sx={{ py: 0.5 }}>
+                          {(Object.keys(ESTADO_DESCRIPCION) as TesoreriaTicketEstado[]).map((e) => (
+                            <Typography key={e} variant="caption" component="div">
+                              <b>{ESTADO_LABEL[e]}</b> — {ESTADO_DESCRIPCION[e]}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      }
+                    >
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
+                </TableCell>
                 <TableCell align="center">Ticket</TableCell>
                 <TableCell>Factura</TableCell>
                 <TableCell align="right">Acciones</TableCell>
@@ -518,12 +601,21 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
             <DialogContent dividers>
               <Stack spacing={2}>
                 {errorDetalle && <Alert severity="error">{errorDetalle}</Alert>}
-                <Chip
-                  size="small"
-                  label={ESTADO_LABEL[ticketAbierto.estado]}
-                  color={ESTADO_COLOR[ticketAbierto.estado]}
-                  sx={{ alignSelf: "flex-start" }}
-                />
+                {errorPickerDrive && (
+                  <Alert severity="error" onClose={() => setErrorPickerDrive(null)}>
+                    {errorPickerDrive}
+                  </Alert>
+                )}
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <Chip
+                    size="small"
+                    label={ESTADO_LABEL[ticketAbierto.estado]}
+                    color={ESTADO_COLOR[ticketAbierto.estado]}
+                  />
+                  <Tooltip title={ESTADO_DESCRIPCION[ticketAbierto.estado]}>
+                    <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                  </Tooltip>
+                </Stack>
                 <Typography variant="body2">
                   <strong>Empleado:</strong> {nombreEmpleado(ticketAbierto.id_empleado)}
                 </Typography>
@@ -654,6 +746,14 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
                           if (archivo) handleSubirFactura(archivo);
                         }}
                       />
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      fullWidth={esMovil}
+                      startIcon={<HardDrive size={16} strokeWidth={1.5} />}
+                      onClick={handleElegirDesdeDrive}
+                    >
+                      Desde Drive
                     </Button>
 
                     {ticketAbierto.link_factura_pdf && (

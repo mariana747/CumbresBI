@@ -41,10 +41,10 @@ import {
   Banknote,
   Check,
   Copy,
-  Download,
   ExternalLink,
   Eye,
   FileCheck2,
+  FileSpreadsheet,
   HelpCircle,
   Link2,
   MoreVertical,
@@ -66,6 +66,7 @@ import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
+import { useExportarSheets } from "@/lib/useExportarSheets";
 import {
   TESORERIA_FLUJO_CAMPOS_CONFIRMABLES,
   TesoreriaComplementoPago,
@@ -81,6 +82,7 @@ import {
   confirmarConciliacionFlujo,
   createFlujo,
   createRecNomina,
+  exportarFlujosSheets,
   getContratoGenericoNomina,
   getContratoGenericoReembolsoPorSociedad,
   listComplementosPago,
@@ -94,7 +96,6 @@ import {
   registrarPagoFlujo,
   subirComprobanteFlujo,
   urlVerComprobanteFlujo,
-  urlExportarFlujosCsv,
   updateFlujo,
   vincularFactura,
 } from "@/lib/tesoreria";
@@ -531,6 +532,21 @@ function TesoreriaFlujosPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flujos]);
 
+  // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
+  // hook reusable en lib/useExportarSheets.ts.
+  const {
+    exportando,
+    error: errorExportarSheets,
+    exportar: handleExportarSheets,
+  } = useExportarSheets((carpetaId) =>
+    exportarFlujosSheets({
+      search: search || undefined,
+      contrato: filtroContrato || undefined,
+      sociedad: filtroEmpresa || undefined,
+      carpetaId,
+    })
+  );
+
   // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
   // del cliente: listFlujos no tiene parametro de fecha en el backend
   // todavia (solo ?search=/?contrato=, ver TesoreriaFlujoViewSet).
@@ -755,6 +771,8 @@ function TesoreriaFlujosPageContent() {
         </Alert>
       )}
 
+      {errorExportarSheets && <Alert severity="error" sx={{ mb: 3 }}>{errorExportarSheets}</Alert>}
+
       {avisoContraparteIA && (
         <Alert
           severity="warning"
@@ -829,20 +847,12 @@ function TesoreriaFlujosPageContent() {
             <Button
               size="small"
               variant="outlined"
-              startIcon={<Download size={14} strokeWidth={2} />}
-              onClick={() =>
-                window.open(
-                  urlExportarFlujosCsv({
-                    search: search || undefined,
-                    contrato: filtroContrato || undefined,
-                    sociedad: filtroEmpresa || undefined,
-                  }),
-                  "_blank"
-                )
-              }
+              startIcon={exportando ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={exportando}
+              onClick={handleExportarSheets}
               sx={{ flexShrink: 0 }}
             >
-              Exportar CSV
+              Exportar a Google Sheets
             </Button>
             {puedeCrear && (
               <Button
@@ -1279,7 +1289,13 @@ function TesoreriaFlujosPageContent() {
                     if (!idNomina) return;
                     const nomina = nominas.find((n) => n.id_nomina === idNomina);
                     try {
-                      const { id_contrato } = await getContratoGenericoNomina(idNomina);
+                      // Solo se puede autocompletar sin ambiguedad si la
+                      // nomina tiene una unica sociedad (14/Sep/2026,
+                      // "pueden estar contratados por dos sociedades") - con
+                      // varias, el backend rechaza sin `?sociedad=` y el
+                      // catch de abajo deja que el usuario elija a mano.
+                      const sociedadUnica = nomina?.sociedades.length === 1 ? nomina.sociedades[0] : undefined;
+                      const { id_contrato } = await getContratoGenericoNomina(idNomina, sociedadUnica);
                       setForm((prev) => ({
                         ...prev,
                         contrato: prev.contrato || id_contrato,

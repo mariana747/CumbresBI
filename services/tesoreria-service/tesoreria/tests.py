@@ -40,6 +40,7 @@ from .models import (
     TesoreriaFlujo,
     TesoreriaMovimientoBancario,
     TesoreriaNomina,
+    TesoreriaNominaSociedad,
     TesoreriaNotaCredito,
     TesoreriaContratoDocumento,
     TesoreriaTicketProveedor,
@@ -346,9 +347,10 @@ class TesoreriaNominaTests(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.scope_crear = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        self.scope_editar = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
 
     def _crear_nomina(self, sociedad, scope=None, centro=None, tipo="QUINCENAL"):
-        body = {"tipo": tipo, "sociedad": sociedad, "serie": "Q1 2026"}
+        body = {"tipo": tipo, "sociedades": [sociedad], "serie": "Q1 2026"}
         if centro:
             body["centro"] = centro
         request = self.factory.post("/api/nominas/", body, format="json")
@@ -377,10 +379,36 @@ class TesoreriaNominaTests(TestCase):
         view = TesoreriaNominaViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
+        self.assertEqual(response.data[0]["sociedades"], [RFC_TIZARA])
 
     def test_status_default_es_activo(self):
         response = self._crear_nomina(RFC_TIZARA)
+        self.assertEqual(response.data["status"], "ACTIVO")
+
+    def _cerrar(self, id_nomina):
+        request = self.factory.patch("/api/nominas/", {"status": "CERRADA"}, format="json")
+        request.effective_scope = self.scope_editar
+        return TesoreriaNominaViewSet.as_view({"patch": "partial_update"})(request, pk=id_nomina)
+
+    def test_nomina_cerrada_no_se_puede_editar(self):
+        # 14/Sep/2026, "los estados aprobados no se podran hacer cambios" -
+        # cierre real de la Nomina (antes CERRADA era solo etiqueta).
+        creada = self._crear_nomina(RFC_TIZARA)
+        self._cerrar(creada.data["id_nomina"])
+
+        request = self.factory.patch("/api/nominas/", {"serie": "Q2 2026"}, format="json")
+        request.effective_scope = self.scope_editar
+        response = TesoreriaNominaViewSet.as_view({"patch": "partial_update"})(request, pk=creada.data["id_nomina"])
+        self.assertEqual(response.status_code, 400)
+
+    def test_nomina_cerrada_se_puede_reabrir(self):
+        creada = self._crear_nomina(RFC_TIZARA)
+        self._cerrar(creada.data["id_nomina"])
+
+        request = self.factory.patch("/api/nominas/", {"status": "ACTIVO"}, format="json")
+        request.effective_scope = self.scope_editar
+        response = TesoreriaNominaViewSet.as_view({"patch": "partial_update"})(request, pk=creada.data["id_nomina"])
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], "ACTIVO")
 
 
@@ -636,9 +664,48 @@ class TesoreriaFlujoTests(TestCase):
         self.assertEqual(response2.status_code, 200)
         self.assertTrue(response2.data["autorizacion"])
         self.assertEqual(response2.data["validacion_estado"], TesoreriaFlujo.VALIDACION_APROBADA)
-        # autorizado_por sale del JWT (identity_user_id), no de lo que
-        # mande el body - aqui no se manda nada y aun asi queda "u001".
-        self.assertEqual(response2.data["autorizado_por"], "u001")
+
+    def test_no_se_puede_crear_ni_editar_flujo_de_nomina_cerrada(self):
+        # 14/Sep/2026, "los estados aprobados no se podran hacer cambios" -
+        # cierre real de la Nomina.
+        nomina = TesoreriaNomina.objects.create(
+            id_nomina="NOM-CERRADA1", tipo=TesoreriaNomina.TIPO_QUINCENAL, serie="Q1 2026",
+        )
+        TesoreriaNominaSociedad.objects.create(nomina=nomina, sociedad=RFC_TIZARA)
+        request = self.factory.post(
+            "/api/flujos/",
+            {
+                "contrato": self.contrato.id_contrato, "cuenta": self.cuenta.id_cuenta_bancaria,
+                "total_mxp": "1000.00", "periodo_nomina": nomina.id_nomina,
+            },
+            format="json",
+        )
+        request.effective_scope = self.scope_crear
+        creado = TesoreriaFlujoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(creado.status_code, 201)
+        flujo_id = creado.data["id_flujo"]
+
+        nomina.status = TesoreriaNomina.STATUS_CERRADA
+        nomina.save(update_fields=["status"])
+
+        # Ya no se puede editar el flujo existente.
+        request_editar = self.factory.patch(f"/api/flujos/{flujo_id}/", {"total_mxp": "2000.00"}, format="json")
+        request_editar.effective_scope = self.scope_editar
+        response_editar = TesoreriaFlujoViewSet.as_view({"patch": "partial_update"})(request_editar, pk=flujo_id)
+        self.assertEqual(response_editar.status_code, 400)
+
+        # Ni crear uno nuevo contra esa misma nomina.
+        request_nuevo = self.factory.post(
+            "/api/flujos/",
+            {
+                "contrato": self.contrato.id_contrato, "cuenta": self.cuenta.id_cuenta_bancaria,
+                "total_mxp": "500.00", "periodo_nomina": nomina.id_nomina,
+            },
+            format="json",
+        )
+        request_nuevo.effective_scope = self.scope_crear
+        response_nuevo = TesoreriaFlujoViewSet.as_view({"post": "create"})(request_nuevo)
+        self.assertEqual(response_nuevo.status_code, 400)
 
     def test_ciclo_completo_aprobar_y_registrar_pago(self):
         creado = self._crear_flujo()
@@ -947,6 +1014,120 @@ class TesoreriaConciliacionCfdiTests(TestCase):
         response = self._conciliacion_csv(requiere_factura="false")
         contenido = response.content.decode("utf-8")
         self.assertIn("FLJ-CONC-14", contenido)
+
+
+class TesoreriaConciliacionNominaTests(TestCase):
+    """Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente pendiente
+    tras el cierre real de Nomina) - clasificacion CON_RECIBO/SIN_RECIBO +
+    reconocido/por_reconocer, mismo patron que TesoreriaConciliacionCfdiTests
+    pero contra TesoreriaRecNomina en vez de factura/complemento."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
+        self.banco = TesoreriaBanco.objects.create(id_banxico="00005", banco="Banorte", alias="BNT")
+        self.cuenta = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000000077", alias="Cuenta nomina", apertura="2026-01-01"
+        )
+        self.nomina = TesoreriaNomina.objects.create(
+            id_nomina="NOM-CONC1", tipo=TesoreriaNomina.TIPO_QUINCENAL, serie="Q1 2026"
+        )
+        TesoreriaNominaSociedad.objects.create(nomina=self.nomina, sociedad=RFC_TIZARA)
+        self.contrato_nomina = contrato_generico_nomina(RFC_TIZARA)
+        self.hoy = timezone.localdate()
+
+    def _conciliacion(self, **params):
+        request = self.factory.get("/api/flujos/conciliacion_nomina/", params)
+        request.effective_scope = self.scope
+        return TesoreriaFlujoViewSet.as_view({"get": "conciliacion_nomina"})(request)
+
+    def test_flujo_de_nomina_sin_recibo(self):
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-NOM-1",
+            contrato=self.contrato_nomina,
+            cuenta=self.cuenta,
+            total_mxp="1000.00",
+            fecha_efectiva=self.hoy,
+            periodo_nomina=self.nomina,
+        )
+        response = self._conciliacion()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["sin_recibo"]), 1)
+        self.assertEqual(len(response.data["con_recibo"]), 0)
+
+    def test_flujo_de_nomina_con_recibo_cuadrado(self):
+        recibo = TesoreriaRecNomina.objects.create(timbre_uuid="uuid-conc-nomina-1", total=Decimal("1000.00"))
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-NOM-2",
+            contrato=self.contrato_nomina,
+            cuenta=self.cuenta,
+            total_mxp="1000.00",
+            fecha_efectiva=self.hoy,
+            periodo_nomina=self.nomina,
+            nomina=recibo,
+        )
+        response = self._conciliacion()
+        self.assertEqual(len(response.data["con_recibo"]), 1)
+        fila = response.data["con_recibo"][0]
+        self.assertEqual(fila["reconocido"], Decimal("1000.00"))
+        self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
+
+    def test_flujo_de_nomina_con_recibo_diferente_marca_por_reconocer(self):
+        recibo = TesoreriaRecNomina.objects.create(timbre_uuid="uuid-conc-nomina-2", total=Decimal("950.00"))
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-NOM-3",
+            contrato=self.contrato_nomina,
+            cuenta=self.cuenta,
+            total_mxp="1000.00",
+            fecha_efectiva=self.hoy,
+            periodo_nomina=self.nomina,
+            nomina=recibo,
+        )
+        response = self._conciliacion()
+        fila = response.data["con_recibo"][0]
+        self.assertEqual(fila["por_reconocer"], Decimal("-50.00"))
+
+    def test_flujo_sin_periodo_nomina_queda_fuera(self):
+        contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Proveedor ajeno a nomina", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="x@x.com"
+        )
+        contrato = TesoreriaContrato.objects.create(
+            id_contrato=f"{RFC_TIZARA}-{contraparte.id_contraparte}-NONOM",
+            sociedad=RFC_TIZARA,
+            contraparte=contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-NONOM-1", contrato=contrato, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+        )
+        response = self._conciliacion()
+        self.assertEqual(len(response.data["con_recibo"]), 0)
+        self.assertEqual(len(response.data["sin_recibo"]), 0)
+
+    def test_filtro_por_nomina(self):
+        otra_nomina = TesoreriaNomina.objects.create(
+            id_nomina="NOM-CONC2", tipo=TesoreriaNomina.TIPO_QUINCENAL, serie="Q2 2026"
+        )
+        TesoreriaNominaSociedad.objects.create(nomina=otra_nomina, sociedad=RFC_TIZARA)
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-NOM-4",
+            contrato=self.contrato_nomina,
+            cuenta=self.cuenta,
+            total_mxp="100.00",
+            fecha_efectiva=self.hoy,
+            periodo_nomina=self.nomina,
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-NOM-5",
+            contrato=self.contrato_nomina,
+            cuenta=self.cuenta,
+            total_mxp="100.00",
+            fecha_efectiva=self.hoy,
+            periodo_nomina=otra_nomina,
+        )
+        response = self._conciliacion(nomina=self.nomina.id_nomina)
+        ids = [f["id_flujo"] for f in response.data["sin_recibo"]]
+        self.assertEqual(ids, ["FLJ-NOM-4"])
 
 
 class TesoreriaFlujoRecordatorioTests(TestCase):
@@ -2088,11 +2269,13 @@ class ReporteDiarioSaldosTests(TestCase):
         # como cualquier otro (misma cuenta/fecha_efectiva), esto solo lo hace
         # visible: nomina_tipo por transaccion + consolidado del dia.
         nomina_q = TesoreriaNomina.objects.create(
-            id_nomina="NOM-Q1", tipo=TesoreriaNomina.TIPO_QUINCENAL, sociedad=RFC_TIZARA, serie="Q1"
+            id_nomina="NOM-Q1", tipo=TesoreriaNomina.TIPO_QUINCENAL, serie="Q1"
         )
+        TesoreriaNominaSociedad.objects.create(nomina=nomina_q, sociedad=RFC_TIZARA)
         nomina_s = TesoreriaNomina.objects.create(
-            id_nomina="NOM-S1", tipo=TesoreriaNomina.TIPO_SEMANAL, sociedad=RFC_TIZARA, serie="S1"
+            id_nomina="NOM-S1", tipo=TesoreriaNomina.TIPO_SEMANAL, serie="S1"
         )
+        TesoreriaNominaSociedad.objects.create(nomina=nomina_s, sociedad=RFC_TIZARA)
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-NOM-Q1", contrato=self.contrato, cuenta=self.cuenta,
             fecha_efectiva="2026-08-25", total_mxp="1000.00", periodo_nomina=nomina_q,
@@ -2112,6 +2295,22 @@ class ReporteDiarioSaldosTests(TestCase):
         self.assertIsNone(transacciones["FLJ-NORMAL"])
         self.assertEqual(reporte["consolidado"]["nomina_total_quincenal"], Decimal("1000.00"))
         self.assertEqual(reporte["consolidado"]["nomina_total_semanal"], Decimal("300.00"))
+
+    def test_incluye_cambio_pct(self):
+        # 11/Sep/2026, cambio (%) por cuenta, ademas del comentario libre
+        # (descripcion_pago) por transaccion. El segundo corte (dia - 1) se
+        # quito el 14/Sep/2026 ("se quitara el dia anterior tanto en la ui
+        # y el correo").
+        TesoreriaSaldo.objects.create(id="s9", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
+        TesoreriaSaldo.objects.create(id="s10", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10500.00")
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-000003", contrato=self.contrato, cuenta=self.cuenta,
+            fecha_efectiva="2026-08-25", total_mxp="500.00", descripcion_pago="PARA IMPUESTOS",
+        )
+        reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
+        fila_hoy = reporte["sociedades"][0]["cuentas"][0]
+        self.assertEqual(fila_hoy["cambio_pct"], Decimal("5"))
+        self.assertEqual(fila_hoy["transacciones"][0]["descripcion_pago"], "PARA IMPUESTOS")
 
     def test_filtra_solo_cuentas_activas_de_la_sociedad_elegida(self):
         TesoreriaCuenta.objects.create(
@@ -3206,6 +3405,50 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    # Exportar a Google Sheets (14/Sep/2026, pendiente.md > Reembolsos
+    # "Exportar desde 'Ticket'") - mismo patron de mocks que
+    # TesoreriaSolicitudPagoCrudTests.
+    def test_exportar_sheets_sin_permiso_da_403(self):
+        request = self.factory.post("/api/tickets-reembolso/exportar_sheets/", {}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
+        response = TesoreriaTicketReembolsoViewSet.as_view({"post": "exportar_sheets"})(request)
+        self.assertEqual(response.status_code, 403)
+
+    @patch("tesoreria.views.google_sheets_utils.obtener_access_token")
+    def test_exportar_sheets_sin_conectar_da_409_con_url_autorizacion(self, mock_token):
+        from tesoreria import google_sheets_utils
+
+        creado = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
+        creado.effective_scope = self.scope_empleado
+        TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
+
+        mock_token.side_effect = google_sheets_utils.GoogleSheetsNoConectado()
+        with patch("tesoreria.views.google_sheets_utils.url_autorizacion", return_value="https://accounts.google.com/x"):
+            request = self.factory.post("/api/tickets-reembolso/exportar_sheets/", {}, format="json")
+            request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+            response = TesoreriaTicketReembolsoViewSet.as_view({"post": "exportar_sheets"})(request)
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.data["conectado"])
+        self.assertEqual(response.data["url_autorizacion"], "https://accounts.google.com/x")
+
+    @patch("tesoreria.views.google_sheets_utils.crear_hoja", return_value="https://docs.google.com/spreadsheets/x")
+    @patch("tesoreria.views.google_sheets_utils.obtener_access_token", return_value="token-x")
+    def test_exportar_sheets_conectado_da_200_con_url(self, mock_token, mock_crear_hoja):
+        creado = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY})
+        creado.effective_scope = self.scope_empleado
+        TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(creado)
+
+        request = self.factory.post("/api/tickets-reembolso/exportar_sheets/", {}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.editar",))
+        response = TesoreriaTicketReembolsoViewSet.as_view({"post": "exportar_sheets"})(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["conectado"])
+        self.assertEqual(response.data["url"], "https://docs.google.com/spreadsheets/x")
+        # Una fila por concepto (el ticket de arriba trae UN_CONCEPTO).
+        filas = mock_crear_hoja.call_args.args[3]
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0][7], "Taxi a obra")
+
 
 class TesoreriaFechaLimiteReembolsoTests(TestCase):
     """Ventana mensual de reembolsos (minuta 03/Sep/2026, regla reemplazada
@@ -3421,6 +3664,54 @@ class TesoreriaSolicitudPagoCrudTests(TestCase):
         response = TesoreriaSolicitudPagoViewSet.as_view({"get": "list"})(request)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["proyecto"], "P01")
+
+    # Exportar a Google Sheets (14/Sep/2026, pendiente.md > Solicitudes de
+    # Pago "Pasar google sheet") - mismo patron de mocks que el resto de
+    # exportar_sheets (sin conectado -> 409 con url de autorizacion;
+    # conectado -> 200 con la url de la hoja creada).
+    @patch("tesoreria.views.google_sheets_utils.obtener_access_token")
+    def test_exportar_sheets_sin_conectar_da_409_con_url_autorizacion(self, mock_token):
+        from tesoreria import google_sheets_utils
+
+        self._crear()
+        mock_token.side_effect = google_sheets_utils.GoogleSheetsNoConectado()
+        with patch("tesoreria.views.google_sheets_utils.url_autorizacion", return_value="https://accounts.google.com/x"):
+            request = self.factory.post("/api/solicitudes-pago/exportar_sheets/", {}, format="json")
+            request.effective_scope = self.scope_aprobador
+            response = TesoreriaSolicitudPagoViewSet.as_view({"post": "exportar_sheets"})(request)
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.data["conectado"])
+        self.assertEqual(response.data["url_autorizacion"], "https://accounts.google.com/x")
+
+    @patch("tesoreria.views.google_sheets_utils.crear_hoja", return_value="https://docs.google.com/spreadsheets/x")
+    @patch("tesoreria.views.google_sheets_utils.obtener_access_token", return_value="token-x")
+    def test_exportar_sheets_conectado_da_200_con_url(self, mock_token, mock_crear_hoja):
+        self._crear()
+        request = self.factory.post("/api/solicitudes-pago/exportar_sheets/", {}, format="json")
+        request.effective_scope = self.scope_aprobador
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "exportar_sheets"})(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["conectado"])
+        self.assertEqual(response.data["url"], "https://docs.google.com/spreadsheets/x")
+        mock_crear_hoja.assert_called_once()
+
+    # 14/Sep/2026, "si esta rechazado no se debe poder subir comprobante" -
+    # una solicitud RECHAZADA no se paga, no tiene sentido seguir subiendo.
+    def test_subir_comprobante_a_solicitud_rechazada_da_400(self):
+        creado = self._crear()
+        id_solicitud = creado.data["id_solicitud"]
+        rechazar_request = self.factory.post(f"/api/solicitudes-pago/{id_solicitud}/rechazar/", {}, format="json")
+        rechazar_request.effective_scope = self.scope_aprobador
+        TesoreriaSolicitudPagoViewSet.as_view({"post": "rechazar"})(rechazar_request, pk=id_solicitud)
+
+        request = self.factory.post(
+            f"/api/solicitudes-pago/{id_solicitud}/subir_comprobante/",
+            {"file": SimpleUploadedFile("comprobante.png", b"contenido-fake", content_type="image/png")},
+            format="multipart",
+        )
+        request.effective_scope = self.scope_solicitante
+        response = TesoreriaSolicitudPagoViewSet.as_view({"post": "subir_comprobante"})(request, pk=id_solicitud)
+        self.assertEqual(response.status_code, 400)
 
 
 class TesoreriaContratoDocumentoScopeTests(TestCase):

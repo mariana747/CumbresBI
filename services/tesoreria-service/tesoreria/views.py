@@ -24,7 +24,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet, ViewSet
 
-from . import recaptcha
+from . import google_sheets_utils, recaptcha
 from .audit_utils import emitir_evento_auditoria
 from .mail_utils import (
     enviar_correo_aviso_saldo_ppd,
@@ -36,6 +36,7 @@ from .mail_utils import (
 )
 from .reportes import (
     calcular_conciliacion_cfdi,
+    calcular_conciliacion_nomina,
     calcular_reporte_conciliacion,
     calcular_reporte_diario,
     sugerir_cfdi_en_lote,
@@ -531,8 +532,16 @@ class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     serializer_class = TesoreriaNominaSerializer
 
     def get_queryset(self):
-        queryset = TesoreriaNomina.objects.for_scope(self.request.effective_scope).order_by("-created_at")
-        for campo in ("sociedad", "proyecto", "centro", "tipo"):
+        # .distinct() (14/Sep/2026, "pueden estar contratados por dos
+        # sociedades") - for_scope() ahora hace join contra
+        # TesoreriaNominaSociedad (SCOPE_FIELD_SOCIEDAD =
+        # "sociedades__sociedad"), que duplicaria filas si 2+ sociedades de
+        # la misma Nomina caen dentro del alcance del usuario a la vez.
+        queryset = TesoreriaNomina.objects.for_scope(self.request.effective_scope).order_by("-created_at").distinct()
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(sociedades__sociedad=sociedad)
+        for campo in ("proyecto", "centro", "tipo"):
             valor = self.request.query_params.get(campo)
             if valor:
                 queryset = queryset.filter(**{campo: valor})
@@ -545,14 +554,46 @@ class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         consecutivo = TesoreriaNomina.objects.count() + 1
         serializer.save(id_nomina=f"NOM-{consecutivo:06d}")
 
+    def perform_update(self, serializer):
+        # Cerrada = ya no se puede editar (14/Sep/2026, "los estados
+        # aprobados no se podran hacer cambios") - la unica edicion
+        # permitida sobre una nomina cerrada es reabrirla (mover status de
+        # vuelta a ACTIVO), para no dejarla trabada para siempre.
+        instancia = serializer.instance
+        if instancia.status == TesoreriaNomina.STATUS_CERRADA:
+            reabriendo = serializer.validated_data.get("status") == TesoreriaNomina.STATUS_ACTIVO
+            otros_campos = set(serializer.validated_data) - {"status"}
+            if not reabriendo or otros_campos:
+                raise ValidationError(
+                    {"status": ["Esta nómina está cerrada, no se pueden hacer cambios (solo reabrirla)."]}
+                )
+        serializer.save()
+
     @action(detail=True, methods=["get"])
     def contrato_generico(self, request, pk=None):
         """Devuelve (creandolo si hace falta) el contrato generico
         GEN-NOMINA-<sociedad> de esta nomina - el frontend lo usa para
         preseleccionar Contrato al dar de alta un Flujo ligado a esta
-        nomina (ver contrato_generico_nomina en models.py)."""
+        nomina (ver contrato_generico_nomina en models.py).
+
+        `?sociedad=` (14/Sep/2026, "pueden estar contratados por dos
+        sociedades") - obligatorio si la nomina tiene mas de una sociedad
+        (cada empleado/Puesto es de UNA sociedad especifica, el Flujo debe
+        usar el contrato generico de esa, no uno cualquiera); si solo tiene
+        una, se usa esa sin necesidad de mandarla."""
         nomina = self.get_object()
-        contrato = contrato_generico_nomina(nomina.sociedad)
+        sociedades = list(nomina.sociedades.values_list("sociedad", flat=True))
+        sociedad = request.query_params.get("sociedad")
+        if not sociedad:
+            if len(sociedades) != 1:
+                return Response(
+                    {"sociedad": ["Esta nómina tiene varias sociedades, especifica '?sociedad=' para elegir cuál."]},
+                    status=400,
+                )
+            sociedad = sociedades[0]
+        elif sociedad not in sociedades:
+            return Response({"sociedad": ["Esa sociedad no pertenece a esta nómina."]}, status=400)
+        contrato = contrato_generico_nomina(sociedad)
         return Response({"id_contrato": contrato.id_contrato})
 
 
@@ -942,6 +983,55 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             )
         return response
 
+    @action(detail=False, methods=["post"])
+    def exportar_sheets(self, request):
+        """Exportar a Google Sheets, al Drive PERSONAL del usuario
+        (14/Sep/2026, "ya no se descargara ni CSV ni Excel, se guardara en
+        su drive personal") - mismos filtros/columnas que exportar_csv de
+        arriba (se deja sin borrar por compatibilidad, el frontend deja de
+        usarlo). Si el usuario no ha conectado su cuenta de Google
+        (ver iam-service/iam/google_personal_views.py), regresa 409 con la
+        url de autorizacion para que el frontend redirija - "la IA
+        propone, el humano aprueba" no aplica aqui pero el criterio de "el
+        usuario ve claro que falta un paso" si."""
+        queryset = self.filter_queryset(self.get_queryset())
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        encabezados = [
+            "ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP",
+            "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría",
+        ]
+        filas = [
+            [
+                f.id_flujo,
+                f.contrato_id or "",
+                f.cuenta_id or "",
+                f.concepto or "",
+                str(f.total_mxp) if f.total_mxp is not None else "",
+                f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
+                f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
+                "Sí" if f.pagado else "No",
+                f.categoria_gasto or "",
+            ]
+            for f in queryset
+        ]
+        titulo = f"Flujos CumbresBI — {timezone.now().date().isoformat()}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
+
     @action(detail=False, methods=["get"])
     def conciliacion(self, request):
         """Conciliacion de Facturas (10/Sep/2026, notas de reunion) - base
@@ -968,6 +1058,19 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             )
 
         return Response(calcular_conciliacion_cfdi(queryset))
+
+    @action(detail=False, methods=["get"])
+    def conciliacion_nomina(self, request):
+        """Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente
+        pendiente tras el cierre real de Nomina) - mismo patron
+        reconocido/por_reconocer que conciliacion() de arriba, acotada a
+        Flujos de nomina (periodo_nomina no nulo). Reusa los filtros de
+        get_queryset() (?sociedad=, ?nomina=, ?id_empleado=) + ?desde=/
+        ?hasta= (mismo default de mes corriente que conciliacion())."""
+        queryset = _aplicar_filtro_fecha_conciliacion(
+            request, self.filter_queryset(self.get_queryset()).filter(periodo_nomina__isnull=False)
+        )
+        return Response(calcular_conciliacion_nomina(queryset))
 
     @action(detail=False, methods=["get"])
     def conciliacion_csv(self, request):
@@ -1022,14 +1125,104 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 )
         return response
 
+    @action(detail=False, methods=["post"])
+    def conciliacion_sheets(self, request):
+        """Exportar a Google Sheets, al Drive PERSONAL del usuario
+        (14/Sep/2026, reemplaza conciliacion_csv - misma clasificacion de
+        arriba, doc completa del flujo de conexion en
+        TesoreriaFlujoViewSet.exportar_sheets)."""
+        queryset = _aplicar_filtro_fecha_conciliacion(request, self.filter_queryset(self.get_queryset()))
+
+        requiere_factura = request.query_params.get("requiere_factura")
+        if requiere_factura is not None:
+            queryset = queryset.filter(contrato__requiere_factura=(requiere_factura.lower() == "true"))
+
+        tipo_comprobante = request.query_params.get("tipo_comprobante")
+        if tipo_comprobante:
+            queryset = queryset.filter(
+                Q(factura__comprobante_tipo_de_comprobante=tipo_comprobante)
+                | Q(complemento__tipo_de_comprobante=tipo_comprobante)
+            )
+
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        resultado = calcular_conciliacion_cfdi(queryset)
+        encabezados = [
+            "Clasificación", "ID Flujo", "Contrato", "Proveedor", "Concepto", "Fecha efectiva",
+            "Total del pago", "Factura", "Complemento", "Importe", "IVA", "Total factura",
+            "Reconocido", "Por reconocer",
+        ]
+        etiquetas = {"con_cfdi": "Ligado a CFDI", "sin_cfdi": "Sin CFDI", "no_requiere": "No requiere CFDI"}
+        filas = [
+            [
+                etiqueta,
+                fila["id_flujo"],
+                fila["contrato"] or "",
+                fila["contraparte_nombre"] or "",
+                fila["concepto"] or "",
+                str(fila["fecha_efectiva"]) if fila["fecha_efectiva"] else "",
+                str(fila["total_mxp"]) if fila["total_mxp"] is not None else "",
+                fila["factura_folio"] or "",
+                fila["complemento_folio"] or "",
+                str(fila["factura_subtotal"]) if fila["factura_subtotal"] is not None else "",
+                str(fila["factura_iva"]) if fila["factura_iva"] is not None else "",
+                str(fila["factura_total"]) if fila["factura_total"] is not None else "",
+                str(fila.get("reconocido")) if fila.get("reconocido") is not None else "",
+                str(fila.get("por_reconocer")) if fila.get("por_reconocer") is not None else "",
+            ]
+            for clave, etiqueta in etiquetas.items()
+            for fila in resultado[clave]
+        ]
+        titulo = f"Conciliación de Facturas CumbresBI — {timezone.now().date().isoformat()}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
+
+    def _validar_nomina_editable(self, periodo_nomina):
+        """Nomina cerrada = sus Flujos ya no se pueden crear, editar ni
+        borrar (14/Sep/2026, "los estados aprobados no se podran hacer
+        cambios" - cierre real de la Nomina, ver pendiente.md > Nominas
+        Fase 2). Antes `status=CERRADA` era solo una etiqueta, no bloqueaba
+        nada."""
+        if periodo_nomina is not None and periodo_nomina.status == TesoreriaNomina.STATUS_CERRADA:
+            raise ValidationError(
+                {"periodo_nomina": ["Esta nómina está cerrada, no se pueden crear ni editar sus Flujos."]}
+            )
+
     def perform_create(self, serializer):
         # id_flujo = "FLJ-{consecutivo global de 6 digitos}" (ver ejemplo
         # real en piezas-de-tesoreria.html: "FLJ-000452") - consecutivo
         # global, no por contrato/sociedad como id_contrato, porque aqui el
         # ERD original (tesoreria_flujos.id_flujo) no trae de por si una
         # composicion legible con otro campo de negocio.
+        self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
         consecutivo = TesoreriaFlujo.objects.count() + 1
         serializer.save(id_flujo=f"FLJ-{consecutivo:06d}")
+
+    def perform_update(self, serializer):
+        # El estado "cerrado" vive en la Nomina, no en el Flujo - se valida
+        # tanto la nomina que ya tenia como la que el request intente poner
+        # (no se puede editar un flujo de una nomina cerrada, ni moverlo a
+        # una que ya este cerrada).
+        self._validar_nomina_editable(serializer.instance.periodo_nomina)
+        self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._validar_nomina_editable(instance.periodo_nomina)
+        instance.delete()
 
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
@@ -1439,7 +1632,7 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             return [_EsEmpleadoAutenticado()]
         if self.action in (
             "update", "partial_update", "destroy", "aprobar", "rechazar",
-            "subir_factura", "vincular_factura", "vincular_flujo",
+            "subir_factura", "vincular_factura", "vincular_flujo", "exportar_sheets",
         ):
             return [require_permission("tesoreria.editar")()]
         return super().get_permissions()
@@ -1489,6 +1682,58 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         if categoria_gasto:
             queryset = queryset.filter(conceptos__categoria_gasto=categoria_gasto).distinct()
         return queryset
+
+    @action(detail=False, methods=["post"])
+    def exportar_sheets(self, request):
+        """Exportar a Google Sheets, al Drive PERSONAL del usuario
+        (14/Sep/2026, pendiente.md > Reembolsos "Exportar desde 'Ticket'")
+        - mismo patron que TesoreriaFlujoViewSet.exportar_sheets. Una fila
+        por CONCEPTO (no por ticket) - un ticket puede tener varios
+        conceptos con categoria/monto distintos, aplanarlos es lo que
+        tiene sentido para un reporte."""
+        queryset = self.filter_queryset(self.get_queryset()).prefetch_related("conceptos")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        encabezados = [
+            "ID Ticket", "Empleado", "Sociedad", "Estado", "Fecha del gasto",
+            "Monto total", "Moneda", "Concepto", "Monto del concepto", "Categoría",
+        ]
+        filas = []
+        for t in queryset:
+            conceptos = list(t.conceptos.all())
+            monto_total = sum((c.monto for c in conceptos), start=Decimal("0"))
+            fila_base = [
+                t.id_ticket, t.id_empleado, t.sociedad or "", t.get_estado_display(),
+                t.fecha_gasto.isoformat() if t.fecha_gasto else "", str(monto_total), t.moneda or "",
+            ]
+            if not conceptos:
+                filas.append(fila_base + ["", "", ""])
+                continue
+            for c in conceptos:
+                filas.append(
+                    fila_base
+                    + [
+                        c.descripcion or "",
+                        str(c.monto) if c.monto is not None else "",
+                        c.get_categoria_gasto_display() if c.categoria_gasto else "",
+                    ]
+                )
+        titulo = f"Tickets de Reembolso CumbresBI — {timezone.now().date().isoformat()}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
 
     def perform_create(self, serializer):
         # Ventana mensual de reembolso (ver reembolso_utils, regla
@@ -1844,8 +2089,13 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
         """Comprobante OPCIONAL (recibo oficial, linea de captura pagada, o
         CFDI si la dependencia lo emite - ver docstring del modelo). Mismo
         patron de subida que TesoreriaTicketReembolsoViewSet.subir_ticket,
-        pero sin exigir estado ni bloquear el flujo si nunca se sube."""
+        pero sin exigir estado ni bloquear el flujo si nunca se sube.
+
+        14/Sep/2026: si ya se rechazo, no tiene sentido seguir subiendo
+        comprobante - una solicitud RECHAZADA no se paga."""
         solicitud = self.get_object()
+        if solicitud.estado == TesoreriaSolicitudPago.ESTADO_RECHAZADO:
+            return Response({"detail": "No se puede subir comprobante a una solicitud rechazada."}, status=400)
         archivo = request.FILES.get("file")
         if not archivo:
             return Response({"detail": "Campo 'file' requerido"}, status=400)
@@ -1884,6 +2134,50 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
             nombre_archivo=f"comprobante-{solicitud.id_solicitud}",
             carpeta=f"Tesoreria/SolicitudesPago/{solicitud.id_solicitud}",
         )
+
+    @action(detail=False, methods=["post"])
+    def exportar_sheets(self, request):
+        """Exportar a Google Sheets, al Drive PERSONAL del usuario
+        (14/Sep/2026, pendiente.md > Solicitudes de Pago "Pasar google
+        sheet") - mismo patron que TesoreriaFlujoViewSet.exportar_sheets."""
+        queryset = self.filter_queryset(self.get_queryset())
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        encabezados = [
+            "ID Solicitud", "Proyecto", "Sociedad", "Tipo", "Descripción",
+            "Monto", "Moneda", "Estado", "Solicitado por", "Categoría",
+        ]
+        filas = [
+            [
+                s.id_solicitud,
+                s.proyecto or "",
+                s.sociedad or "",
+                s.get_tipo_display(),
+                s.descripcion or "",
+                str(s.monto) if s.monto is not None else "",
+                s.moneda or "",
+                s.get_estado_display(),
+                s.solicitado_por or "",
+                s.categoria_gasto or "",
+            ]
+            for s in queryset
+        ]
+        titulo = f"Solicitudes de Pago CumbresBI — {timezone.now().date().isoformat()}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
 
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
@@ -2567,6 +2861,46 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
                 ]
             )
         return response
+
+    @action(detail=False, methods=["post"])
+    def exportar_sheets(self, request):
+        """Exportar a Google Sheets, al Drive PERSONAL del usuario
+        (14/Sep/2026, reemplaza exportar_csv - ver mismo endpoint en
+        TesoreriaFlujoViewSet, doc completa ahi)."""
+        queryset = self.filter_queryset(self.get_queryset())
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        encabezados = ["UUID", "Folio", "Emisor", "RFC Emisor", "Receptor", "Fecha", "Total", "Estado", "Categoría"]
+        filas = [
+            [
+                f.timbre_uuid,
+                f"{f.comprobante_serie or ''}{f.comprobante_folio or ''}",
+                f.emisor_nombre or "",
+                f.emisor_rfc or "",
+                f.receptor_nombre or "",
+                f.comprobante_fecha.strftime("%Y-%m-%d") if f.comprobante_fecha else "",
+                str(f.comprobante_total) if f.comprobante_total is not None else "",
+                f.estado or "",
+                f.categoria_gasto or "",
+            ]
+            for f in queryset
+        ]
+        titulo = f"Facturas CumbresBI — {timezone.now().date().isoformat()}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
 
     @staticmethod
     def _carpeta_documento(factura, tipo):
@@ -3346,7 +3680,9 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
     def get_permissions(self):
         if self.action == "importar":
             return [require_permission("tesoreria.crear")()]
-        if self.action in ("sugerencias", "conciliar_automatico", "reporte_conciliacion", "crear_flujo"):
+        if self.action in (
+            "sugerencias", "conciliar_automatico", "reporte_conciliacion", "reporte_conciliacion_sheets", "crear_flujo",
+        ):
             return [require_permission("tesoreria.editar")()]
         return super().get_permissions()
 
@@ -3586,6 +3922,72 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
             fecha_fin=request.query_params.get("fecha_fin"),
         )
         return Response(reporte)
+
+    @action(detail=False, methods=["post"])
+    def reporte_conciliacion_sheets(self, request):
+        """Exportar a Google Sheets, al Drive PERSONAL del usuario
+        (14/Sep/2026, "en conciliacion bancaria, reporte hay que agregar
+        el exportar") - mismos filtros que reporte_conciliacion() de
+        arriba, las 3 clasificaciones juntas (columna "Grupo"), doc
+        completa del flujo de conexion en
+        TesoreriaFlujoViewSet.exportar_sheets."""
+        cuenta_id = request.query_params.get("cuenta")
+        if not cuenta_id:
+            raise ValidationError("Se requiere '?cuenta='.")
+
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        reporte = calcular_reporte_conciliacion(
+            cuenta_id,
+            corte_edc_id=request.query_params.get("corte_edc"),
+            fecha_inicio=request.query_params.get("fecha_inicio"),
+            fecha_fin=request.query_params.get("fecha_fin"),
+        )
+        encabezados = [
+            "Grupo", "Fecha", "Descripción/Concepto", "Referencia", "Monto Banco",
+            "ID Flujo", "Concepto Flujo", "Total Flujo", "Diferencia", "Cuadra", "Pagado",
+        ]
+        filas = []
+        for fila in reporte["conciliados"]:
+            filas.append(
+                [
+                    "Conciliado", str(fila["fecha"]), fila["descripcion"] or "", fila["referencia"] or "",
+                    str(fila["monto"]), fila["id_flujo"], fila["concepto_flujo"] or "", str(fila["total_flujo"]),
+                    str(fila["diferencia"]), "Sí" if fila["cuadra"] else "No", "",
+                ]
+            )
+        for fila in reporte["sin_conciliar_banco"]:
+            filas.append(
+                [
+                    "Sin conciliar (banco)", str(fila["fecha"]), fila["descripcion"] or "", fila["referencia"] or "",
+                    str(fila["monto"]), "", "", "", "", "", "",
+                ]
+            )
+        for fila in reporte["sin_conciliar_interno"]:
+            filas.append(
+                [
+                    "Sin conciliar (interno)",
+                    str(fila["fecha_pago"] or fila["fecha_efectiva"] or ""),
+                    fila["concepto"] or "", "", "", fila["id_flujo"], "", str(fila["total_mxp"]), "", "",
+                    "Sí" if fila["pagado"] else "No",
+                ]
+            )
+        titulo = f"Conciliación Bancaria CumbresBI — {timezone.now().date().isoformat()}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
 
 
 class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):

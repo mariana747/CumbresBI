@@ -441,3 +441,29 @@ class IamUserContratoAccess(models.Model):
 
     class Meta:
         db_table = "iam_user_contrato_access"
+
+
+class IamGooglePersonalToken(models.Model):
+    """Cuenta de Google PERSONAL que un usuario ligo para exportar a su
+    propio Drive (14/Sep/2026, "exportar a Google Sheets... se guardara en
+    su drive personal") - distinta de IamIdentity (esa es SIEMPRE la
+    cuenta de Workspace de Cumbres via SSO, ver oidc-sso-silencioso-sin-
+    boton-login en memoria de sesion). Esta puede ser una cuenta externa/
+    personal, autorizada aparte con un flujo OAuth propio (ver
+    google_oauth.py). Vive en iam-service (no en drive-service, que es
+    deliberadamente stateless) porque es un dato de identidad del usuario,
+    reusable por cualquier modulo que necesite exportar."""
+
+    user = models.OneToOneField(
+        IamUser, on_delete=models.CASCADE, primary_key=True, related_name="google_personal_token"
+    )
+    google_email = models.EmailField(max_length=254, blank=True, null=True)
+    refresh_token = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "iam_google_personal_tokens"
+
+    def __str__(self):
+        return f"{self.user_id} — {self.google_email or 'sin email'}"
