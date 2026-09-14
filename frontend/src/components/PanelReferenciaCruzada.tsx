@@ -221,7 +221,7 @@ export default function PanelReferenciaCruzada({
               <strong>Tipo:</strong> {datosNomina.tipo === "QUINCENAL" ? "Quincenal (corporativo)" : "Semanal (obra)"}
             </Typography>
             <Typography variant="body2">
-              <strong>Empresa:</strong> {datosNomina.sociedad}
+              <strong>Empresa:</strong> {datosNomina.sociedades.join(", ")}
             </Typography>
             <Typography variant="body2">
               <strong>Proyecto:</strong> {datosNomina.proyecto || "—"}

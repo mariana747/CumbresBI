@@ -334,6 +334,15 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
           icon: FileText,
           group: "FACTURACIÓN Y COMPROBANTES",
         },
+        // Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente
+        // pendiente tras el cierre real de Nomina) - mismo patron que la
+        // de Facturas de arriba, pero contra TesoreriaRecNomina.
+        {
+          label: "Conciliación de Nómina",
+          href: "/tesoreria/conciliacion-nomina",
+          icon: Wallet2,
+          group: "FACTURACIÓN Y COMPROBANTES",
+        },
 
         {
           label: "Cuentas Bancarias",

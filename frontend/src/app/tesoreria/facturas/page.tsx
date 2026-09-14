@@ -36,7 +36,7 @@ import {
 } from "@mui/material";
 import {
   CheckCircle2,
-  Download,
+  FileSpreadsheet,
   Eye,
   ExternalLink,
   FileCode2,
@@ -56,6 +56,7 @@ import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelRef
 import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { SessionUser, getSession } from "@/lib/auth";
+import { useExportarSheets } from "@/lib/useExportarSheets";
 import { DriveArchivo } from "@/lib/drive";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { CATEGORIA_GASTO_LABELS, TesoreriaCategoriaGasto } from "@/lib/miCumbres";
@@ -88,7 +89,7 @@ import {
   TesoreriaContraparte,
   TesoreriaTicketProveedor,
   urlVerFacturaPdf,
-  urlExportarFacturasCsv,
+  exportarFacturasSheets,
   sincronizarDriveFactura,
 } from "@/lib/tesoreria";
 
@@ -631,6 +632,26 @@ export default function TesoreriaFacturasPage() {
   const [filtroCategoriaGasto, setFiltroCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
   const [opcionesProveedor, setOpcionesProveedor] = useState<TesoreriaContraparte[]>([]);
 
+  // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
+  // hook reusable en lib/useExportarSheets.ts.
+  const {
+    exportando,
+    error: errorExportarSheets,
+    exportar: handleExportarSheets,
+  } = useExportarSheets((carpetaId) =>
+    exportarFacturasSheets(
+      {
+        search: search || undefined,
+        contraparte: filtroProveedor?.id_contraparte || undefined,
+        receptorRfc: filtroReceptor || undefined,
+        fechaDesde: filtroFechaDesde || undefined,
+        fechaHasta: filtroFechaHasta || undefined,
+        estado: filtroEstado || undefined,
+      },
+      carpetaId
+    )
+  );
+
   useEffect(() => {
     listSociedades()
       .then(setSociedadesFiltro)
@@ -920,6 +941,7 @@ export default function TesoreriaFacturasPage() {
           {error}
         </Alert>
       )}
+      {errorExportarSheets && <Alert severity="error" sx={{ mb: 3 }}>{errorExportarSheets}</Alert>}
       <FiltrosBar
         search={search}
         onSearchChange={setSearch}
@@ -945,22 +967,11 @@ export default function TesoreriaFacturasPage() {
           <Button
             size="small"
             variant="outlined"
-            startIcon={<Download size={14} strokeWidth={2} />}
-            onClick={() =>
-              window.open(
-                urlExportarFacturasCsv({
-                  search: search || undefined,
-                  contraparte: filtroProveedor?.id_contraparte || undefined,
-                  receptorRfc: filtroReceptor || undefined,
-                  fechaDesde: filtroFechaDesde || undefined,
-                  fechaHasta: filtroFechaHasta || undefined,
-                  estado: filtroEstado || undefined,
-                }),
-                "_blank"
-              )
-            }
+            startIcon={exportando ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+            disabled={exportando}
+            onClick={handleExportarSheets}
           >
-            Exportar CSV
+            Exportar a Google Sheets
           </Button>
           </Stack>
         }

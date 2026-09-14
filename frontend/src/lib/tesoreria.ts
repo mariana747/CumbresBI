@@ -740,6 +740,33 @@ export async function reporteConciliacion(params: {
   return response.json();
 }
 
+// Exportar a Google Sheets (14/Sep/2026, "en conciliacion bancaria,
+// reporte hay que agregar el exportar") - mismos filtros que
+// reporteConciliacion de arriba, ver exportarFlujosSheets para el patron
+// completo.
+export async function exportarReporteConciliacionSheets(
+  params: { cuenta: string; corteEdc?: string; fechaInicio?: string; fechaFin?: string },
+  carpetaId?: string
+): Promise<ExportarSheetsResultado> {
+  const query = new URLSearchParams({ cuenta: params.cuenta });
+  if (params.corteEdc) query.set("corte_edc", params.corteEdc);
+  if (params.fechaInicio) query.set("fecha_inicio", params.fechaInicio);
+  if (params.fechaFin) query.set("fecha_fin", params.fechaFin);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/reporte_conciliacion_sheets/?${query.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carpeta_id: carpetaId }),
+    }
+  );
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export type TesoreriaContratoTipo = "INTERNO" | "EXTERNO";
 // Categoria (07/Sep/2026) - distingue la naturaleza del gasto/relacion,
 // distinto de TesoreriaContratoTipo (interno/externo). Opcional a
@@ -1184,6 +1211,50 @@ export function urlExportarFlujosCsv(opciones?: { search?: string; contrato?: st
   return `${TESORERIA_API_BASE_URL}/api/flujos/exportar_csv/?${params.toString()}`;
 }
 
+// Exportar a Google Sheets, al Drive PERSONAL del usuario (14/Sep/2026,
+// "ya no se descargara ni CSV ni Excel, se guardara en su drive personal")
+// - reemplaza urlExportarFlujosCsv de arriba en el frontend (se deja el
+// endpoint viejo sin usar, sin borrarlo del backend). A diferencia de un
+// link de descarga, esto es un POST porque el resultado no es un archivo
+// para el navegador sino una decision (conectado o no) + una URL para
+// abrir en pestaña nueva.
+export interface ExportarSheetsResultado {
+  conectado: boolean;
+  url?: string;
+  url_autorizacion?: string;
+}
+
+export async function exportarFlujosSheets(opciones?: {
+  search?: string;
+  contrato?: string;
+  sociedad?: string;
+  carpetaId?: string;
+}): Promise<ExportarSheetsResultado> {
+  const params = new URLSearchParams();
+  if (opciones?.search) params.set("search", opciones.search);
+  if (opciones?.contrato) params.set("contrato", opciones.contrato);
+  if (opciones?.sociedad) params.set("sociedad", opciones.sociedad);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/exportar_sheets/?${params.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // carpeta_id (14/Sep/2026, "dejar que ellos puedan escoger donde
+      // guardar") - elegida con el Google Picker, ver
+      // lib/googleFolderPicker.ts; vacio = se queda en la raiz del Drive.
+      body: JSON.stringify({ carpeta_id: opciones?.carpetaId }),
+    }
+  );
+  // 409 (no conectado) trae {conectado:false, url_autorizacion} - un
+  // resultado normal del flujo, no un error a lanzar (ver
+  // friendlyApiError, que asumiria "algo salio mal").
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 // Exportar a CSV de Conciliacion de Facturas (11/Sep/2026, pendiente real
 // de negocio) - mismos filtros que getConciliacionCfdi, una sola descarga
 // con las 3 clasificaciones (columna "Clasificación").
@@ -1203,6 +1274,41 @@ export function urlExportarConciliacionCfdiCsv(params?: {
   if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
   if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
   return `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion_csv/?${query.toString()}`;
+}
+
+// Exportar a Google Sheets (14/Sep/2026, reemplaza urlExportarConciliacionCfdiCsv
+// de arriba - ver exportarFlujosSheets para el patron completo).
+export async function exportarConciliacionCfdiSheets(
+  params?: {
+    desde?: string;
+    hasta?: string;
+    sociedad?: string;
+    contrato?: string;
+    requiereFactura?: boolean;
+    tipoComprobante?: "I" | "E";
+  },
+  carpetaId?: string
+): Promise<ExportarSheetsResultado> {
+  const query = new URLSearchParams();
+  if (params?.desde) query.set("desde", params.desde);
+  if (params?.hasta) query.set("hasta", params.hasta);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
+  if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
+  if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion_sheets/?${query.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carpeta_id: carpetaId }),
+    }
+  );
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 export async function createFlujo(params: {
@@ -1596,7 +1702,9 @@ export type TesoreriaNominaStatus = "ACTIVO" | "CERRADA";
 export interface TesoreriaNomina {
   id_nomina: string;
   tipo: TesoreriaNominaTipo;
-  sociedad: string;
+  // sociedades (14/Sep/2026, "pueden estar contratados por dos
+  // sociedades") - lista de RFCs, ya no un CharField unico.
+  sociedades: string[];
   proyecto: string | null;
   centro: string | null;
   serie: string;
@@ -1639,9 +1747,53 @@ export async function getNomina(idNomina: string): Promise<TesoreriaNomina> {
   return response.json();
 }
 
+// Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente pendiente tras
+// el cierre real de Nomina) - mismo patron reconocido/por_reconocer que
+// ConciliacionCfdiFila/getConciliacionCfdi, acotado a Flujos de nomina.
+export interface ConciliacionNominaFila {
+  id_flujo: string;
+  periodo_nomina: string | null;
+  periodo_nomina_serie: string | null;
+  id_empleado: string | null;
+  concepto: string | null;
+  total_mxp: string | null;
+  fecha_efectiva: string | null;
+  nomina: number | null;
+  reconocido?: string | null;
+  por_reconocer?: string | null;
+}
+
+export interface ConciliacionNominaResponse {
+  con_recibo: ConciliacionNominaFila[];
+  sin_recibo: ConciliacionNominaFila[];
+}
+
+export async function getConciliacionNomina(params?: {
+  desde?: string;
+  hasta?: string;
+  sociedad?: string;
+  nomina?: string;
+  idEmpleado?: string;
+}): Promise<ConciliacionNominaResponse> {
+  const query = new URLSearchParams();
+  if (params?.desde) query.set("desde", params.desde);
+  if (params?.hasta) query.set("hasta", params.hasta);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
+  if (params?.nomina) query.set("nomina", params.nomina);
+  if (params?.idEmpleado) query.set("id_empleado", params.idEmpleado);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion_nomina/?${query.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function createNomina(params: {
   tipo: TesoreriaNominaTipo;
-  sociedad: string;
+  sociedades: string[];
   proyecto?: string;
   centro?: string;
   serie: string;
@@ -1655,7 +1807,7 @@ export async function createNomina(params: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       tipo: params.tipo,
-      sociedad: params.sociedad,
+      sociedades: params.sociedades,
       proyecto: params.proyecto || null,
       centro: params.centro || null,
       serie: params.serie,
@@ -1675,6 +1827,7 @@ export async function updateNomina(
   idNomina: string,
   params: Partial<{
     tipo: TesoreriaNominaTipo;
+    sociedades: string[];
     proyecto: string;
     centro: string;
     serie: string;
@@ -1689,6 +1842,7 @@ export async function updateNomina(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       tipo: params.tipo,
+      sociedades: params.sociedades,
       proyecto: params.proyecto,
       centro: params.centro,
       serie: params.serie,
@@ -1707,10 +1861,16 @@ export async function updateNomina(
 // Contrato generico GEN-NOMINA-<sociedad> de esta nomina (creandolo si hace
 // falta) - para preseleccionar Contrato al dar de alta un Flujo ligado a
 // esta nomina, ver TesoreriaNominaViewSet.contrato_generico.
-export async function getContratoGenericoNomina(idNomina: string): Promise<{ id_contrato: string }> {
+export async function getContratoGenericoNomina(
+  idNomina: string,
+  sociedad?: string
+): Promise<{ id_contrato: string }> {
+  // ?sociedad= (14/Sep/2026, "pueden estar contratados por dos
+  // sociedades") - obligatorio si la nomina tiene mas de una.
+  const params = sociedad ? `?sociedad=${encodeURIComponent(sociedad)}` : "";
   const response = await apiFetch(
     "TESORERIA",
-    `${TESORERIA_API_BASE_URL}/api/nominas/${encodeURIComponent(idNomina)}/contrato_generico/`
+    `${TESORERIA_API_BASE_URL}/api/nominas/${encodeURIComponent(idNomina)}/contrato_generico/${params}`
   );
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -2247,6 +2407,41 @@ export function urlExportarFacturasCsv(opciones?: {
   if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
   if (opciones?.estado) params.set("estado", opciones.estado);
   return `${TESORERIA_API_BASE_URL}/api/facturas/exportar_csv/?${params.toString()}`;
+}
+
+// Exportar a Google Sheets (14/Sep/2026, reemplaza urlExportarFacturasCsv
+// de arriba - ver exportarFlujosSheets para el patron completo).
+export async function exportarFacturasSheets(
+  opciones?: {
+    search?: string;
+    contraparte?: string;
+    receptorRfc?: string;
+    fechaDesde?: string;
+    fechaHasta?: string;
+    estado?: TesoreriaFacturaEstado;
+  },
+  carpetaId?: string
+): Promise<ExportarSheetsResultado> {
+  const params = new URLSearchParams();
+  if (opciones?.search) params.set("search", opciones.search);
+  if (opciones?.contraparte) params.set("contraparte", opciones.contraparte);
+  if (opciones?.receptorRfc) params.set("receptor_rfc", opciones.receptorRfc);
+  if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
+  if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
+  if (opciones?.estado) params.set("estado", opciones.estado);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/facturas/exportar_sheets/?${params.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carpeta_id: carpetaId }),
+    }
+  );
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 export interface FacturaInput {
@@ -3202,13 +3397,9 @@ export interface ReporteDiarioCorte {
   consolidado: ReporteDiarioConsolidado;
 }
 
-// corte_anterior (11/Sep/2026, redisenio sobre el formato legado de
-// Wall-E Homes: "1.1 dia anterior" + "1.2 dia de hoy") - mismo corte que
-// el de arriba (fecha/sociedades/consolidado, que se dejan a nivel raiz
-// por compatibilidad) pero de la fecha - 1 dia.
-export interface ReporteDiario extends ReporteDiarioCorte {
-  corte_anterior: ReporteDiarioCorte;
-}
+// Un solo corte (14/Sep/2026, "se quitara el dia anterior tanto en la ui
+// y el correo" - revierte el rediseño de dos cortes del 11/Sep).
+export type ReporteDiario = ReporteDiarioCorte;
 
 export async function getReporteDiario(sociedades: string[], fecha: string): Promise<ReporteDiario> {
   const params = new URLSearchParams({ sociedades: sociedades.join(","), fecha });

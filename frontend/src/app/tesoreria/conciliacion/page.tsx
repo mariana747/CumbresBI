@@ -28,10 +28,13 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Landmark, RefreshCw, Sparkles, Upload, X as CloseIcon } from "lucide-react";
+import { FileSpreadsheet, Landmark, RefreshCw, Sparkles, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import FiltrosBar from "@/components/FiltrosBar";
+import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive";
 import { SessionUser, getSession } from "@/lib/auth";
+import { MIME_TYPES_EXTRACTO } from "@/lib/googleDriveFilePicker";
+import { useExportarSheets } from "@/lib/useExportarSheets";
 import {
   ConciliarAutomaticoResultado,
   ReporteConciliacion,
@@ -42,6 +45,7 @@ import {
   TesoreriaMovimientoBancario,
   conciliarAutomatico,
   crearFlujoDesdeMovimiento,
+  exportarReporteConciliacionSheets,
   importarExtractoBancario,
   listContratos,
   listCortesEdc,
@@ -83,6 +87,8 @@ export default function TesoreriaConciliacionPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  // Equipo o Drive (14/Sep/2026, "hay que dar la opción actual y una para
+  // drive") - ver componente SelectorArchivoLocalODrive.
   const [archivo, setArchivo] = useState<File | null>(null);
   const [importando, setImportando] = useState(false);
   const [importResultado, setImportResultado] = useState<{ importados: number; errores: string[] } | null>(
@@ -118,6 +124,24 @@ export default function TesoreriaConciliacionPage() {
   // tablas apiladas por separado.
   const [subTabReporte, setSubTabReporte] = useState<"conciliados" | "sin_conciliar_banco" | "sin_conciliar_interno">(
     "conciliados"
+  );
+
+  // Exportar a Google Sheets (14/Sep/2026, "en conciliacion bancaria,
+  // reporte hay que agregar el exportar") - ver hook reusable en
+  // lib/useExportarSheets.ts.
+  const {
+    exportando: exportandoReporte,
+    error: errorExportarReporte,
+    exportar: handleExportarReporte,
+  } = useExportarSheets((carpetaId) =>
+    exportarReporteConciliacionSheets(
+      {
+        cuenta: cuenta!.id_cuenta_bancaria,
+        fechaInicio: fechaInicioReporte || undefined,
+        fechaFin: fechaFinReporte || undefined,
+      },
+      carpetaId
+    )
   );
 
   // Precargar Flujo desde un movimiento sin match (11/Sep/2026, "Subida de
@@ -468,14 +492,27 @@ export default function TesoreriaConciliacionPage() {
                 search=""
                 onSearchChange={() => undefined}
                 actions={
-                  <Button
-                    variant="contained"
-                    disabled={!cuenta || reporteLoading}
-                    onClick={handleVerReporte}
-                    sx={{ flexShrink: 0 }}
-                  >
-                    {reporteLoading ? <CircularProgress size={16} /> : "Ver reporte"}
-                  </Button>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="contained"
+                      disabled={!cuenta || reporteLoading}
+                      onClick={handleVerReporte}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      {reporteLoading ? <CircularProgress size={16} /> : "Ver reporte"}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      disabled={!reporte || exportandoReporte}
+                      startIcon={
+                        exportandoReporte ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />
+                      }
+                      onClick={handleExportarReporte}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      Exportar a Google Sheets
+                    </Button>
+                  </Stack>
                 }
               >
                 <Autocomplete
@@ -504,6 +541,8 @@ export default function TesoreriaConciliacionPage() {
                   InputLabelProps={{ shrink: true }}
                 />
               </FiltrosBar>
+
+              {errorExportarReporte && <Alert severity="error" sx={{ mb: 2 }}>{errorExportarReporte}</Alert>}
 
               {!cuenta ? (
                 <Alert severity="info">Elige una cuenta bancaria para generar el reporte.</Alert>
@@ -701,15 +740,13 @@ export default function TesoreriaConciliacionPage() {
             Sube el estado de cuenta en CSV o Excel (.xlsx). Se acepta cualquier alias razonable de
             columna (Fecha/Date, Cargo/Débito/Retiro, Abono/Crédito/Depósito, Saldo/Balance).
           </Typography>
-          <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />} fullWidth>
-            {archivo ? archivo.name : "Seleccionar archivo"}
-            <input
-              type="file"
-              hidden
-              accept=".csv,.xlsx,.xlsm"
-              onChange={(e) => setArchivo(e.target.files?.[0] || null)}
-            />
-          </Button>
+          <SelectorArchivoLocalODrive
+            archivo={archivo}
+            onChange={setArchivo}
+            accept=".csv,.xlsx,.xlsm"
+            mimeTypesDrive={MIME_TYPES_EXTRACTO}
+            tituloDrive="Elige el extracto bancario"
+          />
           {importResultado && (
             <Alert severity={importResultado.errores.length > 0 ? "warning" : "success"} sx={{ mt: 2 }}>
               {importResultado.importados} movimiento(s) importado(s).

@@ -18,6 +18,7 @@ import {
   FormControl,
   IconButton,
   InputLabel,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -29,22 +30,27 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { CreditCard, Eye, Plus, Upload, X as CloseIcon } from "lucide-react";
+import { CreditCard, Eye, FileSpreadsheet, HelpCircle, MoreVertical, Plus, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
+import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive";
 import { getSession, SessionUser } from "@/lib/auth";
+import { MIME_TYPES_COMPROBANTE } from "@/lib/googleDriveFilePicker";
 import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import { CATEGORIA_GASTO_LABELS, TesoreriaCategoriaGasto } from "@/lib/miCumbres";
 import { TesoreriaFlujo, listFlujos } from "@/lib/tesoreria";
+import { useExportarSheets } from "@/lib/useExportarSheets";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
   aprobarSolicitudPago,
   crearSolicitudPago,
+  exportarSolicitudesPagoSheets,
   listSolicitudesPago,
   rechazarSolicitudPago,
   subirComprobanteSolicitudPago,
@@ -70,6 +76,15 @@ const ESTADO_COLOR: Record<SolicitudPagoEstado, "default" | "warning" | "success
   PAGADO: "success",
 };
 
+// Glosario de estados (14/Sep/2026, pendiente.md > Solicitudes de Pago) -
+// mismo criterio que el glosario de Estado/Pagado en flujos/page.tsx.
+const ESTADO_DESCRIPCION: Record<SolicitudPagoEstado, string> = {
+  PENDIENTE: "Recién creada, todavía nadie la autoriza.",
+  APROBADO: "Ya autorizada, lista para vincular el pago real (Flujo).",
+  RECHAZADO: "No se autoriza, no se paga.",
+  PAGADO: "Ya vinculada a un Flujo con el pago real registrado.",
+};
+
 export default function SolicitudesPagoPage() {
   const theme = useTheme();
   const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
@@ -82,7 +97,6 @@ export default function SolicitudesPagoPage() {
   const puedeCrear = session?.perm_keys.includes("solicitud-pago.crear") ?? false;
   const puedeAprobar = session?.perm_keys.includes("solicitud-pago.aprobar") ?? false;
   const puedeEditar = session?.perm_keys.includes("solicitud-pago.editar") ?? false;
-  const puedeGestionar = puedeAprobar || puedeEditar;
 
   const [solicitudes, setSolicitudes] = useState<TesoreriaSolicitudPago[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +124,20 @@ export default function SolicitudesPagoPage() {
       .finally(() => setLoading(false));
   }
   useEffect(cargar, []);
+
+  // Exportar a Google Sheets (14/Sep/2026, pendiente.md > Solicitudes de
+  // Pago "Pasar google sheet") - mismo patron que Flujos/Conciliacion de
+  // Facturas, ver lib/useExportarSheets.ts.
+  const {
+    exportando,
+    error: errorExportarSheets,
+    exportar: handleExportarSheets,
+  } = useExportarSheets((carpetaId) =>
+    exportarSolicitudesPagoSheets(
+      { proyecto: filtroProyecto || undefined, sociedad: filtroSociedad || undefined, search: search || undefined },
+      carpetaId
+    )
+  );
 
   const solicitudesFiltradas = useMemo(
     () =>
@@ -204,6 +232,7 @@ export default function SolicitudesPagoPage() {
     setError(null);
     try {
       await aprobarSolicitudPago(id);
+      setDetalle(null);
       cargar();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al aprobar");
@@ -216,6 +245,7 @@ export default function SolicitudesPagoPage() {
     setError(null);
     try {
       await rechazarSolicitudPago(id);
+      setDetalle(null);
       cargar();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al rechazar");
@@ -244,6 +274,24 @@ export default function SolicitudesPagoPage() {
     } finally {
       setSubiendoComprobante(null);
     }
+  }
+
+  // Subir desde el equipo O desde Drive (14/Sep/2026, "usa lo mismo que en
+  // Conciliación Bancaria, reutilizalo") - mismo Dialog + componente
+  // SelectorArchivoLocalODrive que /tesoreria/conciliacion (importar
+  // extracto), en vez de subir directo al click.
+  const [subiendoDialogo, setSubiendoDialogo] = useState<TesoreriaSolicitudPago | null>(null);
+  const [archivoComprobante, setArchivoComprobante] = useState<File | null>(null);
+
+  function cerrarSubirComprobante() {
+    setSubiendoDialogo(null);
+    setArchivoComprobante(null);
+  }
+
+  async function handleConfirmarSubirComprobante() {
+    if (!subiendoDialogo || !archivoComprobante) return;
+    await handleSubirComprobante(subiendoDialogo.id_solicitud, archivoComprobante);
+    cerrarSubirComprobante();
   }
 
   // --- Vincular pago (vincular_flujo, cierra el ciclo: Aprobado -> Pagado) ---
@@ -296,6 +344,16 @@ export default function SolicitudesPagoPage() {
     }
   }
 
+  // --- Ver (detalle completo) - faltaba un boton "Ver" en esta pantalla
+  // (14/Sep/2026, "en solicitud de pago no esta la opcion de ver"); mismo
+  // patron que el dialogo de detalle de Reembolsos (TicketsReembolsoAdminPanel).
+  const [detalle, setDetalle] = useState<TesoreriaSolicitudPago | null>(null);
+
+  // Menu de "..." para Aprobar/Rechazar/Vincular pago (14/Sep/2026, "puede
+  // poner los 3 puntos y el ojo" - el ojo se queda como icono suelto,
+  // el resto de acciones se agrupan para no saturar la fila).
+  const [menuAnchor, setMenuAnchor] = useState<{ el: HTMLElement; solicitud: TesoreriaSolicitudPago } | null>(null);
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
@@ -311,6 +369,11 @@ export default function SolicitudesPagoPage() {
           {error}
         </Alert>
       )}
+      {errorExportarSheets && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {errorExportarSheets}
+        </Alert>
+      )}
 
       <FiltrosBar
         search={search}
@@ -324,17 +387,29 @@ export default function SolicitudesPagoPage() {
           setFiltroEstado("");
         }}
         actions={
-          puedeCrear ? (
+          <Stack direction="row" spacing={1}>
             <Button
               size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={() => setOpenNuevo(true)}
+              variant="outlined"
+              startIcon={exportando ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={exportando}
+              onClick={handleExportarSheets}
               sx={{ flexShrink: 0 }}
             >
-              Nueva Solicitud
+              Exportar a Google Sheets
             </Button>
-          ) : undefined
+            {puedeCrear && (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={() => setOpenNuevo(true)}
+                sx={{ flexShrink: 0 }}
+              >
+                Nueva Solicitud
+              </Button>
+            )}
+          </Stack>
         }
       >
         <FormControl size="small" sx={{ minWidth: 160 }}>
@@ -446,12 +521,12 @@ export default function SolicitudesPagoPage() {
                 <Stack spacing={0.5}>
                   <Typography variant="subtitle2">{s.id_solicitud} — {s.proyecto}</Typography>
                   <Typography variant="body2">{s.descripcion}</Typography>
-                  <Chip
-                    size="small"
-                    label={ESTADO_SOLICITUD_PAGO_LABELS[s.estado]}
-                    color={ESTADO_COLOR[s.estado]}
-                    sx={{ alignSelf: "flex-start" }}
-                  />
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <Chip size="small" label={ESTADO_SOLICITUD_PAGO_LABELS[s.estado]} color={ESTADO_COLOR[s.estado]} />
+                    <Tooltip title={ESTADO_DESCRIPCION[s.estado]}>
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
                 </Stack>
                 <Divider sx={{ my: 1 }} />
                 <Typography variant="body2">
@@ -460,46 +535,45 @@ export default function SolicitudesPagoPage() {
                 <Typography variant="body2" color="text.secondary">
                   Solicitado por {nombreSolicitante(s.solicitado_por)}
                 </Typography>
-                {puedeAprobar && s.estado === "PENDIENTE" && (
-                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                    <Button size="small" variant="contained" disabled={accionando === s.id_solicitud} onClick={() => handleAprobar(s.id_solicitud)}>
-                      Aprobar
-                    </Button>
-                    <Button size="small" color="error" disabled={accionando === s.id_solicitud} onClick={() => handleRechazar(s.id_solicitud)}>
-                      Rechazar
-                    </Button>
-                  </Stack>
-                )}
-                {puedeEditar && s.estado === "APROBADO" && (
-                  <Button size="small" variant="outlined" sx={{ mt: 1 }} onClick={() => abrirVincular(s)}>
-                    Vincular pago
-                  </Button>
-                )}
-                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                  {puedeCrear && (
-                    <Button
-                      component="label"
+                {/* Acciones unificadas (14/Sep/2026, "puede poner los 3
+                puntos y el ojo") - Ver (icono suelto) + "..." con
+                Aprobar/Rechazar/Vincular, mismo criterio que la tabla. */}
+                <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
+                  <IconButton size="small" aria-label="Ver" onClick={() => setDetalle(s)}>
+                    <Eye size={16} strokeWidth={1.5} />
+                  </IconButton>
+                  {((puedeAprobar && s.estado === "PENDIENTE") || (puedeEditar && s.estado === "APROBADO")) && (
+                    <IconButton
                       size="small"
-                      startIcon={<Upload size={14} strokeWidth={1.5} />}
-                      disabled={subiendoComprobante === s.id_solicitud}
+                      aria-label="Más acciones"
+                      onClick={(e) => setMenuAnchor({ el: e.currentTarget, solicitud: s })}
                     >
-                      {s.link_comprobante ? "Reemplazar comprobante" : "Subir comprobante"}
-                      <input
-                        type="file"
-                        hidden
-                        accept="image/*,application/pdf"
-                        onChange={(e) => {
-                          const archivo = e.target.files?.[0];
-                          if (archivo) handleSubirComprobante(s.id_solicitud, archivo);
-                          e.target.value = "";
-                        }}
-                      />
-                    </Button>
+                      <MoreVertical size={16} strokeWidth={1.5} />
+                    </IconButton>
                   )}
-                  {s.link_comprobante && (
+                </Stack>
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  {s.link_comprobante ? (
+                    // Ya tiene comprobante - no se reemplaza, solo se ve
+                    // (14/Sep/2026, "que no se pueda subir y solo se
+                    // mantenga el ver").
                     <Button size="small" startIcon={<Eye size={14} strokeWidth={1.5} />} onClick={() => setPreviewComprobante(s)}>
                       Ver comprobante
                     </Button>
+                  ) : (
+                    // Rechazada - no se paga, no tiene sentido seguir
+                    // subiendo comprobante (14/Sep/2026, "si esta
+                    // rechazado no se debe poder subir comprobante").
+                    puedeCrear && s.estado !== "RECHAZADO" && (
+                      <Button
+                        size="small"
+                        startIcon={<Upload size={14} strokeWidth={1.5} />}
+                        disabled={subiendoComprobante === s.id_solicitud}
+                        onClick={() => setSubiendoDialogo(s)}
+                      >
+                        Subir comprobante
+                      </Button>
+                    )
                   )}
                 </Stack>
               </CardContent>
@@ -517,15 +591,32 @@ export default function SolicitudesPagoPage() {
                 <TableCell>Descripción</TableCell>
                 <TableCell>Monto</TableCell>
                 <TableCell>Solicitado por</TableCell>
-                <TableCell>Estado</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>Estado</span>
+                    <Tooltip
+                      title={
+                        <Stack spacing={0.5} sx={{ py: 0.5 }}>
+                          {(Object.keys(ESTADO_DESCRIPCION) as SolicitudPagoEstado[]).map((e) => (
+                            <Typography key={e} variant="caption" component="div">
+                              <b>{ESTADO_SOLICITUD_PAGO_LABELS[e]}</b> — {ESTADO_DESCRIPCION[e]}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      }
+                    >
+                      <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                    </Tooltip>
+                  </Stack>
+                </TableCell>
                 <TableCell align="center">Comprobante</TableCell>
-                {puedeGestionar && <TableCell align="right">Acciones</TableCell>}
+                <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {solicitudesFiltradas.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={puedeGestionar ? 9 : 8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin solicitudes todavía.
                     </Typography>
@@ -547,59 +638,47 @@ export default function SolicitudesPagoPage() {
                   </TableCell>
                   <TableCell align="center">
                     <Stack direction="row" spacing={0.5} justifyContent="center">
-                      {s.link_comprobante && (
+                      {s.link_comprobante ? (
+                        // Ya tiene comprobante - no se reemplaza, solo se
+                        // ve (14/Sep/2026, "que no se pueda subir y solo
+                        // se mantenga el ver").
                         <IconButton size="small" aria-label="Ver comprobante" onClick={() => setPreviewComprobante(s)}>
                           <Eye size={16} strokeWidth={1.5} />
                         </IconButton>
-                      )}
-                      {puedeCrear && (
+                      ) : puedeCrear && s.estado !== "RECHAZADO" ? (
                         <IconButton
-                          component="label"
                           size="small"
-                          aria-label={s.link_comprobante ? "Reemplazar comprobante" : "Subir comprobante"}
+                          aria-label="Subir comprobante"
+                          title="Subir comprobante"
                           disabled={subiendoComprobante === s.id_solicitud}
+                          onClick={() => setSubiendoDialogo(s)}
                         >
                           <Upload size={16} strokeWidth={1.5} />
-                          <input
-                            type="file"
-                            hidden
-                            accept="image/*,application/pdf"
-                            onChange={(e) => {
-                              const archivo = e.target.files?.[0];
-                              if (archivo) handleSubirComprobante(s.id_solicitud, archivo);
-                              e.target.value = "";
-                            }}
-                          />
                         </IconButton>
-                      )}
-                      {!s.link_comprobante && !puedeCrear && (
+                      ) : (
                         <Typography variant="caption" color="text.secondary">
                           —
                         </Typography>
                       )}
                     </Stack>
                   </TableCell>
-                  {puedeGestionar && (
-                    <TableCell align="right">
-                      <Stack direction="row" spacing={1} justifyContent="flex-end">
-                        {puedeAprobar && s.estado === "PENDIENTE" && (
-                          <>
-                            <Button size="small" variant="contained" disabled={accionando === s.id_solicitud} onClick={() => handleAprobar(s.id_solicitud)}>
-                              Aprobar
-                            </Button>
-                            <Button size="small" color="error" disabled={accionando === s.id_solicitud} onClick={() => handleRechazar(s.id_solicitud)}>
-                              Rechazar
-                            </Button>
-                          </>
-                        )}
-                        {puedeEditar && s.estado === "APROBADO" && (
-                          <Button size="small" variant="outlined" onClick={() => abrirVincular(s)}>
-                            Vincular pago
-                          </Button>
-                        )}
-                      </Stack>
-                    </TableCell>
-                  )}
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <IconButton size="small" aria-label="Ver" title="Ver" onClick={() => setDetalle(s)}>
+                        <Eye size={16} strokeWidth={1.5} />
+                      </IconButton>
+                      {((puedeAprobar && s.estado === "PENDIENTE") || (puedeEditar && s.estado === "APROBADO")) && (
+                        <IconButton
+                          size="small"
+                          aria-label="Más acciones"
+                          title="Más acciones"
+                          onClick={(e) => setMenuAnchor({ el: e.currentTarget, solicitud: s })}
+                        >
+                          <MoreVertical size={16} strokeWidth={1.5} />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
                 </TableRow>
                 ))
               )}
@@ -756,6 +835,191 @@ export default function SolicitudesPagoPage() {
             {guardandoVinculo ? <CircularProgress size={20} color="inherit" /> : "Vincular"}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      <Menu anchorEl={menuAnchor?.el} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}>
+        {menuAnchor && puedeAprobar && menuAnchor.solicitud.estado === "PENDIENTE" && (
+          <MenuItem
+            disabled={accionando === menuAnchor.solicitud.id_solicitud}
+            onClick={() => {
+              handleAprobar(menuAnchor.solicitud.id_solicitud);
+              setMenuAnchor(null);
+            }}
+          >
+            Aprobar
+          </MenuItem>
+        )}
+        {menuAnchor && puedeAprobar && menuAnchor.solicitud.estado === "PENDIENTE" && (
+          <MenuItem
+            disabled={accionando === menuAnchor.solicitud.id_solicitud}
+            onClick={() => {
+              handleRechazar(menuAnchor.solicitud.id_solicitud);
+              setMenuAnchor(null);
+            }}
+          >
+            Rechazar
+          </MenuItem>
+        )}
+        {menuAnchor && puedeEditar && menuAnchor.solicitud.estado === "APROBADO" && (
+          <MenuItem
+            onClick={() => {
+              abrirVincular(menuAnchor.solicitud);
+              setMenuAnchor(null);
+            }}
+          >
+            Vincular pago
+          </MenuItem>
+        )}
+      </Menu>
+
+      {/* Subir comprobante: equipo o Drive (14/Sep/2026, "usa lo mismo que
+      en Conciliación Bancaria, reutilizalo") - mismo Dialog + componente
+      que importar extracto. */}
+      <Dialog open={!!subiendoDialogo} onClose={cerrarSubirComprobante} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          Subir comprobante
+          <IconButton size="small" onClick={cerrarSubirComprobante} aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <SelectorArchivoLocalODrive
+            archivo={archivoComprobante}
+            onChange={setArchivoComprobante}
+            accept="image/*,application/pdf"
+            mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+            tituloDrive="Elige el comprobante"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cerrarSubirComprobante}>Cancelar</Button>
+          <Button
+            variant="contained"
+            disabled={!archivoComprobante || subiendoComprobante === subiendoDialogo?.id_solicitud}
+            onClick={handleConfirmarSubirComprobante}
+          >
+            {subiendoComprobante === subiendoDialogo?.id_solicitud ? <CircularProgress size={20} color="inherit" /> : "Subir"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={!!detalle}
+        onClose={(_, reason) => {
+          // Solo se cierra con el boton X (ver memoria
+          // feedback-dialogs-solo-cierran-con-x).
+          if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+          setDetalle(null);
+        }}
+        fullWidth
+        maxWidth="sm"
+        fullScreen={esMovil}
+      >
+        {detalle && (
+          <>
+            <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              Solicitud {detalle.id_solicitud}
+              <IconButton size="small" onClick={() => setDetalle(null)} aria-label="Cerrar">
+                <CloseIcon size={18} strokeWidth={1.5} />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent dividers>
+              <Stack spacing={1.5}>
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <Chip size="small" label={ESTADO_SOLICITUD_PAGO_LABELS[detalle.estado]} color={ESTADO_COLOR[detalle.estado]} />
+                  <Tooltip title={ESTADO_DESCRIPCION[detalle.estado]}>
+                    <HelpCircle size={14} strokeWidth={1.5} style={{ cursor: "help", opacity: 0.6 }} />
+                  </Tooltip>
+                </Stack>
+                <Typography variant="body2">
+                  <strong>Proyecto:</strong> {detalle.proyecto}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Sociedad:</strong>{" "}
+                  {sociedades.find((s) => s.rfc === detalle.sociedad)?.razon_social || detalle.sociedad || "—"}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Tipo:</strong> {TIPO_SOLICITUD_PAGO_LABELS[detalle.tipo]}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Descripción:</strong> {detalle.descripcion}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Monto:</strong> ${detalle.monto} {detalle.moneda}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Categoría de gasto:</strong>{" "}
+                  {detalle.categoria_gasto ? CATEGORIA_GASTO_LABELS[detalle.categoria_gasto] : "—"}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Solicitado por:</strong> {nombreSolicitante(detalle.solicitado_por)}
+                </Typography>
+                {detalle.autorizado_por && (
+                  <Typography variant="body2">
+                    <strong>Autorizado por:</strong> {nombreSolicitante(detalle.autorizado_por)}{" "}
+                    ({detalle.fecha_autorizacion})
+                  </Typography>
+                )}
+                {detalle.factura_folio && (
+                  <Typography variant="body2">
+                    <strong>Factura:</strong> {detalle.factura_folio}
+                  </Typography>
+                )}
+                {detalle.flujo_id && (
+                  <Typography variant="body2">
+                    <strong>Flujo del pago:</strong> {detalle.flujo_id}
+                  </Typography>
+                )}
+                {detalle.comentarios && (
+                  <Typography variant="body2">
+                    <strong>Comentarios:</strong> {detalle.comentarios}
+                  </Typography>
+                )}
+
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  {detalle.link_comprobante && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth={esMovil}
+                      startIcon={<Eye size={14} strokeWidth={1.5} />}
+                      onClick={() => setPreviewComprobante(detalle)}
+                    >
+                      Ver comprobante
+                    </Button>
+                  )}
+                </Stack>
+
+                {puedeAprobar && detalle.estado === "PENDIENTE" && (
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                    <Button
+                      variant="contained"
+                      fullWidth={esMovil}
+                      disabled={accionando === detalle.id_solicitud}
+                      onClick={() => handleAprobar(detalle.id_solicitud)}
+                    >
+                      Aprobar
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      fullWidth={esMovil}
+                      disabled={accionando === detalle.id_solicitud}
+                      onClick={() => handleRechazar(detalle.id_solicitud)}
+                    >
+                      Rechazar
+                    </Button>
+                  </Stack>
+                )}
+                {puedeEditar && detalle.estado === "APROBADO" && (
+                  <Button variant="outlined" fullWidth={esMovil} onClick={() => abrirVincular(detalle)}>
+                    Vincular pago
+                  </Button>
+                )}
+              </Stack>
+            </DialogContent>
+          </>
+        )}
       </Dialog>
 
       <DocumentoPreviewDialog

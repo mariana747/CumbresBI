@@ -30,7 +30,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Download, ExternalLink, Eye, X as CloseIcon } from "lucide-react";
+import { ExternalLink, Eye, FileSpreadsheet, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -49,10 +49,11 @@ import {
   SugerenciaCfdiLote,
   SugerenciasCfdiResponse,
   TesoreriaContrato,
-  urlExportarConciliacionCfdiCsv,
+  exportarConciliacionCfdiSheets,
   urlVerFacturaPdf,
   vincularFactura,
 } from "@/lib/tesoreria";
+import { useExportarSheets } from "@/lib/useExportarSheets";
 
 // Default: mes corriente completo, como valor visible de los campos de
 // fecha (10/Sep/2026, "no es por periodo debe ser por rango de fecha o una
@@ -107,6 +108,25 @@ export default function ConciliacionFacturasPage() {
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroContrato, setFiltroContrato] = useState("");
   const [filtroTipoComprobante, setFiltroTipoComprobante] = useState<"" | "I" | "E">("");
+
+  // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
+  // hook reusable en lib/useExportarSheets.ts.
+  const {
+    exportando,
+    error: errorExportarSheets,
+    exportar: handleExportarSheets,
+  } = useExportarSheets((carpetaId) =>
+    exportarConciliacionCfdiSheets(
+      {
+        desde: desde || undefined,
+        hasta: hasta || undefined,
+        sociedad: filtroEmpresa || undefined,
+        contrato: filtroContrato || undefined,
+        tipoComprobante: filtroTipoComprobante || undefined,
+      },
+      carpetaId
+    )
+  );
 
   // Dialogo de detalle (un pago) con sus propios tabs internos.
   const [detalle, setDetalle] = useState<ConciliacionCfdiFila | null>(null);
@@ -306,6 +326,7 @@ export default function ConciliacionFacturasPage() {
             {error}
           </Alert>
         )}
+        {errorExportarSheets && <Alert severity="error" sx={{ mb: 3 }}>{errorExportarSheets}</Alert>}
 
         <FiltrosBar
           search={search}
@@ -323,22 +344,12 @@ export default function ConciliacionFacturasPage() {
             <Button
               size="small"
               variant="outlined"
-              startIcon={<Download size={14} strokeWidth={2} />}
-              onClick={() =>
-                window.open(
-                  urlExportarConciliacionCfdiCsv({
-                    desde: desde || undefined,
-                    hasta: hasta || undefined,
-                    sociedad: filtroEmpresa || undefined,
-                    contrato: filtroContrato || undefined,
-                    tipoComprobante: filtroTipoComprobante || undefined,
-                  }),
-                  "_blank"
-                )
-              }
+              startIcon={exportando ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={exportando}
+              onClick={handleExportarSheets}
               sx={{ flexShrink: 0 }}
             >
-              Exportar CSV
+              Exportar a Google Sheets
             </Button>
           }
         >

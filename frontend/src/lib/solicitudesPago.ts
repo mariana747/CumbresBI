@@ -7,6 +7,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 import { TesoreriaCategoriaGasto } from "./miCumbres";
+import { ExportarSheetsResultado } from "./tesoreria";
 
 const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
 
@@ -67,6 +68,33 @@ export async function listSolicitudesPago(params?: {
   if (params?.categoriaGasto) qs.set("categoria_gasto", params.categoriaGasto);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/solicitudes-pago/?${qs.toString()}`);
   if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  return response.json();
+}
+
+// Exportar a Google Sheets, al Drive PERSONAL del usuario (14/Sep/2026,
+// pendiente.md > Solicitudes de Pago "Pasar google sheet") - mismo patron
+// que exportarFlujosSheets (ver lib/tesoreria.ts).
+export async function exportarSolicitudesPagoSheets(
+  params?: { proyecto?: string; sociedad?: string; search?: string; categoriaGasto?: TesoreriaCategoriaGasto },
+  carpetaId?: string
+): Promise<ExportarSheetsResultado> {
+  const qs = new URLSearchParams();
+  if (params?.proyecto) qs.set("proyecto", params.proyecto);
+  if (params?.sociedad) qs.set("sociedad", params.sociedad);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.categoriaGasto) qs.set("categoria_gasto", params.categoriaGasto);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/solicitudes-pago/exportar_sheets/?${qs.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carpeta_id: carpetaId }),
+    }
+  );
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
   return response.json();
 }
 

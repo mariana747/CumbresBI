@@ -301,6 +301,11 @@ services:
       # memoria de sesion "recaptcha-pendiente-proyecto-gcp"). Site key es
       # publica por diseno (RecaptchaV2.tsx).
       NEXT_PUBLIC_RECAPTCHA_SITE_KEY: "6LcB_IotAAAAAFXTN4Yah2NlS-lHFYOJ4VZAAiDN"
+      # Google Picker (14/Sep/2026, "dejar que ellos puedan escoger donde
+      # guardar" el Sheet exportado) - ver comentario completo junto a
+      # estas mismas variables en .env (raiz del repo).
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+      NEXT_PUBLIC_GOOGLE_PICKER_API_KEY: ${NEXT_PUBLIC_GOOGLE_PICKER_API_KEY:-}
       # Docker Desktop en Windows no propaga bien los eventos de sistema de
       # archivos del volumen montado (bind mount Windows -> contenedor
       # Linux) - sin esto, Next.js/webpack nunca "ve" los cambios guardados

@@ -8,6 +8,7 @@
 // Contrato: services/tesoreria-service/tesoreria/views.py::TesoreriaTicketReembolsoViewSet.
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
+import { ExportarSheetsResultado } from "./tesoreria";
 
 const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
 
@@ -136,6 +137,30 @@ export function urlVerTicket(idTicket: string): string {
 
 export function urlVerFactura(idTicket: string): string {
   return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_factura/`;
+}
+
+// Exportar a Google Sheets, al Drive PERSONAL del usuario (14/Sep/2026,
+// pendiente.md > Reembolsos "Exportar desde 'Ticket'") - mismo patron que
+// exportarFlujosSheets/exportarSolicitudesPagoSheets (ver lib/tesoreria.ts).
+export async function exportarTicketsReembolsoSheets(
+  search?: string,
+  carpetaId?: string
+): Promise<ExportarSheetsResultado> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/exportar_sheets/?${params.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carpeta_id: carpetaId }),
+    }
+  );
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 // Crea el ticket Y sube su comprobante en una sola llamada multipart

@@ -60,9 +60,18 @@ const TIPO_LABELS: Record<TesoreriaNominaTipo, string> = {
   SEMANAL: "Semanal (obra)",
 };
 
+// Sentinel del filtro "SIN PROYECTO" (14/Sep/2026, "hay proyectos y hay
+// sin proyectos hay que agregar el SIN PROYECTO") - no es un id_proyecto
+// real, se filtra del lado del cliente (el backend no distingue de forma
+// consistente entre proyecto="" y NULL).
+const SIN_PROYECTO = "__SIN_PROYECTO__";
+
 const FORM_VACIO = {
   tipo: "QUINCENAL" as TesoreriaNominaTipo,
-  sociedad: "",
+  // sociedades (14/Sep/2026, "pueden estar contratados por dos
+  // sociedades") - lista, ya editable despues de crear (antes se
+  // deshabilitaba por completo tras el alta).
+  sociedades: [] as string[],
   proyecto: "",
   centro: "",
   serie: "",
@@ -130,10 +139,11 @@ function calcularPeriodoQuincenal(hoy: Date): { fechaInicio: string; fechaFin: s
   return {
     fechaInicio: fechaISO(inicio),
     fechaFin: fechaISO(fin),
-    // Serie compacta (11/Sep/2026, "debe ser Q172026") - Q + numero de
-    // quincena del año + año, sin espacios ni texto. Las fechas (que si
-    // llevan el detalle Enero/Quincena 1/etc.) ya lo dejan claro.
-    serie: `Q${periodo}${anio}`,
+    // Serie compacta (11/Sep/2026, "debe ser Q172026"; 14/Sep/2026, "Q debe
+    // ir con dos digitos, es decir, 01,02") - Q + numero de quincena del
+    // año (siempre 2 digitos) + año, sin espacios ni texto. Las fechas (que
+    // si llevan el detalle Enero/Quincena 1/etc.) ya lo dejan claro.
+    serie: `Q${String(periodo).padStart(2, "0")}${anio}`,
   };
 }
 
@@ -237,7 +247,12 @@ export default function TesoreriaNominasPage() {
     setCuentaGeneracion("");
     setCargandoPuestos(true);
     Promise.all([
-      listPuestos({ sociedad: n.sociedad, proyecto: n.proyecto || undefined, vigente: true }),
+      // Una sociedad de la Nomina puede no tener listPuestos({sociedad:})
+      // en un solo llamado (14/Sep/2026, "pueden estar contratados por dos
+      // sociedades") - se pide una por una y se juntan los resultados.
+      Promise.all(
+        n.sociedades.map((sociedad) => listPuestos({ sociedad, proyecto: n.proyecto || undefined, vigente: true }))
+      ).then((listas) => listas.flat()),
       listFlujos({ nomina: n.id_nomina }),
     ])
       .then(([puestos, flujos]) => {
@@ -270,15 +285,27 @@ export default function TesoreriaNominasPage() {
     setGenerando(true);
     setErrorGeneracion(null);
     try {
-      const { id_contrato } = await getContratoGenericoNomina(generandoPara.id_nomina);
+      // Un contrato generico por sociedad, no uno solo (14/Sep/2026,
+      // "pueden estar contratados por dos sociedades") - cada Puesto ya
+      // trae su propia sociedad, se resuelve/cachea el contrato de cada
+      // una segun se necesite en vez de asumir la de la Nomina completa.
+      const contratosPorSociedad = new Map<string, string>();
+      async function contratoDe(sociedad: string): Promise<string> {
+        const cacheado = contratosPorSociedad.get(sociedad);
+        if (cacheado) return cacheado;
+        const { id_contrato } = await getContratoGenericoNomina(generandoPara!.id_nomina, sociedad);
+        contratosPorSociedad.set(sociedad, id_contrato);
+        return id_contrato;
+      }
       const dias = diasDelPeriodo(generandoPara);
       const puestos = puestosVigentes.filter((p) => seleccionPuestos.has(p.id_puesto));
       let creados = 0;
       for (const puesto of puestos) {
         const salario = puesto.salario_diario ? Number(puesto.salario_diario) : 0;
         const total = dias > 0 && salario > 0 ? (salario * dias).toFixed(2) : undefined;
+        const idContrato = await contratoDe(puesto.sociedad || generandoPara.sociedades[0]);
         await createFlujo({
-          contrato: id_contrato,
+          contrato: idContrato,
           cuenta: cuentaGeneracion,
           periodoNomina: generandoPara.id_nomina,
           concepto: generandoPara.serie,
@@ -306,7 +333,9 @@ export default function TesoreriaNominasPage() {
     setLoading(true);
     listNominas({
       sociedad: filtroSociedad || undefined,
-      proyecto: filtroProyecto || undefined,
+      // SIN_PROYECTO se filtra del lado del cliente (ver nominasFiltradas),
+      // no se manda al backend.
+      proyecto: filtroProyecto && filtroProyecto !== SIN_PROYECTO ? filtroProyecto : undefined,
       centro: filtroCentro || undefined,
       tipo: filtroTipo || undefined,
     })
@@ -322,6 +351,9 @@ export default function TesoreriaNominasPage() {
 
   const nominasFiltradas = useMemo(() => {
     let resultado = nominas;
+    if (filtroProyecto === SIN_PROYECTO) {
+      resultado = resultado.filter((n) => !n.proyecto);
+    }
     if (filtroSerie) {
       resultado = resultado.filter((n) => n.serie === filtroSerie);
     }
@@ -330,7 +362,7 @@ export default function TesoreriaNominasPage() {
       resultado = resultado.filter((n) => `${n.id_nomina} ${n.serie}`.toLowerCase().includes(busqueda));
     }
     return resultado;
-  }, [nominas, search, filtroSerie]);
+  }, [nominas, search, filtroSerie, filtroProyecto]);
 
   const opcionesSerie = useMemo(
     () => Array.from(new Set(nominas.map((n) => n.serie))).sort(),
@@ -346,7 +378,7 @@ export default function TesoreriaNominasPage() {
   // complicar el aviso en Fase 1 - si CUALQUIER sociedad ya tiene el
   // periodo cubierto, no se avisa (mejora futura: por sociedad).
   const avisosPeriodoFaltante = useMemo(() => {
-    const sociedadesConNomina = new Set(nominas.map((n) => n.sociedad));
+    const sociedadesConNomina = new Set(nominas.flatMap((n) => n.sociedades));
     if (sociedadesConNomina.size === 0) return [];
     const avisos: { tipo: TesoreriaNominaTipo; mensaje: string }[] = [];
     (["QUINCENAL", "SEMANAL"] as TesoreriaNominaTipo[]).forEach((tipo) => {
@@ -396,7 +428,7 @@ export default function TesoreriaNominasPage() {
     setSoloLectura(!editar);
     setForm({
       tipo: n.tipo,
-      sociedad: n.sociedad,
+      sociedades: n.sociedades,
       proyecto: n.proyecto || "",
       centro: n.centro || "",
       serie: n.serie,
@@ -410,8 +442,8 @@ export default function TesoreriaNominasPage() {
   }
 
   async function handleGuardar() {
-    if (!editing && (!form.sociedad || !form.serie)) {
-      setFormError("Sociedad y serie son obligatorios.");
+    if (form.sociedades.length === 0 || !form.serie) {
+      setFormError("Al menos una empresa y la serie son obligatorios.");
       return;
     }
     setSaving(true);
@@ -420,6 +452,7 @@ export default function TesoreriaNominasPage() {
       if (editing) {
         await updateNomina(editing.id_nomina, {
           tipo: form.tipo,
+          sociedades: form.sociedades,
           proyecto: form.proyecto || undefined,
           centro: form.centro || undefined,
           serie: form.serie,
@@ -431,7 +464,7 @@ export default function TesoreriaNominasPage() {
       } else {
         await createNomina({
           tipo: form.tipo,
-          sociedad: form.sociedad,
+          sociedades: form.sociedades,
           proyecto: form.proyecto || undefined,
           centro: form.centro || undefined,
           serie: form.serie,
@@ -548,6 +581,7 @@ export default function TesoreriaNominasPage() {
               <MenuItem value="">
                 <em>Todos los proyectos</em>
               </MenuItem>
+              <MenuItem value={SIN_PROYECTO}>SIN PROYECTO</MenuItem>
               {proyectos.map((p) => (
                 <MenuItem key={p.id_proyecto} value={p.id_proyecto}>
                   {p.alias_proyecto || p.denominacion || p.id_proyecto}
@@ -605,8 +639,8 @@ export default function TesoreriaNominasPage() {
                   <TableRow key={n.id_nomina} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{n.id_nomina}</TableCell>
                     <TableCell>{TIPO_LABELS[n.tipo]}</TableCell>
-                    <TableCell>{aliasSociedad(n.sociedad)}</TableCell>
-                    <TableCell>{n.proyecto ? aliasProyecto(n.proyecto) : "—"}</TableCell>
+                    <TableCell>{n.sociedades.map(aliasSociedad).join(", ")}</TableCell>
+                    <TableCell>{n.proyecto ? aliasProyecto(n.proyecto) : "SIN PROYECTO"}</TableCell>
                     <TableCell>{n.serie}</TableCell>
                     <TableCell>{formatoPeriodo(n.fecha_inicio, n.fecha_fin)}</TableCell>
                     <TableCell>
@@ -644,7 +678,7 @@ export default function TesoreriaNominasPage() {
 
       <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}>
         <MenuItem
-          disabled={!puedeEditar}
+          disabled={!puedeEditar || menuNomina?.status === "CERRADA"}
           onClick={() => {
             if (menuNomina) abrirDetalle(menuNomina, true);
             setMenuAnchor(null);
@@ -667,7 +701,7 @@ export default function TesoreriaNominasPage() {
           <ListItemText>Ver Flujos</ListItemText>
         </MenuItem>
         <MenuItem
-          disabled={!puedeCrear}
+          disabled={!puedeCrear || menuNomina?.status === "CERRADA"}
           onClick={() => {
             if (menuNomina) abrirGenerarLineas(menuNomina);
             setMenuAnchor(null);
@@ -719,21 +753,21 @@ export default function TesoreriaNominasPage() {
                 <MenuItem value="SEMANAL">Semanal (obra)</MenuItem>
               </Select>
             </FormControl>
-            <FormControl size="small" fullWidth disabled={!!editing}>
-              <InputLabel id="sociedad-label">Empresa</InputLabel>
-              <Select
-                labelId="sociedad-label"
-                label="Empresa"
-                value={form.sociedad}
-                onChange={(e) => setForm({ ...form, sociedad: e.target.value })}
-              >
-                {sociedades.map((s) => (
-                  <MenuItem key={s.rfc} value={s.rfc}>
-                    {s.alias_sociedad || s.razon_social || s.rfc}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            {/* Multi-sociedad (14/Sep/2026, "pueden estar contratados por
+            dos sociedades") - ya editable despues de crear (antes se
+            deshabilitaba por completo tras el alta, ver disabled={!!editing}
+            en la version vieja de este campo). */}
+            <Autocomplete
+              multiple
+              size="small"
+              disabled={soloLectura}
+              options={sociedades}
+              value={sociedades.filter((s) => form.sociedades.includes(s.rfc))}
+              onChange={(_, valor) => setForm({ ...form, sociedades: valor.map((s) => s.rfc) })}
+              getOptionLabel={(s) => s.alias_sociedad || s.razon_social || s.rfc}
+              isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
+              renderInput={(params) => <TextField {...params} label="Empresas" placeholder="Elige una o más" />}
+            />
             <FormControl size="small" fullWidth disabled={soloLectura}>
               <InputLabel id="proyecto-label">Proyecto</InputLabel>
               <Select
@@ -743,7 +777,7 @@ export default function TesoreriaNominasPage() {
                 onChange={(e) => setForm({ ...form, proyecto: e.target.value })}
               >
                 <MenuItem value="">
-                  <em>Ninguno</em>
+                  <em>SIN PROYECTO</em>
                 </MenuItem>
                 {proyectos.map((p) => (
                   <MenuItem key={p.id_proyecto} value={p.id_proyecto}>
@@ -836,7 +870,8 @@ export default function TesoreriaNominasPage() {
         </DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Crea un Flujo por cada Puesto vigente de {generandoPara && aliasSociedad(generandoPara.sociedad)}
+            Crea un Flujo por cada Puesto vigente de{" "}
+            {generandoPara?.sociedades.map(aliasSociedad).join(", ")}
             {generandoPara?.proyecto ? ` — ${aliasProyecto(generandoPara.proyecto)}` : ""}. El monto es un{" "}
             <strong>estimado</strong> (salario diario × días del periodo), sin ISR/IMSS ni otras deducciones —
             revisa y ajusta cada Flujo antes de pagar.

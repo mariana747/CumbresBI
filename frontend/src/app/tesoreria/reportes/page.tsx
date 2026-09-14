@@ -56,10 +56,6 @@ export default function TesoreriaReporteDiarioPage() {
   // por cuenta") - las opciones salen del reporte ya generado, no de un
   // catalogo aparte, para no mostrar cuentas de empresas no elegidas.
   const [filtroCuenta, setFiltroCuenta] = useState("");
-  // Ocultar el corte del dia anterior (11/Sep/2026, "que el dia anterior se
-  // pueda ocultar") - solo lectura, empieza visible pero se puede colapsar
-  // para dejar solo el dia de hoy a la vista.
-  const [mostrarAnterior, setMostrarAnterior] = useState(true);
   const [reporte, setReporte] = useState<ReporteDiario | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -179,19 +175,8 @@ export default function TesoreriaReporteDiarioPage() {
       .filter((empresa) => empresa.cuentas.length > 0);
   }
   const sociedadesFiltradas = useMemo(() => filtrarSociedades(reporte ?? undefined), [reporte, filtroCuenta]);
-  const sociedadesFiltradasAnterior = useMemo(
-    () => filtrarSociedades(reporte?.corte_anterior),
-    [reporte, filtroCuenta]
-  );
 
-  // renderEmpresas (11/Sep/2026, extraido para poder pintar el corte del
-  // dia anterior y el de hoy con la misma tabla/tarjetas) - `editable`
-  // solo distingue las llaves/ids de cada corte (evita colisiones si una
-  // cuenta aparece en ambos), ya no hay acciones que apagar.
-  function renderEmpresas(
-    lista: { sociedad: string; cuentas: ReporteDiarioCuenta[] }[],
-    editable: boolean
-  ) {
+  function renderEmpresas(lista: { sociedad: string; cuentas: ReporteDiarioCuenta[] }[]) {
     if (lista.length === 0) {
       return (
         <Paper variant="outlined" sx={{ p: 4, textAlign: "center", mb: 3 }}>
@@ -208,7 +193,7 @@ export default function TesoreriaReporteDiarioPage() {
       const nombreEmpresa =
         sociedades.find((s) => s.rfc === empresa.sociedad)?.razon_social || empresa.sociedad || "Sin empresa";
       return (
-        <Paper key={`${editable ? "hoy" : "ayer"}-${empresa.sociedad}`} variant="outlined" sx={{ mb: 3 }}>
+        <Paper key={`hoy-${empresa.sociedad}`} variant="outlined" sx={{ mb: 3 }}>
           <Typography variant="subtitle1" fontWeight={600} sx={{ p: 2, pb: 1 }}>
             {nombreEmpresa}
           </Typography>
@@ -229,7 +214,7 @@ export default function TesoreriaReporteDiarioPage() {
                 </TableHead>
                 <TableBody>
                   {empresa.cuentas.map((c) => {
-                    const idExpandible = `${editable ? "hoy" : "ayer"}-${c.id_cuenta_bancaria}`;
+                    const idExpandible = `hoy-${c.id_cuenta_bancaria}`;
                     const expandida = cuentasExpandidas.has(idExpandible);
                     return (
                       <Fragment key={idExpandible}>
@@ -313,7 +298,7 @@ export default function TesoreriaReporteDiarioPage() {
           {/* Tarjetas - solo celular (xs), mismo criterio que el resto de Tesoreria. */}
           <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
             {empresa.cuentas.map((c) => {
-              const idExpandible = `${editable ? "hoy" : "ayer"}-${c.id_cuenta_bancaria}`;
+              const idExpandible = `hoy-${c.id_cuenta_bancaria}`;
               const expandida = cuentasExpandidas.has(idExpandible);
               return (
                 <Paper key={idExpandible} variant="outlined" sx={{ p: 2 }}>
@@ -517,32 +502,7 @@ export default function TesoreriaReporteDiarioPage() {
 
       {reporte && (
         <>
-          {/* Dos cortes (11/Sep/2026, formato legado de Wall-E Homes: "1.1
-          Resumen del dia anterior" + "1.2 Resumen del dia") - el anterior es
-          solo lectura (ese dia ya cerro) y se puede ocultar (11/Sep/2026,
-          "que el dia anterior se pueda ocultar") para dejar solo el de hoy
-          a la vista. */}
-          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 1 }}>
-            <IconButton
-              size="small"
-              aria-label={mostrarAnterior ? "Ocultar día anterior" : "Mostrar día anterior"}
-              onClick={() => setMostrarAnterior((v) => !v)}
-            >
-              {mostrarAnterior ? <ChevronDown size={18} strokeWidth={1.5} /> : <ChevronRight size={18} strokeWidth={1.5} />}
-            </IconButton>
-            <Typography variant="subtitle2" color="text.secondary">
-              Día anterior — {reporte.corte_anterior.fecha}
-            </Typography>
-          </Stack>
-          <Collapse in={mostrarAnterior} timeout="auto" unmountOnExit>
-            {renderEmpresas(sociedadesFiltradasAnterior, false)}
-            {renderConsolidado(reporte.corte_anterior.consolidado)}
-          </Collapse>
-
-          <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 3, mb: 1 }}>
-            Día de hoy — {reporte.fecha}
-          </Typography>
-          {renderEmpresas(sociedadesFiltradas, true)}
+          {renderEmpresas(sociedadesFiltradas)}
           {renderConsolidado(reporte.consolidado, true)}
         </>
       )}
