@@ -5,6 +5,12 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
 from iam.auth_views import canjear_acceso_externo, google_callback, google_start, logout, me, refresh
+from iam.google_personal_views import (
+    google_personal_access_token,
+    google_personal_autorizar,
+    google_personal_callback,
+    google_personal_estado,
+)
 from iam.views import (
     GeneralSociedadViewSet,
     IamExternalCollaboratorViewSet,
@@ -45,6 +51,12 @@ urlpatterns = [
     path("auth/logout", logout, name="oidc-logout"),
     path("auth/refresh", refresh, name="session-refresh"),
     path("auth/acceso-externo/<str:token>", canjear_acceso_externo, name="canjear-acceso-externo"),
+    # OAuth personal de Google (14/Sep/2026, exportar a Google Sheets al
+    # Drive personal del usuario - ver google_oauth.py).
+    path("api/personal/estado/", google_personal_estado, name="google-personal-estado"),
+    path("api/personal/autorizar/", google_personal_autorizar, name="google-personal-autorizar"),
+    path("api/personal/callback/", google_personal_callback, name="google-personal-callback"),
+    path("api/personal/access-token/", google_personal_access_token, name="google-personal-access-token"),
 ]
 
 # TEMPORAL (ver iam/dev_views.py) - ni siquiera se registra la ruta si

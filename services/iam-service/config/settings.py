@@ -219,3 +219,21 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# OAuth personal de Google (14/Sep/2026, "exportar a Google Sheets, se
+# guarda en su Drive personal") - cada usuario autoriza con SU PROPIA
+# cuenta de Google (interna o externa, no solo Workspace de Cumbres) para
+# que las exportaciones queden en su Drive personal, no en el compartido.
+# Vive en iam-service (no en drive-service, que es deliberadamente
+# stateless - "proxy sin base de datos propia", ver drive/driveclient.py)
+# porque es un dato de identidad del usuario (que cuenta de Google ligo),
+# reusable por cualquier modulo futuro que necesite exportar (hoy
+# Tesoreria/Flujos, despues Facturas/Conciliacion). App en estado "Prueba"
+# en GCP (sin verificar) - agregar cada correo que la use como Test user
+# en OAuth consent screen > Audience.
+GOOGLE_PERSONAL_OAUTH_CLIENT_ID = env("GOOGLE_PERSONAL_OAUTH_CLIENT_ID", default="")
+GOOGLE_PERSONAL_OAUTH_CLIENT_SECRET = env("GOOGLE_PERSONAL_OAUTH_CLIENT_SECRET", default="")
+GOOGLE_PERSONAL_OAUTH_REDIRECT_URI = env("GOOGLE_PERSONAL_OAUTH_REDIRECT_URI", default="")
+# A donde regresar al usuario despues del callback (exito o error) - la
+# pantalla que abrio el flujo, no un endpoint de API.
+GOOGLE_PERSONAL_OAUTH_RETORNO_URL = env("GOOGLE_PERSONAL_OAUTH_RETORNO_URL", default="http://localhost:3000")
