@@ -1,5 +1,4 @@
 import base64
-import datetime
 import logging
 from urllib.parse import quote
 
@@ -75,22 +74,6 @@ def _renderizar_correo(
 
 def _texto_pct(valor) -> str:
     return f"{valor:,.1f}%" if valor is not None else "—"
-
-
-_DIAS_SEMANA_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-_MESES_ES = [
-    "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-]
-
-
-def _fecha_larga_es(valor) -> str:
-    """"día de la semana, día de mes de año" (11/Sep/2026, mismo formato
-    que "Generado al" en el reporte legado de Wall-E Homes: "martes, 21 de
-    mayo de 2024"). `valor` llega como str (YYYY-MM-DD) o como date segun
-    el corte (ver calcular_reporte_diario en reportes.py)."""
-    fecha = valor if isinstance(valor, datetime.date) else datetime.date.fromisoformat(valor)
-    return f"{_DIAS_SEMANA_ES[fecha.weekday()]}, {fecha.day} de {_MESES_ES[fecha.month - 1]} de {fecha.year}"
 
 
 # Colores de fondo por empresa (11/Sep/2026, "en colores azules") - todos
@@ -230,13 +213,10 @@ def _tabla_corte_html(corte: dict, nombres_sociedades: dict[str, str]) -> str:
 
 
 def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str]) -> str:
-    """Dos cortes (11/Sep/2026, redisenio sobre el formato legado de Wall-E
-    Homes - documento "20240521_GWE_DFPE_DT_Registro diario de saldos
-    vencidos - Reporte de saldos": "1.1 Resumen de saldos al día anterior"
-    + "1.2 Resumen de saldos al día") - el correo trae ambas tablas, no
-    solo la del dia elegido, cada una agrupada por empresa (fila de color)
-    con las cuentas y su desglose de transacciones debajo."""
-    tabla_anterior = _tabla_corte_html(reporte["corte_anterior"], nombres_sociedades)
+    """Un solo corte, el de `reporte['fecha']` (14/Sep/2026, "se quitara el
+    dia anterior tanto en la ui y el correo" y "se quitara la fecha
+    generada" - revierte el rediseño de dos cortes + "Generado al" del
+    11/Sep sobre el formato legado de Wall-E Homes)."""
     tabla_hoy = _tabla_corte_html(reporte, nombres_sociedades)
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
@@ -248,10 +228,8 @@ def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str]) -> st
                     background:{_AZUL};color:#fff;font-size:12px;font-weight:800;
                     text-align:center;line-height:22px;margin-right:8px;">C</span>CumbresBI
     </div>
-    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 8px;
+    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 16px;
                letter-spacing:-0.01em;">Registro diario de saldos finales en cuentas bancarias</h1>
-    <div style="font-size:13px;color:{_INK_MUTED};margin:0 0 16px;">Generado al: {_fecha_larga_es(reporte['fecha'])}</div>
-    {tabla_anterior}
     {tabla_hoy}
     <div style="margin-top:26px;padding-top:16px;border-top:1px solid #EEEFF1;
                 font-size:11.5px;color:#9BA0AB;">
@@ -461,7 +439,7 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
     generacion del reporte en si (el frontend lo sigue mostrando en
     pantalla aunque el correo falle)."""
     headers, cookies = forward_auth_headers(request)
-    rfcs = {e["sociedad"] for e in reporte["sociedades"]} | {e["sociedad"] for e in reporte["corte_anterior"]["sociedades"]}
+    rfcs = {e["sociedad"] for e in reporte["sociedades"]}
     nombres_sociedades = _resolver_nombres_sociedades(headers, cookies, rfcs)
     html_body = _renderizar_reporte(reporte, nombres_sociedades)
 

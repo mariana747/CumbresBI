@@ -104,6 +104,50 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
     return {"con_cfdi": con_cfdi, "sin_cfdi": sin_cfdi, "no_requiere": no_requiere}
 
 
+# Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente pendiente tras
+# el cierre real de Nomina) - mismo patron reconocido/por_reconocer que
+# calcular_conciliacion_cfdi, pero acotado a Flujos de nomina
+# (periodo_nomina_id no nulo) y contra `flujo.nomina` (TesoreriaRecNomina,
+# el CFDI individual del empleado), no contra factura/complemento. Los
+# contratos GEN-NOMINA-<sociedad> tienen requiere_factura=False (ver
+# contrato_generico_nomina), por eso calcular_conciliacion_cfdi de arriba
+# los manda todos a "no_requiere" y nunca calcula este cruce.
+def calcular_conciliacion_nomina(queryset) -> dict:
+    """queryset ya viene filtrado (scope, fecha, empresa/proyecto/centro,
+    periodo_nomina) por el llamador (ver
+    TesoreriaFlujoViewSet.conciliacion_nomina) - aqui solo se separa en
+    con_recibo/sin_recibo y, para los que ya tienen recibo, se calcula
+    reconocido/por_reconocer.
+
+    - CON_RECIBO: el flujo ya tiene un recibo de nomina (CFDI) vinculado.
+      reconocido = recibo.total, por_reconocer = reconocido - total_mxp
+      del flujo.
+    - SIN_RECIBO: el flujo de nomina todavia no tiene ningun recibo
+      vinculado."""
+    queryset = queryset.select_related("periodo_nomina", "nomina")
+
+    con_recibo, sin_recibo = [], []
+    for flujo in queryset:
+        fila = {
+            "id_flujo": flujo.id_flujo,
+            "periodo_nomina": flujo.periodo_nomina_id,
+            "periodo_nomina_serie": flujo.periodo_nomina.serie if flujo.periodo_nomina_id else None,
+            "id_empleado": flujo.id_empleado,
+            "concepto": flujo.concepto,
+            "total_mxp": flujo.total_mxp,
+            "fecha_efectiva": flujo.fecha_efectiva,
+            "nomina": flujo.nomina_id,
+        }
+        if not flujo.nomina_id:
+            sin_recibo.append(fila)
+            continue
+        reconocido = flujo.nomina.total
+        por_reconocer = (reconocido - flujo.total_mxp) if reconocido is not None and flujo.total_mxp is not None else None
+        con_recibo.append({**fila, "reconocido": reconocido, "por_reconocer": por_reconocer})
+
+    return {"con_recibo": con_recibo, "sin_recibo": sin_recibo}
+
+
 def _porcentaje_cambio(cambio, base) -> Decimal | None:
     """Cambio (%) igual al del reporte legado (Wall-E Homes, formato
     origen del rediseño 11/Sep/2026) - sin base contra que comparar (cuenta
@@ -222,32 +266,15 @@ def calcular_reporte_diario(sociedades: list[str], fecha) -> dict:
     siempre manda al menos una, pero el backend no lo exige para poder
     probarlo/usarlo sin esa restriccion.
 
-    Trae dos cortes (11/Sep/2026, rediseño sobre el formato legado de Wall-E
-    Homes: "1.1 Resumen del dia anterior" + "1.2 Resumen del dia") - el de
-    `fecha` (backward-compatible en las llaves de siempre "sociedades"/
-    "consolidado", que ya consumen el email y el bloqueo de envio por
-    diferencia) y el de `fecha` menos un dia bajo "corte_anterior", cada uno
-    con su propio desglose por empresa/cuenta."""
-    import datetime
-
-    # fecha llega como str (YYYY-MM-DD) desde la vista - se parsea aqui para
-    # poder restarle un dia; si ya viene como date (llamado directo en
-    # pruebas) se usa tal cual.
-    fecha_date = fecha if isinstance(fecha, datetime.date) else datetime.date.fromisoformat(fecha)
-    fecha_anterior = fecha_date - datetime.timedelta(days=1)
-
+    Un solo corte, el de `fecha` (14/Sep/2026, "se quitara el dia anterior
+    tanto en la ui y el correo" - revierte el rediseño de dos cortes del
+    11/Sep sobre el formato legado de Wall-E Homes)."""
     cuentas = TesoreriaCuenta.objects.filter(activa=True).select_related("banco").order_by("sociedad", "alias")
     if sociedades:
         cuentas = cuentas.filter(sociedad__in=sociedades)
     cuentas = list(cuentas)
 
-    corte_hoy = _calcular_corte(cuentas, fecha)
-    corte_anterior = _calcular_corte(cuentas, fecha_anterior)
-
-    return {
-        **corte_hoy,
-        "corte_anterior": corte_anterior,
-    }
+    return _calcular_corte(cuentas, fecha)
 
 
 def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=None, fecha_fin=None) -> dict:

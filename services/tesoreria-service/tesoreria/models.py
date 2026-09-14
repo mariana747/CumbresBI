@@ -509,7 +509,13 @@ class TesoreriaNomina(models.Model):
 
     id_nomina = models.CharField(max_length=255, primary_key=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
-    sociedad = models.CharField(max_length=13)
+    # sociedades (14/Sep/2026, "porque no se puede poner dos sociedades, ya
+    # que pueden estar contratados por dos sociedades" - un empleado puede
+    # tener Puestos vigentes en mas de una sociedad a la vez) - reemplaza el
+    # viejo CharField `sociedad` unico (migracion 0048) por una relacion
+    # real (TesoreriaNominaSociedad), no un CharField/JSON denormalizado,
+    # para que el alcance (ScopedManager, ver SCOPE_FIELD_SOCIEDAD abajo)
+    # siga siendo una consulta real y no un truco de substring.
     # proyecto solo aplica tipicamente a SEMANAL/obra - queda libre para
     # QUINCENAL/corporativo. A diferencia de TesoreriaContrato.proyecto
     # (CharField suelto de 3, sin catalogo real - hueco heredado que
@@ -534,7 +540,13 @@ class TesoreriaNomina(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.CharField(max_length=100, blank=True, null=True)
 
-    SCOPE_FIELD_SOCIEDAD = "sociedad"
+    # sociedades__sociedad (14/Sep/2026) - filtra a traves de la relacion
+    # inversa hacia TesoreriaNominaSociedad; ScopedQuerySet.for_scope hace
+    # `sociedades__sociedad__in=scope.sociedad_rfcs`, que Django resuelve
+    # con un JOIN normal. TesoreriaNominaViewSet.get_queryset agrega
+    # .distinct() para no duplicar filas cuando 2+ sociedades de la misma
+    # Nomina caen dentro del alcance del usuario a la vez.
+    SCOPE_FIELD_SOCIEDAD = "sociedades__sociedad"
     SCOPE_FIELD_CENTRO = "centro"
     objects = ScopedManager()
 
@@ -543,6 +555,28 @@ class TesoreriaNomina(models.Model):
 
     def __str__(self):
         return self.id_nomina
+
+
+class TesoreriaNominaSociedad(models.Model):
+    """Una sociedad de una TesoreriaNomina (14/Sep/2026, "pueden estar
+    contratados por dos sociedades") - relacion real en vez de un CharField/
+    JSON denormalizado, para que el alcance (ver
+    TesoreriaNomina.SCOPE_FIELD_SOCIEDAD) siga siendo una consulta normal.
+    Cada fila tambien es la unidad que resuelve el contrato generico
+    GEN-NOMINA-<sociedad> correcto para cada Flujo (ver
+    TesoreriaNominaViewSet.contrato_generico)."""
+
+    nomina = models.ForeignKey(TesoreriaNomina, related_name="sociedades", on_delete=models.CASCADE)
+    sociedad = models.CharField(max_length=13)
+
+    class Meta:
+        db_table = "tesoreria_nominas_sociedades"
+        constraints = [
+            models.UniqueConstraint(fields=["nomina", "sociedad"], name="unique_nomina_sociedad"),
+        ]
+
+    def __str__(self):
+        return f"{self.nomina_id} — {self.sociedad}"
 
 
 class TesoreriaCorteEdc(models.Model):
