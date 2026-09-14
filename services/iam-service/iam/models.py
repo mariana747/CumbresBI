@@ -2,6 +2,8 @@ import uuid
 
 from django.db import models
 
+from cumbresbi_scope.managers import ScopedManager
+
 
 def _short_id():
     return uuid.uuid4().hex[:8]
@@ -74,26 +76,6 @@ class GeneralSociedad(models.Model):
         return f"{self.rfc} - {self.razon_social}"
 
 
-class GeneralGrupo(ScopedAuditMixin):
-    """Holding / agrupación empresarial por encima de SOCIEDAD.
-
-    No existe en el ERD de origen ni en la arquitectura v2.0 aprobada
-    (marcado explicitamente "sin decidir" en roles-y-permisos.md sec. 5).
-    Se crea aqui a peticion explicita para este arranque de proyecto;
-    reconciliar con el cliente antes de depender de ella en produccion.
-    """
-
-    grupo_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    nombre = models.CharField(max_length=150)
-    descripcion = models.CharField(max_length=255, blank=True, null=True)
-
-    class Meta:
-        db_table = "general_grupos"
-
-    def __str__(self):
-        return self.nombre
-
-
 class IamUser(models.Model):
     STATUS_ACTIVE = "ACTIVE"
     STATUS_SUSPENDED = "SUSPENDED"
@@ -126,6 +108,12 @@ class IamUser(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Sin SCOPE_FIELD_* declarado todavia (gap documentado en
+    # roles-y-permisos.md, pendiente del punto 2 del plan de Fase 1: agregar
+    # columna real de sociedad/proyecto). Mientras tanto, ScopedManager
+    # actua como gate GLOBAL/no-GLOBAL: solo GLOBAL ve el directorio.
+    objects = ScopedManager()
+
     class Meta:
         db_table = "iam_users"
 
@@ -153,10 +141,34 @@ class IamIdentity(models.Model):
 
 
 class IamRole(models.Model):
+    # 31/Ago/2026 (pedido de Mariana: "en matriz de permisos hay que
+    # dividir entre internos y externos, ya que en externos se debe
+    # asignar su sociedad y proyecto") - un rol EXTERNO nunca puede
+    # otorgarse en alcance GLOBAL (ver IamUserRoleViewSet.perform_create),
+    # solo con Sociedad Y Proyecto especificos (RoleAssignmentDialog exige
+    # ambos, no uno solo). No cambia el mecanismo de scope subyacente
+    # (siguen siendo IamUserRole normales, dos filas - una SOCIEDAD y una
+    # PROYECTO, ver compute_effective_scope_claims que ya union-a por
+    # dimension), solo endurece la UI/validacion para este tipo de rol.
+    TIPO_INTERNO = "INTERNO"
+    TIPO_EXTERNO = "EXTERNO"
+    TIPO_CHOICES = [(TIPO_INTERNO, "Interno"), (TIPO_EXTERNO, "Externo")]
+
     role_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     role_key = models.CharField(max_length=50, unique=True)
     role_name = models.CharField(max_length=100)
     description = models.CharField(max_length=255, blank=True, null=True)
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, default=TIPO_INTERNO)
+    # 31/Ago/2026 (pedido de Mariana: "se pueden borrar?" -> soft-delete,
+    # no DELETE real) - un rol puede tener IamUserRole ya asignadas; borrar
+    # la fila de verdad tumbaria el acceso de quien lo tuviera sin aviso
+    # ni registro (mismo riesgo que motivo IamUser.STATUS_DELETED en vez
+    # de un DELETE real). "activo=False" = ya no se puede asignar a nadie
+    # nuevo (ver IamUserRoleViewSet.perform_create), pero las asignaciones
+    # existentes NO se revocan solas - eso sigue siendo una accion aparte
+    # y deliberada (RoleAssignmentDialog), para no tumbar accesos en
+    # cadena por una sola desactivacion.
+    activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         IamUser, on_delete=models.PROTECT, related_name="roles_created"
@@ -235,27 +247,36 @@ class IamUserRole(models.Model):
     granted_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
 
+    # scope_type/scope_id ya existen pero son genericos (un solo campo que
+    # cambia de significado segun scope_type) - no calzan directo con la
+    # convencion SCOPE_FIELD_* de ScopedManager (que espera un campo fijo
+    # por dimension, ej. sociedad_rfc). Mismo gate GLOBAL/no-GLOBAL que
+    # IamUser mientras tanto; mapear scope_type/scope_id a columnas reales
+    # queda para el punto 2 del plan de Fase 1.
+    objects = ScopedManager()
+
     class Meta:
         db_table = "iam_user_roles"
 
 
 class IamGroup(ScopedAuditMixin):
-    """Equipos internos (no confundir con GeneralGrupo/holding).
+    """Equipos internos / "empresa" del usuario en el directorio.
 
-    Igual que GeneralGrupo, tabla nueva pedida explicitamente para este
-    arranque; no aparece en el ERD ni en la arquitectura v2.0 aprobada.
+    No confundir con el nivel de alcance GRUPO (descartado, ver
+    docs/architecture/roles-y-permisos.md) - esto es solo un catalogo de
+    equipos/empresa para filtrar el directorio de usuarios, sin relacion
+    con RLS. Tabla nueva pedida explicitamente para este arranque; no
+    aparece en el ERD ni en la arquitectura v2.0 aprobada.
     """
 
     group_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    grupo = models.ForeignKey(
-        GeneralGrupo,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="equipos",
-        help_text="Holding empresarial al que pertenece este equipo, si aplica.",
-    )
     nombre = models.CharField(max_length=150)
+    alias = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Nombre corto para mostrar en pantalla (ej. 'CUMBRES' para 'CONSULTORÍA Y PROYECTOS CUMBRES').",
+    )
     descripcion = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
@@ -273,3 +294,176 @@ class IamUserGroup(ScopedAuditMixin):
     class Meta:
         db_table = "iam_user_groups"
         unique_together = ("user", "group")
+
+
+class IamMagicLink(models.Model):
+    """Magic Link de un solo uso para usuarios externos (Fase 1, Semana 4;
+    docs/architecture/README.md sec. 6.2). Mismo patron que
+    pld_ticket_cliente (pld-service), pero generico a nivel iam-service para
+    cualquier modulo que necesite dar acceso externo sin contrasena.
+
+    token_hash: SHA-256 del token - el token en claro nunca se guarda, solo
+    viaja una vez en el link enviado (o, en modo dev sin envio de correo
+    real, en la respuesta del endpoint de generacion - ver views.py).
+
+    recurso_tipo/recurso_id: referencia laxa y generica a que da acceso este
+    link (ej. recurso_tipo="pld_kyc", recurso_id=<id_kyc>) - el modulo
+    consumidor interpreta estos campos, iam-service no los valida.
+    """
+
+    magic_link_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    email = models.EmailField(max_length=254)
+    recurso_tipo = models.CharField(max_length=50, blank=True, null=True)
+    recurso_id = models.CharField(max_length=255, blank=True, null=True)
+    token_hash = models.CharField(max_length=64, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    issued_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="magic_links_issued"
+    )
+    expires_at = models.DateTimeField()
+    max_uses = models.IntegerField(default=1)
+    uses_count = models.IntegerField(default=0)
+    first_used_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_magic_links"
+
+    def __str__(self):
+        return f"{self.magic_link_id} ({self.email})"
+
+
+class IamInvitation(models.Model):
+    """Invitación formal para dar de alta a un empleado nuevo (decisión
+    híbrida 10/Ago/2026, ver memoria de sesión
+    "iam-invitacion-alcance-incierto"): un usuario ya registrado (ya tiene
+    `IamUser`) entra con login libre de siempre; uno nuevo de la
+    organización necesita que un IAM Admin lo invite primero -
+    `_upsert_identity` (`auth_views.py`) rechaza el login OIDC si el
+    correo no tiene ya un `IamUser` NI una invitación pendiente.
+
+    Sin token propio a propósito: a diferencia de `IamMagicLink` (acceso
+    puntual sin cuenta de Workspace), aquí el usuario sí tiene/tendrá
+    cuenta real de Workspace - el "canje" es simplemente iniciar sesión
+    con Google; el dominio aprobado + esta fila pendiente son la
+    validación completa, no hace falta un link con token."""
+
+    invitation_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    email = models.EmailField(max_length=254)
+    invited_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="invitations_sent"
+    )
+    invited_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_invitations"
+
+    def __str__(self):
+        return self.email
+
+
+class IamExternalCollaborator(models.Model):
+    """3er tipo de acceso externo (14/Ago/2026, ver memoria de sesion
+    "tercer-tipo-invitacion-externo-sin-workspace"): colaborador que NO
+    tiene correo de Workspace pero necesita entrar a secciones reales de
+    la app como un colaborador normal - a diferencia de:
+    - `IamMagicLink`: un solo uso/accion puntual, vence en minutos.
+    - `IamInvitation`: para gente que SI tiene/tendra correo de Workspace,
+      se canjea iniciando sesion con Google (sin token propio).
+
+    Aqui el link NO vence por tiempo - solo se revoca a mano
+    (`revoked_at`) cuando el colaborador ya no debe tener acceso. Por eso
+    si tiene `user` (a diferencia de IamMagicLink): se crea un `IamUser`
+    real desde el momento de la invitacion, para que un IAM Admin le
+    asigne roles/permisos de una vez via `iam_user_roles` (mismo sistema
+    de siempre, sin permisos paralelos) - el token solo reemplaza el paso
+    de "iniciar sesion con Google" (ver auth_views.canjear_acceso_externo,
+    que emite la MISMA cookie de sesion que /auth/google/callback via
+    issue_session_jwt, no el JWT de alcance limitado de los magic links).
+    """
+
+    external_access_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    user = models.OneToOneField(IamUser, on_delete=models.CASCADE, related_name="external_access")
+    email = models.EmailField(max_length=254)
+    token_hash = models.CharField(max_length=64, unique=True)
+    invited_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="external_access_issued"
+    )
+    invited_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_external_collaborators"
+
+    def __str__(self):
+        return f"{self.external_access_id} ({self.email})"
+
+
+class IamUserCentroAccess(models.Model):
+    """Grant plano de alcance CENTRO (columna real del ERD, schema.csv) -
+    a diferencia de SOCIEDAD/PROYECTO, CENTRO no vive en
+    iam_user_roles.scope_type (ese enum solo tiene GLOBAL/SOCIEDAD/
+    PROYECTO en la BD real) sino en esta tabla aparte, usuario por
+    usuario, centro por centro. Ver roles-y-permisos.md sec. 1 ("CENTRO/
+    CONTRATO como grants planos") y scope_utils.compute_effective_scope_claims.
+    """
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(IamUser, on_delete=models.CASCADE, related_name="centro_access", db_column="user_id")
+    centro_id = models.CharField(max_length=255)
+    granted_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="centro_access_granted"
+    )
+    granted_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_user_centro_access"
+
+
+class IamUserContratoAccess(models.Model):
+    """Grant plano de alcance CONTRATO - mismo criterio que
+    IamUserCentroAccess arriba, pero sobre un contrato individual
+    (id_contrato, columna real del ERD) en vez de un centro."""
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(IamUser, on_delete=models.CASCADE, related_name="contrato_access", db_column="user_id")
+    id_contrato = models.CharField(max_length=255)
+    granted_by = models.ForeignKey(
+        IamUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="contrato_access_granted"
+    )
+    granted_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "iam_user_contrato_access"
+
+
+class IamGooglePersonalToken(models.Model):
+    """Cuenta de Google PERSONAL que un usuario ligo para exportar a su
+    propio Drive (14/Sep/2026, "exportar a Google Sheets... se guardara en
+    su drive personal") - distinta de IamIdentity (esa es SIEMPRE la
+    cuenta de Workspace de Cumbres via SSO, ver oidc-sso-silencioso-sin-
+    boton-login en memoria de sesion). Esta puede ser una cuenta externa/
+    personal, autorizada aparte con un flujo OAuth propio (ver
+    google_oauth.py). Vive en iam-service (no en drive-service, que es
+    deliberadamente stateless) porque es un dato de identidad del usuario,
+    reusable por cualquier modulo que necesite exportar."""
+
+    user = models.OneToOneField(
+        IamUser, on_delete=models.CASCADE, primary_key=True, related_name="google_personal_token"
+    )
+    google_email = models.EmailField(max_length=254, blank=True, null=True)
+    refresh_token = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "iam_google_personal_tokens"
+
+    def __str__(self):
+        return f"{self.user_id} — {self.google_email or 'sin email'}"

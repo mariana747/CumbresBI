@@ -1,0 +1,11 @@
+body {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  margin: 0;
+}
+
+/* Todo numero mostrado (montos, tasas, fechas tabulares) usa esta clase -
+   tabular-nums + DM Mono, por regla del sistema de diseno. */
+.font-numeric {
+  font-family: var(--font-dm-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}

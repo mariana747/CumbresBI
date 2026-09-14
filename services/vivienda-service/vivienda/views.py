@@ -1,0 +1,221 @@
+import logging
+
+import requests
+from cumbresbi_scope import forward_auth_headers
+from cumbresbi_scope.permissions import require_permission
+from django.conf import settings
+from rest_framework import status
+from rest_framework.filters import SearchFilter
+from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
+
+from .models import (
+    ViviendaListado,
+    ViviendaProyecto,
+    ViviendaRelExpedienteCliente,
+    ViviendaVentasAsesor,
+    ViviendaVentasExpediente,
+    ViviendaVentasExpedienteItem,
+)
+from .serializers import (
+    ViviendaListadoSerializer,
+    ViviendaProyectoSerializer,
+    ViviendaRelExpedienteClienteSerializer,
+    ViviendaVentasAsesorSerializer,
+    ViviendaVentasExpedienteItemSerializer,
+    ViviendaVentasExpedienteSerializer,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+def _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies):
+    """Verifica contra el catalogo maestro real (tesoreria-service) que
+    `id_contraparte` exista, y regresa el id VIGENTE a usar (24/Ago/2026,
+    cierre de la reconciliacion contraparte maestra; 02/Sep/2026, ahora
+    resuelve fusiones - mismo criterio ya usado en
+    pld-service/pld/views.py::_resolver_contraparte_en_tesoreria).
+    ContraparteSelector en el frontend siempre manda un id real, pero
+    puede haberse fusionado con otra desde entonces (ver
+    TesoreriaContraparteViewSet.retrieve/_fusionar_en en tesoreria-service)
+    - se guarda el id vigente que tesoreria-service resuelve, no el alias
+    viejo. Regresa None solo si tesoreria-service confirma con un 404 real
+    que la contraparte no existe en absoluto. Fail-open si tesoreria-
+    service no responde - un problema de red entre servicios no debe
+    bloquear el alta de un cliente real."""
+    try:
+        upstream = requests.get(
+            f"{settings.TESORERIA_SERVICE_URL}/api/contrapartes/{id_contraparte}/",
+            headers=headers,
+            cookies=cookies,
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning(
+            "tesoreria-service no respondio al validar id_contraparte %s", id_contraparte, exc_info=True
+        )
+        return id_contraparte
+
+    if upstream.status_code == 404:
+        return None
+    if upstream.status_code != 200:
+        logger.warning(
+            "tesoreria-service respondio %s al validar id_contraparte %s",
+            upstream.status_code,
+            id_contraparte,
+        )
+        return id_contraparte
+    return upstream.json().get("id_contraparte", id_contraparte)
+
+
+class _PermisosVentasViviendaMixin:
+    """Mismo gate de permisos en los 6 recursos de este primer corte de
+    Fase 3 (arranque de exposicion CRUD, 19/Ago/2026): crear=
+    ventas-vivienda.crear, editar/borrar=ventas-vivienda.editar, lectura
+    abierta - ninguno de estos modelos tiene ScopedManager todavia (queda
+    pendiente declarar SCOPE_FIELD_PROYECTO, ver docs/CumbresBI_estado.md
+    linea 168 y serializers.py). Mismo criterio que
+    _PermisosCatalogoTesoreriaMixin en tesoreria-service, un solo lugar
+    para no repetir el mismo bloque 6 veces."""
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [require_permission("ventas-vivienda.crear")()]
+        if self.action in ("update", "partial_update", "destroy"):
+            return [require_permission("ventas-vivienda.editar")()]
+        return super().get_permissions()
+
+
+class ViviendaProyectoViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
+    """Proyectos de vivienda. Busqueda de texto libre (?search=) sobre
+    denominacion/alias_proyecto. DELETE es fisico (sin soft-delete en el
+    ERD real) - usar con cuidado, mismo criterio que TesoreriaContraparte.
+
+    31/Ago/2026 (auditoria de scope): antes `.all()` sin RLS pese a que
+    roles-y-permisos.md sec. 4 ya citaba este modelo como ejemplo de
+    alcance PROYECTO - ahora usa ScopedManager real."""
+
+    serializer_class = ViviendaProyectoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["denominacion", "alias_proyecto"]
+
+    def get_queryset(self):
+        return ViviendaProyecto.objects.for_scope(self.request.effective_scope).order_by("denominacion")
+
+
+class ViviendaListadoViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
+    """Catalogo de unidades por proyecto. Filtrable por ?proyecto=<id> desde
+    la pantalla de un proyecto especifico."""
+
+    serializer_class = ViviendaListadoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["num_oficial", "denominacion", "modelo", "torre"]
+
+    def get_queryset(self):
+        queryset = (
+            ViviendaListado.objects.for_scope(self.request.effective_scope)
+            .select_related("proyecto")
+            .order_by("-created_at")
+        )
+        proyecto_id = self.request.query_params.get("proyecto")
+        if proyecto_id:
+            queryset = queryset.filter(proyecto_id=proyecto_id)
+        return queryset
+
+
+class ViviendaVentasAsesorViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
+    """Catalogo de asesores de venta. Mismo criterio de permisos que Proyecto."""
+
+    queryset = ViviendaVentasAsesor.objects.all().order_by("nombre")
+    serializer_class = ViviendaVentasAsesorSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["nombre", "email", "razon_social"]
+
+
+class ViviendaVentasExpedienteViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
+    """Expedientes de venta. Filtrable por ?vivienda=<id> o ?asesor=<id>
+    desde sus pantallas respectivas."""
+
+    serializer_class = ViviendaVentasExpedienteSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["id_expediente", "id_contrato"]
+
+    def get_queryset(self):
+        queryset = (
+            ViviendaVentasExpediente.objects.for_scope(self.request.effective_scope)
+            .select_related("vivienda", "asesor")
+            .order_by("-created_at")
+        )
+        vivienda_id = self.request.query_params.get("vivienda")
+        if vivienda_id:
+            queryset = queryset.filter(vivienda_id=vivienda_id)
+        asesor_id = self.request.query_params.get("asesor")
+        if asesor_id:
+            queryset = queryset.filter(asesor_id=asesor_id)
+        return queryset
+
+
+class ViviendaRelExpedienteClienteViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
+    """Datos del cliente/acreditado de un expediente. Filtrable por
+    ?expediente=<id> desde la vista de detalle del expediente."""
+
+    serializer_class = ViviendaRelExpedienteClienteSerializer
+
+    def get_queryset(self):
+        queryset = (
+            ViviendaRelExpedienteCliente.objects.for_scope(self.request.effective_scope)
+            .select_related("expediente")
+            .order_by("-created_at")
+        )
+        expediente_id = self.request.query_params.get("expediente")
+        if expediente_id:
+            queryset = queryset.filter(expediente_id=expediente_id)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        """Valida contra el catalogo real de tesoreria-service antes de
+        crear (24/Ago/2026, ver _resolver_contraparte_en_tesoreria) - mismo
+        criterio que PldContraparteKycViewSet.create en pld-service.
+        02/Sep/2026: si esa contraparte se fusiono con otra desde que el
+        frontend la eligio, se guarda el id vigente que tesoreria-service
+        resuelve, no el alias viejo."""
+        id_contraparte = request.data.get("id_contraparte")
+        if not id_contraparte:
+            return super().create(request, *args, **kwargs)
+
+        headers, cookies = forward_auth_headers(request)
+        resuelto = _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies)
+        if resuelto is None:
+            return Response(
+                {"id_contraparte": "No existe esa contraparte en el catálogo de Tesorería."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if resuelto == id_contraparte:
+            return super().create(request, *args, **kwargs)
+
+        data = request.data.copy()
+        data["id_contraparte"] = resuelto
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers_out = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers_out)
+
+
+class ViviendaVentasExpedienteItemViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
+    """Checklist de documentos de un expediente. Filtrable por
+    ?expediente=<id> desde la vista de detalle del expediente."""
+
+    serializer_class = ViviendaVentasExpedienteItemSerializer
+
+    def get_queryset(self):
+        queryset = (
+            ViviendaVentasExpedienteItem.objects.for_scope(self.request.effective_scope)
+            .select_related("expediente")
+            .order_by("-created_at")
+        )
+        expediente_id = self.request.query_params.get("expediente")
+        if expediente_id:
+            queryset = queryset.filter(expediente_id=expediente_id)
+        return queryset

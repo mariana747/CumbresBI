@@ -1,0 +1,251 @@
+name: CI
+
+# Pipeline de Fase 1 (build, lint, pruebas). El deploy real vive en
+# deploy.yml - separado a proposito, para poder correr CI en cada push/PR
+# sin necesitar credenciales de GCP, y solo intentar el deploy cuando ya
+# hay algo que valga la pena subir (push a main).
+
+on:
+  push:
+    branches: ["main", "feature/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  scope-lib-tests:
+    name: cumbresbi-scope (tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cumbresbi-scope con dependencias de dev
+        working-directory: libs/cumbresbi-scope
+        run: pip install -e ".[dev]"
+
+      - name: Pruebas de scope.py / managers.py / middleware.py / permissions.py
+        working-directory: libs/cumbresbi-scope
+        run: python -m pytest -q
+
+  lint-and-test:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Los 9 microservicios Django (no incluye api-gateway - no tiene BD
+        # propia, ver job aparte "gateway-check" abajo; no incluye
+        # frontend - Next.js, sin manage.py).
+        service:
+          [
+            iam-service,
+            audit-service,
+            pld-service,
+            vivienda-service,
+            materiales-service,
+            compras-tesoreria-service,
+            rrhh-service,
+            tesoreria-service,
+            rentas-service,
+            document-intelligence-service,
+          ]
+    services:
+      # iam-service, audit-service y pld-service ya tienen suites reales que
+      # golpean la BD (TestCase de Django) - sin esto, "manage.py test"
+      # truena al no poder conectar. Un solo contenedor mysql sirve para
+      # los 9, cada uno crea su propia test_<db> via el usuario root.
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DJANGO_SECRET_KEY: ci-only-key
+      # Cada servicio solo usa la variable *_DB_HOST/*_DB_USER que le
+      # corresponde (ver config/settings.py); fijar las nueve aqui es
+      # inocuo y evita mantener un mapeo servicio -> nombre de variable.
+      IAM_DB_HOST: 127.0.0.1
+      AUDIT_DB_HOST: 127.0.0.1
+      PLD_DB_HOST: 127.0.0.1
+      VIVIENDA_DB_HOST: 127.0.0.1
+      MATERIALES_DB_HOST: 127.0.0.1
+      COMPRAS_TESORERIA_DB_HOST: 127.0.0.1
+      RRHH_DB_HOST: 127.0.0.1
+      TESORERIA_DB_HOST: 127.0.0.1
+      RENTAS_DB_HOST: 127.0.0.1
+      DOCINT_DB_HOST: 127.0.0.1
+      IAM_DB_USER: root
+      AUDIT_DB_USER: root
+      PLD_DB_USER: root
+      VIVIENDA_DB_USER: root
+      MATERIALES_DB_USER: root
+      COMPRAS_TESORERIA_DB_USER: root
+      RRHH_DB_USER: root
+      TESORERIA_DB_USER: root
+      RENTAS_DB_USER: root
+      DOCINT_DB_USER: root
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cumbresbi-scope (libreria compartida)
+        run: pip install ./libs/cumbresbi-scope
+
+      - name: Install service dependencies
+        working-directory: services/${{ matrix.service }}
+        run: |
+          sed -i '/^\/libs\/cumbresbi-scope$/d' requirements.txt
+          pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        working-directory: services/${{ matrix.service }}
+        run: |
+          pip install ruff==0.6.9
+          ruff check .
+
+      - name: Django check
+        working-directory: services/${{ matrix.service }}
+        run: python manage.py check
+
+      - name: Tests
+        working-directory: services/${{ matrix.service }}
+        # Ya hay suites reales (iam-service, pld-service, audit-service -
+        # ver rama feature/iam-scoped-manager); los servicios sin tests.py
+        # todavia simplemente corren "Ran 0 tests, OK" - sin "|| true": una
+        # prueba real que falle ahora si debe tumbar el pipeline.
+        run: python manage.py test --no-input
+
+  stateless-service-check:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Servicios sin base de datos propia (proxy stateless, DATABASES={}
+        # en su config/settings.py) - sin el contenedor mysql que si
+        # necesita "lint-and-test" arriba; sus TestCase son SimpleTestCase
+        # (ver mail/tests.py) precisamente porque no hay alias "default"
+        # que Django pueda usar para armar/tirar una BD de pruebas.
+        service: [drive-service, mail-service]
+    env:
+      DJANGO_SECRET_KEY: ci-only-key
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cumbresbi-scope (libreria compartida)
+        run: pip install ./libs/cumbresbi-scope
+
+      - name: Install service dependencies
+        working-directory: services/${{ matrix.service }}
+        run: |
+          sed -i '/^\/libs\/cumbresbi-scope$/d' requirements.txt
+          pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        working-directory: services/${{ matrix.service }}
+        run: |
+          pip install ruff==0.6.9
+          ruff check .
+
+      - name: Django check
+        working-directory: services/${{ matrix.service }}
+        run: python manage.py check
+
+      - name: Tests
+        working-directory: services/${{ matrix.service }}
+        run: python manage.py test --no-input
+
+  gateway-check:
+    name: api-gateway
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: services/api-gateway
+        run: pip install -r requirements.txt
+      - name: Lint (ruff)
+        working-directory: services/api-gateway
+        run: |
+          pip install ruff==0.6.9
+          ruff check .
+      - name: Django check
+        working-directory: services/api-gateway
+        env:
+          DJANGO_SECRET_KEY: ci-only-key
+        run: python manage.py check
+
+  frontend-check:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install
+      - name: Type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+        # "npm run lint" (next lint) queda fuera a proposito - ESLint
+        # todavia no esta configurado en el proyecto (pide setup
+        # interactivo la primera vez, "Strict/Base/Cancel"), se agrega
+        # aparte cuando se decida la configuracion (docs/CumbresBI_estado.md).
+      - name: Production build (mismo build que usa deploy.yml)
+        working-directory: frontend
+        run: npm run build
+
+  docker-build:
+    name: docker build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          [
+            iam-service,
+            audit-service,
+            pld-service,
+            vivienda-service,
+            materiales-service,
+            compras-tesoreria-service,
+            rrhh-service,
+            tesoreria-service,
+            rentas-service,
+            document-intelligence-service,
+            drive-service,
+            mail-service,
+            api-gateway,
+          ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f services/${{ matrix.service }}/Dockerfile -t cumbresbi-${{ matrix.service }}:ci .
+
+  docker-build-frontend:
+    name: docker build (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (produccion, misma imagen que Cloud Run)
+        run: docker build -f frontend/Dockerfile -t cumbresbi-frontend:ci frontend

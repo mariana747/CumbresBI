@@ -1,3 +1,6 @@
+# Build context is the repo root (see docker-compose.yml) so this Dockerfile
+# can install the shared libs/cumbresbi-scope package - all paths below are
+# relative to the repo root, not to this service's folder.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,11 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY libs/cumbresbi-scope /libs/cumbresbi-scope
+COPY services/iam-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY services/iam-service/ .
 
-EXPOSE 8000
+# Cloud Run inyecta su propia variable PORT (normalmente 8080) y espera que
+# el contenedor escuche exactamente ahi - "runserver" con puerto fijo 8000
+# causaba "container failed to start and listen on the port defined by
+# PORT=8080". gunicorn + $PORT funciona igual en Cloud Run y en Docker
+# Compose local (ver docker-compose.yml, mapeo 8000:8080).
+ENV PORT=8080
+EXPOSE 8080
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2"]

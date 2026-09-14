@@ -1,0 +1,1095 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  IconButton,
+  InputLabel,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  MenuItem,
+  Select,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
+import { CheckCircle2, ChevronDown, ExternalLink, FolderSearch, X as CloseIcon } from "lucide-react";
+import { DriveArchivo, listDriveFiles } from "@/lib/drive";
+import {
+  analyzeDocument,
+  AnalysisStatus,
+  DocumentAnalysisResult,
+  guessDocumentTypeFromFilename,
+  pollAnalysis,
+} from "@/lib/docint";
+import {
+  getKyc,
+  listKyc,
+  PLD_CAMPOS_CONFIRMABLES,
+  PldContraparteKyc,
+  PldDatosEditables,
+  TIPO_DOCUMENTO_PLD_LABELS,
+  confirmarExtraccionKyc,
+} from "@/lib/pld";
+import { getSession } from "@/lib/auth";
+
+// Etiquetas legibles de los tipos que el clasificador reconoce (espejo de
+// docint/classifier.py, KEYWORD_TO_PROMPT_KEY) - solo para mostrar el tipo
+// autodetectado de forma amigable, no es un selector manual.
+const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  "pld.ine": "INE / IFE",
+  "pld.curp": "CURP",
+  "pld.acta_nacimiento": "Acta de nacimiento",
+  "pld.acta_constitutiva": "Acta constitutiva",
+  "pld.comprobante_domicilio": "Comprobante de domicilio",
+  "pld.constancia_fiscal": "Constancia de situación fiscal",
+  "compras.cotizacion": "Cotización",
+  "compras.factura_proveedor": "Factura / CFDI de proveedor",
+  "materiales.presupuesto": "Presupuesto",
+  "tesoreria.ticket_gasto": "Ticket / comprobante de gasto",
+  generic: "Genérico (sin tipo esperado)",
+};
+
+// Mismo alias que pld/views.py::PldContraparteKycViewSet.ALIAS_CAMPOS - la
+// extraccion trae "razon_social"/"razon_social_o_nombre" segun el tipo de
+// documento, ambos se guardan en la misma columna (nombre_completo). Se
+// duplica aqui (25/Ago/2026) solo para poder comparar correctamente contra
+// el valor ya guardado del expediente antes de confirmar - el backend
+// sigue siendo quien realmente traduce al guardar.
+const ALIAS_CAMPOS: Record<string, string> = {
+  razon_social: "nombre_completo",
+  razon_social_o_nombre: "nombre_completo",
+};
+
+// Etiquetas legibles de los campos confirmables (25/Ago/2026, para la
+// comparacion "documento vs. lo que ya puso el cliente") - espejo parcial
+// de las mismas etiquetas en app/pld/[idKyc]/page.tsx y
+// app/pld-ticket/[token]/page.tsx, solo los nombres, sin duplicar toda la
+// logica de grupos/requeridos de esas pantallas.
+const LABELS_CAMPOS: Record<string, string> = {
+  nombre_completo: "Nombre completo / Razón social",
+  fecha_nac_const: "Fecha de nacimiento / constitución",
+  pais_nac_const: "País de nacimiento / constitución",
+  folio_mercantil: "Folio mercantil",
+  objeto_social: "Objeto social",
+  curp: "CURP",
+  nacionalidad: "Nacionalidad",
+  ocupacion_act_economica: "Ocupación / actividad económica",
+  dom_calle: "Calle",
+  dom_numero_ext: "Número exterior",
+  dom_numero_int: "Número interior",
+  dom_colonia: "Colonia",
+  dom_municipio_alcaldia: "Municipio / alcaldía",
+  dom_estado: "Estado",
+  dom_cp: "Código postal",
+  dom_pais: "País",
+  tipo_identificacion: "Tipo de identificación",
+  autoridad_identificacion: "Autoridad que emitió la identificación",
+  numero_identificacion: "Número de identificación",
+  dom_corresp_dom_calle: "Calle (correspondencia)",
+  dom_corresp_dom_numero_ext: "Número exterior (correspondencia)",
+  dom_corresp_dom_numero_int: "Número interior (correspondencia)",
+  dom_corresp_dom_colonia: "Colonia (correspondencia)",
+  dom_corresp_dom_municipio_alcaldia: "Municipio / alcaldía (correspondencia)",
+  dom_corresp_dom_estado: "Estado (correspondencia)",
+  dom_corresp_dom_cp: "Código postal (correspondencia)",
+  dom_corresp_dom_pais: "País (correspondencia)",
+  telefono_fijo: "Teléfono fijo",
+  telefono_sms: "Celular",
+  estado_civil: "Estado civil",
+  ident_fideicomiso: "Identificación de fideicomiso",
+  comentarios: "Comentarios",
+  // Tesorería - Flujos (conciliación bancaria, prompt tesoreria.comprobante_bancario)
+  // y Facturas/Tickets, ver TESORERIA_FLUJO_CAMPOS_CONFIRMABLES en lib/tesoreria.ts.
+  fecha_efectiva: "Fecha",
+  concepto: "Concepto",
+  total_mxp: "Monto (MXP)",
+  link_referencia: "Referencia",
+  contraparte_nombre: "Contraparte",
+  factura: "Factura vinculada",
+  complemento: "Complemento de pago vinculado",
+};
+
+// Lógica pura de la edición manual (30/Ago/2026) - separada del componente
+// para poder probarla sin renderizar el diálogo ni llamar a la IA/Drive
+// (esa parte, docint/analyze + polling, sí necesita Gemini real - ver
+// MotorDocumentalDialog.test.ts, que solo cubre estas dos funciones).
+
+// A partir del resultado crudo de la IA, arma la copia editable: solo los
+// campos que el destino puede guardar (camposConfirmables), como texto (el
+// analista edita en un <TextField>, no importa si el valor original era
+// numero/fecha) y descartando null (la IA no encontro ese dato).
+export function camposEditadosDesdeExtraccion(
+  extractedData: Record<string, unknown>,
+  camposConfirmables: readonly string[]
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(extractedData)
+      .filter(([key, value]) => value !== null && camposConfirmables.includes(key))
+      .map(([key, value]) => [key, String(value)])
+  );
+}
+
+// Del formulario ya editado, arma lo que se manda a confirmar - descarta
+// valores vacios (un campo que el analista borro a proposito no debe
+// mandarse como cadena vacia, sobrescribiendo lo que ya hubiera).
+export function camposParaConfirmar(camposEditados: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(camposEditados).filter(([, value]) => value.trim() !== ""));
+}
+
+interface FilaComparacion {
+  campo: string;
+  label: string;
+  valorDocumento: string;
+  valorActual: string | null;
+  coincide: boolean;
+}
+
+// Microservicios consumidores actuales (services/*), identifican quien pide
+// el analisis para el log operacional (AnalysisRequestLog.servicio_solicitante)
+// - no afecta el resultado del analisis, solo trazabilidad de quien llamo.
+//
+// Solo "pld-service" tiene hoy una carpeta de Drive real resuelta (ver
+// `carpeta` mas abajo, PLD/<id_contraparte>) - los demas quedan listados
+// para trazabilidad pero sin carpeta que listar todavia (memoria de sesion
+// "motor-documental-seleccion-archivos-drive").
+const SERVICIOS_SOLICITANTES = [
+  "pld-service",
+  "compras-tesoreria-service",
+  "tesoreria-service",
+  "rentas-service",
+  "vivienda-service",
+  "rrhh-service",
+] as const;
+
+// Contexto generico (24/Ago/2026) - permite reusar este mismo dialogo desde
+// cualquier pantalla que ya sepa exactamente a que registro va a confirmar
+// la extraccion (ej. /tesoreria/facturas), sin pasar por los selectores de
+// "servicio solicitante"/"expediente KYC" que son especificos de PLD.
+// Mutuamente excluyente con kycPreseleccionado - si se manda `contexto`,
+// se ignora cualquier logica de PLD (carpeta/permKey/confirmar propios).
+export interface MotorDocumentalContexto {
+  // Texto libre mostrado en el aviso superior, ej. "factura F-00458".
+  etiqueta: string;
+  servicioSolicitante: string;
+  carpeta: string;
+  permKey: string;
+  // Si se manda, se usa igual para todos los archivos analizados en esta
+  // sesion del dialogo (a diferencia del modo PLD, que adivina un tipo por
+  // archivo via guessDocumentTypeFromFilename - aqui el llamador ya sabe
+  // que todo lo que se sube a esta carpeta es del mismo tipo de documento).
+  expectedDocumentType?: string;
+  camposConfirmables: readonly string[];
+  // Comparacion "documento vs. lo que ya declaro el usuario" (07/Sep/2026,
+  // Reembolsos - mismo mecanismo de PLD/kycActual, generalizado). Llaves =
+  // nombres de extracted_data (ej. "monto_total", "fecha_gasto", "concepto"),
+  // valores = lo que el usuario ya habia escrito para ese mismo campo. Un
+  // campo ausente aqui simplemente no se compara (ej. "comercio_nombre" -
+  // el empleado nunca declara el nombre del comercio, no tiene con que
+  // comparar). Solo aviso visual para el analista, igual que en PLD: no
+  // bloquea nada, el decide si aprueba o rechaza viendo las discrepancias.
+  registroActual?: Record<string, string | null | undefined>;
+  // El archivo de Drive que de verdad se analizo (07/Sep/2026, cierra el
+  // hueco real de Facturas: link_pdf/link_xml nunca se llenaban solos) -
+  // el llamador decide si le importa (ej. TesoreriaFacturaViewSet.
+  // confirmar_extraccion/create lo usan para fijar drive_file_id_pdf/xml).
+  onConfirmar: (campos: Record<string, unknown>, archivo?: DriveArchivo) => Promise<void>;
+}
+
+interface DocumentResult {
+  archivo: DriveArchivo;
+  expectedDocumentType: string;
+  result?: DocumentAnalysisResult;
+  error?: string;
+  // Estado del analisis async (docint/models.py::AnalysisJob) -
+  // "PENDIENTE"/"PROCESANDO" mientras se hace polling, undefined antes de
+  // mandar a analizar. analysisId solo sirve para el polling en curso, no
+  // se muestra en la UI.
+  estadoAnalisis?: AnalysisStatus;
+  analysisId?: string;
+  extraccionConfirmadaEn?: string;
+  extraccionError?: string;
+  // Copia editable de los campos confirmables de extracted_data (30/Ago/2026,
+  // "el analista revisa y ajusta lo que propuso la IA" - antes solo se podia
+  // ver el JSON crudo y confirmar tal cual). Se inicializa al llegar el
+  // resultado final del analisis; lo que se manda a confirmar sale de aqui,
+  // no directo de doc.result.extracted_data.
+  camposEditados?: Record<string, string>;
+}
+
+// Motor Inteligente de Procesamiento Documental (docint) - ver
+// docs/architecture/README.md sec. 10. Decision de Mariana (12/Ago/2026,
+// ver memoria de sesion "motor-documental-seleccion-archivos-drive"): ya
+// NO se suben archivos locales - el analista sube el archivo el mismo en
+// drive.google.com (a la carpeta correspondiente); este dialogo solo
+// LISTA lo que ya esta ahi y lo manda a analizar por referencia
+// (streaming Drive->Gemini, ver docint/drive.py).
+//
+// Modulo emergente (confirmado por el cliente): se invoca como dialogo desde
+// cualquier pantalla que necesite analizar un documento, no como una pagina
+// propia - por eso vive en components/ y no en app/.
+export default function MotorDocumentalDialog({
+  open,
+  onClose,
+  kycPreseleccionado,
+  onDatosActualizados,
+  contexto,
+}: {
+  open: boolean;
+  onClose: () => void;
+  // Se dispara justo despues de confirmar una extraccion con exito
+  // (17/Ago/2026) - para que la pantalla que abrio el dialogo (ej. la
+  // pestaña "Informacion general" de /pld/[idKyc]) pueda refrescar sus
+  // propios datos sin esperar a que el usuario cierre el dialogo o
+  // recargue la pagina a mano.
+  onDatosActualizados?: () => void;
+  // Cuando se abre desde el detalle de un expediente (/pld/[idKyc],
+  // 17/Ago/2026) - se salta el selector de servicio/expediente por
+  // completo, ya se sabe de que cliente se trata. Sin esto (uso desde
+  // cualquier otra pantalla, si algun dia aplica), se comporta como antes:
+  // el analista elige servicio + expediente a mano.
+  kycPreseleccionado?: { id_kyc: string; id_contraparte: string };
+  // Ver docstring de MotorDocumentalContexto arriba - alterna este dialogo
+  // a modo generico para cualquier otro modulo (Facturacion CFDI hoy).
+  contexto?: MotorDocumentalContexto;
+}) {
+  // Tipado explicito: SERVICIOS_SOLICITANTES es "as const" (tupla de
+  // literales), asi que SERVICIOS_SOLICITANTES[0] solo, sin el generic,
+  // infiere el tipo mas angosto ("pld-service" a secas) - el setter
+  // entonces rechaza cualquier otro valor del propio arreglo.
+  const [servicioSolicitante, setServicioSolicitante] = useState<(typeof SERVICIOS_SOLICITANTES)[number]>(
+    SERVICIOS_SOLICITANTES[0]
+  );
+  const [loading, setLoading] = useState(false);
+
+  // Expedientes KYC existentes - determinan la carpeta de Drive a listar
+  // (PLD/<id_contraparte>/) y, mas adelante, a cual expediente se
+  // confirman los datos ya validados. Solo aplica a "pld-service", el
+  // unico consumidor con carpeta real resuelta hoy. Si viene
+  // kycPreseleccionado, no hace falta cargar la lista completa - ya se
+  // sabe exactamente cual expediente es.
+  const [kycOptions, setKycOptions] = useState<PldContraparteKyc[]>([]);
+  const [kycSeleccionado, setKycSeleccionado] = useState(kycPreseleccionado?.id_kyc ?? "");
+
+  // Expediente completo del kyc seleccionado (25/Ago/2026) - kycOptions/
+  // kycPreseleccionado no traen los valores de los campos (solo id/nombre),
+  // hace falta el registro completo para poder comparar "lo que dice el
+  // documento" contra "lo que el cliente ya puso" antes de confirmar.
+  const [kycActual, setKycActual] = useState<(PldContraparteKyc & PldDatosEditables) | null>(null);
+  useEffect(() => {
+    if (!kycSeleccionado) {
+      setKycActual(null);
+      return;
+    }
+    getKyc(kycSeleccionado)
+      .then(setKycActual)
+      .catch(() => setKycActual(null));
+  }, [kycSeleccionado]);
+
+  // "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): mismo prefijo que
+  // pld/views.py (subir/subir_documento) - subcarpeta fija dentro de la
+  // Unidad compartida PLD_CumbresBI, no la raiz directa.
+  const carpeta = contexto
+    ? contexto.carpeta
+    : kycPreseleccionado
+      ? `PLD/Nuevos Clientes/${kycPreseleccionado.id_contraparte}`
+      : kycSeleccionado
+        ? `PLD/Nuevos Clientes/${kycOptions.find((k) => k.id_kyc === kycSeleccionado)?.id_contraparte}`
+        : "";
+  const permKey = contexto ? contexto.permKey : "pld-compliance.crear";
+  // Habilita "Analizar"/"Confirmar" - en modo contexto no depende de elegir
+  // un expediente KYC, el llamador ya trae su propio destino resuelto.
+  const destinoListo = contexto ? true : !!kycSeleccionado;
+
+  const [driveFiles, setDriveFiles] = useState<DriveArchivo[]>([]);
+  const [loadingDriveFiles, setLoadingDriveFiles] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+
+  // 07/Sep/2026: "en lugar de esperar hay que ponerlo como lo tenemos en el
+  // expediente" - en modo expediente KYC (kycPreseleccionado/kycSeleccionado,
+  // sin `contexto`) ya NO se pide una lista cruda de Drive con "Ver archivos
+  // en Drive" (esperaba una llamada extra a la API de Drive); se usa
+  // directamente el checklist que ya se cargo con el expediente
+  // (kycActual.documentos, con drive_file_id real) - mismo dato que ya se ve
+  // en la pestaña "Documentos KYC", sin loading ni carpeta que listar.
+  useEffect(() => {
+    if (contexto) return;
+    if (!kycActual) {
+      setDriveFiles([]);
+      return;
+    }
+    setDriveFiles(
+      kycActual.documentos
+        .filter((doc) => doc.drive_file_id)
+        .map((doc) => ({
+          file_id: doc.drive_file_id as string,
+          nombre:
+            (doc.tipo_documento && TIPO_DOCUMENTO_PLD_LABELS[doc.tipo_documento]) ||
+            doc.denominacion ||
+            "Documento sin nombre",
+          web_view_link: doc.link_documento,
+        }))
+    );
+  }, [contexto, kycActual]);
+
+  const [documents, setDocuments] = useState<DocumentResult[]>([]);
+
+  // Actor real de "confirmar_extraccion" para la auditoria del Motor
+  // Documental (ver pld/audit_utils.py) - este dialogo no llevaba sesion
+  // hasta ahora, asi que el evento se registraba sin analista identificado.
+  const [actorUserId, setActorUserId] = useState<string | null>(null);
+  useEffect(() => {
+    getSession()
+      .then((s) => setActorUserId(s?.user_id ?? null))
+      .catch(() => setActorUserId(null));
+  }, []);
+
+  useEffect(() => {
+    if (!open || contexto || kycPreseleccionado || servicioSolicitante !== "pld-service") return;
+    listKyc()
+      .then(setKycOptions)
+      .catch(() => setKycOptions([]));
+  }, [open, servicioSolicitante, kycPreseleccionado, contexto]);
+
+  async function handleVerArchivosDrive() {
+    if (!carpeta) return;
+    setLoadingDriveFiles(true);
+    setDriveError(null);
+    try {
+      const archivos = await listDriveFiles(carpeta, permKey);
+      setDriveFiles(archivos);
+      setSeleccionados(new Set());
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : "Error al listar archivos de Drive");
+    } finally {
+      setLoadingDriveFiles(false);
+    }
+  }
+
+  function toggleSeleccionado(fileId: string) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
+    });
+  }
+
+  // Normaliza para comparar sin falsos positivos por acentos/mayusculas
+  // (07/Sep/2026, "se marca como diferente sin serlo").
+  function normalizar(valor: string): string {
+    return valor
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
+  // "Nombre completo / Razón social": el documento y el cliente casi nunca
+  // escriben el nombre en el mismo orden (paterno-materno-nombres vs.
+  // nombres-paterno-materno) - comparar como conjunto de palabras, no como
+  // cadena exacta, para no marcar como conflicto lo que es el mismo nombre.
+  function coincideNombre(valorDocumento: string, valorActual: string): boolean {
+    const palabrasDoc = normalizar(valorDocumento).split(" ").filter(Boolean).sort();
+    const palabrasActual = normalizar(valorActual).split(" ").filter(Boolean).sort();
+    return palabrasDoc.length > 0 && palabrasDoc.join(" ") === palabrasActual.join(" ");
+  }
+
+  // "Tipo de identificación": el catalogo real que ve el cliente
+  // (lib/paises.ts::TIPOS_IDENTIFICACION) usa "INE / Credencial para
+  // votar", pero Gemini puede describirlo distinto ("Identificación
+  // oficial", "INE", "INE/IFE"...) - un match por substring de la sigla
+  // evita marcarlo como conflicto cuando es el mismo tipo de documento.
+  function coincideTipoIdentificacion(valorDocumento: string, valorActual: string): boolean {
+    const doc = normalizar(valorDocumento);
+    const actual = normalizar(valorActual);
+    if (doc === actual) return true;
+    const sinonimosIne = ["ine", "ife", "identificacion oficial", "credencial para votar"];
+    const esIneDoc = sinonimosIne.some((s) => doc.includes(s));
+    const esIneActual = sinonimosIne.some((s) => actual.includes(s));
+    return esIneDoc && esIneActual;
+  }
+
+  // Distancia de edicion (Levenshtein) - tolera errores de dedo/OCR del
+  // tipo "Cuauhtemoc" vs "Cuauhtenoc" (07/Sep/2026, "esto tambien hay que
+  // normalizarlo") sin dejar de detectar diferencias reales (otra calle,
+  // otro numero). Implementacion clasica de programacion dinamica.
+  function distanciaEdicion(a: string, b: string): number {
+    const filas = a.length + 1;
+    const columnas = b.length + 1;
+    const dp: number[][] = Array.from({ length: filas }, (_, i) => [i, ...Array(columnas - 1).fill(0)]);
+    for (let j = 0; j < columnas; j++) dp[0][j] = j;
+    for (let i = 1; i < filas; i++) {
+      for (let j = 1; j < columnas; j++) {
+        dp[i][j] =
+          a[i - 1] === b[j - 1]
+            ? dp[i - 1][j - 1]
+            : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[filas - 1][columnas - 1];
+  }
+
+  // Tolerancia general a errores menores de captura/OCR para cualquier
+  // campo (no solo Calle) - un texto casi identico (1-2 caracteres de
+  // diferencia, proporcional al largo) no deberia marcarse como conflicto
+  // real. Umbral conservador: 1 caracter cada ~8, minimo 1.
+  function sonSimilares(valorDocumento: string, valorActual: string): boolean {
+    const doc = normalizar(valorDocumento);
+    const actual = normalizar(valorActual);
+    if (!doc || !actual) return false;
+    const tolerancia = Math.max(1, Math.floor(Math.max(doc.length, actual.length) / 8));
+    return distanciaEdicion(doc, actual) <= tolerancia;
+  }
+
+  // Montos (07/Sep/2026, Reembolsos): "1500" vs "1500.00" o "$1,500.00" no
+  // deberian marcarse como conflicto - son el mismo numero con formato
+  // distinto, y Levenshtein los marcaria diferentes (varios caracteres de
+  // diferencia). Tolerancia de 1 centavo por redondeo.
+  function sonMontosIguales(valorDocumento: string, valorActual: string): boolean | null {
+    const limpiar = (v: string) => Number(v.replace(/[^0-9.-]/g, ""));
+    const doc = limpiar(valorDocumento);
+    const actual = limpiar(valorActual);
+    if (Number.isNaN(doc) || Number.isNaN(actual)) return null;
+    return Math.abs(doc - actual) < 0.01;
+  }
+
+  // Fechas: el documento puede traer "2026-09-05" y el usuario haber
+  // escrito "05/09/2026" - mismo dia, formato distinto. Compara solo la
+  // parte de fecha si ambas son parseables.
+  function sonFechasIguales(valorDocumento: string, valorActual: string): boolean | null {
+    const fechaDoc = new Date(valorDocumento);
+    const fechaActual = new Date(valorActual);
+    if (Number.isNaN(fechaDoc.getTime()) || Number.isNaN(fechaActual.getTime())) return null;
+    return fechaDoc.toISOString().slice(0, 10) === fechaActual.toISOString().slice(0, 10);
+  }
+
+  // Compara los datos que salieron del documento contra lo que el cliente
+  // ya tiene guardado en el expediente (25/Ago/2026, requerimiento real:
+  // "vamos a comparar con la informacion que da el usuario") - solo aviso
+  // visual para el analista, no bloquea nada, el decide que valor se queda
+  // al confirmar. Sin kycActual cargado (todavia cargando o fallo el
+  // fetch) regresa vacio - no compara contra un expediente que no se pudo
+  // leer.
+  function compararConExpediente(extractedData: Record<string, unknown>): FilaComparacion[] {
+    // Modo generico (07/Sep/2026, Reembolsos): el llamador ya trae
+    // registroActual (lo que el usuario declaro), en vez del expediente KYC
+    // de PLD. Mismas reglas de tolerancia, sin los alias/sinonimos que solo
+    // aplican a PLD (nombre por palabras, tipo de identificacion).
+    if (contexto?.registroActual) {
+      const registroActual = contexto.registroActual;
+      return Object.entries(extractedData)
+        .filter(
+          ([campo, value]) => value !== null && contexto.camposConfirmables.includes(campo)
+        )
+        .map(([campo, value]) => {
+          const valorDocumento = String(value);
+          const valorActual = registroActual[campo] ?? null;
+          let coincide = !valorActual || normalizar(valorActual) === normalizar(valorDocumento);
+          if (valorActual && !coincide) {
+            const montosIguales = sonMontosIguales(valorDocumento, valorActual);
+            const fechasIguales = sonFechasIguales(valorDocumento, valorActual);
+            coincide = montosIguales ?? fechasIguales ?? sonSimilares(valorDocumento, valorActual);
+          }
+          return {
+            campo,
+            label: LABELS_CAMPOS[campo] ?? campo,
+            valorDocumento,
+            valorActual,
+            coincide,
+          };
+        });
+    }
+
+    if (!kycActual) return [];
+    return Object.entries(extractedData)
+      .map(([key, value]) => [ALIAS_CAMPOS[key] ?? key, value] as const)
+      .filter(
+        ([campo, value]) => value !== null && (PLD_CAMPOS_CONFIRMABLES as readonly string[]).includes(campo)
+      )
+      .map(([campo, value]) => {
+        const valorDocumento = String(value);
+        const valorActual = (kycActual[campo as keyof PldDatosEditables] as string | null | undefined) ?? null;
+        let coincide = !valorActual || normalizar(valorActual) === normalizar(valorDocumento);
+        if (valorActual && !coincide && campo === "nombre_completo") {
+          coincide = coincideNombre(valorDocumento, valorActual);
+        }
+        if (valorActual && !coincide && campo === "tipo_identificacion") {
+          coincide = coincideTipoIdentificacion(valorDocumento, valorActual);
+        }
+        // Fallback general (07/Sep/2026): un typo/error de OCR de 1-2
+        // caracteres en cualquier campo de texto libre (calle, colonia,
+        // municipio...) no deberia marcarse como conflicto real.
+        if (valorActual && !coincide) {
+          coincide = sonSimilares(valorDocumento, valorActual);
+        }
+        return {
+          campo,
+          label: LABELS_CAMPOS[campo] ?? campo,
+          valorDocumento,
+          valorActual,
+          coincide,
+        };
+      });
+  }
+
+  function handleEditarCampo(index: number, campo: string, valor: string) {
+    setDocuments((prev) =>
+      prev.map((d, i) => (i === index ? { ...d, camposEditados: { ...d.camposEditados, [campo]: valor } } : d))
+    );
+  }
+
+  function handleBorrarTodo() {
+    setDocuments([]);
+    setDriveFiles([]);
+    setSeleccionados(new Set());
+  }
+
+  // Reemplaza la descarga local de JSON: solo manda las llaves de
+  // extracted_data que el expediente realmente puede guardar
+  // (PLD_CAMPOS_CONFIRMABLES, espejo de
+  // PldContraparteKycViewSet.CAMPOS_CONFIRMABLES) - el resto (ej.
+  // "nombre_completo", "clave_elector") no tiene columna propia en este
+  // modelo y se descarta aqui mismo, antes de llamar al backend.
+  async function handleConfirmarExtraccion(index: number) {
+    const doc = documents[index];
+    if (!doc.result) return;
+    if (!contexto && !kycSeleccionado) return;
+
+    // Se manda lo que quedó en camposEditados (lo que propuso la IA, ya
+    // ajustado a mano por el analista si hizo falta) - no el extracted_data
+    // crudo. Se descartan valores vacíos: un campo que el analista borró a
+    // propósito no debe mandarse como cadena vacía.
+    const campos = camposParaConfirmar(doc.camposEditados ?? {});
+    if (Object.keys(campos).length === 0) {
+      setDocuments((prev) =>
+        prev.map((d, i) =>
+          i === index
+            ? { ...d, extraccionError: "Ningún dato extraído coincide con campos guardables de este registro." }
+            : d
+        )
+      );
+      return;
+    }
+
+    try {
+      if (contexto) {
+        await contexto.onConfirmar(campos, doc.archivo);
+      } else {
+        await confirmarExtraccionKyc(kycSeleccionado, campos, actorUserId);
+      }
+      setDocuments((prev) =>
+        prev.map((d, i) =>
+          i === index ? { ...d, extraccionConfirmadaEn: new Date().toISOString(), extraccionError: undefined } : d
+        )
+      );
+      onDatosActualizados?.();
+    } catch (err) {
+      setDocuments((prev) =>
+        prev.map((d, i) =>
+          i === index
+            ? { ...d, extraccionError: err instanceof Error ? err.message : "Error al confirmar la extracción" }
+            : d
+        )
+      );
+    }
+  }
+
+  // "loading" solo cubre el encolado inicial (rapido, 202 por archivo) - una
+  // vez encolados, cada archivo hace su propio polling independiente
+  // (estadoAnalisis por indice) sin bloquear a los demas ni al boton de
+  // enviar. Antes (sincrono) un archivo lento tumbaba a todos con el
+  // timeout del gateway - ver docint/views.py::AnalyzeView.
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const elegidos = driveFiles.filter((a) => seleccionados.has(a.file_id));
+    if (elegidos.length === 0) return;
+    setLoading(true);
+    try {
+      const iniciales: DocumentResult[] = elegidos.map((archivo) => ({
+        archivo,
+        expectedDocumentType: contexto?.expectedDocumentType ?? guessDocumentTypeFromFilename(archivo.nombre),
+      }));
+      setDocuments(iniciales);
+
+      await Promise.all(
+        iniciales.map(async (doc, index) => {
+          try {
+            const { analysisId, status } = await analyzeDocument({
+              driveFileId: doc.archivo.file_id,
+              carpeta,
+              permKey,
+              nombreArchivo: doc.archivo.nombre,
+              mimeType: doc.archivo.mime_type ?? undefined,
+              expectedDocumentType: doc.expectedDocumentType,
+              // Solo cuando el llamador fijo un tipo de antemano (Tesoreria/
+              // Facturas/Tickets de reembolso) - PLD deja esto sin mandar
+              // porque adivina por archivo (ver comentario de
+              // expectedDocumentType arriba y AnalyzeDocumentParams en
+              // docint.ts).
+              internalPromptKey: contexto?.expectedDocumentType,
+              servicioSolicitante: contexto?.servicioSolicitante ?? servicioSolicitante ?? "desconocido",
+            });
+            setDocuments((prev) =>
+              prev.map((d, i) => (i === index ? { ...d, analysisId, estadoAnalisis: status, error: undefined } : d))
+            );
+
+            const final = await pollAnalysis(analysisId);
+            const camposConfirmables = contexto ? contexto.camposConfirmables : PLD_CAMPOS_CONFIRMABLES;
+            const camposEditados = final.result
+              ? camposEditadosDesdeExtraccion(final.result.extracted_data, camposConfirmables)
+              : undefined;
+            setDocuments((prev) =>
+              prev.map((d, i) =>
+                i === index
+                  ? {
+                      ...d,
+                      estadoAnalisis: final.status,
+                      result: final.result ?? undefined,
+                      error: final.error ?? undefined,
+                      camposEditados,
+                    }
+                  : d
+              )
+            );
+          } catch (err) {
+            setDocuments((prev) =>
+              prev.map((d, i) =>
+                i === index
+                  ? { ...d, estadoAnalisis: "ERROR", error: err instanceof Error ? err.message : "Error desconocido" }
+                  : d
+              )
+            );
+          }
+        })
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const hasResults = documents.some((doc) => doc.result || doc.error || doc.estadoAnalisis);
+
+  // Cerrar el dialogo (X, Escape o clic afuera) NO debe perder lo ya
+  // extraido - volver a analizar cuesta tokens de la IA. Por eso "cerrar" y
+  // "borrar" son acciones distintas: cerrar solo oculta el dialogo (el
+  // estado sigue vivo en este componente, sin desmontarse, mientras el
+  // padre no cambie `open`); "Borrar todo" es la unica accion que limpia
+  // el estado de verdad.
+  function handleClose(_event?: unknown, reason?: "backdropClick" | "escapeKeyDown") {
+    if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+    onClose();
+  }
+
+  return (
+    // maxWidth "md" (antes "sm") - hace lugar al panel lateral con el
+    // documento original junto a los datos extraidos (01/Sep/2026, pedido
+    // explicito de Mariana: "en lugar que sea otra pagina sea una lateral").
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
+      <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        Motor Documental
+        <IconButton onClick={() => onClose()} size="small" aria-label="Cerrar">
+          <CloseIcon size={18} strokeWidth={1.5} />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Análisis de documentos con IA — los archivos viven en Google Drive
+          (el analista los sube ahí directamente); aquí solo se eligen y se
+          analizan.
+        </Typography>
+
+        <Stack component="form" spacing={2} onSubmit={handleSubmit}>
+          {contexto && (
+            <Alert severity="info" variant="outlined">
+              Analizando documentos de <strong>{contexto.etiqueta}</strong>.
+            </Alert>
+          )}
+
+          {kycPreseleccionado && !contexto && (
+            <Alert severity="info" variant="outlined">
+              Analizando documentos del expediente <strong>{kycPreseleccionado.id_contraparte}</strong>.
+            </Alert>
+          )}
+
+          {!kycPreseleccionado && !contexto && (
+            <FormControl size="small" fullWidth>
+              <InputLabel id="servicio-solicitante-label">Servicio solicitante</InputLabel>
+              <Select
+                labelId="servicio-solicitante-label"
+                label="Servicio solicitante"
+                value={servicioSolicitante}
+                onChange={(e) => setServicioSolicitante(e.target.value as (typeof SERVICIOS_SOLICITANTES)[number])}
+              >
+                {SERVICIOS_SOLICITANTES.map((servicio) => (
+                  <MenuItem key={servicio} value={servicio}>
+                    {servicio}
+                  </MenuItem>
+                ))}
+              </Select>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
+                Microservicio interno que pide el análisis (para trazabilidad del
+                log, no afecta el resultado) — ej. quién validará este documento.
+              </Typography>
+            </FormControl>
+          )}
+
+          {!contexto && !kycPreseleccionado && servicioSolicitante !== "pld-service" ? (
+            <Alert severity="info">
+              Este servicio todavía no tiene una carpeta de Drive resuelta —
+              por ahora solo "pld-service" puede listar/analizar documentos.
+            </Alert>
+          ) : (
+            <>
+              {!kycPreseleccionado && !contexto && (
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="kyc-select-label">Expediente KYC</InputLabel>
+                  <Select
+                    labelId="kyc-select-label"
+                    label="Expediente KYC"
+                    value={kycSeleccionado}
+                    onChange={(e) => setKycSeleccionado(e.target.value)}
+                  >
+                    {kycOptions.map((kyc) => (
+                      <MenuItem key={kyc.id_kyc} value={kyc.id_kyc}>
+                        {kyc.id_contraparte} ({kyc.id_kyc})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, px: 0.5 }}>
+                    Determina la carpeta de Drive a listar (CumbresBI/PLD/&lt;contraparte&gt;/).
+                  </Typography>
+                </FormControl>
+              )}
+
+              {/* 07/Sep/2026: en modo expediente KYC (sin `contexto`) ya no
+              hace falta este boton - driveFiles se puebla solo desde
+              kycActual.documentos (ver useEffect de arriba). Se queda solo
+              para el modo `contexto` generico (otros servicios sin un
+              checklist propio que reusar). */}
+              {contexto && (
+                <Button
+                  variant="outlined"
+                  startIcon={
+                    loadingDriveFiles ? <CircularProgress size={18} /> : <FolderSearch size={18} strokeWidth={1.5} />
+                  }
+                  disabled={!destinoListo || loadingDriveFiles}
+                  onClick={handleVerArchivosDrive}
+                  sx={{ justifyContent: "flex-start" }}
+                >
+                  Ver archivos en Drive
+                </Button>
+              )}
+
+              {driveError && <Alert severity="error">{driveError}</Alert>}
+
+              {driveFiles.length > 0 && (
+                <List dense sx={{ bgcolor: "background.default", borderRadius: 1 }}>
+                  {driveFiles.map((archivo) => (
+                    <ListItem
+                      key={archivo.file_id}
+                      disablePadding
+                      secondaryAction={
+                        archivo.web_view_link && (
+                          <IconButton
+                            edge="end"
+                            size="small"
+                            aria-label="Ver documento original en Drive"
+                            href={archivo.web_view_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLink size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        )
+                      }
+                    >
+                      <ListItemButton onClick={() => toggleSeleccionado(archivo.file_id)} dense>
+                        <ListItemIcon sx={{ minWidth: 36 }}>
+                          <Checkbox
+                            edge="start"
+                            checked={seleccionados.has(archivo.file_id)}
+                            tabIndex={-1}
+                            disableRipple
+                            size="small"
+                          />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={archivo.nombre}
+                          secondary={
+                            DOCUMENT_TYPE_LABELS[guessDocumentTypeFromFilename(archivo.nombre)] ??
+                            guessDocumentTypeFromFilename(archivo.nombre)
+                          }
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+
+              {driveFiles.length === 0 && !loadingDriveFiles && destinoListo && (
+                <Typography variant="caption" color="text.secondary">
+                  {contexto
+                    ? 'Sin archivos listados todavía — clic en "Ver archivos en Drive" (o la carpeta está vacía).'
+                    : "Este expediente todavía no tiene documentos recibidos en el checklist."}
+                </Typography>
+              )}
+
+              <Button type="submit" variant="contained" disabled={loading || seleccionados.size === 0}>
+                {loading ? (
+                  <CircularProgress size={20} color="inherit" />
+                ) : (
+                  `Analizar ${seleccionados.size > 1 ? `${seleccionados.size} documentos` : "documento"}`
+                )}
+              </Button>
+            </>
+          )}
+        </Stack>
+
+        {hasResults && (
+          <Box sx={{ mt: 3 }}>
+            <Divider sx={{ mb: 2 }} />
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+              <Typography variant="subtitle1" fontWeight={600}>
+                Resultados
+              </Typography>
+              <Button size="small" color="error" onClick={handleBorrarTodo}>
+                Borrar todo
+              </Button>
+            </Stack>
+
+            {documents.map((doc, index) => (
+              <Accordion key={`${doc.archivo.file_id}-${index}`} defaultExpanded={documents.length === 1}>
+                <AccordionSummary expandIcon={<ChevronDown size={18} strokeWidth={1.5} />}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" noWrap sx={{ flex: 1 }}>
+                      {doc.archivo.nombre}
+                    </Typography>
+                    {doc.archivo.web_view_link && (
+                      // Revisar/corregir lo que propuso la IA sin poder ver el
+                      // documento original obligaba a ir a Drive a mano por
+                      // fuera de esta pantalla (hueco real, 01/Sep/2026) - este
+                      // link usa el web_view_link que listDriveFiles ya
+                      // regresaba pero nunca se mostraba en ningun lado.
+                      <IconButton
+                        size="small"
+                        aria-label="Ver documento original en Drive"
+                        href={doc.archivo.web_view_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    )}
+                    {!doc.result && !doc.error && (doc.estadoAnalisis === "PENDIENTE" || doc.estadoAnalisis === "PROCESANDO") && (
+                      <Chip
+                        size="small"
+                        icon={<CircularProgress size={12} color="inherit" />}
+                        label="Procesando"
+                        sx={{ "& .MuiChip-icon": { ml: 1 } }}
+                      />
+                    )}
+                    {doc.result && (
+                      <Chip
+                        size="small"
+                        label={doc.result.matches_expected_type ? "Coincide" : "No coincide"}
+                        color={doc.result.matches_expected_type ? "success" : "warning"}
+                      />
+                    )}
+                    {doc.error && <Chip size="small" label="Error" color="error" />}
+                  </Stack>
+                </AccordionSummary>
+                <AccordionDetails>
+                  {!doc.result && !doc.error && (doc.estadoAnalisis === "PENDIENTE" || doc.estadoAnalisis === "PROCESANDO") && (
+                    <Typography variant="body2" color="text.secondary">
+                      Analizando documento con IA, puede tardar unos segundos…
+                    </Typography>
+                  )}
+                  {doc.error && <Alert severity="error">{doc.error}</Alert>}
+
+                  {doc.result && (
+                    // Panel lateral con el documento original (01/Sep/2026) -
+                    // antes revisar/corregir lo que propuso la IA obligaba a
+                    // salir a otra pestaña de Drive; ahora se ve al lado,
+                    // dentro del mismo dialogo. Se apila arriba/abajo en
+                    // pantallas angostas (xs) - lado a lado desde sm+.
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="flex-start">
+                    <Stack spacing={1.5} sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2">
+                        Tipo detectado: <strong>{doc.result.detected_document_type ?? "—"}</strong>
+                      </Typography>
+                      <Typography variant="body2">
+                        Confianza: <strong>{(doc.result.confidence * 100).toFixed(0)}%</strong>
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Prompt usado: {doc.result.internal_prompt_key_used}
+                        {doc.result.matched_by_filename === false &&
+                          " (clasificación genérica, no confiable)"}
+                      </Typography>
+
+                      {doc.result.validation_errors.length > 0 && (
+                        <Alert severity="error">{doc.result.validation_errors.join(" · ")}</Alert>
+                      )}
+                      {doc.result.warnings.length > 0 && (
+                        <Alert severity="warning">{doc.result.warnings.join(" · ")}</Alert>
+                      )}
+
+                      <Typography variant="subtitle2">Datos extraídos</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Revisa y corrige lo que haga falta antes de confirmar — estos son los
+                        valores que se van a guardar, no el resultado crudo de la IA.
+                      </Typography>
+                      {doc.camposEditados && !doc.extraccionConfirmadaEn && (
+                        <Stack spacing={1.5}>
+                          {Object.entries(doc.camposEditados).map(([campo, valor]) => (
+                            <TextField
+                              key={campo}
+                              size="small"
+                              fullWidth
+                              label={LABELS_CAMPOS[campo] ?? campo}
+                              value={valor}
+                              onChange={(e) => handleEditarCampo(index, campo, e.target.value)}
+                            />
+                          ))}
+                        </Stack>
+                      )}
+                      {(() => {
+                        const comparacion = compararConExpediente(doc.result.extracted_data);
+                        const discrepancias = comparacion.filter((fila) => !fila.coincide);
+                        return (
+                          comparacion.length > 0 && (
+                            <Stack spacing={0.75}>
+                              {discrepancias.length > 0 && (
+                                <Alert severity="warning">
+                                  {discrepancias.length === 1
+                                    ? "1 dato no coincide con lo que el cliente ya había escrito:"
+                                    : `${discrepancias.length} datos no coinciden con lo que el cliente ya había escrito:`}
+                                </Alert>
+                              )}
+                              {comparacion.map((fila) => (
+                                <Box
+                                  key={fila.campo}
+                                  sx={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    gap: 1,
+                                    fontSize: 13,
+                                    py: 0.5,
+                                    px: 1,
+                                    borderRadius: 1,
+                                    bgcolor: fila.coincide ? "transparent" : "warning.main",
+                                    ...(!fila.coincide && { color: "warning.contrastText" }),
+                                  }}
+                                >
+                                  <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                                    {fila.label}
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ textAlign: "right" }}>
+                                    Documento: {fila.valorDocumento}
+                                    {!fila.coincide && ` · Cliente puso: ${fila.valorActual}`}
+                                  </Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          )
+                        );
+                      })()}
+                      <Accordion variant="outlined" disableGutters>
+                        <AccordionSummary expandIcon={<ChevronDown size={16} strokeWidth={1.5} />}>
+                          <Typography variant="caption" color="text.secondary">
+                            Ver resultado crudo de la IA (referencia, no editable)
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Box
+                            component="pre"
+                            sx={{
+                              fontFamily: "var(--font-dm-mono, monospace)",
+                              fontSize: 12,
+                              bgcolor: "background.default",
+                              p: 1.5,
+                              borderRadius: 1,
+                              overflow: "auto",
+                            }}
+                          >
+                            {JSON.stringify(doc.result.extracted_data, null, 2)}
+                          </Box>
+                        </AccordionDetails>
+                      </Accordion>
+
+                      {doc.extraccionConfirmadaEn ? (
+                        <Alert severity="success">
+                          Datos confirmados en el expediente el{" "}
+                          {new Date(doc.extraccionConfirmadaEn).toLocaleString("es-MX")}.
+                        </Alert>
+                      ) : (
+                        <Stack spacing={1}>
+                          {doc.extraccionError && <Alert severity="error">{doc.extraccionError}</Alert>}
+                          <Button
+                            size="small"
+                            variant="contained"
+                            startIcon={<CheckCircle2 size={16} strokeWidth={1.5} />}
+                            disabled={!destinoListo}
+                            onClick={() => handleConfirmarExtraccion(index)}
+                            sx={{ alignSelf: "flex-start" }}
+                          >
+                            Confirmar y guardar en el expediente
+                          </Button>
+                        </Stack>
+                      )}
+                    </Stack>
+
+                    {/* Preview embebido de Drive - el endpoint /preview de
+                    Google SI permite iframes de terceros (a diferencia de la
+                    vista completa en web_view_link, pensada para pestaña
+                    propia). El boton de "abrir en pestaña nueva" del
+                    encabezado del acordeon sigue ahi para zoom/descarga. */}
+                    <Box
+                      sx={{
+                        flex: 1,
+                        minWidth: { xs: "100%", sm: 280 },
+                        alignSelf: "stretch",
+                        border: "1px solid",
+                        borderColor: "divider",
+                        borderRadius: 1,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <Box
+                        component="iframe"
+                        src={`https://drive.google.com/file/d/${doc.archivo.file_id}/preview`}
+                        title={`Documento original: ${doc.archivo.nombre}`}
+                        sx={{ width: "100%", height: 420, border: 0, display: "block" }}
+                      />
+                    </Box>
+                    </Stack>
+                  )}
+                </AccordionDetails>
+              </Accordion>
+            ))}
+          </Box>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

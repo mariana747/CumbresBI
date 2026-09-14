@@ -46,7 +46,7 @@
         <mxCell id="a2" value="A2. Usuario abre&#10;/magic-link/[token]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1C75BC;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="560" y="165" width="260" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="a3" value="A3. iam-service valida token: hash coincide,&#10;no expirado (7 días), uses_count &lt; max_uses,&#10;revoked_at IS NULL" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="a3" value="A3. iam-service valida token: hash coincide,&#10;no expirado (30 min), uses_count &lt; max_uses,&#10;revoked_at IS NULL" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="560" y="240" width="260" height="90" as="geometry" />
         </mxCell>
         <mxCell id="a4" value="A4. iam-service marca uso (first/last_used_at,&#10;uses_count++) y emite JWT de&#10;alcance externo limitado" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaed;strokeColor=#343741;fontSize=10;" vertex="1" parent="1">
