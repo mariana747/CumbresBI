@@ -140,6 +140,17 @@ OIDC_FRONTEND_ERROR_URL = env("OIDC_FRONTEND_ERROR_URL", default="http://localho
 SESSION_COOKIE_NAME_JWT = "cumbresbi_session"
 SESSION_JWT_TTL_MINUTES = 15  # mismo TTL documentado en README.md sec. 6.1
 
+# En local (docker-compose) frontend/iam comparten dominio via el mismo
+# origen logico y SameSite=Lax basta. En Cloud Run cada servicio queda en
+# un subdominio *.run.app distinto - el fetch() del frontend hacia /api/me
+# es cross-site, y Lax no viaja ahi (solo en navegacion top-level), lo que
+# causaba un loop de login real (15/Sep/2026: login "exitoso" en el
+# backend pero el frontend nunca veia la cookie, volvia a mandar a login).
+# SameSite=None exige Secure=True (HTTPS) - seguro en Cloud Run, roto en
+# local http - por eso es configurable, no un cambio fijo.
+SESSION_COOKIE_SAMESITE = env("SESSION_COOKIE_SAMESITE", default="Lax")
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=False)
+
 # Cookie temporal (PKCE code_verifier + state) entre /auth/google/start y
 # /auth/google/callback - firmada con django.core.signing (usa SECRET_KEY),
 # nunca en la sesion ni en la URL. TTL corto: solo dura el redirect a Google

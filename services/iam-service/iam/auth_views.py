@@ -139,7 +139,8 @@ def google_callback(request):
         session_jwt,
         max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
         httponly=True,
-        samesite="Lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
     response.delete_cookie(settings.OIDC_PKCE_COOKIE_NAME)
 
@@ -186,7 +187,8 @@ def canjear_acceso_externo(request, token):
         session_jwt,
         max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
         httponly=True,
-        samesite="Lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
 
     emitir_evento_auditoria(
@@ -310,7 +312,8 @@ def refresh(request):
         session_jwt,
         max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
         httponly=True,
-        samesite="Lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
     return response
 

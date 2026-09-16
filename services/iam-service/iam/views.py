@@ -93,7 +93,17 @@ class IamUserViewSet(ReadOnlyModelViewSet):
         # roles-y-permisos.md) asi que hoy esto es el gate GLOBAL/no-GLOBAL:
         # solo GLOBAL ve el directorio, el resto no ve nada hasta el punto 2
         # del plan (columnas reales de sociedad/proyecto).
-        queryset = IamUser.objects.for_scope(self.request.effective_scope).order_by("primary_email")
+        # "system01" (system@cumbresbi.local, ver migracion
+        # 0002_seed_roles_grupos.py) es un placeholder tecnico para
+        # created_by/updated_by de lo que se siembra por migracion (roles,
+        # permisos, grupos) - nunca fue pensado como una cuenta real ni
+        # tiene con que iniciar sesion. Bug real encontrado 16/Sep/2026:
+        # aparecia en el directorio como si fuera una persona mas.
+        queryset = (
+            IamUser.objects.for_scope(self.request.effective_scope)
+            .exclude(user_id="system01")
+            .order_by("primary_email")
+        )
         status_param = self.request.query_params.get("status")
         if status_param:
             queryset = queryset.filter(status=status_param.upper())
@@ -1065,7 +1075,14 @@ class IamExternalCollaboratorViewSet(ModelViewSet):
             valores_nuevos={"email": acceso.email, "user_id": user.user_id},
         )
 
-        acceso_url = f"/acceso-externo/{token}"
+        # "/iam/auth/..." (no solo "/acceso-externo/...") - el link va
+        # directo a la vista de Django (canjear_acceso_externo,
+        # auth_views.py) via el proxy del frontend
+        # (src/app/[gateway]/[...path]/route.ts), no a una pantalla propia
+        # del frontend (nunca existio una - bug real encontrado 16/Sep/2026,
+        # el link viejo caia en una ruta inexistente y el middleware
+        # redirigia a /login sin llegar nunca a canjear el token).
+        acceso_url = f"/iam/auth/acceso-externo/{token}"
         correo_enviado = enviar_correo_acceso_externo(request, acceso.email, acceso_url)
 
         data = self.get_serializer(acceso).data
@@ -1124,7 +1141,7 @@ class IamExternalCollaboratorViewSet(ModelViewSet):
             valores_nuevos={"email": anterior.email},
         )
 
-        acceso_url = f"/acceso-externo/{token}"
+        acceso_url = f"/iam/auth/acceso-externo/{token}"  # ver nota arriba (create)
         correo_enviado = enviar_correo_acceso_externo(request, anterior.email, acceso_url)
 
         data = self.get_serializer(anterior).data
