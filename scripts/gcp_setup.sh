@@ -108,7 +108,7 @@ echo ">> GCP_DEPLOY_SA_EMAIL = $DEPLOY_SA"
 #    tienen la suya (ver infraestructura-gcp/*.md) - se listan aqui para
 #    dejar el patron completo, "|| true" evita error si ya existen.
 # ---------------------------------------------------------------------------
-SERVICIOS=(iam-service audit-service pld-service vivienda-service compras-tesoreria-service rrhh-service tesoreria-service rentas-service document-intelligence-service api-gateway)
+SERVICIOS=(iam-service audit-service pld-service vivienda-service compras-tesoreria-service rrhh-service tesoreria-service rentas-service document-intelligence-service materiales-service obra-service api-gateway)
 
 for svc in "${SERVICIOS[@]}"; do
   gcloud iam service-accounts create "${svc}" \

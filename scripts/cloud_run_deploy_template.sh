@@ -42,7 +42,7 @@ gcloud run deploy "${SERVICE}-${ENV_SUFFIX}" \
 #   (ya NO "http://pld-service:8080" del docker-compose local, sino algo
 #   como "https://pld-service-dev-xxxxx.a.run.app") y
 #   --allow-unauthenticated (es el unico punto de entrada publico real).
-# - frontend: sin BD, sin Cloud SQL; NEXT_PUBLIC_API_BASE_URL se hornea en
+# - frontend: sin BD, sin Cloud SQL; NEXT_PUBLIC_GATEWAY_URL se hornea en
 #   BUILD TIME (build-arg, ver frontend/Dockerfile), no aqui en runtime -
 #   si cambia la URL del gateway hay que reconstruir la imagen, no solo
 #   redeploy; SI necesita --allow-unauthenticated.
