@@ -13,7 +13,7 @@ import { GATEWAY_URL } from "./gatewayUrl";
 // tambien por Flujos/Facturas/Solicitudes de Pago.
 import { TesoreriaCategoriaGasto } from "./miCumbres";
 
-const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
+const TESORERIA_API_BASE_URL = `${GATEWAY_URL}/tesoreria`;
 
 // Genera un ID corto (8 hex) igual al formato que hasta ahora solo
 // generaba el backend (uuid.hex[:8], ver tesoreria/models.py::_short_id).

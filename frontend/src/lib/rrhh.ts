@@ -8,7 +8,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const RRHH_API_BASE_URL = process.env.NEXT_PUBLIC_RRHH_API_BASE_URL ?? `${GATEWAY_URL}/rrhh`;
+const RRHH_API_BASE_URL = `${GATEWAY_URL}/rrhh`;
 
 export type RrhhEstadoCivil = "SOLTERO" | "CASADO";
 export type RrhhGenero = "MUJER" | "HOMBRE";

@@ -1079,14 +1079,22 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
         estado,
         acciones: !acceso.revoked_at ? (
           <Stack direction="row" spacing={1} justifyContent="flex-end">
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => handleReenviarExterno(acceso.external_access_id)}
-              disabled={!puedeEditar || reenviando === acceso.external_access_id}
-            >
-              {reenviando === acceso.external_access_id ? <CircularProgress size={16} /> : "Reenviar"}
-            </Button>
+            {/* "Reenviar" solo tiene sentido mientras nadie ha usado el
+                link todavia - una vez "Aceptado" (last_used_at), el
+                colaborador ya entro con exito y el link sigue funcionando
+                el solo (no vence, ver IamExternalCollaborator), reenviar
+                el correo no aporta nada (bug real encontrado 16/Sep/2026,
+                seguia apareciendo aun ya aceptado). */}
+            {estado.label === "Pendiente" && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => handleReenviarExterno(acceso.external_access_id)}
+                disabled={!puedeEditar || reenviando === acceso.external_access_id}
+              >
+                {reenviando === acceso.external_access_id ? <CircularProgress size={16} /> : "Reenviar"}
+              </Button>
+            )}
             <Button
               size="small"
               variant="outlined"

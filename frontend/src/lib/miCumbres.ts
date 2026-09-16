@@ -10,7 +10,7 @@ import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 import { ExportarSheetsResultado } from "./tesoreria";
 
-const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
+const TESORERIA_API_BASE_URL = `${GATEWAY_URL}/tesoreria`;
 
 // Flujo real (27/Ago/2026, pedido de Mariana): PENDIENTE -> Tesoreria
 // revisa -> APROBADO o RECHAZADO. Solo un ticket APROBADO se puede

@@ -54,8 +54,7 @@ export interface AnalyzeDocumentParams {
   metadata?: Record<string, unknown>;
 }
 
-const DOCINT_API_BASE_URL =
-  process.env.NEXT_PUBLIC_DOCINT_API_BASE_URL ?? `${GATEWAY_URL}/docint`;
+const DOCINT_API_BASE_URL = `${GATEWAY_URL}/docint`;
 
 // Espejo en cliente de docint/classifier.py (KEYWORD_TO_PROMPT_KEY) - se usa
 // para autollenar expected_document_type al subir varios archivos sin pedirle

@@ -14,7 +14,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const VIVIENDA_API_BASE_URL = process.env.NEXT_PUBLIC_VIVIENDA_API_BASE_URL ?? `${GATEWAY_URL}/vivienda`;
+const VIVIENDA_API_BASE_URL = `${GATEWAY_URL}/vivienda`;
 
 export interface ViviendaProyecto {
   id_proyecto: string;

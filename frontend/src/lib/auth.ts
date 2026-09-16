@@ -3,9 +3,7 @@
 // vive en una cookie HttpOnly que pone iam-service (services/iam-service/
 // iam/auth_views.py), esta libreria solo la consulta via /api/me.
 import { apiFetch } from "./apiError";
-import { GATEWAY_URL } from "./gatewayUrl";
-
-const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? `${GATEWAY_URL}/iam`;
+import { IAM_API_BASE_URL } from "./gatewayUrl";
 
 export interface SessionUser {
   user_id: string;

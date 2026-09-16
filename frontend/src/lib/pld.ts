@@ -170,7 +170,7 @@ export interface PldContraparteKyc {
   fecha_vencimiento: string | null;
 }
 
-const PLD_API_BASE_URL = process.env.NEXT_PUBLIC_PLD_API_BASE_URL ?? `${GATEWAY_URL}/pld`;
+const PLD_API_BASE_URL = `${GATEWAY_URL}/pld`;
 
 // URL del boton "Ver documento" (25/Ago/2026, hallazgo real: el link crudo
 // de Drive (doc.link_documento) requiere que el usuario tenga acceso

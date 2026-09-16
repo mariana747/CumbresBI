@@ -9,7 +9,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const OBRA_API_BASE_URL = process.env.NEXT_PUBLIC_OBRA_API_BASE_URL ?? `${GATEWAY_URL}/obra`;
+const OBRA_API_BASE_URL = `${GATEWAY_URL}/obra`;
 
 export interface ObraEtapa {
   id_etapa: string;

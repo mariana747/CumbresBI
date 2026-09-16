@@ -18,7 +18,7 @@ export interface BitacoraEvento {
   recibido_en: string;
 }
 
-const AUDIT_API_BASE_URL = process.env.NEXT_PUBLIC_AUDIT_API_BASE_URL ?? `${GATEWAY_URL}/audit`;
+const AUDIT_API_BASE_URL = `${GATEWAY_URL}/audit`;
 
 export async function listBitacora({
   search,

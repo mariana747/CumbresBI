@@ -7,7 +7,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const COMPRAS_API_BASE_URL = process.env.NEXT_PUBLIC_COMPRAS_API_BASE_URL ?? `${GATEWAY_URL}/compras-tesoreria`;
+const COMPRAS_API_BASE_URL = `${GATEWAY_URL}/compras-tesoreria`;
 
 export interface CotizacionLinea {
   id_linea: string;

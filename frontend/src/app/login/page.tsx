@@ -1,26 +1,25 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "@mui/material";
-import { LayoutDashboard, RotateCcw } from "lucide-react";
+import { Alert, Box, Button, Paper, Stack, Typography } from "@mui/material";
+import { LayoutDashboard, LogIn } from "lucide-react";
 import { startGoogleLogin } from "@/lib/auth";
 import { Footer } from "@/components/Footer";
 import { PublicNavbar } from "@/components/PublicNavbar";
 import { BRAND } from "@/theme/theme";
 
-// SSO silencioso (Fase 1, Semana 4; decision de producto confirmada, ver
-// memoria de sesion "oidc-sso-silencioso-sin-boton-login"): "sin pantalla
-// intermedia" es literal, asi que el camino feliz normal NUNCA llega
-// aqui - lo intercepta src/middleware.ts (corre en el servidor, antes de
-// pintar nada) y redirige 302 directo a /auth/google/start. Esta pagina
-// solo se ve en casos borde: (a) iam-service regreso con algun ?error=
-// (dominio no aprobado, invitacion revocada, cuenta suspendida, etc. -
-// ver auth_views.py), donde si hace falta un boton "Reintentar" explicito
-// en vez de reintentar solo; o (b) AppShell detecto una cookie presente
-// pero invalida/expirada (GET /api/me devolvio 401) y empujo aqui - en
-// ese caso, sin ?error, el useEffect de abajo reintenta el redirect
-// automatico igual que haria el middleware.
+// YA NO es SSO silencioso automatico (15/Sep/2026, revierte la decision
+// de "SSO silencioso sin boton" - ver memoria de sesion
+// "oidc-sso-silencioso-sin-boton-login"): un redirect 100% automatico sin
+// interaccion real de usuario hacia accounts.google.com y de vuelta es
+// exactamente el patron que la "Bounce Tracking Mitigation" de Chrome
+// detecta y sanciona borrando el estado (cookies) del sitio que orquesto
+// el bounce - encontrado real el mismo dia (el Set-Cookie de sesion SI
+// llegaba, pero Chrome la purgaba enseguida, loop infinito). Un clic real
+// del usuario en el boton de abajo cuenta como interaccion genuina y
+// evita esta proteccion. src/middleware.ts ahora manda aqui a cualquiera
+// sin sesion (antes saltaba directo a Google sin pasar por esta pagina).
 //
 // Mensajes por codigo (14/Ago/2026, hallazgo: antes solo "oidc" se
 // reconocia como error - cualquier otro codigo real que ya emitia el
@@ -44,12 +43,6 @@ function LoginContent() {
   const errorCode = searchParams.get("error");
   const hasError = !!errorCode;
   const mensajeError = errorCode ? (MENSAJES_ERROR[errorCode] ?? MENSAJE_DEFAULT) : "";
-
-  useEffect(() => {
-    if (!hasError) {
-      startGoogleLogin();
-    }
-  }, [hasError]);
 
   return (
     <Box
@@ -95,26 +88,15 @@ function LoginContent() {
             </Typography>
           </Stack>
 
-          {hasError ? (
-            <>
-              <Alert severity="error">{mensajeError}</Alert>
-              <Button
-                variant="contained"
-                fullWidth
-                startIcon={<RotateCcw size={18} strokeWidth={1.5} />}
-                onClick={() => startGoogleLogin()}
-              >
-                Reintentar
-              </Button>
-            </>
-          ) : (
-            <Stack spacing={2} alignItems="center">
-              <CircularProgress size={24} />
-              <Typography variant="body2" color="text.secondary" textAlign="center">
-                Redirigiendo a Google Workspace…
-              </Typography>
-            </Stack>
-          )}
+          {hasError && <Alert severity="error">{mensajeError}</Alert>}
+          <Button
+            variant="contained"
+            fullWidth
+            startIcon={<LogIn size={18} strokeWidth={1.5} />}
+            onClick={() => startGoogleLogin()}
+          >
+            {hasError ? "Reintentar" : "Iniciar sesión con Google"}
+          </Button>
         </Paper>
       </Box>
       <Footer />

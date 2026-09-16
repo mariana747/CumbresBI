@@ -4,7 +4,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const MATERIALES_API_BASE_URL = process.env.NEXT_PUBLIC_MATERIALES_API_BASE_URL ?? `${GATEWAY_URL}/materiales`;
+const MATERIALES_API_BASE_URL = `${GATEWAY_URL}/materiales`;
 
 export interface MaterialCatalogo {
   id_material: string;

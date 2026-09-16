@@ -14,7 +14,7 @@ export interface DriveArchivo {
   web_view_link?: string | null;
 }
 
-const DRIVE_API_BASE_URL = process.env.NEXT_PUBLIC_DRIVE_API_BASE_URL ?? `${GATEWAY_URL}/drive`;
+const DRIVE_API_BASE_URL = `${GATEWAY_URL}/drive`;
 
 export async function listDriveFiles(carpeta: string, permKey: string): Promise<DriveArchivo[]> {
   const params = new URLSearchParams({ carpeta, perm: permKey });

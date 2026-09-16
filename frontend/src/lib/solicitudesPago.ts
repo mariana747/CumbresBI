@@ -9,7 +9,7 @@ import { GATEWAY_URL } from "./gatewayUrl";
 import { TesoreriaCategoriaGasto } from "./miCumbres";
 import { ExportarSheetsResultado } from "./tesoreria";
 
-const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
+const TESORERIA_API_BASE_URL = `${GATEWAY_URL}/tesoreria`;
 
 export type SolicitudPagoEstado = "PENDIENTE" | "APROBADO" | "RECHAZADO" | "PAGADO";
 export type SolicitudPagoTipo = "SERVICIO" | "LICENCIA" | "RENOVACION" | "OTRO";

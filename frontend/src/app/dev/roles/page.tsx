@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GATEWAY_URL } from "@/lib/gatewayUrl";
+import { IAM_API_BASE_URL } from "@/lib/gatewayUrl";
 import { IamRole, listRoles } from "@/lib/iam";
 
 // TEMPORAL - borrar junto con iam-service/iam/dev_views.py y el bloque
@@ -16,7 +16,6 @@ import { IamRole, listRoles } from "@/lib/iam";
 // real de permisos de varios roles activos en la misma sesion
 // (roles-y-permisos.md sec. 4: "los perm_keys se suman, nunca se
 // quitan") - no solo un rol aislado por vez.
-const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? `${GATEWAY_URL}/iam`;
 
 // Las 3 sociedades reales sembradas (iam-service, migracion 0006_seed_sociedades)
 // - RFC placeholder "#####N" a proposito, el cliente todavia no dio el RFC
