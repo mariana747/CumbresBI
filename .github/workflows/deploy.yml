@@ -23,7 +23,10 @@ name: Deploy a Cloud Run
 #       GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_DEPLOY_SA_EMAIL,
 #       GCP_REGION, GATEWAY_URL_DEV (15/Sep/2026: ya no se hornea en build
 #       time - se pasa como env var de runtime GATEWAY_INTERNAL_URL al
-#       frontend, ver next.config.js)
+#       frontend, ver next.config.js), GOOGLE_PICKER_CLIENT_ID,
+#       GOOGLE_PICKER_API_KEY (17/Sep/2026: estos si son build-arg del
+#       frontend, ver frontend/Dockerfile - si faltan, el build sigue
+#       igual, solo el selector de carpetas de Drive queda deshabilitado)
 
 on:
   push:
@@ -107,7 +110,13 @@ jobs:
           # 15/Sep/2026: ya no se hornea nada en build time (ver
           # frontend/src/lib/gatewayUrl.ts + next.config.js) - GATEWAY_INTERNAL_URL
           # se pasa como env var de runtime al hacer el deploy, no aqui.
-          docker build -f frontend/Dockerfile -t "$IMAGE" frontend
+          # 17/Sep/2026: NEXT_PUBLIC_GOOGLE_CLIENT_ID/_PICKER_API_KEY si son
+          # build-arg (ver frontend/Dockerfile) - Next.js las hornea en build
+          # time, no se pueden pasar como env var de runtime.
+          docker build \
+            --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_PICKER_CLIENT_ID }}" \
+            --build-arg NEXT_PUBLIC_GOOGLE_PICKER_API_KEY="${{ secrets.GOOGLE_PICKER_API_KEY }}" \
+            -f frontend/Dockerfile -t "$IMAGE" frontend
           docker push "$IMAGE"
 
   deploy:
