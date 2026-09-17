@@ -53,15 +53,13 @@ import {
   TesoreriaTicketReembolso,
 } from "@/lib/miCumbres";
 
-// Pantalla PROVISIONAL de "MiCumbres" (27/Ago/2026, pedido de Mariana) -
-// el empleado sube su ticket de gasto. La revision (adjuntar factura,
-// Motor Documental, vincular pago) se movio a Tesorería > Facturas > tab
-// "Tickets de reembolso" (27/Ago/2026, mismo día - pedido de Mariana: la
-// revision debe vivir donde Tesoreria ya trabaja, ver
-// TicketsReembolsoAdminPanel) - esta pantalla YA NO tiene ninguna accion
-// de administracion, solo crear + ver el estado de los tickets propios.
-// NO es el portal MiCumbres final (Fase 5, RRHH, sin arrancar) - ver
-// memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente".
+// Pantalla PROVISIONAL de "MiCumbres" - el empleado sube su ticket de
+// gasto. La revision (adjuntar factura, Motor Documental, vincular pago)
+// vive en Tesorería > Facturas > tab "Tickets de reembolso" (la revision
+// vive donde Tesoreria ya trabaja, ver TicketsReembolsoAdminPanel) - esta
+// pantalla YA NO tiene ninguna accion de administracion, solo crear + ver
+// el estado de los tickets propios.
+// NO es el portal MiCumbres final (Fase 5, RRHH, sin arrancar).
 //
 // Regla de permisos: el empleado SOLO puede crear/subir su propio ticket,
 // nunca editarlo despues (el backend lo bloquea, ver
@@ -82,8 +80,8 @@ const ESTADO_LABEL: Record<TesoreriaTicketEstado, string> = {
   RECHAZADO: "Rechazado",
 };
 
-// "28 de septiembre del 2026" (03/Sep/2026, pedido de Mariana) - formato
-// largo en español para las fechas límite mostradas en la pantalla.
+// Formato largo en español ("28 de septiembre del 2026") para las fechas
+// límite mostradas en la pantalla.
 function formatearFechaLarga(fechaIso: string): string {
   const [anio, mes, dia] = fechaIso.split("-").map(Number);
   const fecha = new Date(anio, mes - 1, dia);
@@ -106,20 +104,19 @@ export default function MiCumbresTicketsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Detalle de solo lectura (04/Sep/2026, pedido de Mariana: "boton de
-  // revisar datos... deberia ser icono de ojo, como en otros modulos") -
-  // mismo patron de icono que TicketsReembolsoAdminPanel/tesoreria/flujos,
-  // pero aqui sin acciones (el empleado nunca edita su propio ticket).
+  // Detalle de solo lectura, icono de ojo (mismo patron que
+  // TicketsReembolsoAdminPanel/tesoreria/flujos), pero aqui sin acciones
+  // (el empleado nunca edita su propio ticket).
   const [ticketAbierto, setTicketAbierto] = useState<TesoreriaTicketReembolso | null>(null);
-  // Preview embebido de "Ver ticket"/"Ver factura" (04/Sep/2026, "usa lo
-  // mismo que en pld") - {ticket, tipo} en vez de dos estados separados,
-  // asi un solo DocumentoPreviewDialog sirve para ambos casos.
+  // Preview embebido de "Ver ticket"/"Ver factura" (mismo patron que pld)
+  // - {ticket, tipo} en vez de dos estados separados, asi un solo
+  // DocumentoPreviewDialog sirve para ambos casos.
   const [previewDoc, setPreviewDoc] = useState<{ ticket: TesoreriaTicketReembolso; tipo: "ticket" | "factura" } | null>(
     null
   );
 
-  // Fecha de corte real del mes (03/Sep/2026, pedido de Mariana: mostrar
-  // el dia/mes/año concreto, no solo describir la regla).
+  // Fecha de corte real del mes: mostrar el dia/mes/año concreto, no
+  // solo describir la regla.
   const [fechaLimite, setFechaLimite] = useState<TesoreriaFechaLimiteReembolso | null>(null);
   useEffect(() => {
     getFechaLimiteReembolso().then(setFechaLimite).catch(() => setFechaLimite(null));
@@ -146,9 +143,8 @@ export default function MiCumbresTicketsPage() {
   const [moneda, setMoneda] = useState("MXP");
   const [fechaGasto, setFechaGasto] = useState("");
   const [sociedad, setSociedad] = useState("");
-  // Varios conceptos por ticket (03/Sep/2026, minuta punto 1: "solicitar
-  // varios conceptos") - tabla editable, mismo patron que las lineas de
-  // CotizacionLinea en compras/cotizaciones/page.tsx.
+  // Varios conceptos por ticket - tabla editable, mismo patron que las
+  // lineas de CotizacionLinea en compras/cotizaciones/page.tsx.
   type ConceptoForm = { descripcion: string; monto: string; categoriaGasto: TesoreriaCategoriaGasto | "" };
   const CONCEPTO_VACIO: ConceptoForm = { descripcion: "", monto: "", categoriaGasto: "" };
   const [conceptos, setConceptos] = useState<ConceptoForm[]>([{ ...CONCEPTO_VACIO }]);
@@ -176,16 +172,16 @@ export default function MiCumbresTicketsPage() {
   }, []);
   // El ticket solo guarda el RFC (referencia laxa a general_sociedades,
   // mismo criterio que TesoreriaContrato.sociedad) - mostrar el RFC crudo
-  // no le dice nada al empleado, necesita ver la razon social (07/Sep/2026).
+  // no le dice nada al empleado, necesita ver la razon social.
   function nombreSociedad(rfc: string | null): string {
     if (!rfc) return "—";
     return sociedades.find((s) => s.rfc === rfc)?.razon_social || rfc;
   }
   const [archivoTicket, setArchivoTicket] = useState<File | null>(null);
-  // Piloto de escaneo (28/Ago/2026, pedido de Mariana): foto tomada con
-  // "Tomar foto" pasa por EscanerDocumento antes de quedar como adjunto.
-  // 31/Ago/2026 - "Elegir archivo" tambien manda ahi cuando lo elegido es
-  // una imagen (no PDF): en escritorio no hay camara, asi que "Tomar
+  // Piloto de escaneo: foto tomada con "Tomar foto" pasa por
+  // EscanerDocumento antes de quedar como adjunto. "Elegir archivo"
+  // tambien manda ahi cuando lo elegido es una imagen (no PDF): en
+  // escritorio no hay camara, asi que "Tomar
   // foto" ahi ya es solo un selector de archivos disfrazado - el recorte
   // debe poder usarse igual eligiendo una imagen ya existente, en
   // escritorio o celular.
@@ -294,11 +290,9 @@ export default function MiCumbresTicketsPage() {
         </Button>
       </Stack>
 
-      {/* Reglas del ticket (03/Sep/2026, pedido de Mariana: "las reglas van
-          afuera" - visibles en la pantalla, no solo dentro del dialogo de
-          alta; texto final dictado por Mariana como "Politica para la
-          Captura y Validacion de Tickets de Gasto") - mismas reglas que
-          valida reembolso_utils.validar_fecha_limite en el backend. */}
+      {/* Reglas del ticket visibles en la pantalla, no solo dentro del
+          dialogo de alta - mismas reglas que valida
+          reembolso_utils.validar_fecha_limite en el backend. */}
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2" component="div">
           <strong>Política para la Captura y Validación de Tickets de Gasto</strong>
@@ -488,8 +482,8 @@ export default function MiCumbresTicketsPage() {
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          {/* Orden pedido por Mariana 03/Sep/2026: Sociedad -> Fecha+Moneda
-              -> Conceptos -> Nota general -> Elegir archivo. */}
+          {/* Orden: Sociedad -> Fecha+Moneda -> Conceptos -> Nota general
+              -> Elegir archivo. */}
           <Stack spacing={2} sx={{ mt: 1 }}>
             {errorAlta && <Alert severity="error">{errorAlta}</Alert>}
             <FormControl fullWidth>
@@ -668,8 +662,8 @@ export default function MiCumbresTicketsPage() {
             />
 
             {/* "Tomar foto" con `capture` solo abre la camara directo en
-                celular (pedido de Mariana 27/Ago/2026) - en escritorio no
-                hay camara que abrir, asi que el boton quedaba ahi como un
+                celular - en escritorio no hay camara que abrir, asi que el
+                boton quedaba ahi como un
                 selector de archivos redundante con "Elegir archivo". Desde
                 que "Elegir archivo" tambien manda las imagenes al recorte
                 (31/Ago/2026 - ver su onChange: la distincion real ya no es

@@ -35,7 +35,7 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
+# Llave publica RS256 (/README.md sec. 8) - publica del
 # par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
 # este default fuera de dev; en un ambiente real viene de Secret Manager.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
@@ -52,7 +52,7 @@ fwIDAQAB
 )
 
 # Fase 0: el frontend (Next.js, localhost:3000) llama a este servicio directo
-# desde el navegador, sin API Gateway todavia (docs/architecture/README.md
+# desde el navegador, sin API Gateway todavia (/README.md
 # sec. 8, pendiente). CORS solo para orígenes de desarrollo local.
 CORS_ALLOW_CREDENTIALS = True  # cookie de sesion de iam-service, ver middleware fallback
 CORS_ALLOWED_ORIGINS = env.list(

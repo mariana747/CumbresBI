@@ -23,8 +23,7 @@ class AnalyzeView(APIView):
     MotorDocumentalDialog.tsx) hace polling a GET /analyze/<id>/status hasta
     ver COMPLETADO o ERROR.
 
-    Decision de Mariana (12/Ago/2026, ver memoria de sesion
-    "motor-documental-seleccion-archivos-drive"): ya NO se acepta un archivo
+    No se acepta un archivo
     subido directo del navegador - el analista sube el archivo el mismo en
     drive.google.com (a la carpeta correspondiente); esta vista solo pide
     una referencia (drive_file_id/carpeta) y lee los bytes reales de Drive

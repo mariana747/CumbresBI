@@ -21,8 +21,9 @@ name: Deploy a Cloud Run
 #     roles/run.admin + roles/iam.serviceAccountUser + roles/artifactregistry.writer
 #   - Los secrets del repo de GitHub:
 #       GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_DEPLOY_SA_EMAIL,
-#       GCP_REGION, GATEWAY_URL_DEV (para hornear NEXT_PUBLIC_API_BASE_URL
-#       del frontend en build time)
+#       GCP_REGION, GATEWAY_URL_DEV (15/Sep/2026: ya no se hornea en build
+#       time - se pasa como env var de runtime GATEWAY_INTERNAL_URL al
+#       frontend, ver next.config.js)
 
 on:
   push:
@@ -61,6 +62,8 @@ jobs:
             document-intelligence-service,
             drive-service,
             mail-service,
+            materiales-service,
+            obra-service,
             api-gateway,
           ]
     steps:
@@ -101,11 +104,10 @@ jobs:
       - name: Build y push
         run: |
           IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/frontend:${{ github.sha }}"
-          # NEXT_PUBLIC_* se hornea en build time (ver frontend/Dockerfile) -
-          # tiene que ser la URL real del api-gateway de ESTE ambiente.
-          docker build -f frontend/Dockerfile -t "$IMAGE" \
-            --build-arg NEXT_PUBLIC_API_BASE_URL="${{ secrets.GATEWAY_URL_DEV }}" \
-            frontend
+          # 15/Sep/2026: ya no se hornea nada en build time (ver
+          # frontend/src/lib/gatewayUrl.ts + next.config.js) - GATEWAY_INTERNAL_URL
+          # se pasa como env var de runtime al hacer el deploy, no aqui.
+          docker build -f frontend/Dockerfile -t "$IMAGE" frontend
           docker push "$IMAGE"
 
   deploy:
@@ -129,6 +131,8 @@ jobs:
             document-intelligence-service,
             drive-service,
             mail-service,
+            materiales-service,
+            obra-service,
           ]
     steps:
       - id: auth
@@ -196,4 +200,5 @@ jobs:
             --image "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/frontend:${{ github.sha }}" \
             --region "${{ env.REGION }}" \
             --project "${{ env.PROJECT_ID }}" \
+            --update-env-vars "GATEWAY_INTERNAL_URL=${{ secrets.GATEWAY_URL_DEV }}" \
             --quiet

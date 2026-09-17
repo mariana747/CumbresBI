@@ -14,7 +14,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const VIVIENDA_API_BASE_URL = process.env.NEXT_PUBLIC_VIVIENDA_API_BASE_URL ?? `${GATEWAY_URL}/vivienda`;
+const VIVIENDA_API_BASE_URL = `${GATEWAY_URL}/vivienda`;
 
 export interface ViviendaProyecto {
   id_proyecto: string;
@@ -468,7 +468,7 @@ export async function deleteExpediente(idExpediente: string): Promise<void> {
 export type ViviendaClienteTipo = "ACREDITADO" | "COACREDITADO";
 
 // Cliente/acreditado de un expediente (19/Ago/2026, conectado al catalogo
-// real de contrapartes - ver docs/architecture/README.md sec. 11.2 #7,
+// real de contrapartes - ver /README.md sec. 11.2 #7,
 // "contraparte maestra unica"). `id_contraparte` ya NO se captura a mano -
 // se busca/crea contra tesoreria-service (ver ContraparteSelector.tsx),
 // mismo criterio que ya se conecto en PLD.

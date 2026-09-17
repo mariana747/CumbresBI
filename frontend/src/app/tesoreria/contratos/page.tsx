@@ -134,8 +134,8 @@ type TabContrato = (typeof TABS_CONTRATO)[number];
 // por sociedad_rfcs del usuario, ver tesoreria/models.py).
 // useSearchParams() obliga a envolver en Suspense para el build de
 // produccion (mismo motivo ya documentado en admin/usuarios/page.tsx) - lo
-// necesitamos para el deep link "ir a este contrato" (28/Ago/2026, pedido
-// explicito de Mariana) desde el dialogo de Contratos en Contrapartes.
+// necesitamos para el deep link "ir a este contrato" desde el dialogo de
+// Contratos en Contrapartes.
 export default function TesoreriaContratosPage() {
   return (
     <Suspense fallback={null}>
@@ -153,10 +153,8 @@ function TesoreriaContratosPageContent() {
   const [contrapartes, setContrapartes] = useState<TesoreriaContraparte[]>([]);
   const [search, setSearch] = useState("");
   const [filtroSociedad, setFiltroSociedad] = useState("");
-  // Precargado desde ?contraparte=<id> (28/Ago/2026, pedido explicito de
-  // Mariana: "se te redirige a los contratos solo pertenecientes a esa
-  // contraparte, no se mostraran lo de otra contraparte, recuerda va ser
-  // por empresa y por proyecto") - mismo criterio que filtroSociedad,
+  // Precargado desde ?contraparte=<id> - solo muestra los contratos de esa
+  // contraparte (por sociedad y proyecto), mismo criterio que filtroSociedad,
   // filtro del lado del cliente sobre la lista completa.
   const [filtroContraparte, setFiltroContraparte] = useState(searchParams.get("contraparte") || "");
   const [filtroProyecto, setFiltroProyecto] = useState("");
@@ -166,10 +164,10 @@ function TesoreriaContratosPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaContrato | null>(null);
-  // Ver vs. Editar (28/Ago/2026, pedido explicito de Mariana: mismo
-  // criterio que Contrapartes/Flujos - "Ver" visible siempre, "Editar" vive
-  // en el menu de tres puntos) - mismo dialogo/formulario, con todo
-  // deshabilitado y sin boton de Guardar cuando soloLectura es true.
+  // Ver vs. Editar (mismo criterio que Contrapartes/Flujos): "Ver" visible
+  // siempre, "Editar" vive en el menu de tres puntos - mismo
+  // dialogo/formulario, con todo deshabilitado y sin boton de Guardar
+  // cuando soloLectura es true.
   const [soloLectura, setSoloLectura] = useState(false);
   // Referencia cruzada al proveedor
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
@@ -178,11 +176,9 @@ function TesoreriaContratosPageContent() {
   // periodicidad, contrato firmado, autorizacion interna) - las otras 3
   // categorias (GASTO_SUELTO, REEMBOLSO_EMPLEADO, COMPRA_ADQUISICION) son
   // todas variantes de "sin vigencia, sin contrato firmado, pago unico o
-  // por evento" - mismo criterio que "no hay ni pago recurrente, ni
-  // contrato firmado, ni vigencia" que observo Mariana con el caso real de
-  // Restaurant Izel (GASTO_SUELTO). Sin categoria elegida no se oculta
-  // nada (mismo comportamiento de siempre, contratos viejos sin categoria
-  // incluidos).
+  // por evento" (caso real: GASTO_SUELTO como Restaurant Izel). Sin
+  // categoria elegida no se oculta nada (mismo comportamiento de siempre,
+  // contratos viejos sin categoria incluidos).
   const ocultaCamposFormales = form.categoria !== "" && form.categoria !== "FORMAL_RECURRENTE";
   const [tab, setTab] = useState<TabContrato>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -203,10 +199,8 @@ function TesoreriaContratosPageContent() {
   const [nuevoDocumentoNombre, setNuevoDocumentoNombre] = useState<TesoreriaContratoDocumentoNombre | "">("");
   const [documentosError, setDocumentosError] = useState<string | null>(null);
   const [enviandoRecordatorio, setEnviandoRecordatorio] = useState(false);
-  // Selección manual de a quién avisar (28/Ago/2026, pedido explicito de
-  // Mariana: "se puede...seleccionar para picar en avisar a la
-  // contraparte de los documentos pendientes" - no se manda automatico
-  // por todos los pendientes).
+  // Selección manual de a quién avisar - el usuario elige cuáles documentos
+  // pendientes incluir, no se manda automatico por todos los pendientes.
   const [documentosSeleccionados, setDocumentosSeleccionados] = useState<number[]>([]);
   const [recordatorioMensaje, setRecordatorioMensaje] = useState<string | null>(null);
 
@@ -245,9 +239,9 @@ function TesoreriaContratosPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  // Deep link "ir a este contrato" (?id_contrato=..., 28/Ago/2026, pedido
-  // explicito de Mariana desde el dialogo de Contratos en Contrapartes) -
-  // abre la edicion de ese contrato en cuanto llega en la URL. yaAbierto
+  // Deep link "ir a este contrato" (?id_contrato=..., desde el dialogo de
+  // Contratos en Contrapartes) - abre la edicion de ese contrato en cuanto
+  // llega en la URL. yaAbierto
   // evita reabrirlo solo si el usuario lo cierra a mano (sin esto,
   // cualquier refresh() posterior a cerrar el dialogo lo volveria a abrir
   // porque el query param sigue en la URL).
@@ -1235,9 +1229,7 @@ function TesoreriaContratosPageContent() {
                         </Stack>
                         {/* El cliente sube su archivo via magic link (correo de
                         "Avisar a la contraparte..."), el analista nunca sube
-                        directamente desde aquí (28/Ago/2026, pedido explicito de
-                        Mariana: "no puede subir o reemplazar un archivo esos los
-                        subira el cliente") - solo un chip de estado, sin acción. */}
+                        directamente desde aquí - solo un chip de estado, sin acción. */}
                         <Chip
                           size="small"
                           label={doc.recibido ? "Recibido" : "Pendiente del cliente"}
@@ -1245,8 +1237,7 @@ function TesoreriaContratosPageContent() {
                           variant="outlined"
                         />
                         {/* Un documento ya recibido (el cliente lo subió) ya no se
-                        puede quitar del checklist - solo mientras sigue pendiente
-                        (28/Ago/2026, pedido explicito de Mariana). */}
+                        puede quitar del checklist - solo mientras sigue pendiente. */}
                         {!doc.recibido && (
                           <IconButton
                             size="small"

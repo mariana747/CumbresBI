@@ -97,7 +97,7 @@ const ACCESS_MODE_COLORS: Record<IamUser["access_mode"], "default" | "info"> = {
 // Valor especial del selector de Rol para "sin rol asignado" - vive en el
 // mismo dropdown que los roles reales en vez de un filtro aparte (decision
 // de producto: acceso de empleados nuevos via login libre, no invitacion
-// formal - ver memoria de sesion "iam-invitacion-alcance-incierto").
+// formal).
 const SIN_ROL_VALUE = "__SIN_ROL__";
 
 // useSearchParams() obliga a envolver en Suspense para el build de

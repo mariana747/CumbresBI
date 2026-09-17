@@ -2,7 +2,7 @@
 
 **Cumbres Consultoría y Proyectos** · Anexo al documento de arquitectura v2.0 (microservicios)
 
-> **Estado: catálogo de roles confirmado por el cliente — se van a crear estos roles.** Dos decisiones adicionales confirmadas: (1) **un usuario puede tener varios roles activos en la misma sesión** (ver ajuste a la sección 4 — el alcance efectivo es la unión de todos sus roles, no uno solo); (2) **el nivel GRUPO (holding de sociedades) NO se crea** (decisión final, 10/Ago/2026 — ver sección 5, pregunta 1, ya cerrada). El sistema se queda con los **4 niveles de alcance** confirmados en el onboarding de Dylan: GLOBAL, SOCIEDAD, PROYECTO, CENTRO. El resto de este documento (matriz de permisos y reglas de RLS por rol) se mantiene como base de trabajo para la implementación en `iam_permissions`/`iam_role_permissions`.
+> **Estado: catálogo de roles confirmado por el cliente — se van a crear estos roles.** Dos decisiones adicionales confirmadas: (1) **un usuario puede tener varios roles activos en la misma sesión** (ver ajuste a la sección 4 — el alcance efectivo es la unión de todos sus roles, no uno solo); (2) **el nivel GRUPO (holding de sociedades) NO se crea** (decisión final, 10/Ago/2026 — ver sección 5, pregunta 1, ya cerrada). El sistema se queda con los **4 niveles de alcance** confirmados: GLOBAL, SOCIEDAD, PROYECTO, CENTRO. El resto de este documento (matriz de permisos y reglas de RLS por rol) se mantiene como base de trabajo para la implementación en `iam_permissions`/`iam_role_permissions`.
 
 ## 1. Niveles de alcance 
 
@@ -33,7 +33,7 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Responsable de Proyecto (Tickets) | `TICKETS_RESPONSABLE` | `tickets-service` | PROYECTO | `tickets_proyectos.responsable` / `tickets_subproyectos.responsable` |
 | Participante de Ticket | `TICKETS_PARTICIPANTE` | `tickets-service` | **IDENTIDAD** + PROYECTO | Ve los tickets donde `asignado_a` = su propio `user_id`, dentro de los proyectos donde participa |
 | Cliente / Prospecto (externo, acción puntual) | *(no es un rol de `iam_roles`)* | `pld-compliance-service`, `ventas-vivienda-service` | Acotado por token (Magic Link, `IamMagicLink`), no por `scope_type` | Autenticación vía `pld_ticket_cliente`/Magic Link — sin `IamUser` real, fuera del sistema de roles interno |
-| Colaborador externo (14/Ago/2026, `IamExternalCollaborator`) | Cualquier rol existente (ej. hipotético "Contador") | El que se le asigne | El que se le asigne (GLOBAL/SOCIEDAD/PROYECTO/CENTRO, igual que un colaborador interno) | A diferencia del Magic Link, este mecanismo **sí** crea un `IamUser` real (`access_mode=RESTRICTED`) — un IAM Admin le asigna roles reales en `/admin/usuarios`, no está "fuera del sistema de roles interno". Link permanente, revocable a mano — ver `docs/architecture/README.md` sec. 6.3 |
+| Colaborador externo (14/Ago/2026, `IamExternalCollaborator`) | Cualquier rol existente (ej. hipotético "Contador") | El que se le asigne | El que se le asigne (GLOBAL/SOCIEDAD/PROYECTO/CENTRO, igual que un colaborador interno) | A diferencia del Magic Link, este mecanismo **sí** crea un `IamUser` real (`access_mode=RESTRICTED`) — un IAM Admin le asigna roles reales en `/admin/usuarios`, no está "fuera del sistema de roles interno". Link permanente, revocable a mano — ver `/README.md` sec. 6.3 |
 <!--| Proveedor (externo) | *(no es un rol de `iam_roles`)* | `compras-service` | Acotado por token (Magic Link), si aplica | A confirmar si Compras expone algún formulario público para proveedores (no está explícito en el plan) |-->
 ## 3. Matriz de permisos por servicio (resumen)
 
@@ -60,7 +60,7 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Participante de Ticket | — | — | — | — | — | — | — | — | — | — | L *(solo asignados a mí)*, C *(comentarios)* | — |
 
 `facturacion-cfdi` solo tiene `L` para todos los roles salvo Super Admin
-(decisión 26/Ago/2026, `finanzas.md` sec. "General Notes": *"The user
+(decisión 26/Ago/2026, `Finance Module` sec. "General Notes": *"The user
 cannot create, delete or modify invoices, just see, export and link them
 to transactions"*). Super Admin conserva `LCEA` como excepción operativa.
 
@@ -90,7 +90,7 @@ Cada rol individual aporta su propia combinación de claims al agregado anterior
 
 Estas preguntas son además de las ya planteadas sobre CENTRO/CONTRATO y el dominio raíz de cookies:
 
-1. **Cerrado (decisión final, 10/Ago/2026): NO se crea GRUPO.** El sistema se queda con los 4 niveles del onboarding oficial de Dylan (GLOBAL/SOCIEDAD/PROYECTO/CENTRO).
+1. **Cerrado (decisión final, 10/Ago/2026): NO se crea GRUPO.** El sistema se queda con los 4 niveles confirmados (GLOBAL/SOCIEDAD/PROYECTO/CENTRO).
 
 Vía definitiva (ya no interina): el rol `CONTRALOR` recibe alcance `sociedad_rfcs` como **lista explícita** de las sociedades del grupo que le correspondan (asignada manualmente al crear el usuario, vía `iam_user_roles` múltiples con `scope_type='SOCIEDAD'`, uno por sociedad) — sin agregar `GRUPO` al ENUM. Es más manual si el grupo crece (hay que actualizar la lista de roles del usuario cada vez que se agregue una sociedad al holding), pero no requiere migración de esquema. Confirmado por el cliente (10/Ago/2026) como la solución definitiva, no un parche temporal.
 

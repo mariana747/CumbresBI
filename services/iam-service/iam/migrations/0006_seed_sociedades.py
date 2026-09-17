@@ -1,12 +1,11 @@
 from django.db import migrations
 
-# Punto 2 del plan de Fase 1 (RLS real): las 3 sociedades confirmadas por el
-# cliente (Mariana, 2026-08-10, ver memoria de sesion
-# "empresas-alcance-fase1") - se agregaran mas a futuro, sin migracion
-# pesada (basta un nuevo GeneralSociedad).
+# Punto 2 del plan de Fase 1 (RLS real): las 3 sociedades de alcance Fase 1
+# - se agregaran mas a futuro, sin migracion pesada (basta un nuevo
+# GeneralSociedad).
 #
-# RFC PLACEHOLDER: el cliente todavia no dio el RFC real de cada sociedad
-# (pidio dejarlo como "#####" por ahora, 2026-08-10) - estos valores deben
+# RFC PLACEHOLDER: el RFC real de cada sociedad todavia no esta disponible
+# (se deja como "#####" por ahora) - estos valores deben
 # reemplazarse por el RFC fiscal real antes de produccion. Se usa un sufijo
 # numerico para que sean unicos (rfc es primary key de GeneralSociedad).
 SOCIEDADES = [

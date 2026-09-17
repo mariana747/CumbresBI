@@ -116,7 +116,7 @@ KIYLz1XLfh9TeCisjfT5wQ==
 JWT_PRIVATE_KEY = env("JWT_PRIVATE_KEY", default=_DEV_JWT_PRIVATE_KEY)
 
 # --- Login OIDC real (Google Workspace) - Fase 1, Semana 4 ---
-# docs/architecture/README.md sec. 6.1. Client ID/Secret ya existen en
+# /README.md sec. 6.1. Client ID/Secret ya existen en
 # Secret Manager (docs/architecture/infraestructura-gcp/oidc-login.md);
 # en dev local se leen de .env (cliente OAuth "iam-service-oidc" con las
 # URIs de localhost). SSO silencioso (sin boton "Iniciar sesion con
@@ -125,10 +125,10 @@ JWT_PRIVATE_KEY = env("JWT_PRIVATE_KEY", default=_DEV_JWT_PRIVATE_KEY)
 OIDC_CLIENT_ID = env("OIDC_CLIENT_ID", default="")
 OIDC_CLIENT_SECRET = env("OIDC_CLIENT_SECRET", default="")
 OIDC_REDIRECT_URI = env("OIDC_REDIRECT_URI", default="http://localhost:8000/auth/google/callback")
-# Dominios de Workspace aprobados (claim "hd" del id_token) - unico
-# dominio confirmado hoy es el de Cumbres; agregar aqui los demas cuando
-# se confirmen (ver memoria de sesion "login-y-drive-cuenta-workspace-cumbres").
-OIDC_APPROVED_DOMAINS = env.list("OIDC_APPROVED_DOMAINS", default=["cypcumbres.mx"])
+# Dominios de Workspace aprobados (claim "hd" del id_token) - cypcumbres.mx
+# y cypcumbres.com son dos organizaciones de Workspace distintas, ambas
+# aprobadas.
+OIDC_APPROVED_DOMAINS = env.list("OIDC_APPROVED_DOMAINS", default=["cypcumbres.mx", "cypcumbres.com"])
 # A donde redirige el navegador tras un login exitoso (el frontend lee la
 # cookie de sesion ahi y sigue su flujo normal de AuthProvider).
 OIDC_FRONTEND_SUCCESS_URL = env("OIDC_FRONTEND_SUCCESS_URL", default="http://localhost:3000/")
@@ -140,6 +140,17 @@ OIDC_FRONTEND_ERROR_URL = env("OIDC_FRONTEND_ERROR_URL", default="http://localho
 SESSION_COOKIE_NAME_JWT = "cumbresbi_session"
 SESSION_JWT_TTL_MINUTES = 15  # mismo TTL documentado en README.md sec. 6.1
 
+# En local (docker-compose) frontend/iam comparten dominio via el mismo
+# origen logico y SameSite=Lax basta. En Cloud Run cada servicio queda en
+# un subdominio *.run.app distinto - el fetch() del frontend hacia /api/me
+# es cross-site, y Lax no viaja ahi (solo en navegacion top-level), lo que
+# causaba un loop de login real (15/Sep/2026: login "exitoso" en el
+# backend pero el frontend nunca veia la cookie, volvia a mandar a login).
+# SameSite=None exige Secure=True (HTTPS) - seguro en Cloud Run, roto en
+# local http - por eso es configurable, no un cambio fijo.
+SESSION_COOKIE_SAMESITE = env("SESSION_COOKIE_SAMESITE", default="Lax")
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=False)
+
 # Cookie temporal (PKCE code_verifier + state) entre /auth/google/start y
 # /auth/google/callback - firmada con django.core.signing (usa SECRET_KEY),
 # nunca en la sesion ni en la URL. TTL corto: solo dura el redirect a Google
@@ -148,7 +159,7 @@ OIDC_PKCE_COOKIE_NAME = "oidc_pkce"
 OIDC_PKCE_MAX_AGE_SECONDS = 300
 
 # Fase 0: el frontend (Next.js, localhost:3000) llama a este servicio directo
-# desde el navegador, sin API Gateway todavia (docs/architecture/README.md
+# desde el navegador, sin API Gateway todavia (/README.md
 # sec. 8, pendiente). CORS solo para orígenes de desarrollo local.
 CORS_ALLOWED_ORIGINS = env.list(
     "IAM_CORS_ALLOWED_ORIGINS",

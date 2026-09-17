@@ -8,22 +8,19 @@ def _short_id():
     return uuid.uuid4().hex[:8]
 
 
-# Categoria de gasto (09/Sep/2026, "clasificar y rastrear movimientos de
-# todo tipo" - pedido explicito: saber a fin de mes en que area se gasto
-# mas, ej. Oficina vs. RRHH vs. Equipo de Computo). Se reusa EXACTO el
+# Categoria de gasto: permite clasificar y rastrear movimientos de dinero
+# por area (ej. Oficina vs. RRHH vs. Equipo de Computo). Se reusa EXACTO el
 # catalogo que ya existia solo en TesoreriaTicketReembolsoConcepto (mismos
-# 9 valores, sin agregar ninguno nuevo por ahora - decision explicita de
-# Mariana) y se extiende a TesoreriaFlujo/TesoreriaFactura/
-# TesoreriaSolicitudPago para que TODO movimiento de dinero, no solo los
-# reembolsos, se pueda clasificar igual.
+# 9 valores, sin agregar ninguno nuevo por ahora) y se extiende a
+# TesoreriaFlujo/TesoreriaFactura/TesoreriaSolicitudPago para que TODO
+# movimiento de dinero, no solo los reembolsos, se pueda clasificar igual.
 #
 # Deliberadamente NO es una tabla/catalogo en BD (serian los mismos 9
 # valores fijos en 4 lugares via choices=, un solo lugar de verdad) - mas
 # simple y de menor riesgo que migrar el campo ya vivo de Reembolsos a una
 # FK nueva. Candidato a futuro (anotado, no implementado): alinear estos
 # valores contra el Codigo Agrupador de Cuentas del SAT (Anexo 24) si algun
-# dia existe un catalogo de cuentas contables real - hoy no aplica, ver
-# docs/Documentacion/tesoreria/pendiente.md.
+# dia existe un catalogo de cuentas contables real - hoy no aplica.
 CATEGORIA_GASTO_VIATICOS = "VIATICOS"
 CATEGORIA_GASTO_PAPELERIA = "PAPELERIA"
 CATEGORIA_GASTO_TRANSPORTE = "TRANSPORTE"
@@ -48,19 +45,15 @@ CATEGORIA_GASTO_CHOICES = [
 
 # Nota general: este servicio agrupa Tesoreria + CFDI/Facturacion + el
 # maestro de Contrapartes (tesoreria_contrapartes) en un solo esquema, tal
-# como estaba documentado en docs/architecture/README.md sec. 1.1 - separado
+# como estaba documentado en /README.md sec. 1.1 - separado
 # de compras-tesoreria-service (que se queda sin tablas de negocio propias
 # hasta que exista el dominio real de Compras en Fase 4, ver su models.py).
 
 
 class TesoreriaBanco(models.Model):
-    """created_at/created_by/updated_at/updated_by agregadas en la Actividad 10
-    de Fase 0 (docs/architecture/auditoria-esquema.md sec. 3) - las 3 tablas
-    heredadas de AppSheet que no traian columnas de auditoria. Tipo char(8)
-    para created_by/updated_by (coincide con iam_users.user_id), igual
-    criterio que tesoreria_cortes_edc - no el varchar(100) sobredimensionado
-    que la propia auditoria marca como inconsistencia en tablas legadas.
-    """
+    """Columnas de auditoria agregadas en Fase 0 (tabla heredada de AppSheet
+    sin ellas). created_by/updated_by en char(8) para coincidir con
+    iam_users.user_id."""
 
     id_banxico = models.CharField(max_length=5, primary_key=True)
     banco = models.CharField(max_length=50, blank=True, null=True)
@@ -120,14 +113,12 @@ class TesoreriaContraparte(models.Model):
     # "selector" (02/Sep/2026, hallazgo real: "no me deja crear desde
     # aqui" al usar el ContraparteSelector compartido -PLD/Ventas/Flujos-
     # con solo el nombre) - ese componente esta disenado desde el
-    # principio para alta minima ("créala aquí mismo con solo el nombre.
-    # El resto de sus datos los llena él después, desde el link público
-    # que le mandes") pero nunca se actualizo cuando email/tipo_persona
-    # volvieron a ser obligatorios para origen=manual (28/Ago/2026,
-    # decision de Mariana) - quedo roto desde entonces. Origen propio
-    # (no "ia", que es semanticamente distinto - conciliacion bancaria
-    # automatica, no un analista escribiendo un nombre a mano) para que
-    # la auditoria distinga las 3 vias de alta minima.
+    # Pensado originalmente para alta minima (solo nombre, el resto se
+    # completa despues via link publico) pero quedo roto desde que
+    # email/tipo_persona volvieron a ser obligatorios para origen=manual.
+    # Origen propio (no "ia", que es semanticamente distinto - conciliacion
+    # bancaria automatica, no un analista escribiendo un nombre a mano)
+    # para que la auditoria distinga las 3 vias de alta minima.
     ORIGEN_SELECTOR = "selector"
     ORIGEN_CHOICES = [
         (ORIGEN_MANUAL, "Alta manual"),
@@ -141,23 +132,20 @@ class TesoreriaContraparte(models.Model):
     razon_social = models.CharField(max_length=100)
     contacto = models.CharField(max_length=100, blank=True, null=True)
     telefono_sms = models.CharField(max_length=10, blank=True, null=True)
-    # Obligatorio de nuevo (28/Ago/2026, pedido explicito de Mariana, vuelve
-    # al ERD original) - habia sido blank/null=True desde el 19/Ago/2026
-    # ("contraparte maestra unica", alta minima con solo razon_social). Se
-    # revierte esa relajacion: email es obligatorio otra vez. EXCEPCION:
-    # cuando origen=ia (ver campo abajo), el serializer permite dejarlo
-    # vacio - la IA de conciliacion bancaria no tiene forma de inventar un
-    # correo real (ver memoria "tesoreria-flujos-registro-y-conciliacion-
-    # ia-plan"). La constraint de BD se relaja a blank/null; quien impone
-    # "obligatorio salvo IA" es el serializer, no el modelo.
+    # Obligatorio, vuelve al ERD original (se habia relajado a blank/null
+    # temporalmente para permitir alta minima con solo razon_social).
+    # EXCEPCION: cuando origen=ia (ver campo abajo), el serializer permite
+    # dejarlo vacio - la IA de conciliacion bancaria no tiene forma de
+    # inventar un correo real. La constraint de BD se relaja a blank/null;
+    # quien impone "obligatorio salvo IA" es el serializer, no el modelo.
     email = models.CharField(max_length=100, blank=True, null=True)
-    # NOTA (08/Sep/2026): se probo un campo "sucursal" de texto libre aqui
-    # para distinguir unidades de negocio de una misma contraparte (ej. IZEL
-    # Acuario vs IZEL Restaurante), pero se descarto - una contraparte puede
-    # tener VARIAS sucursales, no una sola fija por registro. La division
-    # real quedo resuelta por SOLICITUD (ver TesoreriaTicketProveedor.
-    # subir_factura: subcarpeta Tesoreria/Facturas/FacturasProveedores/
-    # <id_contraparte>/<id_ticket>), no por un campo en la contraparte.
+    # Se descarto un campo "sucursal" de texto libre para distinguir
+    # unidades de negocio de una misma contraparte (ej. IZEL Acuario vs
+    # IZEL Restaurante) - una contraparte puede tener VARIAS sucursales, no
+    # una sola fija por registro. La division real quedo resuelta por
+    # SOLICITUD (ver TesoreriaTicketProveedor.subir_factura: subcarpeta
+    # Tesoreria/Facturas/FacturasProveedores/<id_contraparte>/<id_ticket>),
+    # no por un campo en la contraparte.
     # Marca si esta contraparte se dio de alta a mano (pantalla de
     # Contrapartes, exige email/tipo_persona) o automaticamente por la IA de
     # conciliacion de comprobantes bancarios (los permite vacios). Default
@@ -208,11 +196,9 @@ class TesoreriaContraparte(models.Model):
         return self.razon_social
 
     def resolver_sobreviviente(self):
-        """Sigue la cadena de fusiones hasta el registro vigente real (el
-        que ya no tiene fusionado_en) - normalmente un solo salto, pero se
-        seguiria mas de uno si alguna vez se fusiona un alias que a su vez
-        ya era alias de otro (guard anti-loop por si acaso, un ciclo real
-        no deberia poder ocurrir con la logica de _fusionar_en)."""
+        """Sigue la cadena de fusiones hasta el registro vigente (sin
+        fusionado_en). Guard anti-loop por si acaso; un ciclo real no
+        deberia ocurrir."""
         visitados = set()
         actual = self
         while actual.fusionado_en_id and actual.fusionado_en_id not in visitados:
@@ -257,7 +243,7 @@ class TesoreriaContraparteRelacion(models.Model):
 
 class TesoreriaCuenta(models.Model):
     # Catalogo real del ERD, no libre - INVERSION habilita la accion
-    # RENDIMIENTOS en el reporte diario de saldos (ver finanzas.md:
+    # RENDIMIENTOS en el reporte diario de saldos (ver Finance Module:
     # "In case the account type is investment, the user will have the
     # option to add a transaction record with the description
     # 'RENDIMIENTOS'..."). Default CHEQUES porque es lo que ya tienen todas
@@ -278,7 +264,7 @@ class TesoreriaCuenta(models.Model):
     # Referencia laxa a general_sociedades.rfc (iam-service, fuera de este
     # esquema) - mismo criterio que TesoreriaContrato.sociedad (26/Ago/2026,
     # se agrega para poder filtrar el reporte diario de saldos "por
-    # empresa (seleccion multiple)", ver finanzas.md). Nullable a proposito:
+    # empresa (seleccion multiple)", ver Finance Module). Nullable a proposito:
     # las cuentas existentes antes de este cambio no tienen este dato
     # capturado todavia.
     sociedad = models.CharField(max_length=13, blank=True, null=True)
@@ -344,11 +330,10 @@ class TesoreriaContrato(models.Model):
     STATUS_INACTIVO = "INACTIVO"
     STATUS_CHOICES = [(STATUS_ACTIVO, "Activo"), (STATUS_INACTIVO, "Inactivo")]
 
-    # Categoria (07/Sep/2026, pedido explicito de Mariana: "definamos que
-    # contratos tendremos") - distinto de TIPO_CHOICES (interno/externo, no
+    # Categoria del contrato, distinto de TIPO_CHOICES (interno/externo, no
     # dice nada de la naturaleza del gasto). Nullable/opcional a proposito:
     # solo aplica a contratos nuevos, los que ya existian se quedan sin
-    # categoria (no se hizo backfill, decision explicita).
+    # categoria (no se hizo backfill).
     CATEGORIA_FORMAL_RECURRENTE = "FORMAL_RECURRENTE"
     CATEGORIA_GASTO_SUELTO = "GASTO_SUELTO"
     CATEGORIA_REEMBOLSO_EMPLEADO = "REEMBOLSO_EMPLEADO"
@@ -400,14 +385,12 @@ class TesoreriaContrato(models.Model):
     # sin ScopedManager (catalogos compartidos, ver serializers.py) - un
     # Contrato SI pertenece a una sociedad especifica.
     SCOPE_FIELD_SOCIEDAD = "sociedad"
-    # 31/Ago/2026 (pendiente Sem 21 del cronograma, ver memoria de sesion
-    # "tesoreria-fase4-adelanto-y-pendientes"): CENTRO/CONTRATO ya existian
-    # como claim en el JWT (IamUserCentroAccess/IamUserContratoAccess,
-    # scope_utils.py) pero ningun modelo real los consumia todavia. CENTRO
-    # es texto libre (mismo campo `centro`, sin catalogo real - ver
-    # "centro-proyecto-no-son-catalogo-generico"); CONTRATO es auto-
-    # referencia (un usuario con acceso solo a un contrato especifico ve
-    # ese contrato, no toda su sociedad).
+    # CENTRO/CONTRATO ya existian como claim en el JWT
+    # (IamUserCentroAccess/IamUserContratoAccess, scope_utils.py) pero
+    # ningun modelo real los consumia todavia. CENTRO es texto libre
+    # (mismo campo `centro`, sin catalogo real); CONTRATO es
+    # auto-referencia (un usuario con acceso solo a un contrato especifico
+    # ve ese contrato, no toda su sociedad).
     SCOPE_FIELD_CENTRO = "centro"
     SCOPE_FIELD_CONTRATO = "id_contrato"
     objects = ScopedManager()
@@ -424,13 +407,10 @@ CONTRATO_NOMINA_PREFIJO = "GEN-NOMINA-"
 
 
 def contrato_generico_nomina(sociedad: str) -> "TesoreriaContrato":
-    """Contrato generico obligatorio para Flujos de nomina (10/Sep/2026,
-    modulo de Nominas Fase 1) - mismo criterio que contrato_generico_
-    reembolso (abajo), UNO POR SOCIEDAD en vez de uno solo total: la
-    nomina/el reembolso son un gasto real de una empresa especifica y el
-    filtro por empresa en Flujos/Reportes debe seguir funcionando.
-    get_or_create es idempotente - se puede llamar en cada alta de Flujo de
-    nomina sin duplicar."""
+    """Contrato generico obligatorio para Flujos de nomina, uno POR
+    SOCIEDAD (mismo criterio que contrato_generico_reembolso) para que el
+    filtro por empresa en Flujos/Reportes siga funcionando. get_or_create
+    es idempotente."""
     TesoreriaContraparte.objects.get_or_create(
         id_contraparte=CONTRAPARTE_NOMINA_ID,
         defaults={"razon_social": "Nómina interna (genérico)"},
@@ -455,13 +435,8 @@ CONTRATO_REEMBOLSO_PREFIJO = "GEN-REEMBOLSOS-"
 
 
 def contrato_generico_reembolso(sociedad: str) -> "TesoreriaContrato":
-    """Contrato generico obligatorio para Flujos de reembolso (10/Sep/2026,
-    "Contratos REEMB por sociedad" - decision explicita de Mariana: SI se
-    separa por sociedad, igual que Nomina) - reemplaza el viejo
-    GEN-REEMBOLSOS-001 unico total (migracion 0011_contrato_obligatorio_en_
-    flujo) por UNO POR SOCIEDAD, mismo criterio que contrato_generico_
-    nomina: sin esto, todo reembolso quedaba bajo sociedad="GENERICO" y
-    nunca aparecia al filtrar Flujos/Reportes por empresa real.
+    """Contrato generico de reembolso, uno POR SOCIEDAD (mismo criterio
+    que contrato_generico_nomina) en vez de un GEN-REEMBOLSOS-001 global.
     get_or_create es idempotente."""
     TesoreriaContraparte.objects.get_or_create(
         id_contraparte=CONTRAPARTE_REEMBOLSO_ID,
@@ -483,18 +458,9 @@ def contrato_generico_reembolso(sociedad: str) -> "TesoreriaContrato":
 
 
 class TesoreriaNomina(models.Model):
-    """Periodo/agrupador de nomina (09/Sep/2026, notas de Jenny - ver
-    memoria de sesion "tesoreria-nominas-diseno-09sep") - NO es el CFDI de
-    nomina (ver TesoreriaRecNomina/tesoreria_rec_nominas, que es el recibo
-    individual timbrado de un empleado). Un TesoreriaNomina se desglosa en N
-    TesoreriaFlujo (uno por empleado pagado, via TesoreriaFlujo.periodo_nomina)
-    - mismo patron que TesoreriaContrato -> Flujos, sin tabla de detalle
-    intermedia porque el propio Flujo ya trae empleado/monto/comprobante/
-    concepto (decision 10/Sep/2026, ver pendiente.md > Manejo de Nominas).
-
-    Fase 1: captura manual del empleado en cada Flujo (rrhh-service todavia
-    no tiene API/Puestos expuestos) - la generacion automatica de N lineas
-    por empleado activo queda para cuando exista esa integracion."""
+    """Periodo/agrupador de nomina, NO el CFDI (ver TesoreriaRecNomina). Se
+    desglosa en N TesoreriaFlujo, uno por empleado. Fase 1: captura manual
+    del empleado (rrhh-service aun sin API de Puestos)."""
 
     TIPO_QUINCENAL = "QUINCENAL"
     TIPO_SEMANAL = "SEMANAL"
@@ -520,10 +486,10 @@ class TesoreriaNomina(models.Model):
     # QUINCENAL/corporativo. A diferencia de TesoreriaContrato.proyecto
     # (CharField suelto de 3, sin catalogo real - hueco heredado que
     # Contratos/Obra siguen teniendo), aqui SI se liga al catalogo real:
-    # vivienda-service.ViviendaProyecto.id_proyecto (10/Sep/2026, pedido
-    # explicito de Mariana: "el proyecto de nominas...son los mismos" que
-    # Vivienda/Obra) - CharField plano de 8 (mismo largo que id_proyecto),
-    # no ForeignKey real (cruza de servicio, ver docs/architecture/README.md
+    # vivienda-service.ViviendaProyecto.id_proyecto (los proyectos de
+    # nomina son los mismos que los de Vivienda/Obra) - CharField plano
+    # de 8 (mismo largo que id_proyecto),
+    # no ForeignKey real (cruza de servicio, ver /README.md
     # sec. 11.2 #1). El frontend resuelve alias/denominacion llamando a
     # vivienda-service (ver listProyectos en frontend/src/lib/vivienda.ts).
     proyecto = models.CharField(max_length=8, blank=True, null=True)
@@ -558,13 +524,9 @@ class TesoreriaNomina(models.Model):
 
 
 class TesoreriaNominaSociedad(models.Model):
-    """Una sociedad de una TesoreriaNomina (14/Sep/2026, "pueden estar
-    contratados por dos sociedades") - relacion real en vez de un CharField/
-    JSON denormalizado, para que el alcance (ver
-    TesoreriaNomina.SCOPE_FIELD_SOCIEDAD) siga siendo una consulta normal.
-    Cada fila tambien es la unidad que resuelve el contrato generico
-    GEN-NOMINA-<sociedad> correcto para cada Flujo (ver
-    TesoreriaNominaViewSet.contrato_generico)."""
+    """Una sociedad de una TesoreriaNomina (empleados con doble sociedad) -
+    relacion real en vez de CharField/JSON denormalizado; resuelve el
+    contrato generico GEN-NOMINA-<sociedad> de cada Flujo."""
 
     nomina = models.ForeignKey(TesoreriaNomina, related_name="sociedades", on_delete=models.CASCADE)
     sociedad = models.CharField(max_length=13)
@@ -713,8 +675,7 @@ class TesoreriaComplementoPago(models.Model):
 
 
 class TesoreriaFactura(models.Model):
-    # Estado del proceso de revision (24/Ago/2026, pedido explicito de
-    # Mariana) - distinto del estado fiscal del CFDI ante el SAT
+    # Estado del proceso de revision, distinto del estado fiscal del CFDI ante el SAT
     # (vigente/cancelada, que hoy tambien vive en este mismo campo como
     # texto libre para las facturas ya capturadas antes de este cambio).
     # Pasar a ACEPTADA exige tener cargados los dos archivos esenciales
@@ -1192,7 +1153,7 @@ class TesoreriaRecNomina(models.Model):
 class TesoreriaFlujo(models.Model):
     """id_empleado/id_empleado_reembolso referencian rrhh_empleados.id_empleado
     (rrhh-service, fuera de este esquema) - CharField plano, no ForeignKey
-    real (docs/architecture/README.md sec. 11.2 #1)."""
+    real (/README.md sec. 11.2 #1)."""
 
     VALIDACION_PENDIENTE = "PENDIENTE"
     VALIDACION_APROBADA = "APROBADA"
@@ -1236,7 +1197,7 @@ class TesoreriaFlujo(models.Model):
     fecha_pago_original = models.DateField(blank=True, null=True)
     descripcion_pago = models.CharField(max_length=150, blank=True, null=True)
     # link_comprobante_banco se llenaba pegando la URL a mano; desde
-    # subir_comprobante() (finanzas.md, decision 26/Ago/2026: "upload
+    # subir_comprobante() (Finance Module, decision 26/Ago/2026: "upload
     # receipts/references from their computer") se llena con el
     # web_view_link real que regresa drive-service, y drive_file_id_comprobante
     # guarda el ID del archivo (permite reemplazarlo despues sin duplicar).
@@ -1301,7 +1262,7 @@ class TesoreriaFlujo(models.Model):
     # contrato relacionado - TesoreriaFlujo no tiene su propia columna de
     # sociedad (viene heredado de AppSheet asi), pero ScopedQuerySet.for_scope
     # soporta lookups con doble guion bajo (ver libs/cumbresbi-scope).
-    # `contrato` es obligatorio (finanzas.md sec. "General Notes": "No
+    # `contrato` es obligatorio (Finance Module, "General Notes": "No
     # transaction can be registered without a linked contract", decision
     # 26/Ago/2026: sin excepcion, incluyendo reembolsos - estos usan un
     # contrato generico de la misma plantilla, ver migracion 0011), asi que
@@ -1333,16 +1294,9 @@ class TesoreriaFlujo(models.Model):
 
 
 class TesoreriaMovimientoBancario(models.Model):
-    """Una linea del estado de cuenta bancario, importada desde el CSV/Excel
-    que sube el analista (08/Sep/2026, primer paso de la conciliacion
-    bancaria - ver TesoreriaMovimientoBancarioViewSet.importar). Es el lado
-    "banco" de la conciliacion (finanzas.md: "Generate reconciliation
-    reports (transactions vs. invoices)") - distinto de TesoreriaFlujo, que
-    es el registro INTERNO capturado a mano o via IA (comprobante de pago).
-
-    `flujo` se llena al conciliar (a mano por ahora; el match automatico
-    fecha+monto queda para el reporte de conciliacion, siguiente paso) -
-    null significa "sin conciliar todavia"."""
+    """Linea del estado de cuenta, importada de CSV/Excel: lado "banco" de
+    la conciliacion, distinto de TesoreriaFlujo (registro interno). `flujo`
+    null significa sin conciliar todavia."""
 
     id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     cuenta = models.ForeignKey(
@@ -1390,17 +1344,10 @@ class TesoreriaMovimientoBancario(models.Model):
 
 
 class TesoreriaDiaFestivo(models.Model):
-    """Cache local de dias festivos oficiales de MX, sincronizada desde
-    Nager.Date (03/Sep/2026, pedido explicito de Mariana: "usemos
-    Nager.Date o OpenHolidays API" en vez de mantener la lista a mano). La
-    fecha limite mensual de reembolsos necesita excluir festivos ademas de
-    fines de semana al calcular los "ultimos 2 dias habiles" del mes (ver
-    reembolso_utils.sincronizar_festivos_mx/_dias_habiles_del_mes) - se
-    sincroniza sola, perezosamente, la primera vez que se necesita un año;
-    tambien se puede forzar via TesoreriaDiaFestivoViewSet.sincronizar. Se
-    deja como tabla editable (no solo cache en memoria) para poder
-    corregir/agregar un festivo a mano si la fuente externa se equivoca o
-    esta caida."""
+    """Cache local de festivos oficiales de MX (Nager.Date), usada para
+    calcular dias habiles de reembolsos (ver reembolso_utils). Se
+    sincroniza sola (perezosa) o a mano; editable por si la fuente externa
+    falla."""
 
     fecha = models.DateField(primary_key=True)
     descripcion = models.CharField(max_length=200)
@@ -1416,25 +1363,11 @@ class TesoreriaDiaFestivo(models.Model):
 
 
 class TesoreriaTicketReembolso(models.Model):
-    """Ticket de reembolso subido por el empleado (pantalla PROVISIONAL
-    "MiCumbres" /mi-cumbres/tickets, 27/Ago/2026) - puente minimo mientras
-    no existe el portal MiCumbres real ni rrhh-service tiene API (Fase 5,
-    sin arrancar, ver memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente").
-    El empleado solo puede CREAR (subir su ticket); una vez creado, solo
-    Tesoreria (tesoreria.editar) puede editarlo.
-
-    Flujo real (27/Ago/2026, pedido explicito de Mariana): PENDIENTE ->
-    Tesoreria revisa -> APROBADO o RECHAZADO. Solo si se aprueba se
-    procede a facturar - subir el/los archivos (PDF, corren por el Motor
-    Documental como staging antes de dar de alta la factura formal, mismo
-    patron que la "bandeja de entrada" de Facturas) y LIGAR el ticket a un
-    TesoreriaFactura real ya creado (`factura`, no un blob suelto) -> el
-    ticket pasa a VINCULADO. `link_factura_pdf`/`drive_file_id_factura`
-    siguen existiendo como staging previo a esa formalizacion (el PDF que
-    se analiza con el Motor antes de llenar el alta de factura), no
-    reemplazan el vinculo real.
-    id_empleado es el identity_user_id del EffectiveScope (self-service),
-    no una FK real a rrhh_empleados (no existe todavia)."""
+    """Ticket de reembolso del empleado (pantalla provisional MiCumbres,
+    puente mientras no existe el portal real). El empleado solo CREA; una
+    vez creado, solo Tesoreria lo edita. Flujo: PENDIENTE ->
+    APROBADO/RECHAZADO -> VINCULADO al ligarse a una TesoreriaFactura real.
+    id_empleado es el identity_user_id, no FK real a rrhh_empleados."""
 
     ESTADO_PENDIENTE = "PENDIENTE"
     ESTADO_APROBADO = "APROBADO"
@@ -1447,16 +1380,12 @@ class TesoreriaTicketReembolso(models.Model):
         (ESTADO_RECHAZADO, "Rechazado"),
     ]
 
-    # Campos agregados 31/Ago/2026 (hallazgo de la comparacion contra
-    # Tesoreria2.pdf, ver memoria de sesion
-    # "tesoreria-diseno-vs-construido-tesoreria2-pdf"): el ticket original
-    # no traia a que empresa/area se carga el gasto ni en que moneda -
-    # solo se asumia MXP y no se podia reportar por categoria/sociedad.
-    # El empleado los llena al crear; `sociedad` es inmutable despues (ver
-    # comentario en el campo mas abajo, regla de minuta 03/Sep/2026: "si se
-    # equivoca de sociedad ya tampoco se acepta" - se rechaza el ticket
-    # completo, no se corrige).
-    # 09/Sep/2026: promovido a constante compartida a nivel de modulo
+    # El ticket original no traia a que empresa/area se carga el gasto ni
+    # en que moneda - solo se asumia MXP y no se podia reportar por
+    # categoria/sociedad. El empleado los llena al crear; `sociedad` es
+    # inmutable despues (ver comentario en el campo mas abajo) - si se
+    # equivoca de sociedad se rechaza el ticket completo, no se corrige.
+    # Promovido a constante compartida a nivel de modulo
     # (CATEGORIA_GASTO_CHOICES, ver comentario junto a _short_id arriba) -
     # los alias de clase se quedan por compatibilidad con codigo/migraciones
     # viejas que referencian TesoreriaTicketReembolso.CATEGORIA_*.
@@ -1471,27 +1400,23 @@ class TesoreriaTicketReembolso(models.Model):
     CATEGORIA_EXTRAORDINARIOS = CATEGORIA_GASTO_EXTRAORDINARIOS
     CATEGORIA_CHOICES = CATEGORIA_GASTO_CHOICES
     MONEDA_CHOICES = [("MXP", "MXP"), ("USD", "USD"), ("EUR", "EUR")]
-    # centro (lista cerrada de areas) se elimino 03/Sep/2026 - pedido
-    # explicito de Mariana en minuta ("centro de costos se elimina"), sin
-    # reemplazo aqui - `proyecto` (division por proyecto) es de Solicitud
-    # de Pago, no de Reembolso (aclarado por Mariana en el chat despues de
-    # agregarlo por error a este modelo, ver memoria de sesion
-    # "tesoreria-solicitud-pago-pendiente" cuando se cree).
+    # centro (lista cerrada de areas) se elimino, sin reemplazo aqui -
+    # `proyecto` (division por proyecto) es de Solicitud de Pago, no de
+    # Reembolso.
 
     id_ticket = models.CharField(max_length=255, primary_key=True)
     id_empleado = models.CharField(max_length=255)
     # Nota general del ticket completo (opcional) - el detalle real vive en
     # los conceptos (TesoreriaTicketReembolsoConcepto), uno por gasto
-    # individual. Antes este campo era obligatorio y unico por ticket;
-    # 03/Sep/2026 (minuta, punto 1: "solicitar varios conceptos") se movio
-    # descripcion/monto/categoria_gasto a una lista de conceptos, mismo
-    # patron que CotizacionLinea en compras-tesoreria-service - un ticket
-    # ahora es "un comprobante, N conceptos", no "un comprobante, un gasto".
+    # individual. Antes este campo era obligatorio y unico por ticket; se
+    # movio descripcion/monto/categoria_gasto a una lista de conceptos,
+    # mismo patron que CotizacionLinea en compras-tesoreria-service - un
+    # ticket ahora es "un comprobante, N conceptos", no "un comprobante,
+    # un gasto".
     descripcion = models.TextField(blank=True, null=True)
-    # Inmutable tras crear, igual que `sociedad` mas abajo (03/Sep/2026:
-    # "cualquier error de sociedad, tipo de moneda o falta de ortografia...
-    # no se aceptara" - Mariana amplio la regla de sociedad a moneda
-    # tambien) - se descarta en TesoreriaTicketReembolsoSerializer.update.
+    # Inmutable tras crear, igual que `sociedad` mas abajo - cualquier
+    # error de sociedad o moneda al capturar el ticket no se corrige,
+    # se rechaza - se descarta en TesoreriaTicketReembolsoSerializer.update.
     moneda = models.CharField(max_length=5, choices=MONEDA_CHOICES, default="MXP")
     fecha_gasto = models.DateField()
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
@@ -1579,14 +1504,9 @@ class TesoreriaTicketReembolso(models.Model):
 
 
 class TesoreriaTicketReembolsoConcepto(models.Model):
-    """Un gasto individual dentro de un ticket de reembolso (03/Sep/2026,
-    minuta punto 1: "solicitar varios conceptos") - mismo patron que
-    CotizacionLinea en compras-tesoreria-service. El empleado los declara
-    al crear el ticket (via `conceptos` en el POST, ver
-    TesoreriaTicketReembolsoSerializer); categoria_gasto vive aqui (por
-    concepto), no en el ticket, porque cada gasto del mismo comprobante
-    puede ser de una categoria distinta (ej. taxi + comida en el mismo
-    viaje)."""
+    """Un gasto individual dentro de un ticket de reembolso (mismo patron
+    que CotizacionLinea). categoria_gasto vive por concepto, no en el
+    ticket, porque un comprobante puede mezclar categorias."""
 
     CATEGORIA_CHOICES = TesoreriaTicketReembolso.CATEGORIA_CHOICES
 
@@ -1606,25 +1526,11 @@ class TesoreriaTicketReembolsoConcepto(models.Model):
 
 
 class TesoreriaSolicitudPago(models.Model):
-    """Solicitud de pago de servicios/licencias/renovaciones (04/Sep/2026,
-    minuta: "Incluye pago de servicios, licencias, renovaciones. Se
-    dividira por proyecto"). Distinta de TesoreriaTicketReembolso a
-    proposito - "reembolso y solicitud de pago, no es lo mismo. todos los
-    colaboradores internos pueden solicitar reembolso pero no todos
-    solicitudes de pago" (Mariana, mismo dia): por eso `crear` exige el
-    permiso real `solicitud-pago.crear` (servicio propio en
-    permission_matrix.py, no abierto a cualquier empleado como Reembolso
-    via _EsEmpleadoAutenticado).
-
-    A diferencia de Reembolso, el comprobante/factura es OPCIONAL (pedido
-    explicito de Mariana: pagos a gobierno por permisos/licencias a veces
-    solo dan un recibo oficial o linea de captura pagada, sin CFDI formal)
-    - `factura` puede quedar vacio para siempre y aun asi llegar a PAGADO,
-    por eso no hay un estado intermedio tipo VINCULADO como en Reembolso.
-
-    Flujo de estados: PENDIENTE -> APROBADO/RECHAZADO (autorizado_por,
-    igual que TesoreriaTicketReembolso.aprobar) -> PAGADO al ligarse a un
-    TesoreriaFlujo real."""
+    """Solicitud de pago de servicios/licencias, por proyecto. Distinta de
+    Reembolso: requiere el permiso `solicitud-pago.crear`, no abierto a
+    cualquier empleado. Comprobante/factura OPCIONAL (puede no haber CFDI
+    formal), por eso no hay estado VINCULADO como en Reembolso. Flujo:
+    PENDIENTE -> APROBADO/RECHAZADO -> PAGADO."""
 
     ESTADO_PENDIENTE = "PENDIENTE"
     ESTADO_APROBADO = "APROBADO"
@@ -1866,24 +1772,11 @@ class FacturaTraslado(models.Model):
 
 
 class TesoreriaContratoDocumento(models.Model):
-    """Checklist de documentos/info requeridos por contrato (diseño
-    manuscrito Tesoreria2.pdf, 28/Ago/2026: "Liga archivo - todavia no esta
-    implementado en BD. Pedir checklist de documentos/info"). Cada renglon
-    es UN documento que ese contrato en particular necesita (ej. "Poliza de
-    arrendamiento", "Identificacion oficial del fiador") - se define al
-    dar de alta el contrato (o despues) y se marca `recibido` conforme se
-    va juntando, con el link real al archivo en Drive una vez subido.
-
-    No reemplaza `link_carpeta`/`link_contrato` de TesoreriaContrato (esos
-    siguen siendo el contrato firmado en si) - esto es la lista de soporte
-    adicional que el contrato exige antes de poder operarlo (ej. antes de
-    aprobar su primer Flujo).
-
-    `nombre` es un catalogo fijo (28/Ago/2026, pedido explicito de Mariana:
-    "que sea una lista desplegable de las opciones") - no texto libre, para
-    que el checklist sea consistente entre contratos. NOMBRE_OTRO existe
-    como valvula de escape para el documento que no encaja en el catalogo
-    (se especifica en `comentarios`)."""
+    """Checklist de documentos requeridos por contrato; cada renglon es un
+    documento que se marca `recibido` al subirse a Drive. No reemplaza
+    link_carpeta/link_contrato (el contrato firmado en si). `nombre` es
+    catalogo fijo; NOMBRE_OTRO + `comentarios` cubren casos fuera de
+    catalogo."""
 
     NOMBRE_CONTRATO_FIRMADO = "CONTRATO_FIRMADO"
     NOMBRE_IDENTIFICACION_OFICIAL = "IDENTIFICACION_OFICIAL"
@@ -1936,17 +1829,10 @@ class TesoreriaContratoDocumento(models.Model):
 
 
 class TesoreriaDocumentoTicket(models.Model):
-    """Ticket publico de un solo documento del checklist, sin login (28/Ago/2026,
-    pedido explicito de Mariana: "esos [archivos] los subira el cliente...
-    mediante una magic link por doc faltante" - el analista de Tesoreria ya
-    NO sube el archivo el mismo, ver TesoreriaContratoDocumentoViewSet.
-    subir_archivo, ahora gateado a tesoreria.aprobar como excepcion manual).
-    Mismo patron que TesoreriaTicketProveedor (token en claro solo una vez,
-    token_hash SHA-256 en BD, sin emitir sesion) pero ligado a UN renglon
-    especifico del checklist en vez de a la contraparte en general - un
-    ticket = un documento, generado uno por cada documento faltante al
-    llamar TesoreriaContratoViewSet.enviar_recordatorio_documentos (nunca se
-    reusa el mismo ticket para varios documentos)."""
+    """Ticket publico sin login por UN documento del checklist: el cliente
+    sube el archivo via magic link. Mismo patron que
+    TesoreriaTicketProveedor (token_hash SHA-256, sin sesion), pero un
+    ticket = un documento, nunca reusado."""
 
     id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     documento = models.ForeignKey(
@@ -1974,17 +1860,10 @@ class TesoreriaDocumentoTicket(models.Model):
 
 
 class TesoreriaTicketProveedor(models.Model):
-    """Ticket publico de un solo uso para que un PROVEEDOR externo suba su
-    factura sin necesitar cuenta ni login (27/Ago/2026, pedido de Mariana:
-    "el proveedor sube su factura" - mismo patron de codigo que
-    PldTicketCliente en pld-service, independiente - cada servicio
-    mantiene su propio modelo, ver memoria de sesion
-    "micumbres-tickets-reembolso-provisional"). Al canjearse NO emite
-    sesion (a diferencia de IamMagicLink) - "validar" regresa el ticket
-    directamente, protegido por reCAPTCHA en la subida real.
-
-    token_hash: SHA-256 del token, nunca el token en claro (ver
-    ticket_utils.py)."""
+    """Ticket publico de un solo uso para que un proveedor suba su factura
+    sin cuenta ni login (mismo patron que PldTicketCliente, modelo propio
+    de este servicio). No emite sesion al canjearse; token_hash es
+    SHA-256, nunca el token en claro."""
 
     id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     contraparte = models.ForeignKey(
@@ -2005,12 +1884,10 @@ class TesoreriaTicketProveedor(models.Model):
     first_used_at = models.DateTimeField(blank=True, null=True)
     last_used_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
-    # 31/Ago/2026 (pedido de Mariana: "los tickets de cliente si se filtran
-    # automaticamente?" -> "hay que hacer ese filtro por sociedad y
-    # proyecto") - contraparte es un catalogo compartido sin sociedad
-    # propia, asi que no hay de donde heredar el alcance; el analista que
-    # emite el ticket lo declara explicito (igual criterio que
-    # TesoreriaTicketReembolso.sociedad/centro, agregados el mismo dia).
+    # contraparte es un catalogo compartido sin sociedad propia, asi que
+    # no hay de donde heredar el alcance para filtrar tickets por
+    # sociedad/proyecto; el analista que emite el ticket lo declara
+    # explicito (igual criterio que TesoreriaTicketReembolso.sociedad/centro).
     sociedad = models.CharField(max_length=13, blank=True, null=True)
     proyecto = models.CharField(max_length=3, blank=True, null=True)
     # Archivo real ya subido a Drive por el proveedor (09/Sep/2026, "los

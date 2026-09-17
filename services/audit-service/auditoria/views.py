@@ -46,9 +46,7 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
         queryset = super().get_queryset()
         # Gate por rol, no por fila: la bitacora no tiene columna de
         # sociedad/proyecto (es un log cross-empresa por diseño), asi que
-        # ScopedManager no aplica aqui. Solo GLOBAL o rol AUDITOR la ven -
-        # decision de producto 2026-08-10, ver memoria de sesion
-        # "empresas-alcance-fase1"/plan Fase 1 punto 1.
+        # ScopedManager no aplica aqui. Solo GLOBAL o rol AUDITOR la ven.
         scope = self.request.effective_scope
         if not (scope is not None and (scope.is_global or scope.has_role("AUDITOR"))):
             return queryset.none()
@@ -82,8 +80,7 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"])
     def export_csv(self, request):
-        """Ya NO descarga el CSV directo al navegador (decision de Mariana,
-        12/Ago/2026, ver memoria de sesion "csv-auditoria-a-drive"): arma el
+        """No descarga el CSV directo al navegador: arma el
         CSV en memoria y lo sube a Drive via drive-service
         (CumbresBI/Auditoria/Bitacora/), igual que pld-service sube
         documentos KYC. Regresa el file_id/web_view_link de Drive en vez de
@@ -152,7 +149,7 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
         """Registro directo de un evento de auditoria (llamada sincrona
         service-to-service), mismo criterio interino que
         confirmar_envio_drive: mientras no exista Pub/Sub real
-        (docs/architecture/README.md sec. 9), los servicios consumidores
+        (/README.md sec. 9), los servicios consumidores
         POSTean aqui en vez de publicar al outbox. Reemplazar por el
         consumidor real de `audit.events` cuando exista GCP/Pub-Sub.
 

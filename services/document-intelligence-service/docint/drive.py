@@ -1,8 +1,7 @@
 """Cliente HTTP hacia drive-service para leer bytes de un documento ya
-guardado en Drive (docs/architecture/README.md sec. 10: "streaming via
-Google Drive API", nunca subida local real - ver memoria de sesion
-"motor-documental-seleccion-archivos-drive": el analista sube el archivo
-directo en drive.google.com, esta app solo lo selecciona y analiza).
+guardado en Drive (/README.md sec. 10: "streaming via
+Google Drive API", nunca subida local real): el analista sube el archivo
+directo en drive.google.com, esta app solo lo selecciona y analiza.
 
 docint nunca habla con la API de Google Drive directo - le pide los bytes
 a drive-service via HTTP (mismo patron que PldContraparteDocViewSet.subir/

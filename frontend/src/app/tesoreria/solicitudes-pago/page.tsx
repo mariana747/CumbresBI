@@ -76,8 +76,8 @@ const ESTADO_COLOR: Record<SolicitudPagoEstado, "default" | "warning" | "success
   PAGADO: "success",
 };
 
-// Glosario de estados (14/Sep/2026, pendiente.md > Solicitudes de Pago) -
-// mismo criterio que el glosario de Estado/Pagado en flujos/page.tsx.
+// Glosario de estados - mismo criterio que el glosario de Estado/Pagado
+// en flujos/page.tsx.
 const ESTADO_DESCRIPCION: Record<SolicitudPagoEstado, string> = {
   PENDIENTE: "Recién creada, todavía nadie la autoriza.",
   APROBADO: "Ya autorizada, lista para vincular el pago real (Flujo).",
@@ -125,8 +125,7 @@ export default function SolicitudesPagoPage() {
   }
   useEffect(cargar, []);
 
-  // Exportar a Google Sheets (14/Sep/2026, pendiente.md > Solicitudes de
-  // Pago "Pasar google sheet") - mismo patron que Flujos/Conciliacion de
+  // Exportar a Google Sheets - mismo patron que Flujos/Conciliacion de
   // Facturas, ver lib/useExportarSheets.ts.
   const {
     exportando,
@@ -168,8 +167,8 @@ export default function SolicitudesPagoPage() {
     return usuario?.display_name || usuario?.primary_email || idUsuario;
   }
 
-  // Proyecto como lista desplegable (04/Sep/2026, pedido de Mariana) -
-  // mismo catalogo compartido que Obra/Compras (ver lib/vivienda.ts,
+  // Proyecto como lista desplegable - mismo catalogo compartido que
+  // Obra/Compras (ver lib/vivienda.ts,
   // reusado tal cual en obra/requisiciones/nueva/page.tsx).
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   useEffect(() => {

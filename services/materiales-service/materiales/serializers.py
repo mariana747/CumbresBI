@@ -119,9 +119,8 @@ class SolicitudMaterialSerializer(serializers.ModelSerializer):
     PATCH directo, mismo criterio de segregacion captura/decision que
     ObraCorteSemanal.aprobar en obra-service.
 
-    La solicitud es SOLO para pedir contra lo que ya hay en almacen
-    (decision de Mariana 21/Ago/2026: "es para pedir del que hay", no una
-    requisicion de compra) - por eso valida aqui que no se pida mas de lo
+    La solicitud es SOLO para pedir contra lo que ya hay en almacen,
+    no una requisicion de compra - por eso valida aqui que no se pida mas de lo
     disponible; el descuento real al entregar vive en
     SolicitudMaterialViewSet.entregar."""
 
@@ -150,8 +149,8 @@ class SolicitudMaterialSerializer(serializers.ModelSerializer):
         read_only_fields = ["id_solicitud", "estado", "fecha_solicitud", "fecha_entrega", "created_at", "updated_at"]
 
     def get_tiene_evidencia(self, obj):
-        # Para pintar el icono de la bitacora en el frontend (verde/rojo,
-        # pedido de Mariana 21/Ago/2026) - al menos una foto capturada.
+        # Para pintar el icono de la bitacora en el frontend (verde/rojo) -
+        # al menos una foto capturada.
         return obj.evidencias.exclude(link_drive__isnull=True).exclude(link_drive="").exists()
 
     def validate(self, attrs):

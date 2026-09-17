@@ -15,8 +15,7 @@ export const BRAND = {
 };
 
 // Nomenclatura de color por nivel de alcance (roles-y-permisos.md sec. 1;
-// 4 niveles confirmados por Dylan - GRUPO no aplica, ver memoria de sesion
-// "nivel-grupo-holding-confirmado"). Paleta propia, no reutiliza
+// 4 niveles - GRUPO no aplica). Paleta propia, no reutiliza
 // error/warning genericos de MUI - un Chip de alcance no es una alerta de
 // error de formulario, es informacion de negocio. GLOBAL en rojo a
 // proposito: es el nivel de mayor riesgo (ve todo sin filtro), debe saltar
@@ -83,10 +82,7 @@ export const theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
     },
-    // Dialog mas ancho en TODA la app (28/Ago/2026, pedido explicito de
-    // Mariana - probamos primero solo celular, luego pantalla completa
-    // tambien en escritorio, y terminamos aqui: "no toda la pantalla como
-    // el dialog de antes pero mas ancho") - un solo lugar en vez de tocar
+    // Dialog mas ancho en TODA la app - un solo lugar en vez de tocar
     // cada uno de los ~25 <Dialog> del proyecto. Gana sobre el maxWidth
     // ("sm"/"md"/etc.) que cada pantalla ya pasa por prop, sin tocar alto
     // ni bordes - sigue centrado y flotante como antes, solo mas ancho.

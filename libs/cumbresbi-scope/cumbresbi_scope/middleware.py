@@ -12,7 +12,7 @@ class EffectiveScopeMiddleware:
     """Prueba request.effective_scope a partir del JWT de alcance.
 
     En produccion: el JWT (RS256, firmado por iam-service, validado ademas por
-    el API Gateway - ver docs/architecture/README.md sec. 8) viaja en el header
+    el API Gateway - ver /README.md sec. 8) viaja en el header
     Authorization: Bearer <token>. Se valida la firma con
     settings.CUMBRESBI_SCOPE_JWT_PUBLIC_KEY.
 

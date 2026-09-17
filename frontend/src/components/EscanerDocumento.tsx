@@ -5,8 +5,7 @@ import Script from "next/script";
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Typography, useTheme, alpha } from "@mui/material";
 
 // Recorte de documentos con la cámara del celular, sin ML Kit (nativo
-// Android/iOS, no aplica a un frontend web - ver conversación 28/Ago/2026
-// con Mariana). Detección automática de esquinas con jscanify + OpenCV.js
+// Android/iOS, no aplica a un frontend web). Detección automática de esquinas con jscanify + OpenCV.js
 // (mismo motor que ese demo), pero OpenCV.js se sirve local desde
 // /public/opencv.js en vez del CDN de docs.opencv.org: cargarlo por red
 // desde el celular por USB fue el origen de las fallas anteriores.
@@ -376,8 +375,7 @@ export default function EscanerDocumento({ open, archivo, onCancelar, onConfirma
   // área, pero el visor (visorRef) en si mismo si hace scroll nativo
   // (mouse wheel/trackpad/swipe fuera de los circulos) si la imagen es
   // mas grande que la ventana visible. Las flechas explicitas de paneo se
-  // quitaron (04/Sep/2026, pedido de Mariana) ahora que el visor ampliado
-  // casi nunca las necesita.
+  // quitaron ahora que el visor ampliado casi nunca las necesita.
   const visorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -609,9 +607,9 @@ export default function EscanerDocumento({ open, archivo, onCancelar, onConfirma
                     vive en el área de arrastre de esquinas, no aquí, así
                     que el swipe/scroll nativo funciona dentro del visor en
                     el espacio que no sea encima de un círculo - las
-                    flechas explícitas de paneo se quitaron (04/Sep/2026,
-                    pedido de Mariana) ahora que el visor ampliado
-                    (ver visAncho/visAlto) casi nunca las necesita. */}
+                    flechas explícitas de paneo se quitaron ahora que el
+                    visor ampliado (ver visAncho/visAlto) casi nunca las
+                    necesita. */}
                 <Box
                   ref={visorRef}
                   sx={{

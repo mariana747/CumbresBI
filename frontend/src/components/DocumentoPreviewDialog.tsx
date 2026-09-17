@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Box, Dialog, DialogContent, DialogTitle, IconButton, Paper, Stack } from "@mui/material";
 import { ExternalLink, Minus, Plus, Search, X as CloseIcon } from "lucide-react";
 
-// Preview embebido de un documento ya subido (01/Sep/2026, pedido explicito
-// de Mariana: "ver documento" en PLD debe verse en la misma pantalla, igual
-// que el panel lateral del Motor Documental en Facturas/Flujos, en vez de
-// abrir Drive en pestaña nueva). Reusable para cualquier endpoint que sirva
+// Preview embebido de un documento ya subido: "ver documento" en PLD debe
+// verse en la misma pantalla, igual que el panel lateral del Motor
+// Documental en Facturas/Flujos, en vez de abrir Drive en pestaña nueva.
+// Reusable para cualquier endpoint que sirva
 // el archivo con Content-Disposition inline y CSP frame-ancestors abierto a
 // este origen (ver PldContraparteDocViewSet.ver) - no asume nada de Drive
 // directamente.
@@ -21,17 +21,15 @@ export interface DocumentoPreviewDialogProps {
   // siempre falla para XML) dejaba el <iframe> de respaldo en blanco -
   // salta directo a <iframe> sin pasar por el intento de <img>.
   probablementeImagen?: boolean;
-  // "Abrir en pestaña nueva" debe apuntar al archivo real de Drive
-  // (09/Sep/2026, "la redireccion debe hacer al archivo de drive"), no a
+  // "Abrir en pestaña nueva" debe apuntar al archivo real de Drive, no a
   // nuestro endpoint de streaming - `url` sigue siendo el que se embebe
   // en el <img>/<iframe>. Si se omite, cae a `url`.
   urlExterna?: string | null;
 }
 
-// ZOOM_MIN = 1 (04/Sep/2026, pedido de Mariana: "de ese contenedor que ya
-// queda asi, ese sera el minimo") - el ajuste automatico (object-fit:
-// contain) YA es el tamaño mas chico util; no tiene caso encoger mas alla
-// de eso, solo se puede acercar desde ahi.
+// ZOOM_MIN = 1: el ajuste automatico (object-fit: contain) YA es el tamaño
+// mas chico util; no tiene caso encoger mas alla de eso, solo se puede
+// acercar desde ahi.
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 5;
 const ZOOM_PASO = 0.1;
@@ -44,10 +42,9 @@ export default function DocumentoPreviewDialog({
   probablementeImagen = true,
   urlExterna,
 }: DocumentoPreviewDialogProps) {
-  // Zoom +/- (04/Sep/2026, pedido de Mariana: barra flotante centrada
-  // abajo, encima del documento - como en apps de galeria/escaner, no dos
-  // botones sueltos en el titulo) - transform:scale. Se reinicia cada vez
-  // que se abre un documento distinto.
+  // Zoom +/-: barra flotante centrada abajo, encima del documento - como
+  // en apps de galeria/escaner, no dos botones sueltos en el titulo.
+  // transform:scale. Se reinicia cada vez que se abre un documento distinto.
   const [zoom, setZoom] = useState(1);
   // 04/Sep/2026 (bug real: una foto de celular en un <iframe> se ve a su
   // resolucion NATIVA, chiquita, con espacio en blanco alrededor - el
@@ -56,9 +53,9 @@ export default function DocumentoPreviewDialog({
   // (ej. PDF), onError cae a <iframe> (el visor nativo de PDF del
   // navegador si se ajusta razonablemente al ancho).
   const [esImagen, setEsImagen] = useState(true);
-  // Pan con mouse directo sobre la imagen (07/Sep/2026, pedido de Mariana:
-  // "manipular con el mouse" igual que en PLD) - arrastrar mueve `offset`,
-  // la rueda del mouse hace zoom centrado donde esta el cursor. Ambos se
+  // Pan con mouse directo sobre la imagen, igual que en PLD - arrastrar
+  // mueve `offset`, la rueda del mouse hace zoom centrado donde esta el
+  // cursor. Ambos se
   // reinician junto con el zoom cada vez que se abre un documento distinto.
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const arrastrando = useRef(false);

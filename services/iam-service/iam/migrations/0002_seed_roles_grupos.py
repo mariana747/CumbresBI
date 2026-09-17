@@ -1,6 +1,6 @@
 from django.db import migrations
 
-# Catalogo confirmado por el cliente en docs/architecture/roles-y-permisos.md
+# Catalogo confirmado por el cliente en docs/architecture/iam/roles-y-permisos.md
 # sec. 2. GRUPO como scope_type formal sigue sin decidir (sec. 5 punto 1) -
 # estos roles usan GLOBAL/SOCIEDAD/PROYECTO segun esa tabla; el nivel GRUPO se
 # resuelve aparte via general_grupos/iam_groups (via peticion explicita del

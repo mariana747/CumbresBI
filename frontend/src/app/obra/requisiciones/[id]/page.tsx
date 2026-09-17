@@ -87,9 +87,8 @@ export default function RequisicionDetallePage() {
     }
   }
 
-  // Exportar (21/Ago/2026, pedido de Mariana: "en lugar de ver es exportar
-  // como excel o pdf"). No hay un motor de .xlsx real con el formato de
-  // Ruben todavia (pendiente, ver memoria del proyecto) - mientras tanto:
+  // Exportar en vez de solo ver. No hay un motor de .xlsx real con el
+  // formato de Ruben todavia (pendiente, ver memoria del proyecto) - mientras tanto:
   // Excel = CSV descargable (Excel lo abre nativamente, sin depender de
   // ninguna libreria nueva) y PDF = vista de impresion limpia del
   // navegador (sin el chrome de la app), el usuario la guarda como PDF

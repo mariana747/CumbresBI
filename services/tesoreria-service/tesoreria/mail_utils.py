@@ -32,10 +32,9 @@ def _renderizar_correo(
     *, kicker_texto: str, kicker_bg: str, kicker_color: str, titulo: str, cuerpo_html: str,
     cta_texto: str, cta_url: str, fineprint_texto: str,
 ) -> str:
-    """Mismo molde que pld-service/pld/mail_utils.py::_renderizar_correo
-    (diseño aprobado por Mariana 14/Ago/2026) - duplicado a proposito, ver
-    comentario de _AZUL/_CHARCOAL arriba. Usado por
-    enviar_correo_ticket_proveedor (27/Ago/2026)."""
+    """Mismo molde que pld-service/pld/mail_utils.py::_renderizar_correo -
+    duplicado a proposito, ver comentario de _AZUL/_CHARCOAL arriba. Usado
+    por enviar_correo_ticket_proveedor."""
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
   <div style="max-width:480px;margin:0 auto;background:#FFFFFF;border-radius:12px;
@@ -99,8 +98,7 @@ def _chip_tipo_movimiento_html(monto) -> str:
 
 
 def _nombre_completo_cuenta(fila: dict) -> str:
-    """Banco real + CLABE (11/Sep/2026, pendiente de Jenny: "correo con
-    nombre completo de cuenta, hoy usa alias, no banco+numero") - el alias
+    """Banco real + CLABE para el correo, en vez del alias libre. El alias
     sigue siendo el fallback si falta banco o clabe (cuentas capturadas
     antes de que esos campos fueran obligatorios)."""
     if fila.get("banco_nombre") and fila.get("clabe"):
@@ -472,12 +470,8 @@ def enviar_correo_documento_faltante(
     request, email: str, id_contrato: str, nombre_documento: str, token: str
 ) -> bool:
     """Avisa que falta UN documento del checklist de un contrato, con un
-    magic link para que el CLIENTE lo suba el mismo, sin login (diseño
-    Tesoreria2.pdf, 28/Ago/2026: "deben marcar el checklist para enviar un
-    correo avisando que faltan esos documentos, un correo por documento que
-    falte" + "esos los subira el cliente...mediante una magic link por doc
-    faltante" - pedido explicito de Mariana). Se llama una vez POR
-    documento pendiente, con un token distinto cada vez (ver
+    magic link para que el CLIENTE lo suba el mismo, sin login. Se llama
+    una vez POR documento pendiente, con un token distinto cada vez (ver
     TesoreriaDocumentoTicket) - mismo criterio de "envio por separado" que
     enviar_factura, nunca se agrupan varios documentos en un solo correo ni
     se reusa un token para dos documentos.
@@ -591,8 +585,7 @@ def enviar_correo_recordatorio_factura(
 def enviar_correo_aviso_saldo_ppd(
     request, email: str, contraparte_nombre: str, factura_folio: str, saldo_pendiente, mensaje: str | None = None
 ) -> bool:
-    """Aviso de saldo pendiente en una factura PPD (10/Sep/2026, pendiente
-    real de Jenny: "aviso por correo de saldo PPD pendiente") - una PPD se
+    """Aviso de saldo pendiente en una factura PPD - una PPD se
     salda con uno o varios Complementos de Pago (REP); mientras el ultimo
     REP registrado siga con `imp_saldo_insoluto` > 0, sigue quedando debe.
     Igual que el recordatorio de CFDI faltante: nunca se dispara solo, solo

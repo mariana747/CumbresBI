@@ -9,9 +9,8 @@ import { PublicNavbar } from "@/components/PublicNavbar";
 import RecaptchaV2 from "@/components/RecaptchaV2";
 
 // Pagina publica (sin AppShell, sin login) - a donde llega el cliente al
-// abrir el link de un documento faltante del checklist de su contrato
-// (28/Ago/2026, pedido explicito de Mariana: "esos [archivos] los subira
-// el cliente...mediante una magic link por doc faltante"). Mismo patron
+// abrir el link de un documento faltante del checklist de su contrato, para
+// subirlo mediante magic link por doc faltante. Mismo patron
 // que app/tesoreria-ticket/[token]/page.tsx (factura de proveedor), pero
 // ligado a UN documento especifico del checklist en vez de a la
 // contraparte en general. Contrato: TesoreriaDocumentoTicketViewSet.

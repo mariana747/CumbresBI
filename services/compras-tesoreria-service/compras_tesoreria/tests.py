@@ -1,8 +1,5 @@
-"""Primera suite del servicio (02/Sep/2026) - compras-tesoreria-service
-tenia solo el esqueleto de Fase 0 hasta este corte. Cubre permisos por
-accion, RLS por proyecto, y el flujo feliz completo: SolicitudCompra ->
-Cotizacion (confirmar_extraccion, el enlace con el Motor Documental) ->
-OrdenCompra (generar_desde_cotizacion) -> Recepcion (parcial y total)."""
+"""Cubre permisos por accion, RLS por proyecto, y el flujo completo:
+SolicitudCompra -> Cotizacion -> OrdenCompra -> Recepcion."""
 
 from decimal import Decimal
 from unittest.mock import Mock, patch
@@ -214,12 +211,8 @@ class FlujoCompletoCompraTests(TestCase):
 
 
 class RecepcionSincronizaInventarioTests(TestCase):
-    """02/Sep/2026, pedido de Mariana: "Recepciones va tener conexion con
-    obra en la parte de materiales, para actualizar el inventario... com-
-    pras es la base". Verifica que RecepcionViewSet.create llama a
-    materiales-service con los datos correctos, y que un fallo de red no
-    tumba el registro local (fail-open, ver views.py::
-    _sincronizar_inventario_materiales)."""
+    """Verifica que RecepcionViewSet.create llama a materiales-service con
+    los datos correctos, y que un fallo de red no tumba el registro local."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -289,11 +282,9 @@ class RecepcionSincronizaInventarioTests(TestCase):
 
 
 class ConfirmarExtraccionSincronizaCatalogoTests(TestCase):
-    """02/Sep/2026, pedido de Mariana: "sincronizar cotizacion -> catalogo"
-    (siguiente paso tras conectar Recepcion->inventario). Verifica que
-    confirmar_extraccion llama a materiales-service por cada linea con
-    precio_unitario, y que un fallo de red no tumba la confirmacion local
-    (fail-open, ver views.py::_sincronizar_precio_cotizado)."""
+    """Verifica que confirmar_extraccion llama a materiales-service por
+    cada linea con precio_unitario, y que un fallo de red no tumba la
+    confirmacion local."""
 
     def setUp(self):
         self.factory = APIRequestFactory()

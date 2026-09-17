@@ -33,7 +33,7 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
+# Llave publica RS256 (/README.md sec. 8) - publica del
 # par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
 # este default fuera de dev; en un ambiente real viene de Secret Manager.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
@@ -101,7 +101,7 @@ DATABASES = {
 }
 
 # tesoreria-service (24/Ago/2026, cierre de la reconciliacion contraparte
-# maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Semana 19,
+# maestra - ver Plan de Trabajo Semana 19,
 # mismo cambio ya hecho en pld-service/config/settings.py).
 # ViviendaRelExpedienteClienteViewSet.create la usa para validar que el
 # id_contraparte que manda el frontend (via ContraparteSelector) exista de

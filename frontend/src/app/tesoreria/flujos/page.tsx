@@ -166,9 +166,9 @@ const VALIDACION_DESCRIPCION: Record<TesoreriaValidacionEstado, string> = {
   RECHAZADA: "No se autoriza, no se puede pagar así.",
 };
 
-// Tooltips de campos heredados/ambiguos del AppSheet original (10/Sep/2026,
-// pendiente.md > Flujos > "Tooltips de campos") - label + icono de ayuda,
-// mismo criterio visual que el glosario de Estado en el encabezado de tabla.
+// Tooltips de campos heredados/ambiguos del AppSheet original - label +
+// icono de ayuda, mismo criterio visual que el glosario de Estado en el
+// encabezado de tabla.
 function LabelTip({ text, tip }: { text: string; tip: string }) {
   return (
     <Stack direction="row" spacing={0.5} alignItems="center" component="span">
@@ -222,10 +222,10 @@ function TesoreriaFlujosPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaFlujo | null>(null);
-  // Ver vs. Editar (28/Ago/2026, pedido explicito de Mariana: mismo
-  // criterio que Contrapartes/Contratos - "Ver" visible siempre, "Editar"
-  // se mueve al menu de tres puntos) - mismo dialogo/formulario, con todo
-  // deshabilitado y sin boton de Guardar cuando soloLectura es true.
+  // Ver vs. Editar (mismo criterio que Contrapartes/Contratos - "Ver"
+  // visible siempre, "Editar" se mueve al menu de tres puntos) - mismo
+  // dialogo/formulario, con todo deshabilitado y sin boton de Guardar
+  // cuando soloLectura es true.
   const [soloLectura, setSoloLectura] = useState(false);
   // Preview embebido del comprobante (09/Sep/2026, apartado de Documentos)
   const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);

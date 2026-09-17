@@ -80,7 +80,7 @@ const DRAWER_WIDTH = 240;
 const HEADER_HEIGHT = 56;
 
 // Catalogo de modulos de negocio en el orden confirmado del Plan de Trabajo
-// v2.0 (docs/architecture/README.md sec. 2): Admin -> PLD -> Ventas/Vivienda
+// v2.0 (/README.md sec. 2): Admin -> PLD -> Ventas/Vivienda
 // -> Compras/Tesoreria -> RRHH. Ninguno tiene ruta real todavia (Fase 0) -
 // href queda en "#" hasta que exista el modulo correspondiente.
 //
@@ -101,8 +101,7 @@ const HEADER_HEIGHT = 56;
 // y un `React.ComponentType<{size?, strokeWidth?}>` hecho a mano - con
 // `LucideIcon` real como tipo de icono, la union queda limpia y
 // `"children" in item` narrowa sin conflicto.
-// "group" opcional (08/Sep/2026, reorganizacion de Tesoreria en secciones -
-// pedido de Mariana) - subdivide los children de un apartado con un
+// "group" opcional - subdivide los children de un apartado con un
 // subheader no clickeable (ej. "REPORTES", "OPERACIONES") sin necesitar un
 // tercer nivel real de anidacion. Los items sin "group" (el resto de
 // apartados, que no lo usan) se siguen renderizando igual que antes.
@@ -265,8 +264,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Viviendas", href: "/ventas-vivienda/viviendas", icon: Home },
         { label: "Asesores", href: "/ventas-vivienda/asesores", icon: Users },
         { label: "Expedientes", href: "/ventas-vivienda/expedientes", icon: ClipboardList },
-        // Materiales se movio a Obra (21/Ago/2026, pedido de Mariana:
-        // "materiales debe estar en obra") - ver children de Obra abajo.
+        // Materiales se movio a Obra - ver children de Obra abajo.
         // Presupuestos sigue en desarrollo (EnDesarrolloPage) - el motor
         // etapa->concepto no esta construido todavia.
         { label: "Presupuestos", href: "/ventas-vivienda/presupuestos", icon: Calculator },
@@ -280,9 +278,8 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
       href: "/tesoreria/contrapartes",
       icon: Landmark,
       enabled: true,
-      // Reorganizado en secciones (08/Sep/2026, pedido de Mariana) - antes
-      // era una lista plana de 11 items sin agrupar, dificil de escanear
-      // ahora que Tesoreria es la prioridad del mes. "Reembolsos" no entra
+      // Reorganizado en secciones - antes era una lista plana de 11 items
+      // sin agrupar, dificil de escanear. "Reembolsos" no entra
       // todavia (sin pantalla propia del lado Tesoreria, el ticket vive
       // hoy solo en MiCumbres - ver micumbres-tickets-reembolso-provisional)
       // - se agrega aqui cuando exista.
@@ -363,8 +360,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // nomenclatura del Excel legado. Mismo criterio que Tesoreria: children
   // con URL propio por pantalla, no pestañas dentro de un solo /obra.
   //
-  // OCULTO del nav (08/Sep/2026, decision de Mariana: "este mes la
-  // prioridad es terminar Tesoreria") - el backend/rutas siguen intactos,
+  // OCULTO del nav - el backend/rutas siguen intactos,
   // solo se oculta la entrada del sidebar. Quitar el "false &&" para
   // reactivar cuando Tesoreria este cerrada.
   if (false && tieneAlgunPermiso(session, ["obra", "materiales"])) {
@@ -377,14 +373,12 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Avance", href: "/obra/avance", icon: HardHat },
         { label: "Cortes Semanales", href: "/obra/cortes", icon: CalendarCheck },
         { label: "Catálogo (Etapas/Conceptos)", href: "/obra/catalogo", icon: ListTree },
-        // Materiales vive aqui desde 21/Ago/2026 (pedido de Mariana:
-        // "materiales debe estar en obra") - antes colgaba de Ventas/
-        // Vivienda; el backend (materiales-service) no cambio, solo el
-        // menu y la ruta del frontend.
+        // Materiales vive aqui - antes colgaba de Ventas/Vivienda; el
+        // backend (materiales-service) no cambio, solo el menu y la ruta
+        // del frontend.
         { label: "Materiales", href: "/obra/materiales", icon: Package },
-        // Requisiciones (21/Ago/2026, decision de Mariana: "en
-        // requisicion es donde se va a pedir material") - documento
-        // formal por proyecto+etapa que dispara la compra, distinto de
+        // Requisiciones - documento formal por proyecto+etapa que dispara
+        // la compra, distinto de
         // "Materiales" (esa es solo el catalogo + salida de almacen).
         { label: "Requisiciones", href: "/obra/requisiciones", icon: ClipboardList },
       ],
@@ -392,7 +386,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   }
   // "Compras" (compras-tesoreria-service, 02/Sep/2026) - regresa al
   // sidebar como apartado real: el hueco de 24/Ago ("sigue sin tablas de
-  // negocio propias") ya se cerro (Fase 4B, ver docs/CumbresBI_estado.md).
+  // negocio propias") ya se cerro (Fase 4B, ver Estado del proyecto).
   // Separado de Tesoreria a proposito - dominio propio (solicitud ->
   // cotizacion -> orden -> recepcion), aunque comparte el catalogo de
   // proveedores (tesoreria_contrapartes) via ContraparteSelector.
@@ -423,14 +417,11 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   if (tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh/empleados", icon: UserCheck, enabled: true });
   }
-  // Tickets/Rentas quitados del sidebar (19/Ago/2026, pedido de Mariana) -
-  // ninguno de los dos tiene backend real todavia, quedaban como
-  // placeholders "en desarrollo" sin nada detras. Si se retoman esos
-  // modulos, revivir este bloque (ver git blame) en vez de reinventarlo -
-  // el hallazgo original que lo agrego sigue documentado en
-  // docs/CumbresBI_estado.md.
-  // "Tickets de reembolso" (27/Ago/2026, pantalla PROVISIONAL - ver
-  // memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente") - visible para
+  // Tickets/Rentas quitados del sidebar - ninguno de los dos tiene backend
+  // real todavia, quedaban como placeholders "en desarrollo" sin nada
+  // detras. Si se retoman esos modulos, revivir este bloque (ver git blame)
+  // en vez de reinventarlo.
+  // "Tickets de reembolso" (pantalla PROVISIONAL) - visible para
   // cualquier sesion real (self-service, sin exigir perm_key alguno,
   // mismo criterio que el resto de MiCumbres) mientras no exista el
   // portal MiCumbres/RRHH real (Fase 5, sin arrancar).
@@ -731,9 +722,8 @@ function Header({
                         {sinRolUsers.length} usuario(s) sin rol asignado
                       </Typography>
                     </MenuItem>,
-                    // Clic directo en el usuario (17/Ago/2026, pedido de
-                    // Mariana) - antes solo estaban listados (disabled) y
-                    // habia que usar "Ver todos en el directorio" incluso
+                    // Clic directo en el usuario - antes solo estaban
+                    // listados (disabled) y habia que usar "Ver todos en el directorio" incluso
                     // para ver a uno solo.
                     ...sinRolUsers.slice(0, 5).map((user) => (
                       <MenuItem
@@ -823,9 +813,8 @@ function Header({
             </Stack>
           </MenuItem>
           <Divider />
-          {/* Acceso directo a MiCumbres desde la carita de perfil
-          (17/Ago/2026, pedido de Mariana) - todos los usuarios con sesion
-          ven este item, MiCumbres siempre esta en el sidebar tambien (ver
+          {/* Acceso directo a MiCumbres desde la carita de perfil - todos
+          los usuarios con sesion ven este item, MiCumbres siempre esta en el sidebar tambien (ver
           buildNavItems, ultimo item) - esto es solo un atajo. */}
           <MenuItem component="a" href="/micumbres" onClick={() => setAvatarAnchorEl(null)}>
             Ir a Mi Cumbres
@@ -862,8 +851,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, [router]);
 
-  // Roles/permisos en tiempo (casi) real (Opcion A, ver memoria de sesion):
-  // un admin puede otorgar/revocar un rol de OTRO usuario mientras ese
+  // Roles/permisos en tiempo (casi) real: un admin puede otorgar/revocar
+  // un rol de OTRO usuario mientras ese
   // usuario ya tiene su sesion abierta - sin este poll, el cambio no se
   // veia hasta que el JWT viejo expirara (SESSION_JWT_TTL_MINUTES=15) y
   // volviera a hacer login. refreshSession() reemite la cookie con los

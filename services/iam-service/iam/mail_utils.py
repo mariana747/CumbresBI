@@ -9,10 +9,8 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT_SEGUNDOS = 10
 
-# Tokens de marca (ver frontend/src/theme/theme.ts, BRAND) - duplicados
-# aqui a proposito: los correos van por Gmail API, no por Next.js, y los
-# clientes de correo (Gmail/Outlook/Apple Mail) ignoran <style> - todo
-# tiene que ir inline, asi que no hay forma de importar el theme real.
+# Tokens de marca duplicados de theme.ts a proposito: los correos van por
+# Gmail API y los clientes de correo ignoran <style>, todo debe ir inline.
 _AZUL = "#1C75BC"
 _CHARCOAL = "#343741"
 _INK_MUTED = "#6B7280"
@@ -22,16 +20,8 @@ def _renderizar_correo(
     *, kicker_texto: str, kicker_bg: str, kicker_color: str, titulo: str, cuerpo_html: str,
     cta_texto: str, cta_url: str, fineprint_texto: str,
 ) -> str:
-    """Molde compartido de los 3 correos de mail-service (diseño aprobado
-    por Mariana 14/Ago/2026 - ver memoria de sesion, artefacto "Correos de
-    Acceso CumbresBI"): wordmark -> kicker de color -> titulo -> cuerpo ->
-    boton -> nota al pie. Solo el color/texto del kicker cambia entre los
-    tres, segun que tan urgente es cada uno (ambar=vence pronto,
-    azul=permanente revocable, verde=ya activo).
-
-    Estilos 100% inline (tablas evitadas por simplicidad, funciona bien en
-    Gmail/Apple Mail - si Outlook desktop da problemas mas adelante, ese
-    es el momento de migrar a un layout de tablas)."""
+    """Molde compartido de los 3 correos de mail-service; solo cambia el color/texto
+    del kicker segun urgencia. Estilos 100% inline por compatibilidad con clientes de correo."""
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
   <div style="max-width:480px;margin:0 auto;background:#FFFFFF;border-radius:12px;
@@ -69,19 +59,9 @@ def _renderizar_correo(
 
 
 def enviar_correo_magic_link(request, email: str, magic_link_url: str) -> bool:
-    """Envia el Magic Link real por correo via mail-service (Gmail API) -
-    decision de Mariana (13/Ago/2026): ya no basta con mostrar el link en
-    pantalla (modo dev), debe llegar de verdad a la bandeja del invitado.
-
-    Reenvia el JWT/cookie del analista que genero el link (mismo patron
-    que PldContraparteDocViewSet.subir hacia drive-service) para que el
-    permiso ("iam.crear") lo siga decidiendo mail-service.
-
-    No propaga la excepcion si mail-service no responde - un fallo de
-    envio no debe tumbar la creacion del magic link en si (el token/url
-    se sigue regresando en la respuesta como respaldo, ver views.py). Solo
-    regresa True/False para que el llamador pueda avisar en la respuesta
-    si el correo se mando o no."""
+    """Envia el Magic Link por correo via mail-service (Gmail API), reenviando el
+    JWT/cookie del analista para que el permiso lo siga validando mail-service.
+    No propaga excepciones: un fallo de envio no debe tumbar la creacion del link."""
     headers, cookies = forward_auth_headers(request)
 
     url_completa = f"{settings.FRONTEND_BASE_URL}{magic_link_url}"
@@ -120,10 +100,8 @@ def enviar_correo_magic_link(request, email: str, magic_link_url: str) -> bool:
 
 
 def enviar_correo_acceso_externo(request, email: str, acceso_url: str) -> bool:
-    """Envia el link de acceso del 3er tipo de invitacion (colaborador
-    externo sin Workspace, ver models.IamExternalCollaborator) - mismo
-    mecanismo que enviar_correo_magic_link pero el texto deja claro que el
-    link NO vence por tiempo, solo se revoca a mano."""
+    """Igual que enviar_correo_magic_link pero para colaborador externo sin Workspace
+    (IamExternalCollaborator): el link no vence por tiempo, solo se revoca a mano."""
     headers, cookies = forward_auth_headers(request)
 
     url_completa = f"{settings.FRONTEND_BASE_URL}{acceso_url}"
@@ -162,12 +140,8 @@ def enviar_correo_acceso_externo(request, email: str, acceso_url: str) -> bool:
 
 
 def enviar_correo_invitacion_workspace(request, email: str) -> bool:
-    """Avisa por correo al colaborador Workspace invitado (14/Ago/2026,
-    pedido explicito de Mariana: antes IamInvitation no mandaba nada -
-    a diferencia de Magic Link/acceso externo, no hay link ni token que
-    compartir, solo un aviso de "ya puedes entrar" - el canje real es
-    simplemente iniciar sesion con Google (ver auth_views._upsert_identity),
-    no hay nada que canjear via correo."""
+    """Avisa por correo al colaborador Workspace invitado. A diferencia de Magic
+    Link/acceso externo no hay link ni token: el canje real es iniciar sesion con Google."""
     headers, cookies = forward_auth_headers(request)
 
     html_body = _renderizar_correo(

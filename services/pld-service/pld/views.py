@@ -47,21 +47,17 @@ logger = logging.getLogger(__name__)
 
 def _carpeta_documento(doc) -> str:
     """Carpeta real en Drive para `doc` - una sola carpeta plana por
-    contraparte, sin subcarpeta por tipo de documento (07/Sep/2026, revierte
-    la subcarpeta por tipo_documento del 04/Sep: "no debe haber carpeta por
-    documento"; el tipo_documento se queda solo como clasificacion/checklist
-    en la base de datos, no como estructura de carpetas)."""
+    contraparte, sin subcarpeta por tipo de documento; tipo_documento se
+    usa solo como clasificacion/checklist en la base de datos."""
     return f"PLD/Nuevos Clientes/{doc.kyc.id_contraparte}"
 
 
 def _nombre_archivo_drive(tipo_documento, nombre_original: str) -> str:
-    """Nombre real con el que se guarda el archivo en Drive - generalizado
-    (07/Sep/2026, "que sea por nombre de documento solicitado", revierte la
-    excepcion puntual de INE del mismo dia): se renombra al label completo
-    del catalogo (get_tipo_documento_display) para CUALQUIER tipo_documento
-    solicitado, conservando la extension del archivo original. Sin
-    tipo_documento (el cliente subio por el link generico, sin elegir tipo)
-    se conserva el nombre original tal cual."""
+    """Nombre real con el que se guarda el archivo en Drive: se renombra
+    al label completo del catalogo (get_tipo_documento_display) para
+    cualquier tipo_documento solicitado, conservando la extension. Sin
+    tipo_documento (link generico, sin elegir tipo) se conserva el
+    nombre original tal cual."""
     if not tipo_documento:
         return nombre_original
     nombre_base = dict(PldContraparteDoc.TIPO_DOCUMENTO_CHOICES).get(tipo_documento)
@@ -74,27 +70,14 @@ def _nombre_archivo_drive(tipo_documento, nombre_original: str) -> str:
 
 
 def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
-    """Revisa contra Drive real cada documento de `kyc` que tenga
-    drive_file_id y BORRA de la base de datos los que ya no existen -
-    alguien los elimino directo en drive.google.com sin pasar por la app
-    (18/Ago/2026, hallazgo real de Mariana: la plataforma se quedaba
-    mostrandolos como si siguieran ahi). Decision de Mariana: borrado real
-    del registro, no solo marcarlo/ocultarlo - un documento sin archivo
-    real detras no aporta nada al expediente.
+    """Revisa contra Drive real cada documento de `kyc` con drive_file_id
+    y borra de la base de datos los que ya no existen ahi (borrado real
+    del registro, no solo ocultarlo). Compartido entre el boton interno
+    "Verificar en Drive" y el canje del link publico de cliente.
 
-    Compartido entre el boton interno "Verificar en Drive"
-    (PldContraparteKycViewSet.verificar_documentos, con headers/cookies del
-    JWT del analista) y el canje del link publico
-    (PldTicketClienteViewSet.validar, con el secreto interno
-    servicio-a-servicio en headers - el cliente externo no tiene JWT que
-    reenviar) - la verificacion debe pasar justo donde el usuario externo
-    ve/sube sus documentos, no solo en la pantalla interna del analista.
-
-    Documentos sin drive_file_id (nunca se llego a subir el archivo real)
-    se omiten - no hay nada que verificar. Regresa la lista de documentos
-    borrados (para avisar en pantalla) - no lanza si drive-service no
-    responde, ese documento simplemente se deja como estaba (fail-safe: un
-    problema de red no debe borrar evidencia real por error)."""
+    Documentos sin drive_file_id se omiten. Regresa la lista de
+    documentos borrados; fail-safe si drive-service no responde (el
+    documento se deja como estaba, no se borra por error de red)."""
     eliminados = []
 
     for doc in kyc.documentos.exclude(drive_file_id__isnull=True).exclude(drive_file_id=""):
@@ -137,24 +120,15 @@ def _limpiar_documentos_borrados_en_drive(kyc, headers, cookies):
 
 
 def _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies):
-    """Verifica contra el catalogo maestro real (tesoreria-service) que
-    `id_contraparte` exista, y regresa sus datos VIGENTES - normalmente el
-    mismo id que se mando, pero puede resolver a otro si esa contraparte
-    se fusiono con otra mientras tanto (02/Sep/2026, cierre real de la
-    reconciliacion contraparte maestra - ver
-    TesoreriaContraparteViewSet.retrieve/_fusionar_en en tesoreria-service:
-    consultar el id de un alias fusionado ya no da 404, da 200 con los
-    datos del sobreviviente real). "tesoreria expone el id nuevo, PLD/
-    Ventas se actualizan solos" - el llamador usa el id_contraparte del
-    dict regresado, no el que mando originalmente.
+    """Verifica contra tesoreria-service que `id_contraparte` exista y
+    regresa sus datos vigentes - puede resolver a otro id si esa
+    contraparte se fusiono con otra (ver
+    TesoreriaContraparteViewSet.retrieve/_fusionar_en); el llamador debe
+    usar el id_contraparte del dict regresado, no el original.
 
-    Regresa None solo si tesoreria-service confirma con un 404 real que la
-    contraparte no existe en absoluto (nunca existio, no es un alias).
-    Fail-open, mismo criterio que _obtener_sociedad_en_iam: si
+    Regresa None solo con un 404 real (nunca existio). Fail-open: si
     tesoreria-service no responde o da error, regresa un dict minimo con
-    el mismo id_contraparte sin cambios (sin nombre real disponible) - un
-    problema de red entre servicios no debe bloquear el alta de un
-    expediente KYC real."""
+    el mismo id_contraparte sin cambios."""
     try:
         upstream = requests.get(
             f"{settings.TESORERIA_SERVICE_URL}/api/contrapartes/{id_contraparte}/",
@@ -184,16 +158,10 @@ def _resolver_contraparte_en_tesoreria(id_contraparte, headers, cookies):
 
 def _nombre_completo_de_contraparte(datos_contraparte):
     """Junta razon_social + apellidos de la respuesta de tesoreria-service
-    en un solo nombre (02/Sep/2026, hallazgo real: "al crear el expediente
-    no se llena el nombre" - PldContraparteKyc.nombre_completo solo se
-    llenaba via confirmar_extraccion del Motor Documental, nunca al crear
-    el expediente aunque ya se hubiera elegido/creado la contraparte real
-    en el selector). Para persona moral/fideicomiso los apellidos vienen
-    vacios, razon_social ya es el nombre completo por si solo. Regresa ""
-    si no hay nada util todavia (ej. alta autonoma con razon_social
-    placeholder "Pendiente de completar...", o si tesoreria-service no
-    respondio) - no tiene caso guardar un nombre a medias o el
-    placeholder como si fuera el nombre real."""
+    en un solo nombre. Para persona moral/fideicomiso los apellidos vienen
+    vacios, razon_social ya es el nombre completo. Regresa "" si no hay
+    nada util todavia (placeholder de alta autonoma, o si tesoreria-
+    service no respondio)."""
     if not datos_contraparte:
         return ""
     partes = [
@@ -216,28 +184,18 @@ def _nombre_completo_de_contraparte(datos_contraparte):
 def _crear_contraparte_minima_en_tesoreria():
     """Crea la contraparte real en el catalogo maestro de tesoreria-service
     para el alta autonoma de un expediente KYC (Opcion B, ver
-    PldContraparteKyc.id_contraparte en models.py) - 02/Sep/2026, cierre
-    real de la reconciliacion contraparte maestra. Antes, cuando el
-    analista creaba un expediente sin pasar por el ContraparteSelector
-    (sin id_contraparte en el payload), el modelo generaba su propio id
-    local (default=_short_id) que nunca existia de verdad en tesoreria-
-    service - un huerfano garantizado que _existe_contraparte_en_tesoreria
-    no alcanzaba a prevenir porque solo valida cuando SI llega un
-    id_contraparte.
+    PldContraparteKyc.id_contraparte en models.py) - sin esto, un
+    expediente creado sin ContraparteSelector queda con un id local
+    (_short_id) que nunca existe de verdad en tesoreria-service.
 
-    Usa el secreto interno servicio-a-servicio (X-Internal-Secret, ver
-    settings.TESORERIA_INTERNAL_SECRET) en vez del JWT del analista - un
-    PLD_ANALISTA no necesariamente tiene el permiso tesoreria.crear, y no
-    deberia necesitarlo solo para poder abrir un expediente autonomo.
-    origen="pld" (ver TesoreriaContraparte.ORIGEN_PLD) exime a
-    tesoreria-service de exigir email/tipo_persona - el cliente completa
-    los datos reales despues via el link publico de PLD.
+    Usa el secreto interno servicio-a-servicio en vez del JWT del
+    analista (PLD_ANALISTA no necesariamente tiene tesoreria.crear).
+    origen="pld" exime a tesoreria-service de exigir email/tipo_persona;
+    el cliente completa esos datos despues via el link publico.
 
-    Fail-open, mismo criterio que _existe_contraparte_en_tesoreria: si el
-    secreto no esta configurado, tesoreria-service no responde, o rechaza
-    la creacion, regresa None y el llamador cae de vuelta al id local
-    autogenerado del modelo - un problema de red entre servicios no debe
-    bloquear el alta de un expediente KYC real."""
+    Fail-open: si el secreto no esta configurado, tesoreria-service no
+    responde, o rechaza la creacion, regresa None y el llamador cae al id
+    local autogenerado del modelo."""
     if not settings.TESORERIA_INTERNAL_SECRET:
         return None
     try:
@@ -265,57 +223,26 @@ def _crear_contraparte_minima_en_tesoreria():
 
 
 def _sincronizar_contraparte_en_tesoreria(id_contraparte, campos):
-    """Empuja de vuelta a tesoreria-service los datos que ya se capturaron
-    en PLD (02/Sep/2026, pedido explicito: "si en PLD ya dio RFC y
-    numero se puede colocar ya en tesoreria... igual lo de tipo de
-    persona") - cierra el sentido inverso de la reconciliacion: antes solo
-    sincronizabamos tesoreria -> PLD al crear el expediente
-    (_resolver_contraparte_en_tesoreria/_nombre_completo_de_contraparte),
-    nunca PLD -> tesoreria cuando el analista/cliente completaba datos
-    despues via el expediente o el link publico.
+    """Empuja de vuelta a tesoreria-service los datos ya capturados en PLD
+    - cierra el sentido inverso de la sincronizacion (antes solo iba
+    tesoreria -> PLD al crear el expediente, ver
+    _resolver_contraparte_en_tesoreria).
 
-    Solo manda los campos que SI tienen columna equivalente en tesoreria-
-    service (rfc, tipo_persona, nombre/apellidos, genero, telefono_sms,
-    contacto - 02/Sep/2026, pedido explicito: "igual lo de nombre y
-    apellidos y genero" + "sincroniza los datos de contacto" + "igual el
-    nombre del contacto") - el resto de "datos del cliente" de PLD
-    (domicilio, telefono_fijo, etc.) no tiene columna equivalente ahi, se
-    quedan solo en el expediente KYC. telefono_fijo NO se sincroniza porque
-    tesoreria-service no tiene columna equivalente (solo tiene
-    telefono_sms/celular, ver TesoreriaContraparte).
+    Solo manda los campos con columna equivalente en tesoreria-service
+    (rfc, tipo_persona, nombre/apellidos, genero, telefono_sms, contacto).
+    "genero" se deriva de la CURP (ver TesoreriaContraparte.GENERO_*);
+    "contacto" se manda igual al titular porque en PLD no existe un
+    contacto distinto; "nombre" de PLD equivale a razon_social en
+    tesoreria-service.
 
-    "contacto" (tesoreria-service) tampoco tiene columna propia en PLD -
-    igual que "genero", se deriva: en PLD el contacto SIEMPRE es el
-    titular mismo (no existe un contacto distinto, a diferencia de
-    tesoreria-service que si permite un tercero - ver el checkbox "El
-    contacto es el mismo titular" en tesoreria/contrapartes/page.tsx), asi
-    que basta con mandar ahi el nombre completo que ya se este
-    sincronizando como razon_social/apellidos en esta misma llamada.
-
-    PLD no tiene una columna PldContraparteKyc.genero propia - "genero" SI
-    se sincroniza, pero derivado de la letra H/M en la posicion 11 (indice
-    10) de la CURP (unico lugar de PLD donde vive el dato), no copiado de
-    un campo con el mismo nombre como el resto de campos_a_sincronizar. Ver
-    TesoreriaContraparte.GENERO_HOMBRE/GENERO_MUJER.
-
-    "nombre" de PLD se manda como "razon_social" de tesoreria-service (son
-    columnas con nombres distintos para el mismo concepto - el nombre de
-    pila de una persona fisica, ver TesoreriaContraparte.razon_social y su
-    docstring "Fisica/Fisica con actividad empresarial es SOLO el/los
-    nombre(s) de pila").
-
-    Actualizar el rfc en tesoreria-service puede disparar ahi la fusion
-    automatica por RFC duplicado (ver TesoreriaContraparteViewSet.update/
-    _fusionar_en) si esa contraparte era un huerfano tipo "Pendiente de
-    completar (alta autónoma PLD)" y el RFC ya coincide con otra real -
-    exactamente el cierre del circulo completo de la reconciliacion.
+    Actualizar el rfc puede disparar la fusion automatica por RFC
+    duplicado en tesoreria-service (ver TesoreriaContraparteViewSet.update)
+    si la contraparte era un huerfano de alta autonoma PLD.
 
     Usa el secreto interno servicio-a-servicio (mismo criterio que
-    _crear_contraparte_minima_en_tesoreria) - ni el analista ni el cliente
-    externo del link publico tienen por que tener tesoreria.editar. Fail-
-    open y en segundo plano respecto al guardado real: si esto falla, el
-    expediente de PLD ya se guardo bien, solo no se reflejo en tesoreria -
-    no vale la pena tronar el request completo por esto."""
+    _crear_contraparte_minima_en_tesoreria). Fail-open: si esto falla, el
+    expediente de PLD ya se guardo bien, no vale la pena tronar el
+    request por esto."""
     if not settings.TESORERIA_INTERNAL_SECRET:
         return
     # "nombre" (PLD) -> "razon_social" (tesoreria-service) - mismo dato,
@@ -430,14 +357,10 @@ MAX_TAMANO_ARCHIVO_BYTES = MAX_TAMANO_ARCHIVO_MB * 1024 * 1024
 
 
 class PldContraparteKycViewSet(ModelViewSet):
-    """Expediente KYC (Fase 2, Semana 7: "Modelos de expediente KYC y
-    contraparte propia"). Alcance real por sociedad ya conectado
-    (ScopedManager, ver get_queryset) y ahora tambien permisos reales de
-    escritura (cumplimiento real de permisos, plan Fase 1): crear/editar
-    requiere PLD_ANALISTA (o quien tenga "pld-compliance.crear"/"editar"),
-    aprobar requiere el rol distinto PLD_APROBADOR (segregacion de
-    funciones documentada en roles-y-permisos.md sec. 2 - "quien captura
-    no aprueba").
+    """Expediente KYC. Alcance real por sociedad (ScopedManager, ver
+    get_queryset). Crear/editar requiere PLD_ANALISTA (o
+    "pld-compliance.crear"/"editar"); aprobar requiere PLD_APROBADOR -
+    segregacion de funciones (roles-y-permisos.md sec. 2).
 
     Filtros: ?estado_llenado=PENDIENTE|INCOMPLETO|ENTREGADO. Busqueda de
     texto libre (?search=) sobre id_contraparte/curp.
@@ -472,28 +395,18 @@ class PldContraparteKycViewSet(ModelViewSet):
         estado_llenado = self.request.query_params.get("estado_llenado")
         if estado_llenado:
             queryset = queryset.filter(estado_llenado=estado_llenado.upper())
-        # 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para
-        # poder ver unicamente los de una sociedad o la otra") - un
-        # analista con acceso a varias sociedades (scope union, ver
-        # ScopedQuerySet) ve todas mezcladas por default; este filtro deja
-        # acotar la vista a una sola sin tener que cambiar el scope real
-        # de la sesion. Mismo criterio que ?estado_llenado= arriba.
+        # Acota a una sola sociedad sin cambiar el scope real de la sesion
+        # (un analista con acceso a varias las ve mezcladas por default).
         sociedad_rfc = self.request.query_params.get("sociedad")
         if sociedad_rfc:
             queryset = queryset.filter(sociedad_rfc=sociedad_rfc)
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
-        # categoria_cumplimiento (04/Sep/2026, pedido de Mariana: "en pld
-        # hay que tener tabs de KYC y KYB, divide los expedientes segun el
-        # KYC/KYB... se vera los pendientes a revision" - solo 2 tabs, sin
-        # tab propio para PENDIENTE_REVISION). Al filtrar por KYC o KYB
-        # tambien se incluyen los "casos raros" en PENDIENTE_REVISION -
-        # deben verse en ambos tabs para que un analista los reclasifique,
-        # no quedar escondidos sin tab que los muestre. Se distinguen por
-        # el color del chip en la columna Categoria del frontend. Filtrar
-        # explicito por PENDIENTE_REVISION (fuera del uso de los tabs,
-        # ej. debug) sigue siendo un match exacto, sin este OR.
+        # Los tabs KYC/KYB (sin tab propio para PENDIENTE_REVISION) deben
+        # incluir tambien los casos en PENDIENTE_REVISION, para que el
+        # analista los reclasifique. Filtro explicito por
+        # PENDIENTE_REVISION sigue siendo un match exacto, sin este OR.
         categoria = self.request.query_params.get("categoria_cumplimiento")
         if categoria:
             categoria = categoria.upper()
@@ -508,24 +421,15 @@ class PldContraparteKycViewSet(ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """Valida contra el catalogo real de tesoreria-service antes de
-        crear (24/Ago/2026, ver _resolver_contraparte_en_tesoreria) - el
-        unique=True del modelo ya evita duplicados, pero no evita un
-        id_contraparte que simplemente no existe en Tesoreria (ej. si
-        alguien llama a la API directo, sin pasar por ContraparteSelector).
-        02/Sep/2026: si esa contraparte se fusiono con otra (ver
-        tesoreria-service::_fusionar_en), se guarda el id vigente que
-        tesoreria-service resuelve, no el alias viejo que mando el
-        frontend.
+        crear (ver _resolver_contraparte_en_tesoreria) - unique=True no
+        evita un id_contraparte que no existe en Tesoreria (ej. llamada
+        directa a la API). Si la contraparte se fusiono con otra, se
+        guarda el id vigente que tesoreria-service resuelve, no el alias.
 
-        25/Ago/2026 (requerimiento real del cliente: "hay que implementar
-        sociedad... se ponga en automatico el nombre") - sociedad_rfc pasa
-        de opcional/texto libre a obligatorio, elegido de un dropdown real
-        en el frontend contra el catalogo de iam-service (ver
-        lib/iam.ts::listSociedades). Se valida aqui igual que
-        id_contraparte, y se guarda tambien el nombre (sociedad_nombre,
-        snapshot de solo lectura) para poder mostrarselo al cliente en el
-        formulario publico sin que esa pagina, sin sesion, tenga que llamar
-        a iam-service (que si exige un permiso real)."""
+        sociedad_rfc es obligatorio, elegido de un dropdown contra el
+        catalogo de iam-service; se guarda tambien sociedad_nombre
+        (snapshot de solo lectura) para mostrarlo en el formulario publico
+        sin que esa pagina, sin sesion, llame a iam-service."""
         id_contraparte = request.data.get("id_contraparte")
         headers, cookies = forward_auth_headers(request)
         data = request.data
@@ -586,12 +490,10 @@ class PldContraparteKycViewSet(ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
-        """Override del update/partial_update generico de DRF (18/Ago/2026)
-        para auditar la edicion manual del analista - hasta ahora era el
-        unico camino real de escritura del expediente sin ningun evento en
-        la bitacora (confirmar_extraccion y actualizar_datos ya se auditan,
-        ver pld/audit_utils.py). Solo audita si algo realmente cambio (un
-        PATCH que no modifica nada no genera ruido en la bitacora).
+        """Override del update/partial_update generico de DRF para auditar
+        la edicion manual del analista (confirmar_extraccion y
+        actualizar_datos ya se auditan, ver pld/audit_utils.py). Solo
+        audita si algo realmente cambio.
 
         actor_user_id se resuelve de "updated_by" - mismo campo que el
         cliente ya manda en el body para esta vista (ver
@@ -614,12 +516,10 @@ class PldContraparteKycViewSet(ModelViewSet):
         campos_tocados = [campo for campo in request.data if campo in campos_escribibles]
         valores_previos = {campo: _valor_serializable(getattr(instance, campo)) for campo in campos_tocados}
 
-        # 07/Sep/2026, "donde puedo asignar una sociedad" - reasignar
-        # sociedad_rfc despues de creado el expediente no actualizaba el
-        # snapshot de solo lectura sociedad_nombre (solo create() lo hacia),
-        # dejando el nombre mostrado desincronizado del RFC real. Mismo
-        # criterio de validacion que create(): debe existir en el catalogo
-        # real de iam-service.
+        # Reasignar sociedad_rfc debe refrescar tambien el snapshot de
+        # solo lectura sociedad_nombre (solo create() lo hacia antes).
+        # Mismo criterio de validacion que create(): debe existir en el
+        # catalogo real de iam-service.
         nuevo_sociedad_rfc = request.data.get("sociedad_rfc")
         sociedad_nombre_nueva = None
         if nuevo_sociedad_rfc and nuevo_sociedad_rfc != instance.sociedad_rfc:
@@ -651,9 +551,6 @@ class PldContraparteKycViewSet(ModelViewSet):
                 valores_previos={k: v for k, v in valores_previos.items() if k in cambios},
                 valores_nuevos={**contexto_kyc(instance), "campos": cambios},
             )
-            # 02/Sep/2026, pedido explicito: "si en PLD ya dio RFC y numero
-            # se puede colocar ya en tesoreria... igual lo de tipo de
-            # persona" - ver _sincronizar_contraparte_en_tesoreria.
             _sincronizar_contraparte_en_tesoreria(instance.id_contraparte, cambios)
         return Response(serializer.data)
 
@@ -666,16 +563,13 @@ class PldContraparteKycViewSet(ModelViewSet):
     # aprobado_por/aprobado_en, que tienen su propio flujo en aprobar()).
     CAMPOS_CONFIRMABLES = {
         "nombre_completo",
-        # tipo_persona (02/Sep/2026, pedido explicito: exponerlo tambien en
-        # el link publico) - el cliente ahora puede declararlo el mismo
-        # via pld-ticket/[token], no solo el analista desde /pld/[idKyc].
+        # tipo_persona: el cliente puede declararlo via pld-ticket/[token],
+        # no solo el analista desde /pld/[idKyc].
         "tipo_persona",
-        # nombre/apellido_paterno/apellido_materno (02/Sep/2026, pedido
-        # explicito: dividir el nombre en 3 campos para Fisica, tambien
-        # expuesto en el link publico) - reemplazan a nombre_completo solo
-        # cuando tipo_persona=fisica (logica de visibilidad vive en el
-        # frontend, ver lib/pld.ts::esCampoVisibleParaTipoPersona; aqui
-        # solo se autoriza que el cliente pueda escribir estas 3 llaves).
+        # nombre/apellido_paterno/apellido_materno reemplazan a
+        # nombre_completo cuando tipo_persona=fisica (logica de
+        # visibilidad en el frontend, ver
+        # lib/pld.ts::esCampoVisibleParaTipoPersona).
         "nombre",
         "apellido_paterno",
         "apellido_materno",
@@ -715,15 +609,10 @@ class PldContraparteKycViewSet(ModelViewSet):
     }
 
     # El Motor Documental extrae el nombre con una llave distinta segun el
-    # tipo de documento (docint/prompts.py): "nombre_completo" (INE/CURP/acta
-    # de nacimiento, persona fisica), "razon_social" (acta constitutiva) y
-    # "razon_social_o_nombre" (constancia de situacion fiscal) - las 3 se
-    # unifican en el mismo campo del modelo (nombre_completo), mismo criterio
-    # que fecha_nac_const/pais_nac_const ya unifican fisica/moral. Se
-    # traducen aqui, antes del filtro de CAMPOS_CONFIRMABLES, en vez de
-    # agregar 3 columnas que guardarian el mismo dato (18/Ago/2026, hallazgo:
-    # antes ninguna de las 3 se guardaba, "nombre_completo" era el ejemplo
-    # citado de "dato sin columna propia").
+    # tipo de documento: "nombre_completo" (persona fisica), "razon_social"
+    # (acta constitutiva), "razon_social_o_nombre" (constancia fiscal) -
+    # las 3 se unifican aqui en el mismo campo del modelo (nombre_completo)
+    # en vez de agregar 3 columnas que guardarian el mismo dato.
     ALIAS_CAMPOS = {
         "razon_social": "nombre_completo",
         "razon_social_o_nombre": "nombre_completo",
@@ -731,19 +620,15 @@ class PldContraparteKycViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def confirmar_extraccion(self, request, pk=None):
-        """Guarda en el expediente los datos que salieron del Motor
-        Documental (docint AnalyzeView) DESPUES de que el analista los revisó
-        y corrigió en pantalla - ver docs/architecture/pld-fase2-alcance.md y
-        memoria de sesion "pld-flujo-extraccion-vs-archivo": la IA propone,
-        un humano confirma antes de que el dato quede como verdad de negocio.
+        """Guarda en el expediente los datos del Motor Documental DESPUES
+        de que el analista los revisó y corrigió en pantalla - la IA
+        propone, un humano confirma (ver
+        docs/architecture/pld/pld-fase2-alcance.md).
 
         Body: {"campos": {<nombre_de_campo>: <valor>, ...}} - solo se
-        aceptan campos en CAMPOS_CONFIRMABLES (traducidos primero via
-        ALIAS_CAMPOS); cualquier otra llave se ignora silenciosamente (datos
-        informativos de la extraccion sin columna propia en este modelo).
-        Mismo permiso que editar el expediente a mano (pld-compliance.editar)
-        - confirmar una extraccion es una forma de edicion, no una accion
-        distinta con su propia regla de acceso."""
+        aceptan campos en CAMPOS_CONFIRMABLES (traducidos via
+        ALIAS_CAMPOS); cualquier otra llave se ignora. Mismo permiso que
+        editar el expediente a mano (pld-compliance.editar)."""
         campos = request.data.get("campos")
         if not isinstance(campos, dict) or not campos:
             return Response({"detail": "Se requiere 'campos' (objeto no vacío)."}, status=400)
@@ -899,7 +784,7 @@ class PldContraparteKycViewSet(ModelViewSet):
     def reportes(self, request):
         """Dashboard interno de cumplimiento PLD/AML (07/Sep/2026) - v1 con
         los datos que YA existen en pld-service, sin depender de un
-        proveedor externo de KYC/AML (ver docs/architecture/pld-fase2-alcance.md
+        proveedor externo de KYC/AML (ver docs/architecture/pld/pld-fase2-alcance.md
         sec. 7, todavia sin elegir). Respeta el mismo alcance por
         sociedad/proyecto que la lista de expedientes (self.get_queryset()).
         Mismo permiso que "list" (sin gate extra) - quien puede ver
@@ -972,15 +857,15 @@ class PldContraparteKycViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="exportar-excel")
     def exportar_excel(self, request):
-        """Export estructurado para auditores/desarrolladores (07/Sep/2026,
-        diseño propuesto por Mariana con formato de 3 pestañas, adaptado a
+        """Export estructurado para auditores/desarrolladores, con formato
+        de 3 pestañas, adaptado a
         los datos reales de este sistema - no se inventa nada que no
         exista):
 
         - Resumen_KYC: una fila por expediente. "Nivel_Riesgo" y el
           screening real (pestaña 2) van como "Sin evaluar"/"Sin
           verificar" a proposito - no hay proveedor externo de KYC/AML
-          conectado todavia (ver docs/architecture/pld-fase2-alcance.md
+          conectado todavia (ver docs/architecture/pld/pld-fase2-alcance.md
           sec. 7), y poner "NO"/limpio ahi seria fabricar una diligencia
           que nunca paso - un riesgo real de integridad para un auditor.
         - Detalle_Screening: misma razon, todo "Sin verificar".
@@ -1225,7 +1110,7 @@ class PldContraparteDocViewSet(ModelViewSet):
         # el analista la conserva.
         if self.action in ("update", "partial_update"):
             return [require_permission("pld-compliance.editar")()]
-        # "ver" (25/Ago/2026, hallazgo real de Mariana: un analista con
+        # "ver": un analista con
         # permiso real en CumbresBI podia no tener acceso a la Unidad
         # compartida de Google directamente - el link crudo de Drive le
         # daba "No tienes acceso" aunque su rol si lo autorizara aqui).
@@ -1247,7 +1132,7 @@ class PldContraparteDocViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir(self, request, pk=None):
         """Sube el archivo real de este documento a Drive (via drive-service,
-        docs/architecture/pld-fase2-alcance.md sec. 1.4) y guarda la
+        docs/architecture/pld/pld-fase2-alcance.md sec. 1.4) y guarda la
         referencia (drive_file_id/mime_type/tamano_bytes/subido_en) - separado
         de create() porque el registro de metadata (denominacion, fecha
         limite, etc.) puede existir antes de que llegue el archivo real
@@ -1262,10 +1147,10 @@ class PldContraparteDocViewSet(ModelViewSet):
             return Response({"detail": "Campo 'file' requerido"}, status=400)
 
         headers, cookies = forward_auth_headers(request)
-        # "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): subcarpeta fija
+        # "Nuevos Clientes": subcarpeta fija
         # dentro de la Unidad compartida PLD_CumbresBI - antes se creaba la
         # carpeta del cliente directo en la raiz. Subcarpeta por
-        # tipo_documento (04/Sep/2026) - ver _carpeta_documento.
+        # tipo_documento - ver _carpeta_documento.
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
@@ -1380,10 +1265,10 @@ class PldContraparteDocViewSet(ModelViewSet):
         # es cacheable por un proxy/CDN compartido).
         response["ETag"] = etag
         response["Cache-Control"] = "private, max-age=300"
-        # Permite embeber esto en un <iframe> del frontend (01/Sep/2026,
-        # pedido explicito de Mariana: "ver documento" en PLD debe mostrarse
-        # como panel/preview en la misma pantalla, igual que en Facturas -
-        # Motor Documental - en vez de abrir Drive en pestaña nueva).
+        # Permite embeber esto en un <iframe> del frontend: "ver documento"
+        # en PLD se muestra como panel/preview en la misma pantalla, igual
+        # que en Facturas - Motor Documental - en vez de abrir Drive en
+        # pestaña nueva.
         # X-Frame-Options: DENY es el default de Django (XFrameOptionsMiddleware,
         # ver settings.py) y bloquearia CUALQUIER framing, incluso del propio
         # frontend; @xframe_options_exempt lo quita para esta vista puntual y
@@ -1581,8 +1466,7 @@ class PldTicketClienteViewSet(ModelViewSet):
         kyc_param = self.request.query_params.get("kyc")
         if kyc_param:
             queryset = queryset.filter(kyc_id=kyc_param)
-        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
-        # filtro") - mismo criterio que PldContraparteKycViewSet.get_queryset:
+        # Filtro por sociedad - mismo criterio que PldContraparteKycViewSet.get_queryset:
         # acota la vista sin cambiar el scope real de la sesion.
         sociedad_rfc = self.request.query_params.get("sociedad")
         if sociedad_rfc:
@@ -1643,9 +1527,9 @@ class PldTicketClienteViewSet(ModelViewSet):
         (si tiene uno) para que el formulario público sepa sobre qué
         expediente está trabajando y qué documentos ya tiene subidos.
 
-        Limpieza contra Drive (18/Ago/2026, decisión de Mariana: la
-        verificación debe pasar justo donde el usuario externo ve/sube sus
-        documentos, no solo en la pantalla interna del analista) - cada vez
+        Limpieza contra Drive: la
+        verificación pasa justo donde el usuario externo ve/sube sus
+        documentos, no solo en la pantalla interna del analista - cada vez
         que el cliente abre su link, se revisan sus documentos contra Drive
         real y se borran los que ya no existen (ver
         _limpiar_documentos_borrados_en_drive), ANTES de serializar el kyc -
@@ -1686,7 +1570,7 @@ class PldTicketClienteViewSet(ModelViewSet):
         un mismo link válido no debe agotarlo de golpe).
 
         Acepta varios archivos en la misma petición (campo 'file' repetido,
-        ver request.FILES.getlist) - decisión de Mariana 17/Ago/2026: un
+        ver request.FILES.getlist): un
         reCAPTCHA real de Google solo es válido una vez, así que pedirle al
         cliente resolverlo por cada archivo sería mala experiencia. Se
         verifica reCAPTCHA UNA sola vez para todo el lote, y cada archivo
@@ -1698,8 +1582,7 @@ class PldTicketClienteViewSet(ModelViewSet):
         El archivo se sube a Drive vía drive-service usando el secreto
         interno servicio-a-servicio (no hay JWT de usuario que reenviar -
         ver settings.DRIVE_INTERNAL_SECRET), a la misma carpeta que usaría
-        un analista interno (mismo flujo de Drive, decisión de Mariana
-        12/Ago/2026). Crea el PldContraparteDoc en el momento (denominación
+        un analista interno (mismo flujo de Drive). Crea el PldContraparteDoc en el momento (denominación
         libre que manda el cliente), no requiere que un analista lo haya
         pre-creado antes.
         """

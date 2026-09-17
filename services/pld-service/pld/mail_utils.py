@@ -23,10 +23,9 @@ def _renderizar_correo(
     *, kicker_texto: str, kicker_bg: str, kicker_color: str, titulo: str, cuerpo_html: str,
     cta_texto: str, cta_url: str, fineprint_texto: str,
 ) -> str:
-    """Mismo molde que iam-service/iam/mail_utils.py::_renderizar_correo
-    (diseño aprobado por Mariana 14/Ago/2026) - wordmark -> kicker de color
-    -> titulo -> cuerpo -> boton -> nota al pie. Duplicado en vez de
-    compartido: ver comentario de _AZUL/_CHARCOAL arriba."""
+    """Mismo molde que iam-service/iam/mail_utils.py::_renderizar_correo -
+    wordmark -> kicker de color -> titulo -> cuerpo -> boton -> nota al pie.
+    Duplicado en vez de compartido: ver comentario de _AZUL/_CHARCOAL arriba."""
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
   <div style="max-width:480px;margin:0 auto;background:#FFFFFF;border-radius:12px;
@@ -64,11 +63,9 @@ def _renderizar_correo(
 
 
 def enviar_correo_ticket_cliente(request, email: str, token: str) -> bool:
-    """Envia el link del ticket de cliente (KYC externo) real por correo
-    via mail-service (Gmail API) - decision de Mariana (13/Ago/2026): ya no
-    basta con mostrarlo en pantalla, debe llegar de verdad a la bandeja del
-    cliente. Mismo patron y diseño que iam-service/iam/mail_utils.py
-    (17/Ago/2026: se le dio el mismo diseño que los correos de magic link).
+    """Envia el link del ticket de cliente (KYC externo) por correo real via
+    mail-service (Gmail API), no solo mostrado en pantalla. Mismo patron y
+    diseño que iam-service/iam/mail_utils.py (correos de magic link).
 
     No propaga la excepcion si mail-service no responde - un fallo de
     envio no debe tumbar la creacion del ticket en si (el token se sigue
@@ -114,10 +111,9 @@ def enviar_correo_documento_faltante(
     request, email: str, id_contraparte: str, nombre_documento: str, token: str
 ) -> bool:
     """Avisa que falta UN documento del checklist del expediente KYC, con
-    un magic link para que el CLIENTE lo suba el mismo, sin login
-    (04/Sep/2026, pedido explicito de Mariana: "hay que unificar la
-    solicitud de documento como en contratos" - mismo patron exacto que
-    tesoreria-service/tesoreria/mail_utils.py::enviar_correo_documento_faltante).
+    un magic link para que el CLIENTE lo suba el mismo, sin login - mismo
+    patron exacto que
+    tesoreria-service/tesoreria/mail_utils.py::enviar_correo_documento_faltante.
     Se llama una vez POR documento pendiente, con un token distinto cada
     vez (ver PldDocumentoTicket) - nunca se agrupan varios documentos en
     un solo correo ni se reusa un token para dos documentos.

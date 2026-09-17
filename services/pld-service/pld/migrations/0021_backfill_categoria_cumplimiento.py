@@ -1,5 +1,4 @@
-# Reclasificacion retroactiva (04/Sep/2026, decision de Mariana: "automatica
-# por tipo_persona, casos raros se revisan a mano") - los expedientes ya
+# Reclasificacion retroactiva automatica por tipo_persona - los expedientes ya
 # dados de alta antes de que existiera categoria_cumplimiento se clasifican
 # aqui mismo, con la misma regla que PldContraparteKyc.categoria_por_tipo_persona:
 # fisica -> KYC, moral -> KYB, cualquier otro caso (fideicomiso, tipo_persona

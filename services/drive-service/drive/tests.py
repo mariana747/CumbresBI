@@ -1,4 +1,4 @@
-"""Pruebas de driveclient.py - primeras del servicio (01/Sep/2026). Se
+"""Pruebas de driveclient.py. Se
 enfocan en _traducir_error_drive, la pieza nueva mas riesgosa de romper en
 silencio: si algun dia alguien vuelve a meter str(exc) crudo en un mensaje,
 estas pruebas lo detectan.
@@ -6,8 +6,7 @@ estas pruebas lo detectan.
 No hay pruebas de las funciones reales contra Drive (upload_bytes,
 list_files, etc.) porque requieren credenciales reales o mockear
 googleapiclient completo - fuera de alcance de este primer corte, que solo
-cierra el hallazgo real de "errores crudos de Google expuestos al cliente"
-(ver memoria de sesion)."""
+cierra el hallazgo de errores crudos de Google expuestos al cliente."""
 
 from unittest.mock import Mock
 

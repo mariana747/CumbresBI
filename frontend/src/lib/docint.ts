@@ -1,10 +1,9 @@
 // Cliente del Motor Inteligente de Procesamiento Documental (docint).
 // Contrato: services/document-intelligence-service/docint/views.py (POST /analyze).
-// El archivo ya NO se sube directo del navegador (decision de Mariana,
-// 12/Ago/2026, ver memoria de sesion "motor-documental-seleccion-archivos-
-// drive"): el analista lo sube el mismo en drive.google.com; aqui solo se
-// manda la referencia (driveFileId/carpeta/permKey). El analisis en si es
-// async (202 + polling, ver pollAnalysis mas abajo).
+// El archivo ya NO se sube directo del navegador: el analista lo sube el
+// mismo en drive.google.com; aqui solo se manda la referencia
+// (driveFileId/carpeta/permKey). El analisis en si es async (202 +
+// polling, ver pollAnalysis mas abajo).
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
@@ -54,8 +53,7 @@ export interface AnalyzeDocumentParams {
   metadata?: Record<string, unknown>;
 }
 
-const DOCINT_API_BASE_URL =
-  process.env.NEXT_PUBLIC_DOCINT_API_BASE_URL ?? `${GATEWAY_URL}/docint`;
+const DOCINT_API_BASE_URL = `${GATEWAY_URL}/docint`;
 
 // Espejo en cliente de docint/classifier.py (KEYWORD_TO_PROMPT_KEY) - se usa
 // para autollenar expected_document_type al subir varios archivos sin pedirle

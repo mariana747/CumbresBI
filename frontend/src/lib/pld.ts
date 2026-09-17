@@ -17,11 +17,10 @@ export const DOC_STATUS_COLORS: Record<PldDocStatus, "default" | "warning" | "in
   APROBADO: "success",
 };
 
-// Catalogo cerrado completo (04/Sep/2026, checklist de proveedores):
-// identidad + especifico de cumplimiento - se duplica a proposito contra
-// el catalogo por contrato de tesoreria-service ("no importa si se piden
-// lo mismo", Mariana). Espejo de PldContraparteDoc.TIPO_DOCUMENTO_CHOICES
-// (pld-service/pld/models.py).
+// Catalogo cerrado completo (checklist de proveedores): identidad +
+// especifico de cumplimiento - se duplica a proposito contra el catalogo
+// por contrato de tesoreria-service. Espejo de
+// PldContraparteDoc.TIPO_DOCUMENTO_CHOICES (pld-service/pld/models.py).
 export type PldTipoDocumento =
   | "IDENTIFICACION_OFICIAL"
   | "CURP"
@@ -125,8 +124,7 @@ export interface PldContraparteDoc {
   updated_at: string;
 }
 
-// KYC/KYB (04/Sep/2026, decision de Mariana: "vamos a tener KYC y KYB") -
-// se deriva sola de tipo_persona salvo override manual, mismo patron
+// KYC/KYB - se deriva sola de tipo_persona salvo override manual, mismo patron
 // hibrido que estado_llenado_manual. PENDIENTE_REVISION es el "caso raro"
 // (fideicomiso, tipo_persona vacio) que un analista debe clasificar a mano.
 export type PldCategoriaCumplimiento = "KYC" | "KYB" | "PENDIENTE_REVISION";
@@ -170,7 +168,7 @@ export interface PldContraparteKyc {
   fecha_vencimiento: string | null;
 }
 
-const PLD_API_BASE_URL = process.env.NEXT_PUBLIC_PLD_API_BASE_URL ?? `${GATEWAY_URL}/pld`;
+const PLD_API_BASE_URL = `${GATEWAY_URL}/pld`;
 
 // URL del boton "Ver documento" (25/Ago/2026, hallazgo real: el link crudo
 // de Drive (doc.link_documento) requiere que el usuario tenga acceso
@@ -284,15 +282,13 @@ export const rechazarSolicitudEliminacion = (
 export async function listKyc(params?: {
   estadoLlenado?: string;
   search?: string;
-  // 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para poder
-  // ver unicamente los de una sociedad o la otra") - un analista con
-  // acceso a varias sociedades las ve todas mezcladas por default; este
-  // filtro acota la vista sin tocar el scope real de la sesion.
+  // Un analista con acceso a varias sociedades las ve todas mezcladas por
+  // default; este filtro acota la vista sin tocar el scope real de la
+  // sesion.
   sociedadRfc?: string;
   proyecto?: string;
-  // categoria_cumplimiento (04/Sep/2026, pedido de Mariana: "en pld hay
-  // que tener tabs de KYC y KYB") - filtra la lista por KYC/KYB/
-  // PENDIENTE_REVISION, mismo criterio que los demas filtros de arriba.
+  // Filtra la lista por KYC/KYB/PENDIENTE_REVISION, mismo criterio que
+  // los demas filtros de arriba.
   categoriaCumplimiento?: PldCategoriaCumplimiento;
 }): Promise<(PldContraparteKyc & PldDatosEditables)[]> {
   const query = new URLSearchParams();
@@ -318,9 +314,8 @@ export async function getKyc(idKyc: string): Promise<PldContraparteKyc & PldDato
   return response.json();
 }
 
-// Expediente minimo/autonomo (17/Ago/2026, Opcion B - ver memoria de sesion
-// "pld-crear-expediente-opcion-b"): el analista solo da de alta el
-// contenedor vacio (opcionalmente ligado a una sociedad); id_contraparte se
+// Expediente minimo/autonomo: el analista solo da de alta el contenedor
+// vacio (opcionalmente ligado a una sociedad); id_contraparte se
 // autogenera en el backend si no se manda. El resto de los datos del
 // cliente los llena el cliente mismo despues via el link publico
 // (pld-ticket/[token]/page.tsx, actualizarDatosPublico).
@@ -332,9 +327,8 @@ export async function createKyc(params: {
   // PldContraparteKycViewSet.create.
   sociedadRfc: string;
   idContraparte?: string;
-  // 31/Ago/2026 (pedido de Mariana: "hay que hacer ese filtro por
-  // sociedad y proyecto" - caso real de un colaborador externo acotado a
-  // un solo proyecto, ej. abogada externa) - opcional, a diferencia de
+  // Filtro por sociedad y proyecto - caso real de un colaborador externo
+  // acotado a un solo proyecto (ej. abogada externa) - opcional, a diferencia de
   // sociedadRfc; sin catalogo real todavia (mismo criterio que
   // TesoreriaContrato.proyecto), texto libre.
   proyecto?: string;
@@ -720,7 +714,7 @@ export async function reactivarAutoEstadoKyc(idKyc: string): Promise<PldContrapa
   return response.json();
 }
 
-// "Se debe poner en auto" (Mariana, 04/Sep/2026) - apaga
+// Vuelve a modo automatico - apaga
 // categoria_cumplimiento_manual y recalcula de inmediato segun
 // tipo_persona, mismo patron que reactivarAutoEstadoKyc arriba.
 export async function reactivarAutoCategoriaKyc(idKyc: string): Promise<PldContraparteKyc> {
@@ -799,9 +793,9 @@ export async function subirDocumentoTicketPld(params: {
   return response.json();
 }
 
-// Borrado manual de un documento (18/Ago/2026, decision de Mariana: los
-// duplicados se borran a mano, no automatico - "Verificar en Drive" solo
-// borra lo que ya no existe en Drive). Requiere pld-compliance.editar - ver
+// Borrado manual de un documento: los duplicados se borran a mano, no
+// automatico - "Verificar en Drive" solo borra lo que ya no existe en
+// Drive. Requiere pld-compliance.editar - ver
 // services/pld-service/pld/views.py::PldContraparteDocViewSet.get_permissions.
 export async function eliminarDocumentoKyc(idKycDoc: string, actorUserId?: string | null): Promise<void> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc-docs/${idKycDoc}/`, {
@@ -873,7 +867,6 @@ export interface PldTicketCliente {
   token?: string;
 }
 
-// 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener filtro") -
 // sociedadRfc acota la vista sin cambiar el scope real de la sesion,
 // mismo criterio que listKyc().
 export async function listTicketsCliente(kycId?: string, sociedadRfc?: string): Promise<PldTicketCliente[]> {
@@ -958,7 +951,7 @@ export async function validarTicketCliente(
   return { ticket, kyc, documentosEliminados: documentos_eliminados ?? [] };
 }
 
-// Formulario publico de KYC externo (docs/architecture/pld-fase2-alcance.md
+// Formulario publico de KYC externo (docs/architecture/pld/pld-fase2-alcance.md
 // sec. 2): el cliente sube un documento sin sesion, canjeando el mismo
 // token del link. No consume el "uso" del ticket (eso ya lo maneja
 // validarTicketCliente, llamado al cargar la pagina) - ver

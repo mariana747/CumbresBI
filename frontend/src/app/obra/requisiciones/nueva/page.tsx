@@ -16,10 +16,9 @@ function moneda(valor: string | number) {
   return n.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
 
-// Vista de alta de Requisicion (21/Ago/2026, pedido de Mariana: "este debe
-// ser editable, es la vista de nueva requisicion") - MISMO documento que
-// el detalle (/obra/requisiciones/[id]), pero con los campos editables en
-// vez de solo lectura: reemplaza el dialogo simple que habia antes. La
+// Vista de alta de Requisicion - MISMO documento que el detalle
+// (/obra/requisiciones/[id]), pero con los campos editables en vez de
+// solo lectura: reemplaza el dialogo simple que habia antes. La
 // tabla de conceptos es una VISTA PREVIA en vivo (se recalcula cuando
 // cambian presupuesto/etapa/viviendas) - los mismos numeros que generara
 // el backend al guardar (ver RequisicionViewSet.perform_create), pero

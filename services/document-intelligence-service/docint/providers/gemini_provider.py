@@ -57,14 +57,10 @@ class GeminiProvider(DocumentIntelligenceProvider):
 
         from google.genai import errors, types
 
-        # Version fija, no el alias "gemini-flash-latest" (decision
-        # 01/Sep/2026, confirmada con Mariana - ver memoria
-        # "gemini-api-precios-y-version"). El alias resulto poco confiable
-        # en la practica: durante una prueba end-to-end real devolvio 503
-        # "high demand" de forma persistente, mientras que este modelo fijo
-        # respondio bien de inmediato. Cuando Google libere una version
-        # nueva hay que actualizar esto a mano, pero a cambio no se hereda
-        # sorpresivamente un modelo saturado o con comportamiento distinto.
+        # Version fija, no el alias "gemini-flash-latest": el alias devolvio
+        # 503 "high demand" de forma persistente en pruebas, mientras que el
+        # modelo fijo respondio bien. Actualizar a mano cuando Google libere
+        # una version nueva (ver memoria "gemini-api-precios-y-version").
         try:
             response = self._client.models.generate_content(
                 model="gemini-3.6-flash",

@@ -52,9 +52,8 @@ type OpcionSelect = string | { value: string; label: string };
 // campos que antes eran texto libre - ver lib/paises.ts para el porque de
 // un catalogo estatico en vez de una API externa. Municipio/colonia se
 // quedan fuera a proposito (ningun dataset global llega a ese nivel).
-// Estado y pais (25/Ago/2026, ajuste posterior de Mariana): se revierten a
-// texto libre - solo nacionalidad y tipo de identificacion quedan como
-// dropdown.
+// Estado y pais se revierten a texto libre - solo nacionalidad y tipo de
+// identificacion quedan como dropdown.
 const OPCIONES_POR_CAMPO: Partial<Record<keyof PldDatosEditables, readonly OpcionSelect[]>> = {
   nacionalidad: GENTILICIOS,
   tipo_identificacion: TIPOS_IDENTIFICACION,
@@ -193,10 +192,10 @@ const CAMPOS_SIN_PRECARGAR = new Set<keyof PldDatosEditables>([
 // tiene llave privada - no hay JWT que mostrar, solo confirma el acceso y
 // el expediente asociado.
 //
-// Formulario de subida (docs/architecture/pld-fase2-alcance.md sec. 2,
-// decision de Mariana 12/Ago/2026): solo sube documentos (sin campos de
-// datos personales) + reCAPTCHA v2 - el archivo va al mismo flujo de
-// Drive que usaria un analista interno (ver pld/views.py::subir_documento).
+// Formulario de subida (docs/architecture/pld/pld-fase2-alcance.md sec. 2):
+// solo sube documentos (sin campos de datos personales) + reCAPTCHA v2 -
+// el archivo va al mismo flujo de Drive que usaria un analista interno
+// (ver pld/views.py::subir_documento).
 //
 // Limites del lote (18/Ago/2026, espejo de pld/views.py::
 // MAX_ARCHIVOS_POR_LOTE/MAX_TAMANO_ARCHIVO_MB) - antes no se avisaba nada y
@@ -252,11 +251,10 @@ export default function PldTicketPage() {
   const [aceptaPoliticas, setAceptaPoliticas] = useState(false);
   const [declaraVeracidad, setDeclaraVeracidad] = useState(false);
 
-  // Documentos que el cliente ya subio antes con este mismo link (18/Ago/2026,
-  // decision de Mariana: la verificacion contra Drive debe pasar justo aqui,
-  // donde el usuario externo ve/sube sus documentos) - validarTicketCliente ya
-  // los limpia contra Drive real antes de regresarlos, asi que esta lista
-  // nunca muestra un documento que ya fue borrado directo en drive.google.com.
+  // Documentos que el cliente ya subio antes con este mismo link -
+  // validarTicketCliente ya los limpia contra Drive real antes de
+  // regresarlos, asi que esta lista nunca muestra un documento que ya fue
+  // borrado directo en drive.google.com.
   const [documentosExistentes, setDocumentosExistentes] = useState<PldContraparteDoc[]>([]);
   const [documentosEliminados, setDocumentosEliminados] = useState<DocumentoEliminadoResumen[]>([]);
 

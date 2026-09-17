@@ -7,10 +7,9 @@ import AppShell from "@/components/AppShell";
 import TicketsReembolsoAdminPanel from "@/components/TicketsReembolsoAdminPanel";
 import { SessionUser, getSession } from "@/lib/auth";
 
-// Pantalla propia (08/Sep/2026, pedido de Mariana: reorganizacion del
-// sidebar de Tesoreria) - antes "Tickets de Reembolso" vivia como una
-// pestaña dentro de /tesoreria/facturas (27/Ago/2026, "la revision debe
-// vivir donde Tesoreria ya trabaja"); con Tesoreria dividida en secciones
+// Pantalla propia (reorganizacion del sidebar de Tesoreria) - antes
+// "Tickets de Reembolso" vivia como una pestaña dentro de
+// /tesoreria/facturas; con Tesoreria dividida en secciones
 // (REPORTES/OPERACIONES/FACTURACIÓN Y COMPROBANTES/CONFIGURACIÓN Y BANCOS)
 // ya tiene lugar propio en OPERACIONES, junto a Solicitudes de Pago y
 // Flujos - no hace falta seguir compartiendo pantalla con Facturas CFDI.

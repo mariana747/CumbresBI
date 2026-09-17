@@ -11,13 +11,10 @@ RUN npm install
 
 COPY . .
 
-# NEXT_PUBLIC_* se hornean en el bundle en build time (no en runtime, a
-# diferencia de las variables de un backend) - se reciben como build args
-# desde el pipeline de CI/CD, con el mismo default de desarrollo local para
-# que "docker build" sin argumentos siga funcionando igual que antes.
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
-ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-
+# GATEWAY_INTERNAL_URL (server-to-server, ver next.config.js) es una env
+# var de RUNTIME, no de build time - a diferencia del viejo
+# NEXT_PUBLIC_GATEWAY_URL (15/Sep/2026, ver gatewayUrl.ts), ya no hace
+# falta pasarla como build-arg aqui ni reconstruir la imagen si cambia.
 RUN npm run build
 
 # ---- Etapa final: solo el output standalone, sin devDependencies ----

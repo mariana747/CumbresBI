@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GATEWAY_URL } from "@/lib/gatewayUrl";
+import { IAM_API_BASE_URL } from "@/lib/gatewayUrl";
 import { IamRole, listRoles } from "@/lib/iam";
 
 // TEMPORAL - borrar junto con iam-service/iam/dev_views.py y el bloque
@@ -16,11 +16,10 @@ import { IamRole, listRoles } from "@/lib/iam";
 // real de permisos de varios roles activos en la misma sesion
 // (roles-y-permisos.md sec. 4: "los perm_keys se suman, nunca se
 // quitan") - no solo un rol aislado por vez.
-const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? `${GATEWAY_URL}/iam`;
 
 // Las 3 sociedades reales sembradas (iam-service, migracion 0006_seed_sociedades)
 // - RFC placeholder "#####N" a proposito, el cliente todavia no dio el RFC
-// fiscal real (ver memoria de sesion "empresas-alcance-fase1").
+// fiscal real.
 const SOCIEDADES_PRUEBA = [
   { rfc: "#####1", nombre: "CIF TIZARA" },
   { rfc: "#####2", nombre: "TIZARA CAPITAL" },
@@ -37,8 +36,8 @@ const SOCIEDADES_PRUEBA = [
 const PROYECTOS_PRUEBA = ["P01", "P02", "P03"];
 const CENTRO_PRUEBA = "CENTRO-TEST-1";
 // Mismos id_contrato de los Contratos reales creados a mano en
-// tesoreria-service (31/Ago/2026, ver memoria de sesion) para poder
-// probar SCOPE_FIELD_CONTRATO desde esta pantalla - uno por sociedad, para
+// tesoreria-service para poder probar SCOPE_FIELD_CONTRATO desde esta
+// pantalla - uno por sociedad, para
 // poder probar "un usuario ve el contrato X pero no el Y".
 const CONTRATOS_PRUEBA = [
   { id: "DEVTEST-CONTRATO-001", nombre: "DEVTEST-CONTRATO-001 (CONSULTORÍA Y PROYECTOS CUMBRES)" },
@@ -71,8 +70,7 @@ export default function DevRolesPage() {
 
   const [seleccionados, setSeleccionados] = useState<string[]>([]);
   const [scopeType, setScopeType] = useState("SOCIEDAD");
-  // 31/Ago/2026 (pedido de Mariana: "pon para que pueda seleccionar mas de
-  // dos sociedades") - varias a la vez, para simular un analista con
+  // Permite seleccionar varias sociedades a la vez, para simular un analista con
   // acceso a mas de una sociedad (dev_views.py acepta "?scope_id=A,B" y
   // crea una IamUserRole por cada una, se juntan por UNION igual que en
   // produccion - ver scope_utils.py::compute_effective_scope_claims).

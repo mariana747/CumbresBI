@@ -38,8 +38,8 @@ def test_una_sola_dimension_presente_filtra_sola_sin_and():
 
 
 def test_dos_dimensiones_presentes_combinan_por_interseccion():
-    # 31/Ago/2026 (pedido de Mariana, caso real de colaborador externo con
-    # Sociedad Y Proyecto asignados a la vez): cuando el scope trae DOS
+    # Caso real: colaborador externo con Sociedad Y Proyecto asignados
+    # a la vez. Cuando el scope trae DOS
     # dimensiones con valor simultaneamente, deben combinarse por AND, no
     # por OR - un registro debe matchear las dos, no solo una. Antes de
     # este cambio, este mismo escenario regresaba las 2 filas "sueltas"
