@@ -125,12 +125,12 @@ PROMPTS = {
         "descripcion, unidad, cantidad, precio_unitario, importe), "
         "subtotal, iva, total, vigencia_dias. " + _REGLA_COMUN
     ),
-    # 27/Ago/2026, pedido de Mariana: antes de aprobar un ticket de
-    # reembolso de MiCumbres, Tesoreria verifica con el Motor Documental el
-    # comprobante/foto que subio el propio empleado (no la factura formal,
-    # esa se sube despues, ya aprobado - ver TesoreriaTicketReembolso). Los
-    # nombres de campo no corresponden a ninguna tabla real: solo sirven
-    # para que el analista compare contra lo que el empleado ya declaro
+    # Antes de aprobar un ticket de reembolso de MiCumbres, Tesoreria
+    # verifica con el Motor Documental el comprobante/foto que subio el
+    # propio empleado (no la factura formal, esa se sube despues, ya
+    # aprobado - ver TesoreriaTicketReembolso). Los nombres de campo no
+    # corresponden a ninguna tabla real: solo sirven para que el analista
+    # compare contra lo que el empleado ya declaro
     # (descripcion/monto/fecha_gasto), nunca se guardan.
     "tesoreria.ticket_gasto": (
         "El documento es un ticket, recibo o comprobante de un gasto de "
