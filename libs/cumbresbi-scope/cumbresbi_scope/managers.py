@@ -16,22 +16,11 @@ class ScopedQuerySet(models.QuerySet):
     IDENTIDAD (SCOPE_FIELD_IDENTITY) es una igualdad directa contra
     identity_user_id, no jerarquica - ver roles-y-permisos.md sec. 1.
 
-    31/Ago/2026 (pedido de Mariana: caso real de un colaborador externo
-    con Sociedad Y Proyecto asignados a la vez, ej. una abogada externa
-    acotada a un proyecto especifico dentro de una sociedad) - cuando el
-    scope trae DOS O MAS dimensiones con valor a la vez (ej. sociedad_rfcs
-    y proyecto_ids ambos no vacios) Y el modelo declara mas de una de esas
-    dimensiones, se combinan por INTERSECCION (AND): una fila debe
-    matchear TODAS las dimensiones presentes, no solo alguna. Cuando el
-    scope solo trae UNA dimension con valor (el caso normal - la enorme
-    mayoria de roles hoy, ej. FINANZAS_MANAGER solo con sociedad_rfcs),
-    el comportamiento sigue siendo el de siempre: esa unica dimension
-    filtra sola, sin AND con nada (no hay nada mas con que intersectar).
-    Esto ademas alinea el codigo con roles-y-permisos.md sec. 4, que ya
-    documentaba el ejemplo "Participante de Ticket" (identity_user_id +
-    proyecto_ids) como AND ("asignado_a = 'u123' AND id_subproyecto IN
-    (...)") - antes el codigo lo hacia OR, en contra de su propia
-    documentacion.
+    Cuando el scope trae DOS O MAS dimensiones con valor a la vez y el
+    modelo declara mas de una, se combinan por INTERSECCION (AND): una
+    fila debe matchear TODAS las dimensiones presentes. Con una sola
+    dimension con valor (el caso normal), esa dimension filtra sola.
+    Alineado con roles-y-permisos.md sec. 4.
     """
 
     def for_scope(self, scope):
