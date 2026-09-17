@@ -208,14 +208,13 @@ class SolicitudMaterial(models.Model):
     Semana 13: "Registro de recepcion de material y proceso de solicitud
     de material; descuento automatico de material disponible contra lo
     presupuestado"). Es SOLO para pedir contra lo que ya hay en almacen,
-    NO una requisicion de compra (decision de Mariana 21/Ago/2026) - por
+    NO una requisicion de compra - por
     eso el serializer valida que cantidad_solicitada no exceda
     MaterialCatalogo.cantidad_disponible al crear, y
     SolicitudMaterialViewSet.entregar hace el descuento real (con
     select_for_update).
 
-    Flujo de 3 estados (decision de Mariana 21/Ago/2026: "tendremos
-    Entregado, Solicitado, Rechazado" - sin paso intermedio de Aprobado):
+    Flujo de 3 estados, sin paso intermedio de Aprobado:
     SOLICITADO -> ENTREGADO o SOLICITADO -> RECHAZADO. `entregar` exige
     ademas al menos una EvidenciaRecepcion con foto (ver
     SolicitudMaterialViewSet.entregar)."""
@@ -257,10 +256,8 @@ class SolicitudMaterial(models.Model):
 
 class EvidenciaRecepcion(models.Model):
     """Bitacora de recepcion de material contra una SolicitudMaterial: foto +
-    fecha/hora de cuando llego el material (pedido de Mariana 21/Ago/2026,
-    "falta evidencia de recepcion... debe poder mandar foto, anotar fecha,
-    hora... es una bitacora" - puede haber varias entradas por solicitud,
-    ej. entregas parciales).
+    fecha/hora de cuando llego el material - puede haber varias entradas
+    por solicitud, ej. entregas parciales.
 
     Mismo patron que ObraEvidencia en obra-service: `link_drive` se captura
     a mano (URL pegada desde el frontend) mientras no exista la Unidad
@@ -297,8 +294,7 @@ class Requisicion(models.Model):
     jala los ConceptoPresupuesto ya presupuestados y ES la que dispara la
     COMPRA - distinta de SolicitudMaterial ("Salida de almacen", esa es
     para pedir contra lo que YA hay en almacen, ver su docstring).
-    Decision de Mariana 21/Ago/2026: "en requisicion es donde se va a
-    pedir material". Diseno del documento (folio, presupuesto asignado,
+    En requisicion es donde se va a pedir material. Diseno del documento (folio, presupuesto asignado,
     viviendas que comprende, etapa constructiva con sus conceptos,
     3 firmas) aprobado 17/Ago/2026 sobre el mockup original de Ruben.
 

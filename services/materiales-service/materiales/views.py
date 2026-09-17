@@ -103,9 +103,7 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     @action(detail=False, methods=["post"])
     def recibir_compra(self, request):
         """Suma al inventario cuando compras-tesoreria-service registra una
-        recepcion (02/Sep/2026, "Recepciones va tener conexion con obra en
-        la parte de materiales, para actualizar el inventario" - pedido de
-        Mariana). Compras es la base: el analista de Compras no elige un
+        recepcion. Compras es la base: el analista de Compras no elige un
         MaterialCatalogo de antemano, esta llamada busca por nombre
         (case-insensitive) y crea el registro si no existia todavia -
         mismo criterio de "buscar o crear" que TesoreriaFlujoViewSet.
@@ -151,8 +149,8 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     @action(detail=False, methods=["post"])
     def actualizar_precio_cotizado(self, request):
         """Sincroniza precio_unitario/proveedor cuando Compras confirma una
-        cotizacion (02/Sep/2026, pedido de Mariana - siguiente paso de la
-        conexion Compras<->Obra, ver recibir_compra arriba). A diferencia
+        cotizacion (siguiente paso de la conexion Compras<->Obra, ver
+        recibir_compra arriba). A diferencia
         de recibir_compra, esto NO es una entrega real todavia - solo
         registra que se cotizo a tal precio con tal proveedor, sin tocar
         cantidad_disponible (0 si el material es nuevo, sin existencia
@@ -248,8 +246,8 @@ class PresupuestoFirmaViewSet(_PermisosMaterialesMixin, ModelViewSet):
 
 class SolicitudMaterialViewSet(_PermisosMaterialesMixin, ModelViewSet):
     """Solicitud de material contra almacen - es SOLO para pedir contra lo
-    que ya hay en almacen (decision de Mariana 21/Ago/2026, no una
-    requisicion de compra); `entregar` descuenta MaterialCatalogo.
+    que ya hay en almacen, no una
+    requisicion de compra; `entregar` descuenta MaterialCatalogo.
     cantidad_disponible de verdad (con select_for_update contra condiciones
     de carrera entre solicitudes concurrentes del mismo material). Flujo de
     3 estados, sin paso intermedio de aprobacion: `entregar`/`rechazar`
@@ -281,8 +279,7 @@ class SolicitudMaterialViewSet(_PermisosMaterialesMixin, ModelViewSet):
     @action(detail=True, methods=["post"])
     def entregar(self, request, pk=None):
         # No se puede cerrar como entregado sin evidencia fotografica de
-        # recepcion (pedido de Mariana 21/Ago/2026: "no puede estar
-        # entregado hasta que tenga foto") - al menos una entrada de la
+        # recepcion - al menos una entrada de la
         # bitacora (EvidenciaRecepcion) con link_drive capturado.
         solicitud = self.get_object()
         if not solicitud.evidencias.exclude(link_drive__isnull=True).exclude(link_drive="").exists():
@@ -290,7 +287,7 @@ class SolicitudMaterialViewSet(_PermisosMaterialesMixin, ModelViewSet):
                 {"detail": "No se puede marcar como entregado sin al menos una foto en la bitácora de recepción."},
                 status=400,
             )
-        # Descuento real del almacen (pendiente hasta 21/Ago/2026) -
+        # Descuento real del almacen -
         # select_for_update bloquea la fila del material mientras se
         # revalida/descuenta, para que dos solicitudes del mismo material
         # entregandose "al mismo tiempo" no dejen cantidad_disponible en
@@ -326,8 +323,8 @@ class SolicitudMaterialViewSet(_PermisosMaterialesMixin, ModelViewSet):
 class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
     """Requisicion de materiales: documento por proyecto+etapa que jala los
     ConceptoPresupuesto ya presupuestados y ES la que dispara la compra -
-    distinta de SolicitudMaterial/"Salida de almacen" (decision de Mariana
-    21/Ago/2026, ver docstring del modelo). Flujo de 3 firmas simples (sin
+    distinta de SolicitudMaterial/"Salida de almacen" (ver docstring del
+    modelo). Flujo de 3 firmas simples (sin
     firma electronica todavia): `validar` -> `autorizar` (requiere validar
     primero) o `rechazar` en cualquier momento antes de autorizar.
 
