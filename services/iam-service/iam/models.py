@@ -10,13 +10,10 @@ def _short_id():
 
 
 class ScopedAuditMixin(models.Model):
-    """Campos transversales de RLS y auditoria de negocio.
-
-    alcance_tipo/alcance_id: mismo mecanismo documentado en
-    /README.md sec. 8 (ScopedManager / EffectiveScope).
-    scope_type hoy solo cubre GLOBAL/SOCIEDAD/PROYECTO (gap de CENTRO/CONTRATO
-    documentado en roles-y-permisos.md sec. 5 punto 5 - se maneja aparte via
-    iam_user_centro_access / iam_user_contrato_access, no aqui).
+    """Campos transversales de RLS y auditoria de negocio (ScopedManager /
+    EffectiveScope, ver /README.md sec. 8). alcance_tipo solo cubre
+    GLOBAL/SOCIEDAD/PROYECTO; CENTRO/CONTRATO se manejan aparte via
+    iam_user_centro_access / iam_user_contrato_access (roles-y-permisos.md sec. 5.5).
     """
 
     ALCANCE_GLOBAL = "GLOBAL"
@@ -100,18 +97,15 @@ class IamUser(models.Model):
     access_mode = models.CharField(
         max_length=20, choices=ACCESS_MODE_CHOICES, default=ACCESS_STANDARD
     )
-    # FK real es a rrhh_empleados.id_empleado (servicio rrhh-service, fuera de
-    # este microservicio) - se guarda como referencia laxa, no ForeignKey real,
-    # para no acoplar iam-service a la BD de otro servicio (regla de aislamiento
-    # de esquema, sec. 11.2 #1 de /README.md).
+    # Referencia laxa a rrhh_empleados.id_empleado (no ForeignKey real, para no
+    # acoplar iam-service a la BD de otro servicio, ver /README.md sec. 11.2 #1).
     employee_id = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Sin SCOPE_FIELD_* declarado todavia (gap documentado en
-    # roles-y-permisos.md, pendiente del punto 2 del plan de Fase 1: agregar
-    # columna real de sociedad/proyecto). Mientras tanto, ScopedManager
-    # actua como gate GLOBAL/no-GLOBAL: solo GLOBAL ve el directorio.
+    # Sin SCOPE_FIELD_* declarado todavia (falta columna real de
+    # sociedad/proyecto); mientras tanto ScopedManager solo hace de gate
+    # GLOBAL/no-GLOBAL, no filtra por sociedad/proyecto.
     objects = ScopedManager()
 
     class Meta:
@@ -141,15 +135,9 @@ class IamIdentity(models.Model):
 
 
 class IamRole(models.Model):
-    # 31/Ago/2026 (pedido de Mariana: "en matriz de permisos hay que
-    # dividir entre internos y externos, ya que en externos se debe
-    # asignar su sociedad y proyecto") - un rol EXTERNO nunca puede
-    # otorgarse en alcance GLOBAL (ver IamUserRoleViewSet.perform_create),
-    # solo con Sociedad Y Proyecto especificos (RoleAssignmentDialog exige
-    # ambos, no uno solo). No cambia el mecanismo de scope subyacente
-    # (siguen siendo IamUserRole normales, dos filas - una SOCIEDAD y una
-    # PROYECTO, ver compute_effective_scope_claims que ya union-a por
-    # dimension), solo endurece la UI/validacion para este tipo de rol.
+    # Un rol EXTERNO nunca puede otorgarse en alcance GLOBAL (ver
+    # IamUserRoleViewSet.perform_create); requiere Sociedad Y Proyecto
+    # especificos, para acotar el acceso de gente ajena a la organizacion.
     TIPO_INTERNO = "INTERNO"
     TIPO_EXTERNO = "EXTERNO"
     TIPO_CHOICES = [(TIPO_INTERNO, "Interno"), (TIPO_EXTERNO, "Externo")]
@@ -159,15 +147,9 @@ class IamRole(models.Model):
     role_name = models.CharField(max_length=100)
     description = models.CharField(max_length=255, blank=True, null=True)
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, default=TIPO_INTERNO)
-    # 31/Ago/2026 (pedido de Mariana: "se pueden borrar?" -> soft-delete,
-    # no DELETE real) - un rol puede tener IamUserRole ya asignadas; borrar
-    # la fila de verdad tumbaria el acceso de quien lo tuviera sin aviso
-    # ni registro (mismo riesgo que motivo IamUser.STATUS_DELETED en vez
-    # de un DELETE real). "activo=False" = ya no se puede asignar a nadie
-    # nuevo (ver IamUserRoleViewSet.perform_create), pero las asignaciones
-    # existentes NO se revocan solas - eso sigue siendo una accion aparte
-    # y deliberada (RoleAssignmentDialog), para no tumbar accesos en
-    # cadena por una sola desactivacion.
+    # Soft-delete, no DELETE real: borrar la fila tumbaria sin aviso el acceso
+    # de quien ya tuviera el rol. "activo=False" solo bloquea asignaciones
+    # nuevas; las existentes se revocan a mano, aparte.
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
@@ -247,12 +229,9 @@ class IamUserRole(models.Model):
     granted_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
 
-    # scope_type/scope_id ya existen pero son genericos (un solo campo que
-    # cambia de significado segun scope_type) - no calzan directo con la
-    # convencion SCOPE_FIELD_* de ScopedManager (que espera un campo fijo
-    # por dimension, ej. sociedad_rfc). Mismo gate GLOBAL/no-GLOBAL que
-    # IamUser mientras tanto; mapear scope_type/scope_id a columnas reales
-    # queda para el punto 2 del plan de Fase 1.
+    # scope_type/scope_id son genericos y no calzan con la convencion
+    # SCOPE_FIELD_* de ScopedManager (campo fijo por dimension); mismo gate
+    # GLOBAL/no-GLOBAL que IamUser mientras tanto.
     objects = ScopedManager()
 
     class Meta:
@@ -260,13 +239,9 @@ class IamUserRole(models.Model):
 
 
 class IamGroup(ScopedAuditMixin):
-    """Equipos internos / "empresa" del usuario en el directorio.
-
-    No confundir con el nivel de alcance GRUPO (descartado, ver
-    docs/architecture/iam/roles-y-permisos.md) - esto es solo un catalogo de
-    equipos/empresa para filtrar el directorio de usuarios, sin relacion
-    con RLS. Tabla nueva pedida explicitamente para este arranque; no
-    aparece en el ERD ni en la arquitectura v2.0 aprobada.
+    """Equipos internos / "empresa" del usuario en el directorio. No confundir
+    con el nivel de alcance GRUPO (descartado, ver roles-y-permisos.md) -
+    es solo un catalogo para filtrar el directorio, sin relacion con RLS.
     """
 
     group_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
@@ -297,18 +272,10 @@ class IamUserGroup(ScopedAuditMixin):
 
 
 class IamMagicLink(models.Model):
-    """Magic Link de un solo uso para usuarios externos (Fase 1, Semana 4;
-    /README.md sec. 6.2). Mismo patron que
-    pld_ticket_cliente (pld-service), pero generico a nivel iam-service para
-    cualquier modulo que necesite dar acceso externo sin contrasena.
-
-    token_hash: SHA-256 del token - el token en claro nunca se guarda, solo
-    viaja una vez en el link enviado (o, en modo dev sin envio de correo
-    real, en la respuesta del endpoint de generacion - ver views.py).
-
-    recurso_tipo/recurso_id: referencia laxa y generica a que da acceso este
-    link (ej. recurso_tipo="pld_kyc", recurso_id=<id_kyc>) - el modulo
-    consumidor interpreta estos campos, iam-service no los valida.
+    """Magic Link de un solo uso para acceso externo sin contraseña
+    (/README.md sec. 6.2), generico a cualquier modulo. token_hash guarda
+    solo el hash SHA-256; recurso_tipo/recurso_id son referencia laxa que
+    interpreta el modulo consumidor, iam-service no los valida.
     """
 
     magic_link_id = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
@@ -366,8 +333,7 @@ class IamInvitation(models.Model):
 
 
 class IamExternalCollaborator(models.Model):
-    """3er tipo de acceso externo (14/Ago/2026, ver memoria de sesion
-    "tercer-tipo-invitacion-externo-sin-workspace"): colaborador que NO
+    """3er tipo de acceso externo: colaborador que NO
     tiene correo de Workspace pero necesita entrar a secciones reales de
     la app como un colaborador normal - a diferencia de:
     - `IamMagicLink`: un solo uso/accion puntual, vence en minutos.
@@ -445,10 +411,8 @@ class IamUserContratoAccess(models.Model):
 
 class IamGooglePersonalToken(models.Model):
     """Cuenta de Google PERSONAL que un usuario ligo para exportar a su
-    propio Drive (14/Sep/2026, "exportar a Google Sheets... se guardara en
-    su drive personal") - distinta de IamIdentity (esa es SIEMPRE la
-    cuenta de Workspace de Cumbres via SSO, ver oidc-sso-silencioso-sin-
-    boton-login en memoria de sesion). Esta puede ser una cuenta externa/
+    propio Drive - distinta de IamIdentity (esa es SIEMPRE la
+    cuenta de Workspace de Cumbres via SSO). Esta puede ser una cuenta externa/
     personal, autorizada aparte con un flujo OAuth propio (ver
     google_oauth.py). Vive en iam-service (no en drive-service, que es
     deliberadamente stateless) porque es un dato de identidad del usuario,

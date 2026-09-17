@@ -48,10 +48,7 @@ from .serializers import (
     IamUserSerializer,
 )
 
-# Cambio de decision del cliente (Dylan, 2026-08-07): el Magic Link ya no
-# vive 7 dias, vive 30 minutos - ventana corta a proposito, no es un
-# ajuste tecnico interno. Actualizar README.md sec. 6.2/sec. 4 y el Plan de
-# Trabajo si se documenta la fecha exacta de este cambio de alcance.
+# El Magic Link vive 30 minutos, no 7 dias - ventana corta a proposito.
 MAGIC_LINK_DEFAULT_EXPIRATION_MINUTES = 30
 
 # Validacion simple de formato (no de existencia real del correo, eso solo
@@ -74,10 +71,9 @@ class IamUserViewSet(ReadOnlyModelViewSet):
     activa, removed_at IS NULL). Desactivar/reactivar (escritura) sigue
     pendiente - depende de permisos reales, no solo de exponer el campo.
 
-    ?sin_rol=true (decision de producto: acceso de empleados nuevos via
-    login libre, no invitacion formal - ver memoria de sesion
-    "iam-invitacion-alcance-incierto"): usuarios sin ningun rol activo, para
-    la lista/aviso de "falta asignar rol" en el frontend.
+    ?sin_rol=true (acceso de empleados nuevos via login libre, no
+    invitacion formal): usuarios sin ningun rol activo, para la lista/aviso
+    de "falta asignar rol" en el frontend.
     """
 
     queryset = IamUser.objects.all().order_by("primary_email")
@@ -189,9 +185,7 @@ class IamUserViewSet(ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["post"])
     def eliminar(self, request, pk=None):
-        """Borrado logico (14/Ago/2026, pedido explicito de Mariana tras
-        encontrar un usuario de prueba atorado en SUSPENDED sin forma de
-        quitarlo del directorio). NO es un DELETE de fila real: hay
+        """Borrado logico. NO es un DELETE de fila real: hay
         FKs con on_delete=PROTECT hacia IamUser desde media tabla del
         sistema (created_by/issued_by/granted_by/invited_by en varios
         modelos) - borrar la fila de verdad tronaria en cuanto ese usuario
@@ -266,22 +260,18 @@ class IamRoleViewSet(ModelViewSet):
     campo "permisos" del serializer, la matriz de permisos roles x permisos
     (Fase 1, Semana 5).
 
-    31/Ago/2026 (pedido de Mariana: "super admin debe poder crear roles
-    para colaboradores externos" - hasta ahora un SUPER_ADMIN podia
-    otorgar/acotar el ALCANCE de un rol ya existente via RoleAssignmentDialog,
-    pero no podia crear un rol nuevo de cero con exactamente los permisos
-    que necesitaba - ej. "solo PLD" para un abogado externo - sin tocar
-    Django admin). create() ya existe.
+    Un SUPER_ADMIN puede crear un rol nuevo de cero con exactamente los
+    permisos que necesita (ej. "solo PLD" para un abogado externo), ademas
+    de otorgar/acotar el ALCANCE de un rol ya existente via
+    RoleAssignmentDialog. create() ya existe.
 
-    "se pueden borrar?" -> soft-delete via desactivar()/activar() para el
-    caso normal (un rol puede tener IamUserRole ya asignadas; borrar la
-    fila tumbaria el acceso de quien lo tuviera sin aviso ni registro).
-    Un rol inactivo ya no se puede asignar a nadie nuevo (ver
-    IamUserRoleViewSet.perform_create) pero las asignaciones existentes NO
-    se revocan solas.
+    Borrado: soft-delete via desactivar()/activar() para el caso normal (un
+    rol puede tener IamUserRole ya asignadas; borrar la fila tumbaria el
+    acceso de quien lo tuviera sin aviso ni registro). Un rol inactivo ya no
+    se puede asignar a nadie nuevo (ver IamUserRoleViewSet.perform_create)
+    pero las asignaciones existentes NO se revocan solas.
 
-    31/Ago/2026 (pedido de Mariana: "quiero agregar tambien un borrado
-    real"): destroy() SI esta expuesto, pero bloqueado (400) si el rol
+    destroy() SI esta expuesto, pero bloqueado (400) si el rol
     tiene alguna IamUserRole activa (revoked_at IS NULL) - solo se puede
     borrar de verdad un rol que nadie tiene asignado hoy. role.user_roles
     usa on_delete=CASCADE (ver IamUserRole.role), asi que el DELETE real
@@ -464,9 +454,9 @@ class IamUserRoleViewSet(ModelViewSet):
         role = serializer.validated_data.get("role")
         if role and not role.activo:
             raise ValidationError({"role": ["Este rol está desactivado, no se puede asignar."]})
-        # Un rol EXTERNO nunca se otorga en alcance GLOBAL (pedido de
-        # Mariana: "en externos se debe asignar su sociedad y proyecto") -
-        # el backend rechaza el caso mas grave (GLOBAL) aunque alguien
+        # Un rol EXTERNO nunca se otorga en alcance GLOBAL: siempre debe
+        # llevar sociedad y proyecto asignados. El backend rechaza el caso
+        # mas grave (GLOBAL) aunque alguien
         # llame la API directo sin pasar por RoleAssignmentDialog. El
         # frontend exige ademas Sociedad Y Proyecto los dos (dos filas de
         # IamUserRole, una por dimension) - eso no se puede validar en una
@@ -492,8 +482,8 @@ class GeneralSociedadViewSet(ModelViewSet):
     razon_social/rfc.
 
     A diferencia de Centro/Proyecto (que NO son catalogos genericos reales
-    - pertenecen a modulos que todavia no existen, Tickets/Vivienda, ver
-    memoria de sesion), Sociedad SI es un catalogo real y generico del ERD
+    - pertenecen a modulos que todavia no existen, Tickets/Vivienda),
+    Sociedad SI es un catalogo real y generico del ERD
     (general_sociedades), por eso es el unico con CRUD completo por ahora.
 
     DELETE es fisico (sin columna de soft-delete en el ERD real) - las
@@ -651,8 +641,8 @@ class IamMagicLinkViewSet(ModelViewSet):
 
     def get_permissions(self):
         # "validar" es el unico punto de entrada publico (el externo lo
-        # canjea sin sesion, ver memoria de sesion "iam-magic-link-alcance")
-        # - todo lo demas (crear/masivo/revocar/reenviar un link) es una
+        # canjea sin sesion) - todo lo demas (crear/masivo/revocar/reenviar
+        # un link) es una
         # accion interna, requiere "iam.crear"/"iam.editar" como el resto.
         if self.action == "validar":
             return []
@@ -890,7 +880,7 @@ class IamMagicLinkViewSet(ModelViewSet):
 
 class IamInvitationViewSet(ModelViewSet):
     """Invitaciones formales de empleado nuevo (gate de _upsert_identity,
-    ver auth_views.py y memoria de sesion "iam-invitacion-alcance-incierto").
+    ver auth_views.py).
 
     DELETE no esta permitido: una invitacion no se borra, se revoca (mismo
     criterio que iam_user_roles/iam_magic_links) - usa
@@ -904,9 +894,9 @@ class IamInvitationViewSet(ModelViewSet):
     def get_permissions(self):
         # Sin DEFAULT_PERMISSION_CLASSES en settings (DRF cae a AllowAny) -
         # sin este gate, list/retrieve quedaban abiertos a cualquiera, ni
-        # siquiera con sesion, exponiendo correos de gente por invitar
-        # (hallazgo 11/Ago/2026). Es territorio de administracion de IAM,
-        # no lectura general - mismo perm_key que create.
+        # siquiera con sesion, exponiendo correos de gente por invitar.
+        # Es territorio de administracion de IAM, no lectura general -
+        # mismo perm_key que create.
         if self.action in ("create", "list", "retrieve"):
             return [require_permission("iam.crear")()]
         if self.action == "revocar":
@@ -927,9 +917,9 @@ class IamInvitationViewSet(ModelViewSet):
         email = (request.data.get("email") or "").strip()
         if not email:
             return Response({"email": ["Este campo es requerido."]}, status=400)
-        # Solo dominios de Workspace aprobados (14/Ago/2026, pedido
-        # explicito de Mariana): la invitacion formal (IamInvitation) es
-        # para quien SI tiene/tendra cuenta real de Google Workspace y
+        # Solo dominios de Workspace aprobados: la invitacion formal
+        # (IamInvitation) es para quien SI tiene/tendra cuenta real de
+        # Google Workspace y
         # entra por OIDC (dominio_aprobado en oidc_utils.py exige lo
         # mismo en el login) - alguien de otro dominio nunca podria
         # canjearla, es un colaborador externo (IamExternalCollaborator,

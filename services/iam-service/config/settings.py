@@ -127,7 +127,7 @@ OIDC_CLIENT_SECRET = env("OIDC_CLIENT_SECRET", default="")
 OIDC_REDIRECT_URI = env("OIDC_REDIRECT_URI", default="http://localhost:8000/auth/google/callback")
 # Dominios de Workspace aprobados (claim "hd" del id_token) - cypcumbres.mx
 # y cypcumbres.com son dos organizaciones de Workspace distintas, ambas
-# aprobadas (ver memoria de sesion "drive-dos-organizaciones-workspace").
+# aprobadas.
 OIDC_APPROVED_DOMAINS = env.list("OIDC_APPROVED_DOMAINS", default=["cypcumbres.mx", "cypcumbres.com"])
 # A donde redirige el navegador tras un login exitoso (el frontend lee la
 # cookie de sesion ahi y sigue su flujo normal de AuthProvider).

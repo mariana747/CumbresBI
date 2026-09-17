@@ -62,11 +62,9 @@ def dev_role_switch(request):
     scope_type = request.GET.get("scope_type", IamUserRole.SCOPE_GLOBAL)
     if scope_type not in _SCOPE_TYPES_VALIDOS:
         return HttpResponseBadRequest(f"scope_type invalido: {scope_type}")
-    # "?scope_id=A,B" (31/Ago/2026, pedido de Mariana: "pon para que pueda
-    # seleccionar mas de dos sociedades") - un analista real puede tener
-    # varias sociedades a la vez (compute_effective_scope_claims las junta
-    # por UNION desde varias filas IamUserRole, ver scope_utils.py); antes
-    # esta pantalla solo podia simular una. Sigue aceptando un solo valor
+    # "?scope_id=A,B": un analista real puede tener varias sociedades a la
+    # vez (compute_effective_scope_claims las junta por UNION desde varias
+    # filas IamUserRole, ver scope_utils.py). Sigue aceptando un solo valor
     # (o "*" para GLOBAL) igual que antes.
     scope_ids = [s.strip() for s in request.GET.get("scope_id", "*").split(",") if s.strip()] or ["*"]
 

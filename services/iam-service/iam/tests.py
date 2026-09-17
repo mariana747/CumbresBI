@@ -2,7 +2,7 @@
 ViewSets). Objetivo: demostrar que solo GLOBAL ve datos y cualquier otro
 alcance no ve nada (fail-closed), ya que IamUser/IamUserRole todavia no
 declaran SCOPE_FIELD_* (columna real de sociedad/proyecto - punto 2 del
-plan, ver memoria de sesion "empresas-alcance-fase1").
+plan).
 
 Se evita firmar un JWT real: se ataca el ViewSet directo via
 APIRequestFactory, adjuntando `request.effective_scope` a mano - es lo
@@ -108,8 +108,7 @@ class IamUserRoleScopeTests(TestCase):
 
 
 class IamRoleCrearTests(TestCase):
-    """31/Ago/2026 (pedido de Mariana: "super admin debe poder crear roles
-    para colaboradores externos") - IamRoleViewSet.create() antes existia
+    """IamRoleViewSet.create() antes existia
     en la ruta pero el serializer era 100% read_only, asi que no tenia
     forma real de llenarse. Mismo criterio de permiso que
     IamUserRoleViewSet.create (iam.crear)."""
@@ -167,10 +166,7 @@ class IamRoleCrearTests(TestCase):
 
 
 class IamRoleExternoScopeTests(TestCase):
-    """31/Ago/2026 (pedido de Mariana: "en matriz de permisos hay que
-    dividir entre internos y externos, ya que en externos se debe asignar
-    su sociedad y proyecto") - un rol EXTERNO nunca se puede otorgar en
-    alcance GLOBAL."""
+    """Un rol EXTERNO nunca se puede otorgar en alcance GLOBAL."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -374,8 +370,7 @@ class CumplimientoDePermisosEnEscrituraTests(TestCase):
 class GeneralSociedadCrudTests(TestCase):
     """CRUD real de Sociedades (Gestion organizacional, /admin/organizacion) -
     el unico catalogo generico real (general_sociedades existe en el ERD;
-    Centro/Proyecto NO, pertenecen a modulos que todavia no se construyen -
-    ver memoria de sesion, decision 10/Ago/2026)."""
+    Centro/Proyecto NO, pertenecen a modulos que todavia no se construyen)."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -540,7 +535,7 @@ class EmitirEventoAuditoriaTests(TestCase):
 
 
 class SessionRefreshTests(TestCase):
-    """/auth/refresh (Opcion A, ver memoria de sesion): reemite la cookie
+    """/auth/refresh: reemite la cookie
     de sesion con los roles/permisos ACTUALES de BD sin pedir login de
     nuevo. self.client (Django test client) en vez de APIRequestFactory
     porque aqui si importa el manejo real de cookies (set_cookie/

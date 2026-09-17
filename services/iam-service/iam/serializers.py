@@ -97,9 +97,8 @@ class IamRoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = IamRole
         fields = ["role_id", "role_key", "role_name", "description", "tipo", "activo", "permisos"]
-        # 31/Ago/2026 (pedido de Mariana: "super admin debe poder crear
-        # roles para colaboradores externos") - role_key/role_name/
-        # description/tipo ahora se pueden mandar al crear (ver
+        # Super admin puede crear roles para colaboradores externos:
+        # role_key/role_name/description/tipo ahora se pueden mandar al crear (ver
         # IamRoleViewSet.perform_create); antes todo el serializer era de
         # solo lectura y "crear un rol" no tenia forma real de llenarse.
         # role_id sigue siendo autogenerado, permisos sigue siendo
