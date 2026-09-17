@@ -1,10 +1,7 @@
-// Cliente de rrhh-service (10/Sep/2026, Fase 2 del modulo de Nominas - ver
-// memoria de sesion "tesoreria-nominas-diseno-09sep"). Primer cliente real
-// de este servicio - antes solo tenia modelos, sin API (ver
-// services/rrhh-service/rrhh/views.py). Cubre Empleados y Puestos; el
-// historial de sueldo se logra dando de baja el Puesto vigente (dar_de_baja)
-// y creando uno nuevo con el sueldo actualizado, nunca editando
-// salario_diario de un Puesto ya usado.
+// Cliente de rrhh-service. Cubre Empleados y Puestos; el historial de
+// sueldo se logra dando de baja el Puesto vigente (dar_de_baja) y creando
+// uno nuevo con el sueldo actualizado, nunca editando salario_diario de un
+// Puesto ya usado (ver services/rrhh-service/rrhh/views.py).
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
@@ -146,9 +143,8 @@ export async function updateEmpleado(
   return response.json();
 }
 
-// Puestos - historial de sueldo (09/Sep/2026, notas de Jenny). Un Puesto
-// vigente tiene fecha_baja=null; dar_de_baja() lo cierra, y crear uno
-// nuevo con el sueldo actualizado es el "cambio de sueldo" (nunca se
+// Un Puesto vigente tiene fecha_baja=null; dar_de_baja() lo cierra, y crear
+// uno nuevo con el sueldo actualizado es el "cambio de sueldo" (nunca se
 // edita salario_diario de un Puesto ya usado).
 export interface RrhhPuesto {
   id_puesto: string;

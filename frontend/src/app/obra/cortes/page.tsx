@@ -75,8 +75,8 @@ export default function ObraCortesPage() {
 
   // Snapshot congelado (ObraCorteSemanalDetalle) - solo existe despues de
   // aprobar un corte, ver views.py::ObraCorteSemanalViewSet.aprobar. Se
-  // muestra agrupado por etapa/lote, igual look que /obra/avance (pedido
-  // de Mariana: la lista plana no era intuitiva).
+  // muestra agrupado por etapa/lote, igual look que /obra/avance (la
+  // lista plana no era intuitiva).
   const [detalleDialog, setDetalleDialog] = useState<ObraCorteSemanal | null>(null);
   const [detalle, setDetalle] = useState<ObraCorteSemanalDetalle[]>([]);
   const [etapas, setEtapas] = useState<ObraEtapa[]>([]);

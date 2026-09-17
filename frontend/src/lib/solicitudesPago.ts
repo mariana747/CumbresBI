@@ -71,8 +71,7 @@ export async function listSolicitudesPago(params?: {
   return response.json();
 }
 
-// Exportar a Google Sheets, al Drive PERSONAL del usuario (14/Sep/2026,
-// pendiente.md > Solicitudes de Pago "Pasar google sheet") - mismo patron
+// Exportar a Google Sheets, al Drive PERSONAL del usuario - mismo patron
 // que exportarFlujosSheets (ver lib/tesoreria.ts).
 export async function exportarSolicitudesPagoSheets(
   params?: { proyecto?: string; sociedad?: string; search?: string; categoriaGasto?: TesoreriaCategoriaGasto },

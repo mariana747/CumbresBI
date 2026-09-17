@@ -5,8 +5,8 @@ import { Alert, FormControlLabel, Checkbox } from "@mui/material";
 import Script from "next/script";
 
 // Widget de reCAPTCHA v2 ("no soy un robot") para el formulario publico de
-// KYC externo (docs/architecture/pld/pld-fase2-alcance.md sec. 2, decision de
-// Mariana 12/Ago/2026: v2 sobre v3). Site key es publica por diseno (va en
+// KYC externo (docs/architecture/pld/pld-fase2-alcance.md sec. 2, se eligio
+// v2 sobre v3). Site key es publica por diseno (va en
 // el HTML) - la verificacion real ocurre server-side con la secret key
 // (ver services/pld-service/pld/recaptcha.py).
 //

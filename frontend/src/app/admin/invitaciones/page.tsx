@@ -109,14 +109,11 @@ export default function InvitacionesPage() {
 // input libre en pantalla invita a valores inconsistentes/feos, ej.
 // "PLD_KYC" vs "pld-kyc" vs "kyc"). Agregar un tipo nuevo aqui cuando otro
 // modulo empiece a usar Magic Links (ver iam/models.py, IamMagicLink).
-// "tesoreria_proveedor" (27/Ago/2026, pedido de Mariana: "las invitaciones
-// en admin tambien debe poder [generar] invitacion para subir facturas de
-// proveedores, igual que pld va a mandar a una pantalla publica") - a
-// diferencia de "pld_kyc" (que hoy solo etiqueta un IamMagicLink real, ver
-// docstring de esta pantalla), este SI dispara un mecanismo distinto por
-// dentro: un TesoreriaTicketProveedor anonimo (sin sesion, con reCAPTCHA -
-// ver handleGenerar), no un Magic Link. Mismo formulario, mismo boton
-// "Generar", el usuario no necesita saber la diferencia.
+// "tesoreria_proveedor" es distinto de "pld_kyc" (que solo etiqueta un
+// IamMagicLink real): dispara un TesoreriaTicketProveedor anonimo (sin
+// sesion, con reCAPTCHA - ver handleGenerar), no un Magic Link. Mismo
+// formulario, mismo boton "Generar", el usuario no necesita saber la
+// diferencia.
 const RECURSO_TIPO_OPTIONS = [
   { value: "pld_kyc", label: "Expediente KYC (PLD)" },
   { value: "tesoreria_proveedor", label: "Factura de proveedor (Tesorería)" },
@@ -838,8 +835,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
 
 // --- Tab 2: Colaboradores (IamInvitation + IamExternalCollaborator) -----
 
-// Unifica los dos mecanismos de alta de "colaborador" (14/Ago/2026, ver
-// memoria de sesion "tercer-tipo-invitacion-externo-sin-workspace"): dos
+// Unifica los dos mecanismos de alta de "colaborador": dos
 // recuadros de alta distintos (uno para quien SI tiene correo de
 // Workspace, otro para quien NO), pero un solo historial abajo - ambos
 // terminan siendo "un colaborador de CumbresBI", solo cambia como entra.
@@ -884,12 +880,11 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
   const [accesosExternos, setAccesosExternos] = useState<IamExternalCollaborator[]>([]);
   const [reenviando, setReenviando] = useState<string | null>(null);
 
-  // 31/Ago/2026 (pedido de Mariana: "hay que unificar esa parte, pero sin
-  // borrar lo que ya hay") - opcional, sobre el formulario de arriba: si
-  // se llenan los 3, el acceso externo sale con su rol+alcance ya
-  // asignado en el mismo paso, sin tener que ir a /admin/usuarios
-  // despues. El flujo viejo (crear -> ir a Usuarios -> RoleAssignmentDialog)
-  // sigue intacto para quien no llene esto - es un atajo, no un reemplazo.
+  // Opcional, sobre el formulario de arriba: si se llenan los 3, el
+  // acceso externo sale con su rol+alcance ya asignado en el mismo paso,
+  // sin tener que ir a /admin/usuarios despues. El flujo viejo (crear ->
+  // ir a Usuarios -> RoleAssignmentDialog) sigue intacto para quien no
+  // llene esto - es un atajo, no un reemplazo.
   const [asignarRolAhora, setAsignarRolAhora] = useState(false);
   const [rolesExternos, setRolesExternos] = useState<IamRole[]>([]);
   const [rolExternoId, setRolExternoId] = useState("");
@@ -1201,10 +1196,8 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
               />
             </Stack>
 
-            {/* 31/Ago/2026 (pedido de Mariana: "hay que unificar esa parte,
-            pero sin borrar lo que ya hay") - atajo opcional, el flujo viejo
-            (crear -> Admin Usuarios -> RoleAssignmentDialog) sigue intacto
-            para quien no marque esto. */}
+            {/* Atajo opcional, el flujo viejo (crear -> Admin Usuarios ->
+            RoleAssignmentDialog) sigue intacto para quien no marque esto. */}
             <FormControlLabel
               control={<Checkbox checked={asignarRolAhora} onChange={(e) => setAsignarRolAhora(e.target.checked)} />}
               label="Asignar rol externo ahora mismo"

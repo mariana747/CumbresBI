@@ -90,9 +90,9 @@ export default function TesoreriaReporteDiarioPage() {
     listCuentas().then(setCuentas).catch(() => setCuentas([]));
   }, []);
 
-  // Bloquear envio si hay diferencia (Jenny, junta 09/Sep: "no enviar el
-  // reporte diario si hay diferencia") - el backend ya lo rechaza, esto
-  // solo evita el viaje redondo cuando ya se sabe que va a fallar.
+  // Bloquear envio si hay diferencia: no se debe enviar el reporte diario
+  // con diferencia - el backend ya lo rechaza, esto solo evita el viaje
+  // redondo cuando ya se sabe que va a fallar.
   const cuentasConDiferencia = useMemo(
     () =>
       (reporte?.sociedades ?? []).flatMap((s) => s.cuentas.filter((c) => c.cuadra === false).map((c) => c.alias)),

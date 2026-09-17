@@ -1,10 +1,8 @@
-// Cliente de la pantalla PROVISIONAL "MiCumbres" (/mi-cumbres/tickets,
-// 27/Ago/2026) - puente minimo para que un empleado pueda subir su ticket
-// de reembolso mientras no existe el portal MiCumbres real ni rrhh-service
-// tiene API (Fase 5, sin arrancar, ver memoria de sesion
-// "rrhh-mi-cumbres-y-modulo-pendiente"). Vive en tesoreria-service porque
-// ahi ya esta la infraestructura de Drive/Auditoria/Flujos que necesita -
-// NO es el modelo final de RRHH.
+// Cliente de la pantalla PROVISIONAL "MiCumbres" (/mi-cumbres/tickets) -
+// puente minimo para que un empleado pueda subir su ticket de reembolso
+// mientras no existe el portal MiCumbres real ni rrhh-service tiene API.
+// Vive en tesoreria-service porque ahi ya esta la infraestructura de
+// Drive/Auditoria/Flujos que necesita - NO es el modelo final de RRHH.
 // Contrato: services/tesoreria-service/tesoreria/views.py::TesoreriaTicketReembolsoViewSet.
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
@@ -12,9 +10,9 @@ import { ExportarSheetsResultado } from "./tesoreria";
 
 const TESORERIA_API_BASE_URL = `${GATEWAY_URL}/tesoreria`;
 
-// Flujo real (27/Ago/2026, pedido de Mariana): PENDIENTE -> Tesoreria
-// revisa -> APROBADO o RECHAZADO. Solo un ticket APROBADO se puede
-// facturar (subir_factura + vincular_factura) -> VINCULADO.
+// Flujo: PENDIENTE -> Tesoreria revisa -> APROBADO o RECHAZADO. Solo un
+// ticket APROBADO se puede facturar (subir_factura + vincular_factura)
+// -> VINCULADO.
 export type TesoreriaTicketEstado = "PENDIENTE" | "APROBADO" | "VINCULADO" | "RECHAZADO";
 
 // Espejo de TesoreriaTicketReembolso.CATEGORIA_CHOICES (models.py,
@@ -46,9 +44,9 @@ export const CATEGORIA_GASTO_LABELS: Record<TesoreriaCategoriaGasto, string> = {
   EXTRAORDINARIOS: "Extraordinarios",
 };
 
-// `centro` (lista cerrada) se elimino 03/Sep/2026 - pedido explicito de
-// Mariana en minuta ("centro de costos se elimina"), sin reemplazo aqui
-// (division por proyecto es de Solicitud de Pago, no de Reembolso).
+// `centro` (lista cerrada) se elimino - "centro de costos" ya no aplica
+// aqui, sin reemplazo (division por proyecto es de Solicitud de Pago, no
+// de Reembolso).
 
 // Un gasto individual dentro del ticket (03/Sep/2026, minuta punto 1:
 // "solicitar varios conceptos") - mismo patron que CotizacionLinea en
@@ -90,10 +88,8 @@ export interface TesoreriaTicketReembolso {
   updated_by: string | null;
 }
 
-// Ventana de reembolso del mes en curso (03/Sep/2026, pedido de Mariana:
-// "que se coloque el dia/mes/año de hasta cuando se aceptan"; campos
-// reemplazados 04/Sep/2026 junto con la regla - ver
-// reembolso_utils.validar_fecha_limite en el backend).
+// Ventana de reembolso del mes en curso: dia/mes/año de hasta cuando se
+// aceptan (ver reembolso_utils.validar_fecha_limite en el backend).
 export interface TesoreriaFechaLimiteReembolso {
   // Los ultimos 2 dias habiles del mes, ascendente [penultimo, ultimo] -
   // unicos dias en que aplica la regla estricta de "mismo dia".
@@ -139,9 +135,8 @@ export function urlVerFactura(idTicket: string): string {
   return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_factura/`;
 }
 
-// Exportar a Google Sheets, al Drive PERSONAL del usuario (14/Sep/2026,
-// pendiente.md > Reembolsos "Exportar desde 'Ticket'") - mismo patron que
-// exportarFlujosSheets/exportarSolicitudesPagoSheets (ver lib/tesoreria.ts).
+// Exportar a Google Sheets, al Drive PERSONAL del usuario - mismo patron
+// que exportarFlujosSheets/exportarSolicitudesPagoSheets (ver lib/tesoreria.ts).
 export async function exportarTicketsReembolsoSheets(
   search?: string,
   carpetaId?: string

@@ -1,8 +1,7 @@
 // Cliente de drive-service - solo lo necesario para que el frontend LISTE
-// archivos ya existentes en una carpeta de Drive (el Motor Documental ya no
-// sube archivos locales, ver memoria de sesion
-// "motor-documental-seleccion-archivos-drive": el analista sube el archivo
-// el mismo en drive.google.com, esta app solo lo selecciona).
+// archivos ya existentes en una carpeta de Drive. El Motor Documental ya
+// no sube archivos locales: el analista sube el archivo el mismo en
+// drive.google.com, esta app solo lo selecciona.
 // Contrato: services/drive-service/drive/views.py (GET /api/list/).
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";

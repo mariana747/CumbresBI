@@ -87,11 +87,11 @@ function tituloConcepto(descripcion: string): string {
   return idx > 0 ? descripcion.slice(0, idx).trim() : descripcion;
 }
 
-// Color de la celda segun el % acumulado (concepto+lote) - explicado por
-// Mariana: todo arranca en 0; FALTA es que ya hay % capturado pero no
-// llega a 100 (va en proceso); SOBREESTIMADO es mas de 100%; SIN
-// INFORMACION es que el trabajo ya se realizo (hay evidencia/foto) pero
-// nadie capturo el % - por eso necesita `hayEvidencia`, no se puede saber
+// Color de la celda segun el % acumulado (concepto+lote): todo arranca en
+// 0; FALTA es que ya hay % capturado pero no llega a 100 (va en proceso);
+// SOBREESTIMADO es mas de 100%; SIN INFORMACION es que el trabajo ya se
+// realizo (hay evidencia/foto) pero nadie capturo el % - por eso necesita
+// `hayEvidencia`, no se puede saber
 // solo con el %. Si no hay ni % ni evidencia, es el "0" base - no se
 // pinta, no es una excepcion que valga la pena señalar.
 function colorPorAvance(total: number | null, hayEvidencia: boolean): string | undefined {

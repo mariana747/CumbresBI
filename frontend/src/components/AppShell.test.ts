@@ -137,12 +137,11 @@ describe("buildNavItems - Ventas / Vivienda", () => {
   });
 });
 
-// Materiales vive en Obra desde 21/Ago/2026 (pedido de Mariana: "materiales
-// debe estar en obra") - antes colgaba de Ventas/Vivienda; ver AppShell.tsx.
+// Materiales vive en Obra - antes colgaba de Ventas/Vivienda; ver AppShell.tsx.
 //
-// OCULTO del nav (08/Sep/2026, decision de Mariana: "este mes la prioridad
-// es terminar Tesoreria" - Obra/Compras/RRHH se ocultan del sidebar sin
-// tocar backend/rutas, ver el "false &&" en AppShell.tsx). El test de abajo
+// OCULTO del nav mientras Tesoreria es prioridad: Obra/Compras/RRHH se
+// ocultan del sidebar sin tocar backend/rutas, ver el "false &&" en
+// AppShell.tsx. El test de abajo
 // se invierte mientras dure: confirma que el apartado NO aparece pase lo
 // que pase el permiso. Revertir junto con el "false &&" de AppShell.tsx.
 describe("buildNavItems - Obra (oculto temporalmente, prioridad Tesorería)", () => {
@@ -181,8 +180,7 @@ describe("buildNavItems - Tesorería", () => {
       expect(tesoreria, `${roleKey} deberia ver Tesorería`).toBeDefined();
       expect(tesoreria?.enabled).toBe(true);
       const labels = hijos(tesoreria).map((c) => c.label);
-      // Reorganizado en secciones (08/Sep/2026, pedido de Mariana - prioridad
-      // del mes es Tesoreria): REPORTES, OPERACIONES, FACTURACIÓN Y
+      // Reorganizado en secciones: REPORTES, OPERACIONES, FACTURACIÓN Y
       // COMPROBANTES, CONFIGURACIÓN Y BANCOS (ver "group" en NavChild,
       // AppShell.tsx). "Reembolsos" no entra todavia - sin pantalla propia
       // del lado Tesoreria (el ticket vive hoy solo en MiCumbres).
@@ -248,8 +246,8 @@ describe("buildNavItems - siempre presentes", () => {
 // dos servicios de la matriz sin ningun apartado dueno en el sidebar -
 // "tickets" (TICKETS_RESPONSABLE, TICKETS_PARTICIPANTE, EMPLEADO_SELF) y
 // "rentas" (FINANZAS_MANAGER, CONTRALOR). Se agregaron placeholders "en
-// desarrollo" ese dia, pero se QUITARON otra vez el 19/Ago/2026 (pedido de
-// Mariana - ningun backend real detras, quedaban como ruido en el sidebar).
+// desarrollo" pero se QUITARON otra vez - ningun backend real detras,
+// quedaban como ruido en el sidebar.
 // SIN_DUEÑO_A_PROPOSITO documenta ese hueco como deliberado (no un
 // descuido) para no confundirlo con un servicio nuevo que de verdad se le
 // olvido a alguien agregarle apartado - ver DUEÑO_CONOCIDO abajo para esos.

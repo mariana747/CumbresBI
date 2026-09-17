@@ -926,16 +926,12 @@ export async function createContrato(params: {
   return response.json();
 }
 
-// Checklist de documentos requeridos de un contrato (diseño manuscrito
-// Tesoreria2.pdf, 28/Ago/2026: "Liga archivo - todavia no esta
-// implementado en BD. Pedir checklist de documentos/info") - un renglon
-// por documento que ese contrato en particular necesita. link_archivo/
+// Checklist de documentos requeridos de un contrato - un renglon por
+// documento que ese contrato en particular necesita. link_archivo/
 // drive_file_id son de solo lectura, se llenan cuando el CLIENTE sube el
 // archivo via el magic link de TesoreriaDocumentoTicketViewSet.subir - el
-// analista no tiene ninguna accion para subirlo directamente (28/Ago/2026,
-// pedido explicito de Mariana).
-// Catalogo fijo (28/Ago/2026, pedido explicito de Mariana: "que sea una
-// lista desplegable de las opciones") - mismo orden/codigos que
+// analista no tiene ninguna accion para subirlo directamente.
+// Catalogo fijo (lista desplegable) - mismo orden/codigos que
 // TesoreriaContratoDocumento.NOMBRE_CHOICES en el backend.
 export type TesoreriaContratoDocumentoNombre =
   | "CONTRATO_FIRMADO"
@@ -1018,10 +1014,8 @@ export async function deleteContratoDocumento(id: number): Promise<void> {
   }
 }
 
-// Avisa a la contraparte de los documentos que el analista SELECCIONO del
-// checklist (28/Ago/2026, pedido explicito de Mariana: "se puede...
-// seleccionar para picar en avisar a la contraparte de los documentos
-// pendientes" - no se manda automatico por todos los pendientes) - el
+// Avisa a la contraparte solo de los documentos que el analista SELECCIONO
+// del checklist - no se manda automatico por todos los pendientes. El
 // backend manda UN correo por cada documento en `documentoIds`
 // (ver TesoreriaContratoViewSet.enviar_recordatorio_documentos).
 export async function enviarRecordatorioDocumentos(
@@ -2230,8 +2224,8 @@ export async function deleteNotaCreditoConcepto(id: number): Promise<void> {
   }
 }
 
-// Ciclo de vida propio de la factura (24/Ago/2026, pedido explicito de
-// Mariana) - distinto del ciclo de un TesoreriaFlujo, no se segrega
+// Ciclo de vida propio de la factura, distinto del ciclo de un
+// TesoreriaFlujo - no se segrega
 // captura/aprobacion aqui (mismo permiso facturacion-cfdi.editar para
 // cualquier transicion, ver marcarEstadoFactura). Pasar a ACEPTADA exige
 // link_pdf + link_xml ya cargados (el backend lo valida, ver
@@ -3573,11 +3567,11 @@ export async function subirFacturaTicketProveedor(params: {
   return response.json();
 }
 
-// Ticket publico de UN documento del checklist (28/Ago/2026, pedido
-// explicito de Mariana: "esos [archivos] los subira el cliente...mediante
-// una magic link por doc faltante") - mismo patron que validarTicketProveedor/
-// subirFacturaTicketProveedor arriba, pero ligado a un documento especifico
-// en vez de a la contraparte en general (ver TesoreriaDocumentoTicketViewSet).
+// Ticket publico de UN documento del checklist - el cliente lo sube via
+// magic link por documento faltante. Mismo patron que
+// validarTicketProveedor/subirFacturaTicketProveedor arriba, pero ligado a
+// un documento especifico en vez de a la contraparte en general (ver
+// TesoreriaDocumentoTicketViewSet).
 export interface TesoreriaDocumentoTicketValidado {
   nombre_documento: string;
   id_contrato: string;

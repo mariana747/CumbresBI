@@ -9,9 +9,7 @@ import { Footer } from "@/components/Footer";
 import { PublicNavbar } from "@/components/PublicNavbar";
 import { BRAND } from "@/theme/theme";
 
-// YA NO es SSO silencioso automatico (15/Sep/2026, revierte la decision
-// de "SSO silencioso sin boton" - ver memoria de sesion
-// "oidc-sso-silencioso-sin-boton-login"): un redirect 100% automatico sin
+// YA NO es SSO silencioso automatico: un redirect 100% automatico sin
 // interaccion real de usuario hacia accounts.google.com y de vuelta es
 // exactamente el patron que la "Bounce Tracking Mitigation" de Chrome
 // detecta y sanciona borrando el estado (cookies) del sitio que orquesto

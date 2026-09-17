@@ -167,8 +167,7 @@ interface FilaComparacion {
 //
 // Solo "pld-service" tiene hoy una carpeta de Drive real resuelta (ver
 // `carpeta` mas abajo, PLD/<id_contraparte>) - los demas quedan listados
-// para trazabilidad pero sin carpeta que listar todavia (memoria de sesion
-// "motor-documental-seleccion-archivos-drive").
+// para trazabilidad pero sin carpeta que listar todavia.
 const SERVICIOS_SOLICITANTES = [
   "pld-service",
   "compras-tesoreria-service",
@@ -234,9 +233,7 @@ interface DocumentResult {
 }
 
 // Motor Inteligente de Procesamiento Documental (docint) - ver
-// /README.md sec. 10. Decision de Mariana (12/Ago/2026,
-// ver memoria de sesion "motor-documental-seleccion-archivos-drive"): ya
-// NO se suben archivos locales - el analista sube el archivo el mismo en
+// /README.md sec. 10. Ya NO se suben archivos locales - el analista sube el archivo el mismo en
 // drive.google.com (a la carpeta correspondiente); este dialogo solo
 // LISTA lo que ya esta ahi y lo manda a analizar por referencia
 // (streaming Drive->Gemini, ver docint/drive.py).
@@ -302,7 +299,7 @@ export default function MotorDocumentalDialog({
       .catch(() => setKycActual(null));
   }, [kycSeleccionado]);
 
-  // "Nuevos Clientes" (17/Ago/2026, pedido de Mariana): mismo prefijo que
+  // "Nuevos Clientes": mismo prefijo que
   // pld/views.py (subir/subir_documento) - subcarpeta fija dentro de la
   // Unidad compartida PLD_CumbresBI, no la raiz directa.
   const carpeta = contexto
@@ -701,8 +698,7 @@ export default function MotorDocumentalDialog({
 
   return (
     // maxWidth "md" (antes "sm") - hace lugar al panel lateral con el
-    // documento original junto a los datos extraidos (01/Sep/2026, pedido
-    // explicito de Mariana: "en lugar que sea otra pagina sea una lateral").
+    // documento original junto a los datos extraidos.
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         Motor Documental

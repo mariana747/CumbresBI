@@ -203,16 +203,13 @@ export default function MatrizPermisosPage() {
   // completo (roles + permisos) ya se trae una sola vez, filtrar aqui
   // evita ir y venir al servidor por cada cambio de seleccion.
   const [areasFiltro, setAreasFiltro] = useState<string[]>([]);
-  // Filtro por rol (04/Sep/2026, pedido de Mariana: "pon un filtro por
-  // rol, como administradores, etc") - mismo patron que areasFiltro:
-  // multi-select sobre role_id, [] = sin filtro. Util para aislar, por
-  // ejemplo, solo los roles "*_ADMIN"/SUPER_ADMIN en una tabla que ya
-  // tiene muchas filas.
+  // Filtro por rol: mismo patron que areasFiltro, multi-select sobre
+  // role_id, [] = sin filtro. Util para aislar, por ejemplo, solo los
+  // roles "*_ADMIN"/SUPER_ADMIN en una tabla que ya tiene muchas filas.
   const [rolesFiltro, setRolesFiltro] = useState<string[]>([]);
 
-  // Crear rol nuevo (31/Ago/2026, pedido de Mariana: "super admin debe
-  // poder crear roles para colaboradores externos") - antes de esto solo
-  // se podian editar los permisos de un rol ya existente en el catalogo.
+  // Crear rol nuevo: super admin puede crear roles para colaboradores
+  // externos, no solo editar permisos de roles ya existentes en el catalogo.
   const [openNuevoRol, setOpenNuevoRol] = useState(false);
   const [nuevoRoleTipo, setNuevoRoleTipo] = useState<IamRoleTipo>("INTERNO");
   const [nuevoRoleKey, setNuevoRoleKey] = useState("");
@@ -303,9 +300,8 @@ export default function MatrizPermisosPage() {
   // puros "—", ruido sin informacion util para lo que se esta buscando.
   // En modo edicion se muestran todos los roles igual (podrias querer
   // OTORGAR el primer permiso de esa area a un rol que hoy no tiene nada).
-  // Internos vs Externos (31/Ago/2026, pedido de Mariana: "en matriz de
-  // permisos hay que dividir entre internos y externos") - misma
-  // convencion visual que /admin/invitaciones (Temporales/Colaboradores).
+  // Internos vs Externos: la matriz de permisos se divide entre ambos,
+  // misma convencion visual que /admin/invitaciones (Temporales/Colaboradores).
   const [tipoTab, setTipoTab] = useState<IamRoleTipo>("INTERNO");
 
   const rolesVisibles = (
@@ -328,8 +324,7 @@ export default function MatrizPermisosPage() {
 
   // Desactivar/reactivar (soft-delete) - separado de handleToggle porque
   // no toca la matriz de permisos, solo IamRole.activo. Menu de 3 puntos
-  // (31/Ago/2026, pedido de Mariana) en vez de un boton ancho aparte -
-  // mas compacto, no necesita columna propia.
+  // en vez de un boton ancho aparte - mas compacto, no necesita columna propia.
   const [cambiandoActivo, setCambiandoActivo] = useState<string | null>(null);
   const [menuRoleId, setMenuRoleId] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -399,8 +394,7 @@ export default function MatrizPermisosPage() {
 
   return (
     <AppShell>
-      {/* 31/Ago/2026 (pedido de Mariana: "quiero que se vea asi") - titulo
-      solo a la izquierda; TODO lo demas (caja, Área, Nuevo Rol, Modo
+      {/* Titulo solo a la izquierda; el resto (caja, Área, Nuevo Rol, Modo
       edicion) agrupado en un solo bloque que envuelve junto como unidad -
       antes cada uno envolvia por separado y quedaba chueco. */}
       <Stack
@@ -411,10 +405,9 @@ export default function MatrizPermisosPage() {
       >
         <Typography variant="h5">Matriz de Permisos</Typography>
 
-        {/* flex:1 + justifyContent center (31/Ago/2026, pedido de Mariana:
-        "no esta centrado") - antes esto quedaba pegado a la derecha por
-        el space-between del Stack padre; ahora usa el espacio sobrante
-        junto al titulo y centra el grupo dentro de el. */}
+        {/* flex:1 + justifyContent center: antes esto quedaba pegado a la
+        derecha por el space-between del Stack padre; ahora usa el espacio
+        sobrante junto al titulo y centra el grupo dentro de el. */}
         <Stack
           direction="row"
           spacing={2}
@@ -424,10 +417,9 @@ export default function MatrizPermisosPage() {
           useFlexGap
           sx={{ flex: 1 }}
         >
-          {/* 31/Ago/2026 (pedido de Mariana: "interno y externo se ve
-          diferente") - la caja ya NO cambia de tamaño entre pestañas (antes
-          le crecia una linea extra en Externos, corriendo toda la fila).
-          El aviso de "nunca GLOBAL" vive aparte, debajo de las Tabs. */}
+          {/* La caja no cambia de tamaño entre pestañas (antes le crecia una
+          linea extra en Externos, corriendo toda la fila). El aviso de
+          "nunca GLOBAL" vive aparte, debajo de las Tabs. */}
           <Paper variant="outlined" sx={{ p: 2, textAlign: "center", display: "inline-block" }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               {editando
@@ -460,11 +452,9 @@ export default function MatrizPermisosPage() {
             </Select>
           </FormControl>
 
-          {/* Filtro por rol (04/Sep/2026, pedido de Mariana: "pon un filtro
-          por rol, como administradores, etc") - mismo patron que el filtro
-          de Área; las opciones son los roles de la pestaña activa
-          (Internos/Externos), asi no se puede elegir un rol que ya no se
-          esta viendo. */}
+          {/* Filtro por rol: mismo patron que el filtro de Área; las
+          opciones son los roles de la pestaña activa (Internos/Externos),
+          asi no se puede elegir un rol que ya no se esta viendo. */}
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="rol-filter-label">Rol</InputLabel>
             <Select
@@ -492,9 +482,9 @@ export default function MatrizPermisosPage() {
             </Select>
           </FormControl>
 
-          {/* Solo en modo edicion (31/Ago/2026, pedido de Mariana) - mismo
-          criterio que los checkboxes de permisos y el menu de 3 puntos, que
-          tampoco aparecen fuera de modo edicion. */}
+          {/* Solo en modo edicion - mismo criterio que los checkboxes de
+          permisos y el menu de 3 puntos, que tampoco aparecen fuera de
+          modo edicion. */}
           {puedeCrearRol && editando && (
             <Button
               size="small"
@@ -624,10 +614,8 @@ export default function MatrizPermisosPage() {
                               <Chip size="small" label="Inactivo" color="default" sx={{ mt: 0.5, alignSelf: "flex-start" }} />
                             )}
                           </Stack>
-                          {/* Menu de 3 puntos (31/Ago/2026, pedido de Mariana:
-                          "usa los tres puntos a un lado de la columna de rol")
-                          - solo en modo edicion, mismo criterio que los
-                          checkboxes de permisos. */}
+                          {/* Menu de 3 puntos: solo en modo edicion, mismo
+                          criterio que los checkboxes de permisos. */}
                           {puedeEditar && editando && (
                             <IconButton
                               size="small"
@@ -708,10 +696,9 @@ export default function MatrizPermisosPage() {
                 " Al asignarlo a alguien, va a exigir acotarlo a una Sociedad y un Proyecto — nunca alcance GLOBAL."}
             </Typography>
             {errorNuevoRol && <Alert severity="error">{errorNuevoRol}</Alert>}
-            {/* Editable dentro del dialogo (31/Ago/2026, pedido de Mariana:
-            "al crear un nuevo rol que este la parte si es interno o
-            externo") - el boton que lo abrio solo lo preselecciona segun
-            la pestaña activa, aqui se puede cambiar antes de guardar. */}
+            {/* Editable dentro del dialogo: el boton que lo abrio solo lo
+            preselecciona segun la pestaña activa, aqui se puede cambiar
+            antes de guardar. */}
             <FormControl size="small" fullWidth>
               <InputLabel id="nuevo-rol-tipo-label">Tipo</InputLabel>
               <Select

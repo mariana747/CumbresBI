@@ -72,8 +72,8 @@ const FORM_VACIO = {
   estado: "",
 };
 
-// "Facturas PPD a Liquidar" (24/Ago/2026, pedido explicito de Mariana,
-// alineado al estandar del SAT) - el nodo "DoctoRelacionado" del XML de un
+// "Facturas PPD a Liquidar" (alineado al estandar del SAT) - el nodo
+// "DoctoRelacionado" del XML de un
 // Complemento de Pago (REP) describe QUE facturas PPD esta liquidando este
 // pago y con que parcialidad, distinto del nodo "CfdiRelacionados" de una
 // Factura normal (sustitucion/nota de credito, ese vive en

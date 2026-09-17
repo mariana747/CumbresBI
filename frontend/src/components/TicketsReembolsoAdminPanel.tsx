@@ -68,14 +68,11 @@ import { createFactura, TESORERIA_CAMPOS_CONFIRMABLES_NUEVA } from "@/lib/tesore
 import { useExportarSheets } from "@/lib/useExportarSheets";
 
 // Revision de Tesoreria sobre los tickets de reembolso que suben los
-// empleados desde MiCumbres (27/Ago/2026, pantalla PROVISIONAL - ver
-// memoria de sesion "micumbres-tickets-reembolso-provisional"). Vive como
-// pestaña dentro de /tesoreria/facturas (pedido de Mariana: la revision
-// debe estar donde Tesoreria ya trabaja, no en MiCumbres).
+// empleados desde MiCumbres (pantalla PROVISIONAL). Vive como
+// pestaña dentro de /tesoreria/facturas: la revision
+// debe estar donde Tesoreria ya trabaja, no en MiCumbres.
 //
-// Flujo real (pedido explicito de Mariana, 27/Ago/2026, orden final:
-// "verificar con Gemini, muestra los datos, se aprueba, luego se sube
-// factura"): PENDIENTE -> el Motor Documental analiza el comprobante/foto
+// Flujo: PENDIENTE -> el Motor Documental analiza el comprobante/foto
 // que ya subio el empleado (`tesoreria.ticket_gasto`, sobre
 // link_ticket/drive_file_id_ticket) y muestra los datos extraidos -> el
 // analista los revisa y confirma (nunca automatico sin humano, regla no
@@ -100,8 +97,7 @@ const ESTADO_LABEL: Record<TesoreriaTicketEstado, string> = {
   RECHAZADO: "Rechazado",
 };
 
-// Glosario de estados (14/Sep/2026, pendiente.md > Reembolsos) - mismo
-// criterio que el glosario de Solicitudes de Pago.
+// Glosario de estados - mismo criterio que el glosario de Solicitudes de Pago.
 const ESTADO_DESCRIPCION: Record<TesoreriaTicketEstado, string> = {
   PENDIENTE: "Recién subido por el empleado, todavía nadie lo revisa.",
   APROBADO: "Ya autorizado, falta subir/validar la factura real para facturarlo.",
@@ -149,8 +145,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  // Exportar a Google Sheets (14/Sep/2026, pendiente.md > Reembolsos
-  // "Exportar desde 'Ticket'") - mismo patron que Flujos/Solicitudes de
+  // Exportar a Google Sheets - mismo patron que Flujos/Solicitudes de
   // Pago, ver lib/useExportarSheets.ts.
   const {
     exportando,
@@ -353,8 +348,7 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
         permKey: "tesoreria.editar",
         // Fijo (no adivinado por nombre de archivo) - el punto es
         // justamente validar que SI sea una factura real antes de
-        // aceptar el ticket como facturado (pedido de Mariana 27/Ago/2026:
-        // "podrían meter un ticket que no lo es"). Si Gemini marca
+        // aceptar el ticket como facturado. Si Gemini marca
         // matches_expected_type=false o trae validation_errors, el
         // dialogo ya lo muestra como advertencia — el analista decide si
         // igual confirma o rechaza el ticket en vez de facturarlo.

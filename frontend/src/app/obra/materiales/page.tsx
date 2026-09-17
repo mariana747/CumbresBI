@@ -67,8 +67,7 @@ function fechaActual() {
 }
 const FORM_EVIDENCIA_VACIO = { linkDrive: "", fecha: fechaActual(), hora: horaActual(), comentarios: "" };
 
-// Flujo de 3 estados, sin paso intermedio de aprobacion (decision de
-// Mariana 21/Ago/2026: "tendremos Entregado, Solicitado, Rechazado").
+// Flujo de 3 estados, sin paso intermedio de aprobacion.
 const ESTADO_LABELS: Record<SolicitudMaterialEstado, string> = {
   SOLICITADO: "Solicitado",
   ENTREGADO: "Entregado",
@@ -85,8 +84,8 @@ const ESTADO_COLOR: Record<SolicitudMaterialEstado, "default" | "success" | "err
 // 19/Ago/2026 pero sin CRUD real, mismo punto en el que estaba Obra antes
 // de construirlo.
 //
-// Movido de /ventas-vivienda/materiales a /obra/materiales (21/Ago/2026,
-// pedido de Mariana: "materiales debe estar en obra").
+// Movido de /ventas-vivienda/materiales a /obra/materiales: materiales
+// pertenece al modulo de Obra.
 //
 // "Salida de almacen" (21/Ago/2026, antes "Solicitudes de material") es
 // DISTINTA de la Requisicion de Materiales (diseno aprobado 17/Ago/2026,
@@ -100,16 +99,15 @@ const ESTADO_COLOR: Record<SolicitudMaterialEstado, "default" | "success" | "err
 // real). Los nombres del modelo/API internos siguen siendo
 // SolicitudMaterial/`/api/solicitudes/` - solo cambio la etiqueta visible.
 //
-// El catalogo de mano de obra se saco de esta pantalla (21/Ago/2026,
-// pedido de Mariana: "no se que va ahi pero nos pueden fundir por tenerlo
-// en materiales") - el modelo ManoObraCatalogo sigue en el backend (lo
-// usa ConceptoPresupuesto), solo falta decidir en que pantalla vive.
+// El catalogo de mano de obra se saco de esta pantalla - el modelo
+// ManoObraCatalogo sigue en el backend (lo usa ConceptoPresupuesto), solo
+// falta decidir en que pantalla vive.
 type Seccion = "catalogo" | "disponibles" | "salida";
 
 export default function MaterialesPage() {
-  // Pestañas (02/Sep/2026, pedido de Mariana - mismo patrón de Tabs que
-  // admin/reportes/page.tsx) en vez de tarjetas apiladas/laterales: 3
-  // secciones que antes competían por el mismo scroll vertical.
+  // Pestañas (mismo patrón de Tabs que admin/reportes/page.tsx) en vez de
+  // tarjetas apiladas/laterales: 3 secciones que antes competían por el
+  // mismo scroll vertical.
   const [seccion, setSeccion] = useState<Seccion>("catalogo");
   const [session, setSession] = useState<SessionUser | null>(null);
   const [materiales, setMateriales] = useState<MaterialCatalogo[]>([]);
@@ -332,8 +330,7 @@ export default function MaterialesPage() {
         </Stack>
       ) : (
         <>
-          {/* Pestañas (02/Sep/2026, pedido de Mariana: "quiero esas tabs en
-          materiales", mismo patrón que admin/reportes/page.tsx) - antes
+          {/* Pestañas (mismo patrón que admin/reportes/page.tsx) - antes
           eran 3 tarjetas compitiendo por el mismo scroll vertical (o 2
           lado a lado + 1 abajo). "Catálogo de Materiales" y "Catálogo de
           materiales disponibles" leen la misma fuente (MaterialCatalogo);

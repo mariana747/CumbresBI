@@ -134,15 +134,12 @@ const ESTADO_CUENTA_COLOR: Record<string, "success" | "warning" | "error"> = {
   CONGELADA: "error",
 };
 
-// Vista de detalle de un expediente KYC (17/Ago/2026, referencia visual
-// pedida por Mariana: dossier tipo "KYC/AML Customer Dossier" con pestañas
-// y semáforo de riesgo) - adaptado a nuestra paleta clara (BRAND) en vez
-// del mockup oscuro original, y a los datos que REALMENTE existen hoy.
-// "Análisis de riesgo" se queda como "próximamente" (requiere integración
-// externa de KYC/AML, PEP/OFAC, ninguna elegida todavía - ver memoria de
-// sesión "pld-validacion-externa-kyc-pendiente"). "Historial de
-// transacciones" (02/Sep/2026, pedido explicito: "ya funciona tesorería")
-// SÍ está conectado - lee en vivo Factura/ComplementoPago/NotaCredito de
+// Vista de detalle de un expediente KYC: dossier tipo "KYC/AML Customer
+// Dossier" con pestañas y semáforo de riesgo, adaptado a los datos que
+// REALMENTE existen hoy. "Análisis de riesgo" se queda como
+// "próximamente" (requiere integración externa de KYC/AML, PEP/OFAC,
+// ninguna elegida todavía). "Historial de transacciones" SÍ está
+// conectado - lee en vivo Factura/ComplementoPago/NotaCredito de
 // tesoreria-service, filtrado por id_contraparte (ver el useEffect de
 // "transacciones" mas abajo).
 
@@ -170,10 +167,9 @@ type TransaccionUnificada = {
   estado: string | null;
 };
 
-// Agrupado en secciones (17/Ago/2026, combinando con KycDetalleDialog.tsx
-// de feature/pld-drive-explorador - esa rama tenia mas campos que esta
-// vista, ver memoria de sesion "pld-detalle-expediente-comparacion"):
-// Identificacion/Domicilio/Domicilio de correspondencia/Contacto, mismo
+// Agrupado en secciones (combinando con KycDetalleDialog.tsx de
+// feature/pld-drive-explorador - esa rama tenia mas campos que esta
+// vista): Identificacion/Domicilio/Domicilio de correspondencia/Contacto, mismo
 // whitelist que PLD_CAMPOS_CONFIRMABLES.
 const GRUPOS_CAMPOS_GENERAL: { titulo: string; campos: { campo: keyof PldDatosEditables; label: string }[] }[] = [
   {
@@ -934,13 +930,13 @@ export default function PldExpedienteDetallePage() {
                   {kyc.sociedad_nombre ? `Sociedad: ${kyc.sociedad_nombre}` : "Sin sociedad asociada"}
                 </Typography>
               )}
-              {/* Categoria KYC/KYB (04/Sep/2026) - se deriva sola de
-              tipo_persona; el Select solo tiene efecto real cuando queda
-              en PENDIENTE_REVISION (fideicomiso/tipo_persona vacio, "casos
+              {/* Categoria KYC/KYB - se deriva sola de tipo_persona; el
+              Select solo tiene efecto real cuando queda en
+              PENDIENTE_REVISION (fideicomiso/tipo_persona vacio, "casos
               raros" que un analista debe clasificar a mano). "AUTO" es un
               valor especial (no una categoria real, ver
               handleVolverACategoriaAutomatica) para volver a dejar que se
-              derive sola - "se debe poner en auto" (Mariana). */}
+              derive sola. */}
               <FormControl size="small" sx={{ mt: 1, minWidth: 220 }}>
                 <Select
                   value={kyc.categoria_cumplimiento ?? ""}
@@ -1029,17 +1025,13 @@ export default function PldExpedienteDetallePage() {
 
               <Divider sx={{ my: 2.5 }} />
 
-              {/* Control puramente visual (17/Ago/2026, pedido de Mariana:
-              "que no haga nada las partes faltantes") - ajustar
-              calificacion de riesgo requiere el motor de scoring EBR, que
-              no existe todavia (ver
-              docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Fase 2
-              Semana 10 y memoria "pld-validacion-externa-kyc-pendiente").
+              {/* Control puramente visual - ajustar calificacion de riesgo
+              requiere el motor de scoring EBR, que no existe todavia.
               Deshabilitado a proposito, no decorativo-enganoso: el cursor
               "not-allowed" y el texto atenuado dejan claro que no responde.
-              Movido a la columna izquierda (18/Ago/2026, pedido de
-              Mariana: antes vivia a ancho completo hasta abajo de la
-              pagina, requeria scroll para actuar sobre la cuenta). */}
+              Movido a la columna izquierda (antes vivia a ancho completo
+              hasta abajo de la pagina, requeria scroll para actuar sobre
+              la cuenta). */}
               <Box
                 sx={{
                   p: 1.5,

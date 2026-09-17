@@ -561,8 +561,7 @@ export default function TesoreriaFacturasPage() {
   const [vinculandoFlujo, setVinculandoFlujo] = useState(false);
   const [errorVincularFlujo, setErrorVincularFlujo] = useState<string | null>(null);
 
-  // Aviso de saldo PPD pendiente (10/Sep/2026, pendiente real de Jenny) -
-  // nunca se dispara solo, solo con este boton.
+  // Aviso de saldo PPD pendiente - nunca se dispara solo, solo con este boton.
   const [mensajeAvisoSaldo, setMensajeAvisoSaldo] = useState("");
   const [enviandoAvisoSaldo, setEnviandoAvisoSaldo] = useState(false);
   const [avisoSaldoEnviado, setAvisoSaldoEnviado] = useState(false);
@@ -1834,9 +1833,8 @@ export default function TesoreriaFacturasPage() {
                     )}
                   </Stack>
                 </Paper>
-                {/* Aviso de saldo PPD pendiente (10/Sep/2026, pendiente
-                real de Jenny: "aviso por correo de saldo PPD pendiente") -
-                solo aplica si es PPD y todavia le queda saldo. */}
+                {/* Aviso por correo de saldo PPD pendiente - solo aplica
+                si es PPD y todavia le queda saldo. */}
                 {editing.comprobante_metodo_pago === "PPD" &&
                   editing.saldo_pendiente_exhibiciones != null &&
                   Number(editing.saldo_pendiente_exhibiciones) > 0 && (
