@@ -2,7 +2,7 @@
 
 **Cumbres Consultoría y Proyectos** · Anexo al documento de arquitectura v2.0 (microservicios)
 
-> **Estado: catálogo de roles confirmado por el cliente — se van a crear estos roles.** Dos decisiones adicionales confirmadas: (1) **un usuario puede tener varios roles activos en la misma sesión** (ver ajuste a la sección 4 — el alcance efectivo es la unión de todos sus roles, no uno solo); (2) **el nivel GRUPO (holding de sociedades) NO se crea** (decisión final, 10/Ago/2026 — ver sección 5, pregunta 1, ya cerrada). El sistema se queda con los **4 niveles de alcance** confirmados en el onboarding de Dylan: GLOBAL, SOCIEDAD, PROYECTO, CENTRO. El resto de este documento (matriz de permisos y reglas de RLS por rol) se mantiene como base de trabajo para la implementación en `iam_permissions`/`iam_role_permissions`.
+> **Estado: catálogo de roles confirmado por el cliente — se van a crear estos roles.** Dos decisiones adicionales confirmadas: (1) **un usuario puede tener varios roles activos en la misma sesión** (ver ajuste a la sección 4 — el alcance efectivo es la unión de todos sus roles, no uno solo); (2) **el nivel GRUPO (holding de sociedades) NO se crea** (decisión final, 10/Ago/2026 — ver sección 5, pregunta 1, ya cerrada). El sistema se queda con los **4 niveles de alcance** confirmados: GLOBAL, SOCIEDAD, PROYECTO, CENTRO. El resto de este documento (matriz de permisos y reglas de RLS por rol) se mantiene como base de trabajo para la implementación en `iam_permissions`/`iam_role_permissions`.
 
 ## 1. Niveles de alcance 
 
@@ -90,7 +90,7 @@ Cada rol individual aporta su propia combinación de claims al agregado anterior
 
 Estas preguntas son además de las ya planteadas sobre CENTRO/CONTRATO y el dominio raíz de cookies:
 
-1. **Cerrado (decisión final, 10/Ago/2026): NO se crea GRUPO.** El sistema se queda con los 4 niveles del onboarding oficial de Dylan (GLOBAL/SOCIEDAD/PROYECTO/CENTRO).
+1. **Cerrado (decisión final, 10/Ago/2026): NO se crea GRUPO.** El sistema se queda con los 4 niveles confirmados (GLOBAL/SOCIEDAD/PROYECTO/CENTRO).
 
 Vía definitiva (ya no interina): el rol `CONTRALOR` recibe alcance `sociedad_rfcs` como **lista explícita** de las sociedades del grupo que le correspondan (asignada manualmente al crear el usuario, vía `iam_user_roles` múltiples con `scope_type='SOCIEDAD'`, uno por sociedad) — sin agregar `GRUPO` al ENUM. Es más manual si el grupo crece (hay que actualizar la lista de roles del usuario cada vez que se agregue una sociedad al holding), pero no requiere migración de esquema. Confirmado por el cliente (10/Ago/2026) como la solución definitiva, no un parche temporal.
 
