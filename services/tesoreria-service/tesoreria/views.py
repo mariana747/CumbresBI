@@ -137,14 +137,11 @@ class _PermisosCatalogoTesoreriaMixin:
 
 
 class _PermiteSecretoInternoOTesoreriaCrear(BasePermission):
-    """Crear una contraparte por el secreto interno servicio-a-servicio
-    (pld-service, alta automatica del expediente KYC autonomo - ver
-    pld/views.py::_crear_contraparte_minima_en_tesoreria) O por el permiso
-    normal tesoreria.crear (pantalla de Contrapartes). Mismo patron que
-    drive-service/drive/views.py::_autorizado - el secreto es una via
-    adicional, nunca reemplaza el permiso en el caso normal con JWT de
-    usuario (02/Sep/2026, cierre de la reconciliacion contraparte
-    maestra)."""
+    """Permite crear contraparte por secreto interno servicio-a-servicio
+    (pld-service, alta automatica del expediente KYC) O por el permiso
+    normal tesoreria.crear. Mismo patron que
+    drive-service/drive/views.py::_autorizado - el secreto es via
+    adicional, nunca reemplaza el permiso normal con JWT de usuario."""
 
     message = "No tienes el permiso 'tesoreria.crear' para hacer esto."
 
@@ -157,20 +154,11 @@ class _PermiteSecretoInternoOTesoreriaCrear(BasePermission):
 
 
 class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
-    """Catalogo maestro de contrapartes (Fase 4, arranque formal 18/Ago/2026).
-    CRUD real, sin ScopedManager (catalogo compartido entre sociedades, ver
-    docstring del serializer) - filtro real por permiso
-    (tesoreria.crear/.editar), mismo criterio que GeneralSociedadViewSet en
-    iam-service (unico otro catalogo generico real del ERD).
-
-    Busqueda de texto libre (?search=) sobre razon_social/rfc/contacto.
-    Filtro adicional ?cliente=1 / ?proveedor=1 (19/Ago/2026) - para que el
-    ContraparteSelector del frontend pueda mostrar solo uno u otro segun el
-    contexto (ej. PLD preguntando si el expediente es de un cliente o un
-    proveedor). Sin filtro, regresa todas por igual - un registro puede ser
-    ambas cosas a la vez (cliente Y proveedor), no son excluyentes.
-    DELETE es fisico (sin soft-delete en el ERD real) - usar con cuidado,
-    igual advertencia que GeneralSociedadViewSet."""
+    """Catalogo maestro de contrapartes, sin ScopedManager (compartido
+    entre sociedades), gateado por permiso (tesoreria.crear/.editar).
+    Busqueda libre (?search=) sobre razon_social/rfc/contacto;
+    ?cliente=1/?proveedor=1 filtran sin ser excluyentes. DELETE es fisico,
+    usar con cuidado."""
 
     serializer_class = TesoreriaContraparteSerializer
     filter_backends = [SearchFilter]
@@ -437,10 +425,10 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         return Response({"id_contrato": contrato.id_contrato})
 
     def perform_create(self, serializer):
-        # id_contrato = "{sociedad}-{id_contraparte}-{consecutivo 3 digitos}"
-        # (decision de Mariana 18/Ago/2026) - generado aqui, no autogenerado
-        # por uuid como Contraparte/Cuenta, porque aqui si importa que sea
-        # legible. Cuenta TODOS los contratos existentes de esa sociedad+
+        # id_contrato = "{sociedad}-{id_contraparte}-{consecutivo 3 digitos}",
+        # generado aqui, no autogenerado por uuid como Contraparte/Cuenta,
+        # porque aqui si importa que sea legible. Cuenta TODOS los
+        # contratos existentes de esa sociedad+
         # contraparte sin filtrar por scope (TesoreriaContrato.objects.filter
         # sin .for_scope() no aplica RLS) - el consecutivo debe ser correcto
         # sin importar que alcance tenga quien esta creando.
@@ -458,10 +446,8 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     @action(detail=True, methods=["post"])
     def enviar_recordatorio_documentos(self, request, pk=None):
         """Avisa a la contraparte de los documentos que el analista
-        SELECCIONO del checklist (28/Ago/2026, pedido explicito de Mariana:
-        "se puede...seleccionar para picar en avisar a la contraparte de
-        los documentos pendientes" - no se manda automatico por todos los
-        pendientes, el analista elige cuales). UN correo por cada documento
+        SELECCIONO del checklist - no se manda automatico por todos los
+        pendientes, el analista elige cuales. UN correo por cada documento
         seleccionado, nunca un solo correo agrupando varios (ver
         enviar_correo_documento_faltante).
 
@@ -489,10 +475,9 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
                 status=400,
             )
 
-        # Un TesoreriaDocumentoTicket nuevo por documento (28/Ago/2026,
-        # pedido explicito de Mariana: "un correo por documento que falte" +
-        # "esos [archivos] los subira el cliente...mediante una magic link
-        # por doc faltante") - nunca se reusa el token de un documento para
+        # Un TesoreriaDocumentoTicket nuevo por documento, un correo por
+        # documento faltante con magic link para que el cliente lo suba -
+        # nunca se reusa el token de un documento para
         # otro, mismo criterio que TesoreriaTicketProveedor (token en claro
         # solo se expone en el correo, jamas se guarda).
         enviados = []
@@ -601,10 +586,7 @@ class TesoreriaContratoDocumentoViewSet(ModelViewSet):
     """Checklist de documentos requeridos de un contrato.
     crear=tesoreria.crear, borrar=tesoreria.editar - el analista arma y
     depura el checklist. NO existe ninguna accion para que el analista
-    suba/reemplace el archivo (28/Ago/2026, pedido explicito de Mariana:
-    "no puede subir o reemplazar un archivo esos los subira el cliente...
-    mediante una magic link", y despues confirmado sin excepcion manual:
-    "no olvides quitar el boton de subir") - el UNICO camino para llenar
+    suba/reemplace el archivo, sin excepcion manual - el UNICO camino para llenar
     `link_archivo`/`recibido` es que el cliente lo suba via
     TesoreriaDocumentoTicketViewSet.subir, sin sesion.
 
@@ -637,9 +619,7 @@ class TesoreriaContratoDocumentoViewSet(ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         """Un documento ya recibido (el cliente lo subió) deja de poder
-        borrarse (28/Ago/2026, pedido explicito de Mariana: "si ya hay
-        documentos subido por contraparte, el analista podra verlo y ya no
-        podra borrar") - solo se puede depurar el checklist mientras sigue
+        borrarse - solo se puede depurar el checklist mientras sigue
         pendiente."""
         documento = self.get_object()
         if documento.recibido:
@@ -660,8 +640,8 @@ class TesoreriaContratoDocumentoViewSet(ModelViewSet):
         return TesoreriaContratoDocumento.objects.select_related("contrato").filter(contrato_id=contrato_id)
 
 class TesoreriaDocumentoTicketViewSet(ViewSet):
-    """Ticket publico de UN documento del checklist (28/Ago/2026, pedido
-    explicito de Mariana - ver TesoreriaDocumentoTicket). Solo expone
+    """Ticket publico de UN documento del checklist (ver
+    TesoreriaDocumentoTicket). Solo expone
     "validar"/"subir", ambos publicos (sin sesion, sin ningun perm_key) -
     los tickets en si solo se generan desde
     TesoreriaContratoViewSet.enviar_recordatorio_documentos, no hay
@@ -766,20 +746,10 @@ class TesoreriaDocumentoTicketViewSet(ViewSet):
 
 
 def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
-    """Propone candidatos de Factura para conciliar con un Flujo (07/Sep/2026,
-    "IA que proponga el match comprobante->factura" - antes el enlace
-    factura<->flujo siempre era 100% manual, la IA solo ayudaba con los
-    demas campos/contraparte, ver docstring de confirmar_conciliacion).
-
-    Heuristica simple, no un modelo de ML: mismo RFC de la contraparte si
-    ya se conoce + monto igual o muy cercano (tolerancia de 1 peso por
-    redondeo) + fecha cercana (una factura muy vieja no deberia sugerirse
-    aunque el monto cuadre por casualidad, ver TOLERANCIA_DIAS). Excluye
-    facturas que ya tienen un flujo ligado (`factura.flujos.exists()`) -
-    un mismo CFDI no debe proponerse dos veces para pagos distintos.
-    Nunca liga sola: regresa solo una lista de sugerencias ordenadas por
-    score descendente, el analista sigue siendo quien confirma cual (o
-    ninguna)."""
+    """Propone candidatos de Factura para un Flujo por heuristica simple
+    (RFC de la contraparte + monto con tolerancia + fecha cercana,
+    excluyendo facturas ya ligadas). Nunca liga sola: regresa sugerencias
+    ordenadas por score, el analista confirma cual (o ninguna)."""
     if monto is None:
         return []
 
@@ -834,11 +804,9 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
 
 
 def _aplicar_filtro_fecha_conciliacion(request, queryset):
-    """Rango de fechas de Conciliacion de Facturas (10/Sep/2026, "no es por
-    periodo debe ser por rango de fecha o una sola fecha") - compartido
-    entre conciliacion/ y sugerencias_cfdi_lote/ (mismo filtro base en las
-    2). ?desde=/?hasta=, cualquiera de los dos es opcional (mandar solo uno
-    = limite abierto); sin ninguno, el mes corriente por default."""
+    """Rango de fechas de Conciliacion de Facturas, compartido entre
+    conciliacion/ y sugerencias_cfdi_lote/. ?desde=/?hasta=, cualquiera
+    opcional; sin ninguno, el mes corriente por default."""
     desde_param = request.query_params.get("desde")
     hasta_param = request.query_params.get("hasta")
     if desde_param or hasta_param:
@@ -922,9 +890,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         contrato_id = self.request.query_params.get("contrato")
         if contrato_id:
             queryset = queryset.filter(contrato_id=contrato_id)
-        # ?cuenta= y ?categoria_gasto= (09/Sep/2026, feedback de Jenny +
-        # "clasificar y rastrear movimientos") - mismo criterio que el
-        # resto de filtros de este metodo.
+        # ?cuenta= y ?categoria_gasto= para clasificar y rastrear
+        # movimientos - mismo criterio que el resto de filtros de este metodo.
         cuenta_id = self.request.query_params.get("cuenta")
         if cuenta_id:
             queryset = queryset.filter(cuenta_id=cuenta_id)
@@ -985,15 +952,11 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def exportar_sheets(self, request):
-        """Exportar a Google Sheets, al Drive PERSONAL del usuario
-        (14/Sep/2026, "ya no se descargara ni CSV ni Excel, se guardara en
-        su drive personal") - mismos filtros/columnas que exportar_csv de
-        arriba (se deja sin borrar por compatibilidad, el frontend deja de
-        usarlo). Si el usuario no ha conectado su cuenta de Google
-        (ver iam-service/iam/google_personal_views.py), regresa 409 con la
-        url de autorizacion para que el frontend redirija - "la IA
-        propone, el humano aprueba" no aplica aqui pero el criterio de "el
-        usuario ve claro que falta un paso" si."""
+        """Exporta a Google Sheets, al Drive personal del usuario (mismos
+        filtros/columnas que exportar_csv, que se deja sin borrar por
+        compatibilidad). Si el usuario no ha conectado su cuenta de
+        Google, regresa 409 con la url de autorizacion para que el
+        frontend redirija."""
         queryset = self.filter_queryset(self.get_queryset())
         try:
             access_token = google_sheets_utils.obtener_access_token(request)
@@ -1034,16 +997,10 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def conciliacion(self, request):
-        """Conciliacion de Facturas (10/Sep/2026, notas de reunion) - base
-        de las 3 pantallas (Ligado a CFDI / Sin CFDI / No requiere CFDI).
-        Reusa los filtros de empresa/contrato de get_queryset() y agrega los
-        propios de esta vista: ?desde=/?hasta= (YYYY-MM-DD, rango de
-        fecha_efectiva - mandar solo uno de los dos equivale a una sola
-        fecha; sin ninguno, el mes corriente por default),
-        ?requiere_factura= (true/false, del contrato) y ?tipo_comprobante=
-        (I/E - Ingreso/Egreso, del catalogo SAT en la factura/complemento
-        ligado; un flujo sin ninguno de los dos no puede filtrarse por
-        esto y queda fuera si se manda el parametro)."""
+        """Conciliacion de Facturas: base de las 3 pantallas (Ligado a
+        CFDI / Sin CFDI / No requiere CFDI). Filtros propios:
+        ?desde=/?hasta= (default mes corriente), ?requiere_factura= y
+        ?tipo_comprobante= (I/E del catalogo SAT)."""
         queryset = _aplicar_filtro_fecha_conciliacion(request, self.filter_queryset(self.get_queryset()))
 
         requiere_factura = request.query_params.get("requiere_factura")
@@ -1061,12 +1018,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def conciliacion_nomina(self, request):
-        """Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente
-        pendiente tras el cierre real de Nomina) - mismo patron
-        reconocido/por_reconocer que conciliacion() de arriba, acotada a
-        Flujos de nomina (periodo_nomina no nulo). Reusa los filtros de
-        get_queryset() (?sociedad=, ?nomina=, ?id_empleado=) + ?desde=/
-        ?hasta= (mismo default de mes corriente que conciliacion())."""
+        """Conciliacion Nomina<->Recibo CFDI, mismo patron que
+        conciliacion() pero acotada a Flujos con periodo_nomina."""
         queryset = _aplicar_filtro_fecha_conciliacion(
             request, self.filter_queryset(self.get_queryset()).filter(periodo_nomina__isnull=False)
         )
@@ -1127,10 +1080,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def conciliacion_sheets(self, request):
-        """Exportar a Google Sheets, al Drive PERSONAL del usuario
-        (14/Sep/2026, reemplaza conciliacion_csv - misma clasificacion de
-        arriba, doc completa del flujo de conexion en
-        TesoreriaFlujoViewSet.exportar_sheets)."""
+        """Exporta a Google Sheets, al Drive personal del usuario - mismo
+        flujo de conexion que TesoreriaFlujoViewSet.exportar_sheets."""
         queryset = _aplicar_filtro_fecha_conciliacion(request, self.filter_queryset(self.get_queryset()))
 
         requiere_factura = request.query_params.get("requiere_factura")
@@ -1192,10 +1143,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     def _validar_nomina_editable(self, periodo_nomina):
         """Nomina cerrada = sus Flujos ya no se pueden crear, editar ni
-        borrar (14/Sep/2026, "los estados aprobados no se podran hacer
-        cambios" - cierre real de la Nomina, ver pendiente.md > Nominas
-        Fase 2). Antes `status=CERRADA` era solo una etiqueta, no bloqueaba
-        nada."""
+        borrar - cierre real de la Nomina. Antes `status=CERRADA` era solo
+        una etiqueta, no bloqueaba nada."""
         if periodo_nomina is not None and periodo_nomina.status == TesoreriaNomina.STATUS_CERRADA:
             raise ValidationError(
                 {"periodo_nomina": ["Esta nómina está cerrada, no se pueden crear ni editar sus Flujos."]}
@@ -1389,24 +1338,18 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def sugerencias_cfdi_lote(self, request):
-        """Sugerencias para TODOS los flujos "Sin CFDI" del filtro actual a
-        la vez (10/Sep/2026, "aprobar en lote, no uno por uno") - mismos
-        filtros que conciliacion/ (empresa, contrato, rango de fecha).
-        Sigue sin ligar nada sola - ver aprobar_lote para el paso que si
-        liga, siempre con confirmacion explicita del analista en pantalla."""
+        """Sugerencias para todos los flujos "Sin CFDI" del filtro actual
+        (mismos filtros que conciliacion/). No liga nada; ver
+        aprobar_lote."""
         queryset = self.filter_queryset(self.get_queryset())
         queryset = _aplicar_filtro_fecha_conciliacion(request, queryset)
         return Response(sugerir_cfdi_en_lote(queryset))
 
     @action(detail=False, methods=["post"])
     def aprobar_lote(self, request):
-        """Aplica varias ligas de una vez (10/Sep/2026, "aprobar en lote") -
-        recibe una lista de {id_flujo, tipo, timbre_uuid} ya elegida en
-        pantalla (el analista pudo haber desmarcado algunas antes de
-        mandar esto) y llama el mismo camino de siempre por cada una
-        (mismo criterio que vincular_factura, una por una en el momento del
-        POST) - nunca es la IA sola quien decide, este endpoint solo evita
-        que el analista abra cada pago uno por uno."""
+        """Aplica varias ligas de una vez: recibe {id_flujo, tipo,
+        timbre_uuid} ya elegidos en pantalla y llama el mismo camino que
+        vincular_factura por cada uno."""
         items = request.data.get("items", [])
         resultados = []
         for item in items:
@@ -1433,18 +1376,9 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     @action(detail=True, methods=["post"])
     def vincular_factura(self, request, pk=None):
         """Liga el flujo a una factura/complemento/recibo de nomina ya
-        emitidos - `factura`/`complemento`/`nomina` son de solo
-        lectura en el serializer (ver TesoreriaFlujoSerializer) porque no
-        tiene sentido escribirlos a mano en un POST/PATCH normal: el CFDI
-        debe existir de antemano en tesoreria-service, esta accion solo
-        valida eso y hace el enlace. Recibe timbre_uuid (PK real de los 3
-        modelos), no el id numerico interno.
-
-        `nomina` (10/Sep/2026, "como se une nomina y recibos de nomina") -
-        antes era un FK muerto (nunca se llenaba desde ningun lado); ahora
-        un Flujo con periodo_nomina puede ligarse tambien al recibo de
-        nomina (CFDI) real de ese empleado, igual patron que factura/
-        complemento."""
+        emitidos (campos read-only en el serializer); recibe timbre_uuid,
+        no el id interno. `nomina` antes era un FK muerto, ahora se llena
+        aqui igual que factura/complemento."""
         flujo = self.get_object()
         timbre_uuid_factura = request.data.get("factura")
         timbre_uuid_complemento = request.data.get("complemento")
@@ -1605,8 +1539,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
 class TesoreriaTicketReembolsoViewSet(ModelViewSet):
     """Tickets de reembolso de MiCumbres (pantalla PROVISIONAL
-    /mi-cumbres/tickets, 27/Ago/2026 - ver docstring del modelo en
-    models.py). Regla de permisos pedida por Mariana: el empleado sube su
+    /mi-cumbres/tickets - ver docstring del modelo en
+    models.py). El empleado sube su
     propio ticket (crear + subir_ticket), Tesoreria es quien despues
     adjunta la factura real y liga el pago - el empleado NUNCA puede
     editar/borrar un ticket una vez creado.
@@ -1639,9 +1573,7 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def fecha_limite(self, request):
-        """Ventana de reembolso del mes en curso (03/Sep/2026, pedido de
-        Mariana: "que se coloque el dia/mes/año de hasta cuando se
-        aceptan"; regla reemplazada 04/Sep/2026, ver docstring de
+        """Ventana de reembolso del mes en curso (ver docstring de
         reembolso_utils). Lectura abierta a cualquier empleado autenticado -
         la necesitan ver ANTES de intentar crear un ticket, mismo criterio
         que create/subir_ticket."""
@@ -1666,8 +1598,7 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             .select_related("flujo")
             .order_by("-created_at")
         )
-        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
-        # filtro") - acota la vista sin cambiar el scope real de la sesion,
+        # Filtro por sociedad - acota la vista sin cambiar el scope real de la sesion,
         # mismo criterio que PldContraparteKycViewSet.get_queryset.
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
@@ -1685,12 +1616,9 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def exportar_sheets(self, request):
-        """Exportar a Google Sheets, al Drive PERSONAL del usuario
-        (14/Sep/2026, pendiente.md > Reembolsos "Exportar desde 'Ticket'")
-        - mismo patron que TesoreriaFlujoViewSet.exportar_sheets. Una fila
-        por CONCEPTO (no por ticket) - un ticket puede tener varios
-        conceptos con categoria/monto distintos, aplanarlos es lo que
-        tiene sentido para un reporte."""
+        """Exporta a Google Sheets, mismo patron que
+        TesoreriaFlujoViewSet.exportar_sheets. Una fila por CONCEPTO (no
+        por ticket), ya que un ticket puede mezclar categorias/montos."""
         queryset = self.filter_queryset(self.get_queryset()).prefetch_related("conceptos")
         try:
             access_token = google_sheets_utils.obtener_access_token(request)
@@ -1760,19 +1688,10 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         )
 
     def create(self, request, *args, **kwargs):
-        """Crea el ticket Y sube su comprobante en una sola llamada
-        (07/Sep/2026 - antes eran dos pasos separados: crear() via JSON y
-        luego subirFotoTicket() via multipart aparte, ver miCumbres.ts. Bug
-        real encontrado ese dia: si el segundo paso fallaba (ej. timeout de
-        drive-service), el ticket ya quedaba creado SIN imagen, y el
-        reintento del empleado desde el formulario volvia a llamar crear(),
-        generando un ticket DUPLICADO completo en vez de solo reintentar la
-        subida sobre el mismo). Ahora "file" es requerido para crear el
-        ticket - no puede existir un ticket sin comprobante - y si la subida
-        a Drive falla, se borra el ticket recien creado (rollback manual,
-        sin dejar un registro huerfano) y se regresa el mismo error de
-        siempre; el empleado reintenta desde cero, sin que eso deje
-        basura."""
+        """Crea el ticket Y sube su comprobante en una sola llamada, para
+        evitar tickets duplicados si el paso de subida fallaba por
+        separado. "file" es obligatorio; si Drive falla, se hace rollback
+        del ticket recien creado."""
         archivo = request.FILES.get("file")
         if not archivo:
             return Response(
@@ -1844,26 +1763,9 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
-        """Primer paso de la revision (27/Ago/2026, flujo pedido por
-        Mariana, orden final: "verificar con Gemini, muestra los datos, se
-        aprueba, luego se sube factura"): Tesoreria verifica con el Motor
-        Documental el comprobante/foto que subio el empleado
-        (`tesoreria.ticket_gasto`, sobre link_ticket/drive_file_id_ticket,
-        ver TicketsReembolsoAdminPanel.tsx) y, viendo los datos extraidos,
-        decide si el gasto procede - todavia NO hay factura ni pago, solo
-        la decision de que el ticket es valido. Solo se puede aprobar desde
-        PENDIENTE. La obligacion de pasar por el Motor Documental antes de
-        aprobar se enforce en el frontend (unico boton que llama a este
-        endpoint es el "Confirmar" del dialogo, no hay boton manual de
-        Aprobar) - no hay un campo propio en el modelo para verificar esto
-        del lado del backend, igual que el resto de "confirmar extraccion"
-        del Motor Documental en otros modulos (PLD, Facturas). Requiere
-        tesoreria.editar.
-
-        autorizado_por/fecha_autorizacion (03/Sep/2026, minuta: "se necesita
-        autorizar antes de pagar") se resuelven del JWT igual que
-        TesoreriaFlujoViewSet.aprobar - antes este aprobar() solo cambiaba
-        el estado sin dejar rastro de quien lo hizo."""
+        """Primer paso de revision: aprueba el ticket como valido (aun sin
+        factura ni pago), solo desde PENDIENTE. Requiere tesoreria.editar.
+        autorizado_por/fecha_autorizacion se resuelven del JWT."""
         ticket = self.get_object()
         if ticket.estado != TesoreriaTicketReembolso.ESTADO_PENDIENTE:
             return Response({"estado": ["Solo se puede aprobar un ticket Pendiente."]}, status=400)
@@ -2033,11 +1935,11 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
 
 class TesoreriaSolicitudPagoViewSet(ModelViewSet):
-    """Solicitud de pago de servicios/licencias/renovaciones (04/Sep/2026,
-    ver docstring del modelo). A diferencia de TesoreriaTicketReembolso
+    """Solicitud de pago de servicios/licencias/renovaciones (ver
+    docstring del modelo). A diferencia de TesoreriaTicketReembolso
     (abierto a cualquier empleado via _EsEmpleadoAutenticado), aqui `crear`
-    exige el permiso real `solicitud-pago.crear` - "no todos los
-    colaboradores pueden solicitar pago" (Mariana). `aprobar`/`rechazar`
+    exige el permiso real `solicitud-pago.crear` - no todos los
+    colaboradores pueden solicitar pago. `aprobar`/`rechazar`
     exigen `solicitud-pago.aprobar` en vez de `.editar` (a diferencia de
     TesoreriaTicketReembolsoViewSet) para reforzar la separacion de
     funciones: TESORERIA_ANALISTA tiene `.crear` pero NO `.aprobar` en el
@@ -2137,9 +2039,8 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def exportar_sheets(self, request):
-        """Exportar a Google Sheets, al Drive PERSONAL del usuario
-        (14/Sep/2026, pendiente.md > Solicitudes de Pago "Pasar google
-        sheet") - mismo patron que TesoreriaFlujoViewSet.exportar_sheets."""
+        """Exporta a Google Sheets, mismo patron que
+        TesoreriaFlujoViewSet.exportar_sheets."""
         queryset = self.filter_queryset(self.get_queryset())
         try:
             access_token = google_sheets_utils.obtener_access_token(request)
@@ -2434,13 +2335,13 @@ def _primer_archivo_por_tipo(archivos, extension):
 
 class TesoreriaTicketProveedorViewSet(ModelViewSet):
     """Ticket publico de un solo uso para que un PROVEEDOR externo suba su
-    factura sin login (27/Ago/2026, mismo patron que
+    factura sin login (mismo patron que
     PldTicketClienteViewSet en pld-service, independiente - ver docstring
     del modelo). "validar"/"subir_factura" son publicos (sin sesion);
     crear/revocar son acciones internas de Tesoreria.
 
-    El archivo sube a Tesoreria/Facturas/FacturasProveedores (27/Ago/2026,
-    pedido de Mariana: nombre propio, no mezclado con el alta manual) - el
+    El archivo sube a Tesoreria/Facturas/FacturasProveedores (nombre propio,
+    no mezclado con el alta manual) - el
     analista abre "Nueva factura" > Motor Documental apuntando a esa misma
     carpeta, sin necesitar una pantalla de revision aparte para estos
     tickets.
@@ -2473,8 +2374,7 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
         queryset = TesoreriaTicketProveedor.objects.for_scope(self.request.effective_scope).select_related(
             "contraparte"
         )
-        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
-        # filtro") - acota la vista sin cambiar el scope real de la sesion.
+        # Filtros por sociedad/proyecto - acota la vista sin cambiar el scope real de la sesion.
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
             queryset = queryset.filter(sociedad=sociedad)
@@ -2575,16 +2475,12 @@ class TesoreriaTicketProveedorViewSet(ModelViewSet):
         if not recaptcha.verificar(request.data.get("recaptcha_token"), request.META.get("REMOTE_ADDR")):
             return Response({"detail": "Verificación reCAPTCHA fallida. Intenta de nuevo."}, status=400)
 
-        # Subcarpeta por proveedor (27/Ago/2026, pedido de Mariana: "igual
-        # proveedores se dividen dentro por su id") - id_contraparte, no
+        # Subcarpeta por proveedor - id_contraparte, no
         # razon_social, mismo criterio que el resto del proyecto (ej.
         # PLD/Nuevos Clientes/<id_contraparte>) - un nombre puede repetirse
         # o traer caracteres raros para una ruta de Drive, el id nunca.
         #
-        # Sub-division por SOLICITUD (08/Sep/2026, "seria por registro de
-        # solicitud como se hace ahora pero que de la contraparte dentro se
-        # creen subcarpetas donde se iran metiendo cada que se genere una")
-        # - una misma contraparte (ej. IZEL) puede facturar desde varias
+        # Sub-division por SOLICITUD - una misma contraparte (ej. IZEL) puede facturar desde varias
         # unidades de negocio (Acuario, Restaurante, etc.) sin que exista un
         # catalogo fijo de cuales son; en vez de intentar adivinar/capturar
         # esa unidad, cada ticket (=una solicitud de subida) ya es un evento
@@ -2864,9 +2760,8 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def exportar_sheets(self, request):
-        """Exportar a Google Sheets, al Drive PERSONAL del usuario
-        (14/Sep/2026, reemplaza exportar_csv - ver mismo endpoint en
-        TesoreriaFlujoViewSet, doc completa ahi)."""
+        """Exporta a Google Sheets, reemplaza exportar_csv - ver mismo
+        endpoint en TesoreriaFlujoViewSet."""
         queryset = self.filter_queryset(self.get_queryset())
         try:
             access_token = google_sheets_utils.obtener_access_token(request)
@@ -3083,8 +2978,8 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         # proceso), no edicion manual del CFDI - se gatean con
         # facturacion-cfdi.aprobar para que TESORERIA_ANALISTA/
         # FINANZAS_MANAGER las conserven aunque perdieron crear/editar
-        # (finanzas.md: "the user cannot create, delete or modify
-        # invoices", 26/Ago/2026 - ver permission_matrix.py).
+        # (el usuario no puede crear, borrar ni modificar facturas - ver
+        # permission_matrix.py).
         if self.action in ("confirmar_extraccion", "marcar_estado", "enviar_masivo"):
             return [require_permission("facturacion-cfdi.aprobar")()]
         if self.action == "aviso_saldo_pendiente":
@@ -3093,8 +2988,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def aviso_saldo_pendiente(self, request, pk=None):
-        """Aviso manual de saldo PPD pendiente (10/Sep/2026, pendiente real
-        de Jenny) - solo tiene sentido si la factura es PPD y todavia le
+        """Aviso manual de saldo PPD pendiente - solo tiene sentido si la factura es PPD y todavia le
         queda saldo (ver TesoreriaFacturaSerializer.saldo_pendiente_
         exhibiciones); nunca se dispara solo/programado, solo desde este
         boton."""
@@ -3159,13 +3053,11 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     def marcar_estado(self, request, pk=None):
         """Cambia el estado del proceso de revision de la factura
         (PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA, ver
-        TesoreriaFactura.ESTADO_CHOICES) - pedido explicito de Mariana
-        (24/Ago/2026). Pasar a ACEPTADA exige que ya esten cargados los dos
+        TesoreriaFactura.ESTADO_CHOICES). Pasar a ACEPTADA exige que ya esten cargados los dos
         archivos esenciales, PDF y XML - sin eso no queda forma de
         comprobar despues que el CFDI aceptado es el correcto. Acepta
         drive_file_id_pdf/xml (el archivo real, via Drive) O link_pdf/
-        link_xml (09/Sep/2026, "no se aceptan de links manuales, todo de
-        drive" - ya no se puede CAPTURAR un link manual desde la UI, pero
+        link_xml - ya no se puede CAPTURAR un link manual desde la UI, pero
         estos campos siguen sirviendo para facturas viejas que ya lo
         tenian asi). Mismo permiso que editar la factura
         (facturacion-cfdi.editar) - a diferencia de TesoreriaFlujo, aqui no
@@ -3469,14 +3361,12 @@ class TesoreriaCorteEdcViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         return queryset
 
 
-# Encabezados aceptados por columna del extracto bancario (08/Sep/2026,
-# primer paso de la conciliacion bancaria real - ver finanzas.md
-# "Generate reconciliation reports (transactions vs. invoices)"). No hay un
+# Encabezados aceptados por columna del extracto bancario, primer paso de
+# la conciliacion bancaria (transacciones vs. facturas). No hay un
 # formato unico de estado de cuenta entre bancos, asi que se acepta
 # cualquiera de estos alias por columna en vez de exigir un nombre exacto.
 _ENCABEZADOS_MOVIMIENTO = {
-    # "fecha operacion"/"fecha operación" (11/Sep/2026, formato real de
-    # CRCM compartido por Jenny) - normalizada ya viene sin acentos raros
+    # "fecha operacion"/"fecha operación" - normalizada ya viene sin acentos raros
     # de encoding pero se dejan ambas formas por si acaso.
     "fecha": ("fecha", "date", "fecha operacion", "fecha operación"),
     "descripcion": ("descripcion", "concepto", "description"),
@@ -3532,12 +3422,9 @@ _ALIAS_ENCABEZADO_CONOCIDOS = {alias for aliases in _ENCABEZADOS_MOVIMIENTO.valu
 
 
 def _indice_fila_encabezado(filas_crudas: list[list]) -> int:
-    """Detecta cual fila cruda es la de encabezados reales (11/Sep/2026,
-    "Subida de archivos CRCM" - el estado de cuenta real trae filas de
-    metadata antes, ej. "Cuenta  0124071131", que no son el encabezado).
-    Se queda con la primera fila que reconoce al menos 3 de las columnas
-    esperadas (fecha/concepto/cargo/abono/saldo) en vez de asumir que
-    siempre es la fila 1."""
+    """Detecta la fila de encabezados reales (el extracto trae filas de
+    metadata antes) - primera fila que reconoce al menos 3 de las
+    columnas esperadas, en vez de asumir que siempre es la fila 1."""
     for indice, fila in enumerate(filas_crudas):
         normalizada = {str(v).strip().lower() for v in fila if v not in (None, "")}
         if len(normalizada & _ALIAS_ENCABEZADO_CONOCIDOS) >= 3:
@@ -3546,12 +3433,9 @@ def _indice_fila_encabezado(filas_crudas: list[list]) -> int:
 
 
 def _parsear_filas_extracto(nombre_archivo: str, contenido: bytes) -> list[dict]:
-    """Regresa una lista de dicts {encabezado_original: valor} por fila de
-    datos - CSV con encabezados o Excel (.xlsx), buscando la fila real de
-    encabezados en vez de asumir que es siempre la primera (ver
-    _indice_fila_encabezado). No hay soporte de OFX/PDF por ahora
-    (pendiente, igual que el resto de integraciones de escaneo/Drive del
-    proyecto)."""
+    """Lista de dicts {encabezado: valor} por fila (CSV o Excel), usando
+    _indice_fila_encabezado para ubicar el encabezado real. Sin soporte
+    OFX/PDF por ahora."""
     nombre = nombre_archivo.lower()
     if nombre.endswith(".csv"):
         texto = contenido.decode("utf-8-sig", errors="replace")
@@ -3583,20 +3467,10 @@ def _monto_movimiento_bancario(movimiento) -> Decimal:
 
 
 def _sugerir_flujos_para_movimiento(movimiento, limite=5):
-    """Propone candidatos de TesoreriaFlujo para conciliar un
-    TesoreriaMovimientoBancario (08/Sep/2026, matching automatico -
-    siguiente paso de la conciliacion bancaria real, ver
-    TesoreriaMovimientoBancarioViewSet.importar). Misma heuristica de
-    puntaje que _sugerir_facturas_para_flujo: no es un modelo de ML, es
-    monto + fecha con tolerancia, ordenado por score. El monto se compara
-    en valor absoluto a proposito (no todo `total_mxp` capturado hasta hoy
-    sigue el signo exacto de finanzas.md) - la fecha y el monto exacto ya
-    bastan para acotar bien los candidatos reales.
-
-    Excluye flujos que ya tiene ligado OTRO movimiento bancario (un mismo
-    flujo no debe proponerse dos veces para lineas de banco distintas) y
-    flujos de otra cuenta (el banco no cuadra un pago que salio de otra
-    cuenta)."""
+    """Propone candidatos de Flujo para un movimiento bancario por
+    heuristica (monto en valor absoluto + fecha con tolerancia, ordenado
+    por score), excluyendo flujos ya ligados a otro movimiento o de otra
+    cuenta."""
     monto = _monto_movimiento_bancario(movimiento)
     if monto == 0:
         return []
@@ -3659,19 +3533,11 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
 
 
 class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
-    """Lineas del estado de cuenta bancario (08/Sep/2026, primer paso de la
-    conciliacion bancaria real) - se cargan via `importar` (CSV/Excel), no
-    se capturan una por una a mano. Filtros ?cuenta=, ?corte_edc= y
-    ?conciliado=true/false (flujo asignado o no).
-
-    Vincular manualmente un flujo ya funciona con el PATCH generico del
-    ModelViewSet ({"flujo": "<id_flujo>"}) - `flujo` no es read-only en el
-    serializer. `sugerencias` (08/Sep/2026) propone candidatos por
-    monto+fecha para que el analista elija (mismo patron "IA/heuristica
-    propone, humano confirma" del resto del servicio); `conciliar_automatico`
-    aplica solo los matches de alta confianza (monto exacto + fecha muy
-    cercana + candidato unico), deja el resto para revision manual via
-    `sugerencias`."""
+    """Lineas del estado de cuenta, cargadas via `importar` (CSV/Excel).
+    Filtros ?cuenta=, ?corte_edc=, ?conciliado=. Vincular a mano funciona
+    con PATCH ({"flujo": "<id>"}); `sugerencias` propone candidatos por
+    monto+fecha y `conciliar_automatico` solo aplica los de alta
+    confianza."""
 
     serializer_class = TesoreriaMovimientoBancarioSerializer
     filter_backends = [SearchFilter]
@@ -3703,10 +3569,9 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
 
     @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
     def importar(self, request):
-        """Sube y parsea un extracto bancario completo: crea un
-        TesoreriaCorteEdc como encabezado del lote (con el archivo original
-        subido a Drive, ver `_subir_a_drive`, 08/Sep/2026 - antes quedaba
-        `link=""`) y una TesoreriaMovimientoBancario por cada fila con
+        """Sube y parsea un extracto bancario: crea un TesoreriaCorteEdc
+        como encabezado del lote (archivo subido a Drive, ver
+        `_subir_a_drive`) y un TesoreriaMovimientoBancario por fila con
         fecha valida."""
         archivo = request.FILES.get("file")
         cuenta_id = request.data.get("cuenta")
@@ -3806,14 +3671,10 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
 
     @action(detail=False, methods=["post"])
     def conciliar_automatico(self, request):
-        """Aplica solo los matches de alta confianza: candidato UNICO con
-        monto exacto y fecha a lo mas 1 dia de diferencia. Todo lo demas
-        (varios candidatos posibles, o ninguno) se deja para revision
-        manual via `sugerencias` - nunca adivina cuando hay ambiguedad.
-
-        Body opcional: {"cuenta": "<id>"} y/o {"corte_edc": "<id>"} para
-        acotar el lote; sin filtro corre sobre todos los movimientos sin
-        conciliar."""
+        """Aplica solo matches de alta confianza (candidato unico, monto
+        exacto, fecha a lo mas 1 dia de diferencia); ambiguos quedan para
+        `sugerencias`. Body opcional: {"cuenta"} y/o {"corte_edc"} para
+        acotar el lote."""
         queryset = TesoreriaMovimientoBancario.objects.filter(flujo__isnull=True)
         cuenta_id = request.data.get("cuenta")
         if cuenta_id:
@@ -3861,16 +3722,11 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
 
     @action(detail=True, methods=["post"])
     def crear_flujo(self, request, pk=None):
-        """Precarga un Flujo nuevo a partir de un movimiento sin conciliar
-        (11/Sep/2026, "Subida de archivos CRCM para precargar Flujos" -
-        pendiente real de negocio). `importar`/`sugerencias`/
-        `conciliar_automatico` de arriba solo LIGAN un movimiento a un Flujo
-        YA existente (capturado a mano); esto cubre el caso contrario -
-        el movimiento no tiene ningun Flujo interno que le corresponda
-        todavia, asi que se crea uno nuevo con cuenta/concepto/monto ya
-        precargados desde el estado de cuenta, y el analista solo necesita
-        elegir el contrato (obligatorio en TesoreriaFlujo, el extracto
-        bancario no lo puede inferir) para terminar de completarlo."""
+        """Precarga un Flujo nuevo a partir de un movimiento sin Flujo
+        interno correspondiente (a diferencia de
+        importar/sugerencias/conciliar_automatico, que solo ligan a uno ya
+        existente). Precarga cuenta/concepto/monto; falta elegir el
+        contrato."""
         movimiento = self.get_object()
         if movimiento.flujo_id:
             return Response({"detail": "Este movimiento ya está conciliado con un Flujo."}, status=400)
@@ -3925,11 +3781,9 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
 
     @action(detail=False, methods=["post"])
     def reporte_conciliacion_sheets(self, request):
-        """Exportar a Google Sheets, al Drive PERSONAL del usuario
-        (14/Sep/2026, "en conciliacion bancaria, reporte hay que agregar
-        el exportar") - mismos filtros que reporte_conciliacion() de
-        arriba, las 3 clasificaciones juntas (columna "Grupo"), doc
-        completa del flujo de conexion en
+        """Exporta a Google Sheets, mismos filtros que
+        reporte_conciliacion() con las 3 clasificaciones juntas (columna
+        "Grupo"). Mismo flujo de conexion que
         TesoreriaFlujoViewSet.exportar_sheets."""
         cuenta_id = request.query_params.get("cuenta")
         if not cuenta_id:
@@ -4019,11 +3873,9 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def reporte_diario(self, request):
-        """Reporte diario de saldos (26/Ago/2026, ver documentos/finanzas.md)
-        - por empresa (seleccion multiple via ?sociedades=rfc1,rfc2),
-        trae todas las cuentas activas de esas sociedades, compara
-        transacciones del dia (Flujo) contra el cambio de saldo. Calculo
-        real en reportes.py (probado aparte, sin pasar por DRF)."""
+        """Reporte diario de saldos por empresa (?sociedades=rfc1,rfc2),
+        compara transacciones del dia contra el cambio de saldo. Calculo
+        real en reportes.py."""
         sociedades_param = request.query_params.get("sociedades", "")
         sociedades = [s for s in sociedades_param.split(",") if s]
         fecha = request.query_params.get("fecha") or timezone.localdate().isoformat()
@@ -4032,13 +3884,9 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def arrastrar(self, request):
-        """"Arrastrar" el saldo del dia anterior (finanzas.md: "There must
-        be an option to carry the same balance from the previous day") -
-        copia el saldo mas reciente antes de `fecha` como saldo de `fecha`
-        para esa cuenta, sin pedirle a nadie que lo vuelva a capturar a
-        mano. Si ya existe un saldo para esa cuenta+fecha, no lo pisa (400
-        explicito, en vez de sobreescribir en silencio un dato ya
-        capturado)."""
+        """Copia el saldo mas reciente antes de `fecha` como saldo de
+        `fecha` para esa cuenta. Si ya existe uno, regresa 400 en vez de
+        sobreescribir en silencio."""
         cuenta = request.data.get("cuenta")
         fecha = request.data.get("fecha")
         if not cuenta or not fecha:
@@ -4071,8 +3919,7 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
 
         reporte = calcular_reporte_diario(sociedades, fecha)
 
-        # Bloquear envio si alguna cuenta no cuadra (Jenny, junta 09/Sep:
-        # "no enviar el reporte diario si hay diferencia") - se valida aqui,
+        # Bloquear envio si alguna cuenta no cuadra - se valida aqui,
         # no solo en el frontend, para que no se pueda saltar deshabilitando
         # el boton.
         cuentas_con_diferencia = [
@@ -4111,16 +3958,10 @@ class FacturaTrasladoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
 
 class FacturaDoctoRelacionadoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
-    """Documento relacionado de un CFDI (parcialidad de pago) - dos filtros
-    distintos, no intercambiables:
-    - ?timbre_uuid=<uuid del complemento> - lineas QUE TRAE ese complemento
-      de pago (uso original: pantalla de Complementos de Pago, para
-      capturar/editar sus DoctoRelacionado).
-    - ?id_documento=<uuid de la factura> (10/Sep/2026, "mostrar la lista de
-      exhibiciones/REPs ya recibidos dentro de la misma factura") - todas
-      las parcialidades YA RECIBIDAS que pagan esa factura en especifico,
-      sin importar de que complemento vengan. Mismo campo que usa
-      TesoreriaFacturaSerializer.get_saldo_pendiente_exhibiciones."""
+    """Documento relacionado de un CFDI: ?timbre_uuid= filtra lineas de
+    ese complemento; ?id_documento= filtra todas las parcialidades ya
+    recibidas de esa factura, sin importar el complemento (mismo campo
+    que TesoreriaFacturaSerializer.get_saldo_pendiente_exhibiciones)."""
 
     serializer_class = FacturaDoctoRelacionadoSerializer
     filter_backends = [SearchFilter]

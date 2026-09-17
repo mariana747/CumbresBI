@@ -1431,8 +1431,7 @@ class TesoreriaFacturaExportarCsvTests(TestCase):
 
 
 class TesoreriaFacturaAvisoSaldoPendienteTests(TestCase):
-    """Aviso manual de saldo PPD pendiente (10/Sep/2026, pendiente real de
-    Jenny: "aviso por correo de saldo PPD pendiente") - nunca se dispara
+    """Aviso manual de saldo PPD pendiente - nunca se dispara
     solo, solo por este boton."""
 
     def setUp(self):
@@ -1706,10 +1705,10 @@ class TesoreriaFacturaSaldoPendienteExhibicionesTests(TestCase):
 
 
 class TesoreriaFacturaMarcarEstadoTests(TestCase):
-    """marcar_estado() - ciclo de vida propio (24/Ago/2026, pedido explicito
-    de Mariana): PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA. Aceptar exige
-    link_pdf + link_xml ya cargados. Gate propio facturacion-cfdi.aprobar
-    (27/Ago/2026), no .editar - ver TesoreriaFacturaViewSet.get_permissions."""
+    """marcar_estado() - ciclo de vida propio:
+    PENDIENTE/EN_PROCESO/ACEPTADA/RECHAZADA. Aceptar exige
+    link_pdf + link_xml ya cargados. Gate propio facturacion-cfdi.aprobar,
+    no .editar - ver TesoreriaFacturaViewSet.get_permissions."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -2382,9 +2381,8 @@ class ReporteDiarioSaldosTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_enviar_reporte_con_diferencia_da_400(self):
-        # Jenny, junta 09/Sep: "no enviar el reporte diario si hay
-        # diferencia" - se rechaza en el backend, no solo deshabilitando el
-        # boton del lado del cliente.
+        # No se envia el reporte diario si hay diferencia - se rechaza en
+        # el backend, no solo deshabilitando el boton del lado del cliente.
         TesoreriaSaldo.objects.create(id="s10", fecha="2026-08-24", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10000.00")
         TesoreriaSaldo.objects.create(id="s11", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10800.00")
         TesoreriaFlujo.objects.create(
@@ -3360,9 +3358,8 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(response.data["sociedad"], RFC_TIZARA)
 
     def test_moneda_no_se_puede_corregir_despues_de_crear(self):
-        # 03/Sep/2026: Mariana amplio la regla de sociedad a moneda
-        # tambien ("cualquier error de sociedad, tipo de moneda o falta de
-        # ortografia... no se aceptara").
+        # La regla de sociedad tambien aplica a moneda: cualquier error de
+        # sociedad, tipo de moneda o falta de ortografia no se acepta.
         crear = self._post_crear({"conceptos": self.UN_CONCEPTO, "fecha_gasto": self.HOY, "moneda": "USD"})
         crear.effective_scope = self.scope_empleado
         creado = TesoreriaTicketReembolsoViewSet.as_view({"post": "create"})(crear)
@@ -3378,9 +3375,8 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         self.assertEqual(response.data["moneda"], "USD")
 
     def test_fecha_limite_expone_la_ventana_real(self):
-        # 03/Sep/2026 (pedido de Mariana: "que se coloque el dia/mes/año de
-        # hasta cuando se aceptan" en vez de solo texto generico); campos
-        # reemplazados 04/Sep/2026 junto con la regla.
+        # Expone el dia/mes/año exacto hasta cuando se acepta, en vez de
+        # solo texto generico.
         request = self.factory.get("/api/tickets-reembolso/fecha_limite/")
         request.effective_scope = self.scope_empleado
         response = TesoreriaTicketReembolsoViewSet.as_view({"get": "fecha_limite"})(request)
@@ -3405,8 +3401,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-    # Exportar a Google Sheets (14/Sep/2026, pendiente.md > Reembolsos
-    # "Exportar desde 'Ticket'") - mismo patron de mocks que
+    # Exportar a Google Sheets - mismo patron de mocks que
     # TesoreriaSolicitudPagoCrudTests.
     def test_exportar_sheets_sin_permiso_da_403(self):
         request = self.factory.post("/api/tickets-reembolso/exportar_sheets/", {}, format="json")
@@ -3459,8 +3454,8 @@ class TesoreriaFechaLimiteReembolsoTests(TestCase):
     mediodia.
 
     Usa la funcion pura de reembolso_utils directamente - septiembre 2026
-    es el mes de referencia porque es el ejemplo real dado por Mariana:
-    29 y 30 son los ultimos 2 dias habiles (29 = penultimo, 30 = ultimo).
+    es el mes de referencia: 29 y 30 son los ultimos 2 dias habiles
+    (29 = penultimo, 30 = ultimo).
 
     requests.get se mockea para toda la clase (falla siempre) - sin esto,
     la sincronizacion perezosa de festivos (ver
@@ -3494,15 +3489,15 @@ class TesoreriaFechaLimiteReembolsoTests(TestCase):
         self.assertIsNone(error)
 
     def test_gasto_de_mes_distinto_nunca_se_acepta_sin_periodo_de_gracia(self):
-        # 04/Sep/2026: "en ningun caso" - ya no hay gracia para el mes
-        # anterior, ni siquiera si la fecha cae en lo que hubieran sido los
+        # No hay gracia para el mes anterior en ningun caso, ni siquiera
+        # si la fecha cae en lo que hubieran sido los
         # ultimos 2 dias habiles de ese mes.
         ahora = datetime(2026, 9, 15, 10, 0)
         error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 8, 30))
         self.assertIsNotNone(error)
 
     def test_gasto_con_fecha_futura_nunca_se_acepta(self):
-        # 03/Sep/2026 (bug real reportado por Mariana): un dia futuro
+        # Bug corregido: un dia futuro
         # DENTRO del mes en curso se colaba porque el chequeo de "mismo
         # mes que hoy" se evaluaba antes que el de futuro.
         ahora = datetime(2026, 9, 3, 10, 0)
@@ -3510,8 +3505,8 @@ class TesoreriaFechaLimiteReembolsoTests(TestCase):
         self.assertIsNotNone(error)
 
     def test_penultimo_dia_habil_solo_acepta_gasto_de_ese_mismo_dia(self):
-        # 04/Sep/2026, ejemplo real de Mariana: "el 29 de septiembre puede
-        # subir una factura del 29 de septiembre pero no del 28".
+        # El penultimo dia habil solo acepta gasto de ese mismo dia,
+        # no del dia anterior.
         ahora = datetime(2026, 9, 29, 10, 0)
         self.assertIsNone(validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 29)))
         error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 28))
@@ -3523,7 +3518,7 @@ class TesoreriaFechaLimiteReembolsoTests(TestCase):
         self.assertIsNone(error)
 
     def test_ultimo_dia_habil_rechaza_despues_de_mediodia(self):
-        # 04/Sep/2026: "el ultimo dia... solo hasta medio dia".
+        # El ultimo dia habil solo acepta hasta medio dia.
         ahora = datetime(2026, 9, 30, 12, 1)
         error = validar_fecha_limite(ahora, fecha_gasto=date(2026, 9, 30))
         self.assertIsNotNone(error)
@@ -3665,8 +3660,7 @@ class TesoreriaSolicitudPagoCrudTests(TestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["proyecto"], "P01")
 
-    # Exportar a Google Sheets (14/Sep/2026, pendiente.md > Solicitudes de
-    # Pago "Pasar google sheet") - mismo patron de mocks que el resto de
+    # Exportar a Google Sheets - mismo patron de mocks que el resto de
     # exportar_sheets (sin conectado -> 409 con url de autorizacion;
     # conectado -> 200 con la url de la hoja creada).
     @patch("tesoreria.views.google_sheets_utils.obtener_access_token")
@@ -3818,8 +3812,7 @@ class TesoreriaTicketProveedorScopeTests(TestCase):
         self.assertEqual(response.data[0]["proyecto"], "P01")
 
     def test_filtro_sociedad_acota_dentro_del_scope_union(self):
-        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
-        # filtro") - un usuario con acceso a AMBAS sociedades puede acotar
+        # Un usuario con acceso a AMBAS sociedades puede acotar
         # la vista a una sola sin cambiar su alcance real.
         self._crear_ticket(RFC_TIZARA)
         self._crear_ticket(RFC_CAPITAL)

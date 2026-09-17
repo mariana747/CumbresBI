@@ -110,13 +110,8 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
         # retrieve() ya resuelve esto solo).
         read_only_fields = ["created_at", "updated_at", "fusionado_en"]
 
-    # Campos que se guardan siempre en mayusculas (08/Sep/2026, pedido
-    # explicito de Mariana: "quiero que todo se mantenga en mayusculas para
-    # estar estandarizado" - viendo la tabla de Contrapartes con nombres
-    # mezclados, ej. "Anthropic, PBC" vs "IZEL") - texto de identidad
-    # (razon social/nombre, apellidos, contacto, RFC), no correo (los
-    # correos si distinguen mayusculas/minusculas en la practica, aunque
-    # rara vez importe, no se tocan).
+    # Campos de identidad (razon social/nombre, apellidos, contacto, RFC) se
+    # guardan siempre en mayusculas para estandarizar. No incluye correo.
     CAMPOS_MAYUSCULAS = ["razon_social", "apellido_paterno", "apellido_materno", "contacto", "rfc"]
 
     def validate(self, attrs):
@@ -200,10 +195,10 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
     Flujos y Facturas (Estado del proyecto, notas de Tesoreria).
 
     `id_contrato` se genera en el backend (ver views.py::perform_create),
-    formato "{sociedad}-{id_contraparte}-{consecutivo de 3 digitos}"
-    (decision de Mariana 18/Ago/2026) - NO es autogenerado por uuid como
-    Contraparte/Cuenta, porque aqui si tiene valor de negocio ser legible
-    (identifica sociedad+contraparte a simple vista).
+    formato "{sociedad}-{id_contraparte}-{consecutivo de 3 digitos}" - NO es
+    autogenerado por uuid como Contraparte/Cuenta, porque aqui si tiene
+    valor de negocio ser legible (identifica sociedad+contraparte a simple
+    vista).
 
     `sociedad` es CharField plano (referencia laxa a
     general_sociedades.rfc, ver models.py) - primer modelo de este servicio
@@ -1030,13 +1025,10 @@ class TesoreriaTicketReembolsoSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """`sociedad`/`moneda` se llenan al crear pero son inmutables
-        despues (03/Sep/2026: "cualquier error de sociedad, tipo de moneda
-        o falta de ortografia... no se aceptara" - mismo criterio que
-        sociedad, ampliado explicitamente a moneda por Mariana en el chat;
-        ni el empleado ni Tesoreria los corrigen, se rechaza el ticket
-        completo y se crea uno nuevo). No pueden ir en
-        Meta.read_only_fields porque eso tambien bloquearia el create; se
-        descartan aqui solo en update. `conceptos` tambien se descarta
+        despues - cualquier error se rechaza el ticket completo y se crea
+        uno nuevo, no se corrige. No pueden ir en Meta.read_only_fields
+        porque eso tambien bloquearia el create; se descartan aqui solo en
+        update. `conceptos` tambien se descarta
         aqui - no es editable via PATCH (ver docstring de la clase)."""
         validated_data.pop("sociedad", None)
         validated_data.pop("moneda", None)
