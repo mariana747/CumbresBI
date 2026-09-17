@@ -289,10 +289,8 @@ export default function TesoreriaRecNominasPage() {
                             />
                           </IconButton>
                         )}
-                        {!n.link_comprobante && !puedeEditar && (
-                          <Typography variant="caption" color="text.secondary">
-                            —
-                          </Typography>
+                        {!n.link_comprobante && (
+                          <Chip size="small" color="warning" variant="outlined" label="Falta subir" />
                         )}
                       </Stack>
                     </TableCell>
@@ -363,6 +361,9 @@ export default function TesoreriaRecNominasPage() {
                       variant="outlined"
                       sx={{ alignSelf: "flex-start" }}
                     />
+                  )}
+                  {!n.link_comprobante && (
+                    <Chip size="small" color="warning" variant="outlined" label="Falta subir comprobante" sx={{ alignSelf: "flex-start" }} />
                   )}
                   <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
                     {puedeEditar && (
