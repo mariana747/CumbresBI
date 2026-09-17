@@ -116,11 +116,9 @@ DRIVE_IMPERSONATE_SUBJECT = env("DRIVE_IMPERSONATE_SUBJECT", default="")
 DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
 
 # ID de la carpeta raiz "CumbresBI/" en Drive (se resuelve una vez y se
-# fija aqui - ver pld-fase2-alcance.md sec. 1.3 y memoria de sesion
-# "drive-estructura-carpetas-grupos": estructura de carpetas por modulo,
-# CumbresBI/RRHH/, CumbresBI/Vivienda/, CumbresBI/Compras/,
-# CumbresBI/Tesoreria/ - decision 12/Ago/2026 reemplazo la mencion original
-# a Contratos/Excels). Sigue siendo el fallback para los modulos que NO
+# fija aqui - ver pld-fase2-alcance.md sec. 1.3): estructura de carpetas por
+# modulo, CumbresBI/RRHH/, CumbresBI/Vivienda/, CumbresBI/Compras/,
+# CumbresBI/Tesoreria/. Sigue siendo el fallback para los modulos que NO
 # tienen todavia su propia Unidad compartida (ver DRIVE_MODULE_FOLDER_IDS).
 DRIVE_ROOT_FOLDER_ID = env("DRIVE_ROOT_FOLDER_ID", default="")
 
