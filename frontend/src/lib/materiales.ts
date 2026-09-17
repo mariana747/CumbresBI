@@ -4,7 +4,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const MATERIALES_API_BASE_URL = process.env.NEXT_PUBLIC_MATERIALES_API_BASE_URL ?? `${GATEWAY_URL}/materiales`;
+const MATERIALES_API_BASE_URL = `${GATEWAY_URL}/materiales`;
 
 export interface MaterialCatalogo {
   id_material: string;
@@ -152,8 +152,8 @@ export async function deleteManoObra(idManoObra: string): Promise<void> {
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
 }
 
-// Flujo de 3 estados, sin paso intermedio de aprobacion (decision de
-// Mariana 21/Ago/2026): SOLICITADO -> ENTREGADO o SOLICITADO -> RECHAZADO.
+// Flujo de 3 estados, sin paso intermedio de aprobacion:
+// SOLICITADO -> ENTREGADO o SOLICITADO -> RECHAZADO.
 export type SolicitudMaterialEstado = "SOLICITADO" | "ENTREGADO" | "RECHAZADO";
 
 export interface SolicitudMaterial {
@@ -327,9 +327,9 @@ export async function listConceptosPresupuesto(presupuesto: string): Promise<Con
 
 // Requisicion de materiales - documento formal por proyecto+etapa que
 // jala los ConceptoPresupuesto ya presupuestados y ES la que dispara la
-// compra (decision de Mariana 21/Ago/2026, distinta de SolicitudMaterial/
-// "Salida de almacen" - ver docstring del modelo en el backend). Las
-// lineas se generan solas al crear (snapshot), no se mandan en el POST.
+// compra, distinta de SolicitudMaterial/"Salida de almacen" (ver docstring
+// del modelo en el backend). Las lineas se generan solas al crear
+// (snapshot), no se mandan en el POST.
 export type RequisicionEstado = "PENDIENTE" | "AUTORIZADA" | "RECHAZADA";
 
 export interface RequisicionLinea {

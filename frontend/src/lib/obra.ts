@@ -9,7 +9,7 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
 
-const OBRA_API_BASE_URL = process.env.NEXT_PUBLIC_OBRA_API_BASE_URL ?? `${GATEWAY_URL}/obra`;
+const OBRA_API_BASE_URL = `${GATEWAY_URL}/obra`;
 
 export interface ObraEtapa {
   id_etapa: string;
@@ -216,7 +216,7 @@ export async function deleteEstimacion(idEstimacion: string): Promise<void> {
   if (!response.ok) throw await friendlyApiError("OBRA", response);
 }
 
-// Foto de evidencia por concepto+lote (minuta_reunion-1.md sec. 1 y 2:
+// Foto de evidencia por concepto+lote (Minuta de Reunión, 1 y 2:
 // "Toma de Evidencia") - va a vivir en Google Drive, pero todavia no
 // existe la Unidad compartida para Obra (21/Ago/2026, ver
 // obra-evidencia-fotos-drive-pendiente en memoria del proyecto). Mientras

@@ -43,7 +43,7 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
+# Llave publica RS256 (/README.md sec. 8) - publica del
 # par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
 # este default fuera de dev; en un ambiente real viene de Secret Manager.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
@@ -84,7 +84,7 @@ MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
 # mismo patron que pld-service/pld/views.py::_validar_sociedad_rfc.
 IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
 
-# drive-service - subida real de comprobantes/PDF/XML (finanzas.md, decision
+# drive-service - subida real de comprobantes/PDF/XML (Finance Module, decision
 # 26/Ago/2026), ver tesoreria/views.py::TesoreriaFlujoViewSet.subir_comprobante.
 # Mismo default de desarrollo que pld-service/config/settings.py. Sin carpeta
 # propia dada de alta en DRIVE_MODULE_FOLDER_IDS todavia - drive-service cae

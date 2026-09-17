@@ -9,7 +9,7 @@ import { GATEWAY_URL } from "./gatewayUrl";
 import { TesoreriaCategoriaGasto } from "./miCumbres";
 import { ExportarSheetsResultado } from "./tesoreria";
 
-const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
+const TESORERIA_API_BASE_URL = `${GATEWAY_URL}/tesoreria`;
 
 export type SolicitudPagoEstado = "PENDIENTE" | "APROBADO" | "RECHAZADO" | "PAGADO";
 export type SolicitudPagoTipo = "SERVICIO" | "LICENCIA" | "RENOVACION" | "OTRO";
@@ -71,8 +71,7 @@ export async function listSolicitudesPago(params?: {
   return response.json();
 }
 
-// Exportar a Google Sheets, al Drive PERSONAL del usuario (14/Sep/2026,
-// pendiente.md > Solicitudes de Pago "Pasar google sheet") - mismo patron
+// Exportar a Google Sheets, al Drive PERSONAL del usuario - mismo patron
 // que exportarFlujosSheets (ver lib/tesoreria.ts).
 export async function exportarSolicitudesPagoSheets(
   params?: { proyecto?: string; sociedad?: string; search?: string; categoriaGasto?: TesoreriaCategoriaGasto },

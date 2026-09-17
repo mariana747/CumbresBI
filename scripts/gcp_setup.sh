@@ -89,9 +89,15 @@ for role in roles/run.admin roles/iam.serviceAccountUser roles/artifactregistry.
     --quiet
 done
 
+# El member de un principalSet apunta al POOL, no al provider especifico
+# (bug real 14/Sep/2026: usar WORKLOAD_IDENTITY_PROVIDER completo aqui da
+# "INVALID_ARGUMENT: Invalid principalSet member" - el provider queda
+# implicito, la condicion ya se aplico al crear el provider en el paso 3).
+WORKLOAD_IDENTITY_POOL="projects/$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')/locations/global/workloadIdentityPools/github-actions-pool"
+
 gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" \
   --role="roles/iam.workloadIdentityUser" \
-  --member="principalSet://iam.googleapis.com/${WORKLOAD_IDENTITY_PROVIDER}/attribute.repository/${GITHUB_REPO}" \
+  --member="principalSet://iam.googleapis.com/${WORKLOAD_IDENTITY_POOL}/attribute.repository/${GITHUB_REPO}" \
   --quiet
 
 echo ">> GCP_DEPLOY_SA_EMAIL = $DEPLOY_SA"
@@ -102,7 +108,7 @@ echo ">> GCP_DEPLOY_SA_EMAIL = $DEPLOY_SA"
 #    tienen la suya (ver infraestructura-gcp/*.md) - se listan aqui para
 #    dejar el patron completo, "|| true" evita error si ya existen.
 # ---------------------------------------------------------------------------
-SERVICIOS=(iam-service audit-service pld-service vivienda-service compras-tesoreria-service rrhh-service tesoreria-service rentas-service document-intelligence-service api-gateway)
+SERVICIOS=(iam-service audit-service pld-service vivienda-service compras-tesoreria-service rrhh-service tesoreria-service rentas-service document-intelligence-service materiales-service obra-service api-gateway)
 
 for svc in "${SERVICIOS[@]}"; do
   gcloud iam service-accounts create "${svc}" \

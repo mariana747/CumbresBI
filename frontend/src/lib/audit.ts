@@ -18,7 +18,7 @@ export interface BitacoraEvento {
   recibido_en: string;
 }
 
-const AUDIT_API_BASE_URL = process.env.NEXT_PUBLIC_AUDIT_API_BASE_URL ?? `${GATEWAY_URL}/audit`;
+const AUDIT_API_BASE_URL = `${GATEWAY_URL}/audit`;
 
 export async function listBitacora({
   search,
@@ -87,9 +87,8 @@ export interface BitacoraCsvExportado {
   tamano_bytes: number;
 }
 
-// Ya NO regresa una URL para <a href> de descarga local (decision de
-// Mariana, 12/Ago/2026, ver memoria de sesion "csv-auditoria-a-drive"):
-// arma el CSV en audit-service y lo sube a Drive
+// Ya NO regresa una URL para <a href> de descarga local: arma el CSV en
+// audit-service y lo sube a Drive
 // (CumbresBI/Auditoria/Bitacora/) - esta funcion dispara esa subida y
 // regresa la referencia de Drive (web_view_link) para que el frontend la
 // abra en una pestaña nueva, sin bajar el archivo al navegador.
@@ -119,7 +118,7 @@ export async function exportarBitacoraCsvADrive(params: {
 
 // Nombres amigables para mostrar en pantalla - solo cubren los servicios,
 // entidades y verbos de accion conocidos hoy (ver services/*/README y
-// docs/architecture/README.md sec. 1.1); un valor no listado se muestra tal
+// /README.md sec. 1.1); un valor no listado se muestra tal
 // cual, nunca se oculta informacion por no tener traduccion.
 const SERVICE_LABELS: Record<string, string> = {
   "iam-service": "IAM (Usuarios y Roles)",

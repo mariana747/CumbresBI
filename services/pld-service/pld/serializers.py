@@ -334,7 +334,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         return attrs
 
     def update(self, instance, validated_data):
-        # Workflow hibrido (docs/architecture/pld-fase2-alcance.md sec. 3,
+        # Workflow hibrido (docs/architecture/pld/pld-fase2-alcance.md sec. 3,
         # ver pld/signals.py): si el analista edita estado_llenado a mano
         # (via PATCH normal, no confirmar_extraccion ni la accion de
         # aprobar), a partir de ahi deja de recalcularse automatico segun

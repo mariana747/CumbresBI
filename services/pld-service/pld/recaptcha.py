@@ -1,4 +1,4 @@
-"""Verificacion server-side de reCAPTCHA v2 (docs/architecture/README.md
+"""Verificacion server-side de reCAPTCHA v2 (/README.md
 sec. 11: "secret key de reCAPTCHA... servicios con formularios publicos").
 Usado por PldTicketClienteViewSet.subir_documento - el formulario publico
 (pld-ticket/[token]/page.tsx) manda el token que genera el widget de

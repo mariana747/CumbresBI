@@ -35,7 +35,7 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
+# Llave publica RS256 (/README.md sec. 8) - publica del
 # par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
 # este default fuera de dev; en un ambiente real viene de Secret Manager.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
@@ -112,8 +112,7 @@ DATABASES = {
 }
 
 # URL interna de drive-service (export_csv sube el CSV ahi en vez de
-# descargarlo directo al navegador - decision de Mariana 12/Ago/2026, ver
-# memoria de sesion "csv-auditoria-a-drive"). Mismo patron que
+# descargarlo directo al navegador). Mismo patron que
 # pld-service/config/settings.py.
 DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
 

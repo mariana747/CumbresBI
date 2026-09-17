@@ -9,15 +9,15 @@ def _short_id():
 
 
 # Esqueleto de modelos (19/Ago/2026) - servicio nuevo, planeado en
-# docs/architecture/README.md sec. 1.1.2 como "materiales-service (futuro)":
+# /README.md sec. 1.1.2 como "materiales-service (futuro)":
 # catalogo de materiales + motor de presupuesto/conceptos automatizado,
 # construido de forma AUTONOMA dentro de Fase 3 (Ventas/Vivienda) y
 # extendido/reconciliado despues por Compras (Fase 4) - mismo principio de
 # "autonomia de modulos con dependencias diferidas" que ya se aplico a
 # Contrapartes (PLD/Ventas/Tesoreria).
 #
-# Fuente de los campos: docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md,
-# Fase 3 Semana 13, y docs/architecture/README.md sec. 3 (tabla de
+# Fuente de los campos: Plan de Trabajo,
+# Fase 3 Semana 13, y /README.md sec. 3 (tabla de
 # refactorizacion, fila "Conceptos y Firmas (nueva)"). Solo modelos +
 # migraciones en este primer corte - sin serializers/views/tests todavia
 # (mismo orden que se siguio en tesoreria-service: modelos heredados
@@ -208,14 +208,13 @@ class SolicitudMaterial(models.Model):
     Semana 13: "Registro de recepcion de material y proceso de solicitud
     de material; descuento automatico de material disponible contra lo
     presupuestado"). Es SOLO para pedir contra lo que ya hay en almacen,
-    NO una requisicion de compra (decision de Mariana 21/Ago/2026) - por
+    NO una requisicion de compra - por
     eso el serializer valida que cantidad_solicitada no exceda
     MaterialCatalogo.cantidad_disponible al crear, y
     SolicitudMaterialViewSet.entregar hace el descuento real (con
     select_for_update).
 
-    Flujo de 3 estados (decision de Mariana 21/Ago/2026: "tendremos
-    Entregado, Solicitado, Rechazado" - sin paso intermedio de Aprobado):
+    Flujo de 3 estados, sin paso intermedio de Aprobado:
     SOLICITADO -> ENTREGADO o SOLICITADO -> RECHAZADO. `entregar` exige
     ademas al menos una EvidenciaRecepcion con foto (ver
     SolicitudMaterialViewSet.entregar)."""
@@ -257,10 +256,8 @@ class SolicitudMaterial(models.Model):
 
 class EvidenciaRecepcion(models.Model):
     """Bitacora de recepcion de material contra una SolicitudMaterial: foto +
-    fecha/hora de cuando llego el material (pedido de Mariana 21/Ago/2026,
-    "falta evidencia de recepcion... debe poder mandar foto, anotar fecha,
-    hora... es una bitacora" - puede haber varias entradas por solicitud,
-    ej. entregas parciales).
+    fecha/hora de cuando llego el material - puede haber varias entradas
+    por solicitud, ej. entregas parciales.
 
     Mismo patron que ObraEvidencia en obra-service: `link_drive` se captura
     a mano (URL pegada desde el frontend) mientras no exista la Unidad
@@ -297,8 +294,7 @@ class Requisicion(models.Model):
     jala los ConceptoPresupuesto ya presupuestados y ES la que dispara la
     COMPRA - distinta de SolicitudMaterial ("Salida de almacen", esa es
     para pedir contra lo que YA hay en almacen, ver su docstring).
-    Decision de Mariana 21/Ago/2026: "en requisicion es donde se va a
-    pedir material". Diseno del documento (folio, presupuesto asignado,
+    En requisicion es donde se va a pedir material. Diseno del documento (folio, presupuesto asignado,
     viviendas que comprende, etapa constructiva con sus conceptos,
     3 firmas) aprobado 17/Ago/2026 sobre el mockup original de Ruben.
 

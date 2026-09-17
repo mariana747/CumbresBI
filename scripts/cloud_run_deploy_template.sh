@@ -42,7 +42,7 @@ gcloud run deploy "${SERVICE}-${ENV_SUFFIX}" \
 #   (ya NO "http://pld-service:8080" del docker-compose local, sino algo
 #   como "https://pld-service-dev-xxxxx.a.run.app") y
 #   --allow-unauthenticated (es el unico punto de entrada publico real).
-# - frontend: sin BD, sin Cloud SQL; NEXT_PUBLIC_API_BASE_URL se hornea en
+# - frontend: sin BD, sin Cloud SQL; NEXT_PUBLIC_GATEWAY_URL se hornea en
 #   BUILD TIME (build-arg, ver frontend/Dockerfile), no aqui en runtime -
 #   si cambia la URL del gateway hay que reconstruir la imagen, no solo
 #   redeploy; SI necesita --allow-unauthenticated.
@@ -55,8 +55,7 @@ gcloud run deploy "${SERVICE}-${ENV_SUFFIX}" \
 #   (JSON, ej. {"PLD": "<id>"}) como --set-env-vars
 #   (no son secretos); DRIVE_SERVICE_ACCOUNT_JSON como --set-secrets
 #   ("DRIVE_SERVICE_ACCOUNT_JSON=DRIVE_SERVICE_ACCOUNT_JSON:latest" - ya
-#   existe en Secret Manager, ver memoria de sesion
-#   "drive-estructura-carpetas-grupos"). Mientras ese secreto no tenga una
+#   existe en Secret Manager). Mientras ese secreto no tenga una
 #   version real cargada, el servicio sigue en modo simulado sin romperse
 #   (ver driveclient.py) - se puede desplegar antes de tener la credencial
 #   final.

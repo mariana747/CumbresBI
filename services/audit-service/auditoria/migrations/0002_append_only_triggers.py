@@ -1,6 +1,6 @@
 from django.db import migrations
 
-# Enforcement append-only a nivel de motor (docs/architecture/README.md sec. 9):
+# Enforcement append-only a nivel de motor (/README.md sec. 9):
 # GRANT sin UPDATE/DELETE/DROP para el usuario runtime (se aplica fuera de
 # Django, al aprovisionar el usuario de BD del servicio) + estos triggers,
 # que son la ultima linea de defensa incluso si alguien conecta con un usuario

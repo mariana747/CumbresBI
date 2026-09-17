@@ -32,7 +32,7 @@ _TIMEOUT_SEGUNDOS_POR_PREFIJO = {"docint": 90, "pld": 90}
 
 @csrf_exempt
 def proxy(request, path):
-    """Unico punto de entrada del frontend (docs/architecture/README.md sec.
+    """Unico punto de entrada del frontend (/README.md sec.
     8) - reenvia cada request al microservicio real segun el primer
     segmento del path (ej. /iam/api/users/ -> iam-service:/api/users/).
 

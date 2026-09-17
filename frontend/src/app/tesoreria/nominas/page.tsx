@@ -105,9 +105,9 @@ function fechaISO(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Numero de semana ISO-8601 (11/Sep/2026, "Semanal va en semana 37" -
-// pendiente real de negocio: Jenny/Dylan hablan en numero de semana del
-// año, no solo en fechas). Algoritmo estandar: jueves de la semana define
+// Numero de semana ISO-8601 - pendiente real de negocio: el area de
+// nomina habla en numero de semana del año, no solo en fechas. Algoritmo
+// estandar: jueves de la semana define
 // a que semana ISO pertenece.
 function numeroSemanaISO(fecha: Date): number {
   const d = new Date(Date.UTC(fecha.getFullYear(), fecha.getMonth(), fecha.getDate()));
@@ -171,11 +171,10 @@ function calcularPeriodoActual(tipo: TesoreriaNominaTipo, hoy = new Date()) {
   return tipo === "QUINCENAL" ? calcularPeriodoQuincenal(hoy) : calcularPeriodoSemanal(hoy);
 }
 
-// Nominas (10/Sep/2026, modulo de Nominas Fase 1) - periodo/agrupador que
-// se desglosa en Flujos (uno por empleado pagado, via
-// TesoreriaFlujo.periodo_nomina). Fase 1: captura manual, sin generacion
-// automatica de lineas por empleado (rrhh-service todavia sin API/Puestos
-// expuestos) - ver memoria de sesion "tesoreria-nominas-diseno-09sep".
+// Nominas (modulo de Nominas Fase 1) - periodo/agrupador que se desglosa
+// en Flujos (uno por empleado pagado, via TesoreriaFlujo.periodo_nomina).
+// Fase 1: captura manual, sin generacion automatica de lineas por
+// empleado (rrhh-service todavia sin API/Puestos expuestos).
 export default function TesoreriaNominasPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [nominas, setNominas] = useState<TesoreriaNomina[]>([]);
@@ -395,8 +394,7 @@ export default function TesoreriaNominasPage() {
     return avisos;
   }, [nominas]);
 
-  // Centro no tiene catalogo real todavia (ver memoria de sesion
-  // "centro-proyecto-no-son-catalogo-generico") - "desplegable" aqui
+  // Centro no tiene catalogo real todavia - "desplegable" aqui
   // significa Autocomplete freeSolo sobre lo ya capturado, no un catalogo
   // fijo: sigue permitiendo escribir un valor nuevo. Proyecto SI tiene
   // catalogo real (ver import de listProyectos arriba), no necesita esto.

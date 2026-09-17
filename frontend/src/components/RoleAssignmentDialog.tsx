@@ -51,8 +51,7 @@ type ScopeType = "GLOBAL" | "SOCIEDAD" | "PROYECTO";
 // otorgaba GLOBAL a fuerza (grantRole no mandaba scope_type/scope_id).
 // CENTRO/CONTRATO van aparte abajo: son grants planos
 // (iam_user_centro_access/iam_user_contrato_access), no scope_type de
-// iam_user_roles (roles-y-permisos.md sec. 1) - ver memoria de sesion
-// "pendiente-quitar-grupo-del-codigo" para el porque de esta separacion.
+// iam_user_roles (roles-y-permisos.md sec. 1).
 // Permisos reales ya conectados (iam.crear/iam.editar, mismo criterio en
 // los 3 pares otorgar/revocar de aqui abajo) - el backend ya los exige
 // desde la rama feature/iam-scoped-manager; esto solo evita mostrar
@@ -76,8 +75,7 @@ export default function RoleAssignmentDialog({
   const [selectedRole, setSelectedRole] = useState("");
   const [scopeType, setScopeType] = useState<ScopeType>("GLOBAL");
   const [scopeId, setScopeId] = useState("");
-  // 31/Ago/2026 (pedido de Mariana: "en externos se debe asignar su
-  // sociedad y proyecto") - un rol EXTERNO no usa el selector de Alcance
+  // Un rol EXTERNO no usa el selector de Alcance
   // de arriba (GLOBAL/SOCIEDAD/PROYECTO, uno solo): exige los DOS a la
   // vez, asi que va en un formulario aparte con ambos campos obligatorios.
   // Por dentro sigue siendo el mismo mecanismo (dos IamUserRole - una
@@ -168,8 +166,8 @@ export default function RoleAssignmentDialog({
     setError(null);
     try {
       if (esExterno) {
-        // Rol EXTERNO: Sociedad Y Proyecto los dos, nunca GLOBAL (pedido
-        // de Mariana) - dos IamUserRole (una por dimension), el backend
+        // Rol EXTERNO: Sociedad Y Proyecto los dos, nunca GLOBAL - dos
+        // IamUserRole (una por dimension), el backend
         // ya rechaza GLOBAL para estos roles como segunda linea de
         // defensa (ver IamUserRoleViewSet.perform_create).
         if (!sociedadExterno.trim() || !proyectoExterno.trim()) return;

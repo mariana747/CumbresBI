@@ -19,10 +19,8 @@ export default function MiCumbresPage() {
         datos conectados todavía (llega en Fase 5, RRHH y Talento).
       </Typography>
 
-      {/* Tickets de reembolso (27/Ago/2026) - unica pieza real hoy,
-          pantalla provisional sobre tesoreria-service mientras no exista
-          rrhh-service, ver memoria de sesion
-          "rrhh-mi-cumbres-y-modulo-pendiente". */}
+      {/* Tickets de reembolso - unica pieza real hoy, pantalla provisional
+          sobre tesoreria-service mientras no exista rrhh-service. */}
       <Stack direction="row">
         <Button component={Link} href="/micumbres/tickets" variant="outlined" startIcon={<Receipt size={18} strokeWidth={1.5} />}>
           Tickets de Reembolso

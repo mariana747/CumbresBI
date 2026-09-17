@@ -13,7 +13,7 @@ import { GATEWAY_URL } from "./gatewayUrl";
 // tambien por Flujos/Facturas/Solicitudes de Pago.
 import { TesoreriaCategoriaGasto } from "./miCumbres";
 
-const TESORERIA_API_BASE_URL = process.env.NEXT_PUBLIC_TESORERIA_API_BASE_URL ?? `${GATEWAY_URL}/tesoreria`;
+const TESORERIA_API_BASE_URL = `${GATEWAY_URL}/tesoreria`;
 
 // Genera un ID corto (8 hex) igual al formato que hasta ahora solo
 // generaba el backend (uuid.hex[:8], ver tesoreria/models.py::_short_id).
@@ -47,7 +47,7 @@ export interface TesoreriaContraparte {
   // opcional desde 19/Ago/2026 (migracion 0002) - la contraparte maestra
   // unica se puede dar de alta con solo razon_social, el resto se llena
   // despues (mismo criterio que ya usaba PLD por su cuenta, ver
-  // docs/architecture/README.md sec. 11.2 #7).
+  // /README.md sec. 11.2 #7).
   tipo_persona: TesoreriaTipoPersona | null;
   genero: "MUJER" | "HOMBRE" | "X" | null;
   contacto: string | null;
@@ -926,16 +926,12 @@ export async function createContrato(params: {
   return response.json();
 }
 
-// Checklist de documentos requeridos de un contrato (diseño manuscrito
-// Tesoreria2.pdf, 28/Ago/2026: "Liga archivo - todavia no esta
-// implementado en BD. Pedir checklist de documentos/info") - un renglon
-// por documento que ese contrato en particular necesita. link_archivo/
+// Checklist de documentos requeridos de un contrato - un renglon por
+// documento que ese contrato en particular necesita. link_archivo/
 // drive_file_id son de solo lectura, se llenan cuando el CLIENTE sube el
 // archivo via el magic link de TesoreriaDocumentoTicketViewSet.subir - el
-// analista no tiene ninguna accion para subirlo directamente (28/Ago/2026,
-// pedido explicito de Mariana).
-// Catalogo fijo (28/Ago/2026, pedido explicito de Mariana: "que sea una
-// lista desplegable de las opciones") - mismo orden/codigos que
+// analista no tiene ninguna accion para subirlo directamente.
+// Catalogo fijo (lista desplegable) - mismo orden/codigos que
 // TesoreriaContratoDocumento.NOMBRE_CHOICES en el backend.
 export type TesoreriaContratoDocumentoNombre =
   | "CONTRATO_FIRMADO"
@@ -1018,10 +1014,8 @@ export async function deleteContratoDocumento(id: number): Promise<void> {
   }
 }
 
-// Avisa a la contraparte de los documentos que el analista SELECCIONO del
-// checklist (28/Ago/2026, pedido explicito de Mariana: "se puede...
-// seleccionar para picar en avisar a la contraparte de los documentos
-// pendientes" - no se manda automatico por todos los pendientes) - el
+// Avisa a la contraparte solo de los documentos que el analista SELECCIONO
+// del checklist - no se manda automatico por todos los pendientes. El
 // backend manda UN correo por cada documento en `documentoIds`
 // (ver TesoreriaContratoViewSet.enviar_recordatorio_documentos).
 export async function enviarRecordatorioDocumentos(
@@ -1453,7 +1447,7 @@ export async function registrarPagoFlujo(
 }
 
 // Sube el comprobante/referencia de pago real a Drive para un flujo ya
-// creado (finanzas.md, decision 26/Ago/2026 - ver
+// creado (Finance Module, decision 26/Ago/2026 - ver
 // services/tesoreria-service/tesoreria/views.py::TesoreriaFlujoViewSet.
 // subir_comprobante). Mismo patron que lib/pld.ts::subirArchivoDocumento.
 // Llenar link_comprobante_banco a mano en el formulario de "Registrar pago"
@@ -2230,8 +2224,8 @@ export async function deleteNotaCreditoConcepto(id: number): Promise<void> {
   }
 }
 
-// Ciclo de vida propio de la factura (24/Ago/2026, pedido explicito de
-// Mariana) - distinto del ciclo de un TesoreriaFlujo, no se segrega
+// Ciclo de vida propio de la factura, distinto del ciclo de un
+// TesoreriaFlujo - no se segrega
 // captura/aprobacion aqui (mismo permiso facturacion-cfdi.editar para
 // cualquier transicion, ver marcarEstadoFactura). Pasar a ACEPTADA exige
 // link_pdf + link_xml ya cargados (el backend lo valida, ver
@@ -2597,7 +2591,7 @@ export interface EnvioMasivoResultado {
   detail?: string;
 }
 
-// Envio masivo de facturas por correo (finanzas.md: "Multiple invoices can
+// Envio masivo de facturas por correo (Finance Module: "Multiple invoices can
 // be selected to send massively (separately)") - un correo individual por
 // factura, cada uno con su propio destinatario (editable en pantalla, ver
 // facturas/page.tsx). Ver
@@ -3349,7 +3343,7 @@ export async function deleteSaldo(id: string): Promise<void> {
   }
 }
 
-// Reporte diario de saldos (26/Ago/2026, ver documentos/finanzas.md:
+// Reporte diario de saldos (26/Ago/2026, ver Finance Module:
 // "Generate daily reports on bank transactions") - por empresa (seleccion
 // multiple), compara las transacciones (Flujos) del dia contra el cambio
 // de saldo de cada cuenta. Calculo real vive en tesoreria-service/
@@ -3410,7 +3404,7 @@ export async function getReporteDiario(sociedades: string[], fecha: string): Pro
   return response.json();
 }
 
-// "Arrastrar" el saldo del dia anterior (finanzas.md: "There must be an
+// "Arrastrar" el saldo del dia anterior (Finance Module: "There must be an
 // option to carry the same balance from the previous day") - crea el
 // TesoreriaSaldo de `fecha` copiando el ultimo saldo capturado antes de
 // esa fecha para esa cuenta. 400 si ya hay un saldo capturado o si no hay
@@ -3573,11 +3567,11 @@ export async function subirFacturaTicketProveedor(params: {
   return response.json();
 }
 
-// Ticket publico de UN documento del checklist (28/Ago/2026, pedido
-// explicito de Mariana: "esos [archivos] los subira el cliente...mediante
-// una magic link por doc faltante") - mismo patron que validarTicketProveedor/
-// subirFacturaTicketProveedor arriba, pero ligado a un documento especifico
-// en vez de a la contraparte en general (ver TesoreriaDocumentoTicketViewSet).
+// Ticket publico de UN documento del checklist - el cliente lo sube via
+// magic link por documento faltante. Mismo patron que
+// validarTicketProveedor/subirFacturaTicketProveedor arriba, pero ligado a
+// un documento especifico en vez de a la contraparte en general (ver
+// TesoreriaDocumentoTicketViewSet).
 export interface TesoreriaDocumentoTicketValidado {
   nombre_documento: string;
   id_contrato: string;

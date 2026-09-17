@@ -1,16 +1,7 @@
-"""Login OIDC real via Google Workspace (Fase 1, Semana 4;
-docs/architecture/README.md sec. 6.1). Vistas Django simples (no
-ViewSet/DRF): son parte de un flujo de redirects de navegador, no de una
-API JSON convencional - /api/me es la unica que responde JSON.
-
-SSO silencioso (decision de producto confirmada, ver memoria de sesion
-"oidc-sso-silencioso-sin-boton-login"): esta vista NO decide eso, solo la
-implementa - /auth/google/start no muestra ninguna pantalla propia, salta
-directo a Google. El frontend ya no muestra el boton "Iniciar sesion con
-Google" para usuarios internos (ver src/app/login/page.tsx - redirige
-directo, solo cae a un boton "Reintentar" si /auth/google/callback regreso
-con ?error=oidc).
-"""
+"""Login OIDC via Google Workspace (README.md sec. 6.1). Vistas Django
+simples de redirects de navegador, no ViewSet/DRF - /api/me es la unica
+que responde JSON. SSO silencioso: sin pantalla propia, salta directo a
+Google."""
 
 import logging
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -43,11 +34,8 @@ _PKCE_SALT = "oidc-pkce"
 
 
 class LoginRechazadoSinInvitacion(Exception):
-    """El correo no tiene IamUser existente ni invitacion pendiente -
-    decision hibrida 10/Ago/2026 (ver memoria de sesion
-    "iam-invitacion-alcance-incierto"): un usuario ya registrado entra con
-    login libre, uno nuevo de la organizacion necesita que un IAM Admin lo
-    invite primero."""
+    """Correo sin IamUser ni invitacion pendiente: usuario existente entra
+    libre, uno nuevo necesita invitacion de un IAM Admin."""
 
 
 def _agregar_error_a_redirect(url: str, error_code: str) -> str:
@@ -120,12 +108,9 @@ def google_callback(request):
         response.delete_cookie(settings.OIDC_PKCE_COOKIE_NAME)
         return response
 
-    # Gate de status (14/Ago/2026, hallazgo al construir "eliminar usuario"
-    # en /admin/usuarios): sin esto, suspender/eliminar a alguien desde el
-    # directorio no le cerraba la puerta de verdad si esa persona TAMBIEN
-    # tiene cuenta de Workspace - _upsert_identity la deja pasar por login
-    # libre sin fijarse en status. Mismo criterio que
-    # canjear_acceso_externo (auth_views.py) para el 3er tipo de invitacion.
+    # Gate de status: sin esto, suspender/eliminar a alguien no le cierra
+    # la puerta si tiene cuenta de Workspace. Mismo criterio que
+    # canjear_acceso_externo.
     if user.status != IamUser.STATUS_ACTIVE:
         logger.warning("Login rechazado: %s tiene status=%s", user.primary_email, user.status)
         response = redirect(_agregar_error_a_redirect(settings.OIDC_FRONTEND_ERROR_URL, "cuenta_suspendida"))
@@ -139,7 +124,8 @@ def google_callback(request):
         session_jwt,
         max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
         httponly=True,
-        samesite="Lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
     response.delete_cookie(settings.OIDC_PKCE_COOKIE_NAME)
 
@@ -155,19 +141,10 @@ def google_callback(request):
 
 @require_GET
 def canjear_acceso_externo(request, token):
-    """Canje del 3er tipo de invitacion (colaborador externo sin
-    Workspace, ver models.IamExternalCollaborator y memoria de sesion
-    "tercer-tipo-invitacion-externo-sin-workspace"): a diferencia de
-    IamMagicLinkViewSet.validar (JSON, JWT de alcance limitado), esta
-    vista es de navegador - el link del correo apunta directo aqui, no a
-    una pantalla del frontend que luego llama a la API.
-
-    Emite la MISMA cookie de sesion que google_callback
-    (issue_session_jwt) porque el colaborador debe navegar la app normal
-    con sus roles/permisos reales, no solo probar un correo verificado
-    como el magic link. El link no vence por tiempo (no hay expires_at
-    aqui) - solo revocado a mano (IamExternalCollaboratorViewSet.revocar,
-    que tambien suspende el IamUser)."""
+    """Canje del 3er tipo de invitacion (colaborador externo sin Workspace).
+    A diferencia de IamMagicLinkViewSet.validar, es vista de navegador y
+    emite la misma cookie de sesion que google_callback. No vence por
+    tiempo, solo se revoca a mano."""
     try:
         acceso = IamExternalCollaborator.objects.select_related("user").get(token_hash=hash_token(token))
     except IamExternalCollaborator.DoesNotExist:
@@ -186,7 +163,8 @@ def canjear_acceso_externo(request, token):
         session_jwt,
         max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
         httponly=True,
-        samesite="Lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
 
     emitir_evento_auditoria(
@@ -204,23 +182,15 @@ def _upsert_identity(claims: dict) -> IamUser:
     7). email_verified/hd/picture se refrescan en cada login - son datos
     de Google, no editables por el usuario dentro de CumbresBI.
 
-    Gate de invitacion formal (decision hibrida 10/Ago/2026, ver memoria
-    de sesion "iam-invitacion-alcance-incierto"): si el correo YA tiene
-    IamUser, es un usuario ya registrado en la organizacion -> login
-    libre, como siempre. Si NO lo tiene, es alguien nuevo -> solo entra si
-    un IAM Admin ya lo invito (IamInvitation pendiente, ni aceptada ni
-    revocada); si no hay invitacion, se rechaza el login SIN crear el
-    IamUser (antes de este gate, cualquier correo del dominio aprobado se
-    autocreaba en silencio - ver LoginRechazadoSinInvitacion arriba).
+    Gate de invitacion formal: con IamUser ya existente, login libre; sin
+    el, solo entra si hay una IamInvitation pendiente (ni aceptada ni
+    revocada) - evita que cualquier correo del dominio aprobado se
+    autocree en silencio (ver LoginRechazadoSinInvitacion arriba).
 
-    Reactivacion (14/Ago/2026, ver IamUserViewSet.eliminar): un IamUser
-    con status=DELETED se trata como "sin cuenta" para este gate (misma
-    logica que IamInvitationViewSet.create, que ya excluye DELETED del
-    chequeo de "ya existe una cuenta") - necesita invitacion nueva, y al
-    aceptarla se reactiva (status=ACTIVE) en vez de crear una fila
-    duplicada. Sin esto, un usuario eliminado quedaba en un callejon sin
-    salida: no podia loguearse (gate de status en google_callback) ni
-    volver a entrar por invitacion (esta fila ya "existia")."""
+    Un IamUser con status=DELETED se trata como "sin cuenta" para este
+    gate (mismo criterio que IamInvitationViewSet.create) - necesita
+    invitacion nueva, y al aceptarla se reactiva en vez de duplicar la
+    fila (ver IamUserViewSet.eliminar)."""
     email = claims["email"]
     now = timezone.now()
 
@@ -277,14 +247,9 @@ def logout(request):
 @csrf_exempt
 @require_GET
 def refresh(request):
-    """Reemite la cookie de sesion con los roles/permisos ACTUALES de BD,
-    sin pedirle al usuario que vuelva a hacer login (Opcion A: el frontend
-    la llama con un poll periodico corto - AppShell.tsx - en vez de
-    esperar a que el JWT expire por si solo, SESSION_JWT_TTL_MINUTES).
-
-    Requiere que el JWT viejo todavia sea valido (no expirado) - a
-    diferencia de google_callback, esto no es un login nuevo, es renovar
-    una sesion que ya existia."""
+    """Reemite la cookie de sesion con roles/permisos actuales de BD sin
+    pedir login (frontend hace poll periodico, AppShell.tsx). Requiere JWT
+    viejo aun valido - renueva sesion existente, no es login nuevo."""
     token = request.COOKIES.get(settings.SESSION_COOKIE_NAME_JWT)
     if not token:
         return JsonResponse({"detail": "No autenticado."}, status=401)
@@ -310,7 +275,8 @@ def refresh(request):
         session_jwt,
         max_age=settings.SESSION_JWT_TTL_MINUTES * 60,
         httponly=True,
-        samesite="Lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
     return response
 
@@ -342,10 +308,8 @@ def me(request):
             "proyecto_ids": claims["proyecto_ids"],
             "centro_ids": claims["centro_ids"],
             "contrato_ids": claims["contrato_ids"],
-            # Ya viajaban en el JWT (compute_effective_scope_claims) pero
-            # /api/me no los exponia - el frontend los necesita para
-            # filtrar el sidebar por rol (ver AppShell.tsx), no solo
-            # confiar en que el backend regrese 403 en escritura.
+            # El frontend los necesita para filtrar el sidebar por rol
+            # (AppShell.tsx), no solo confiar en 403 del backend.
             "role_keys": claims["role_keys"],
             "perm_keys": claims["perm_keys"],
             "picture_url": identity.picture_url if identity else None,

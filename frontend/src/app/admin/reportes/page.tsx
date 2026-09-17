@@ -360,8 +360,7 @@ function BitacoraAuditoria() {
 
   // El boton ya no descarga localmente - sube el CSV a Drive
   // (CumbresBI/Auditoria/Bitacora/) y abre el link de Drive en una pestaña
-  // nueva (decision de Mariana, 12/Ago/2026, ver memoria de sesion
-  // "csv-auditoria-a-drive").
+  // nueva.
   async function handleExportarCsv() {
     setExportando(true);
     setError(null);

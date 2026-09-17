@@ -10,11 +10,9 @@ import RecaptchaV2 from "@/components/RecaptchaV2";
 
 // Pagina publica (sin AppShell, sin login) - a donde llega el cliente al
 // abrir el link de un documento faltante del checklist de su expediente
-// KYC (04/Sep/2026, pedido explicito de Mariana: "hay que unificar la
-// solicitud de documento como en contratos"). Mismo patron exacto que
-// app/tesoreria-documento/[token]/page.tsx, pero ligado a UN documento
-// especifico del expediente en vez de a un contrato. Contrato:
-// PldDocumentoTicketViewSet.validar/subir.
+// KYC. Mismo patron exacto que app/tesoreria-documento/[token]/page.tsx,
+// pero ligado a UN documento especifico del expediente en vez de a un
+// contrato. Contrato: PldDocumentoTicketViewSet.validar/subir.
 const MAX_TAMANO_ARCHIVO_MB = 5;
 const MAX_TAMANO_ARCHIVO_BYTES = MAX_TAMANO_ARCHIVO_MB * 1024 * 1024;
 

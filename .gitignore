@@ -79,6 +79,9 @@ services/document-intelligence-service/Maria/
 *.xlsx
 !docs/architecture/*.md
 !docs/architecture/**/*.md
+# README principal del repo (17/Sep/2026, movido de docs/architecture/ a la raiz) -
+# es la documentacion real vigente, debe versionarse igual que docs/architecture/.
+!/README.md
 
 # HTML sueltos en la raiz del repo (24/Ago/2026) - diagramas/documentacion
 # exploratoria generados durante una sesion (ej. mapas de tablas, ejemplos

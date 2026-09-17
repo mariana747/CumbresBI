@@ -35,17 +35,14 @@ const ESTADO_COLOR: Record<RequisicionEstado, "warning" | "success" | "error"> =
   RECHAZADA: "error",
 };
 
-// Requisicion de materiales (21/Ago/2026, decision de Mariana: "en
-// requisicion es donde se va a pedir material") - documento formal por
-// proyecto+etapa que jala los ConceptoPresupuesto ya presupuestados y
-// dispara la COMPRA. Distinta de "Salida de almacen" en /obra/materiales
-// (esa es para pedir contra lo que ya hay). Diseno del documento sobre el
-// mockup de Ruben aprobado 17/Ago/2026.
+// Requisicion de materiales: documento formal por proyecto+etapa que jala
+// los ConceptoPresupuesto ya presupuestados y dispara la COMPRA. Distinta
+// de "Salida de almacen" en /obra/materiales (esa es para pedir contra lo
+// que ya hay). Diseno del documento sobre el mockup de Ruben.
 //
-// El alta vive en /obra/requisiciones/nueva (21/Ago/2026, pedido de
-// Mariana: "este debe ser editable, es la vista de nueva requisicion") -
-// ya no es un dialogo simple, es el mismo documento oscuro pero con los
-// campos editables y una vista previa en vivo de los conceptos.
+// El alta vive en /obra/requisiciones/nueva - ya no es un dialogo simple,
+// es el mismo documento oscuro pero con los campos editables y una vista
+// previa en vivo de los conceptos.
 export default function RequisicionesPage() {
   const router = useRouter();
   const [session, setSession] = useState<SessionUser | null>(null);

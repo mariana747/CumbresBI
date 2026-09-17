@@ -36,11 +36,8 @@ def _actor(request):
 
 
 class _PermisosComprasMixin:
-    """Mismo gate de permisos en todos los recursos de este primer corte:
-    crear=compras.crear, editar/borrar=compras.editar, lectura abierta -
-    mismo criterio que _PermisosMaterialesMixin en materiales-service.
-    Las acciones que deciden (generar orden, confirmar extraccion de la
-    IA) piden compras.aprobar por separado, ver cada ViewSet."""
+    """Gate de permisos: crear=compras.crear, editar/borrar=compras.editar,
+    lectura abierta. Acciones que deciden piden compras.aprobar aparte."""
 
     def get_permissions(self):
         if self.action == "create":
@@ -80,13 +77,8 @@ class SolicitudCompraViewSet(_PermisosComprasMixin, ModelViewSet):
 
 class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
     """Cotizacion de un proveedor contra una SolicitudCompra.
-    confirmar_extraccion es el enlace real con el Motor Documental
-    (prompt "compras.cotizacion" de docint/prompts.py, ya existia sin
-    consumidor real) - mismo patron "la IA propone, un humano confirma"
-    que TesoreriaFlujoViewSet.confirmar_conciliacion en tesoreria-service:
-    el frontend ya llamo a docint AnalyzeView por su cuenta y dejo que el
-    analista revise/corrija en pantalla, esta accion solo guarda lo ya
-    confirmado."""
+    confirmar_extraccion es el enlace con el Motor Documental: la IA
+    propone, un humano confirma en pantalla antes de este POST."""
 
     serializer_class = CotizacionSerializer
     filter_backends = [SearchFilter]
@@ -280,12 +272,8 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
 
 
 def _llamar_materiales_service(endpoint, payload, contexto):
-    """POST a un endpoint interno de materiales-service (X-Internal-Secret,
-    ver settings.MATERIALES_INTERNAL_SECRET) - fail-open, mismo criterio
-    que pld-service/pld/views.py::_crear_contraparte_minima_en_tesoreria:
-    un problema de red entre servicios no debe bloquear ni revertir lo que
-    ya quedo guardado en Compras. `contexto` es solo para el mensaje de
-    log (ej. "recepcion", "cotizacion confirmada")."""
+    """POST interno a materiales-service (X-Internal-Secret). Fail-open: un
+    problema de red no debe revertir lo ya guardado en Compras."""
     if not settings.MATERIALES_INTERNAL_SECRET:
         return
     try:
@@ -308,12 +296,8 @@ def _llamar_materiales_service(endpoint, payload, contexto):
 
 
 def _sincronizar_inventario_materiales(orden, orden_linea, cantidad_recibida):
-    """Suma al inventario de Obra al registrar una recepcion (02/Sep/2026,
-    pedido de Mariana: "Recepciones va tener conexion con obra en la parte
-    de materiales, para actualizar el inventario... compras es la base").
-    Llama a MaterialCatalogoViewSet.recibir_compra en materiales-service -
-    busca/crea el material por nombre (case-insensitive), sin que el
-    analista de Compras tenga que elegir uno de un catalogo de antemano."""
+    """Suma al inventario de Obra al registrar una recepcion; busca/crea el
+    material por nombre, sin catalogo previo obligatorio."""
     _llamar_materiales_service(
         "recibir_compra",
         {
@@ -328,13 +312,7 @@ def _sincronizar_inventario_materiales(orden, orden_linea, cantidad_recibida):
 
 def _sincronizar_precio_cotizado(cotizacion, linea):
     """Actualiza precio_unitario/proveedor en MaterialCatalogo al confirmar
-    una cotizacion (02/Sep/2026, siguiente paso pedido por Mariana tras
-    conectar Recepcion->inventario: "sincronizar cotizacion -> catalogo").
-    A diferencia de _sincronizar_inventario_materiales, esto NO es una
-    entrega real todavia - solo dice "se cotizo a este precio con este
-    proveedor", sin tocar cantidad_disponible (ver
-    MaterialCatalogoViewSet.actualizar_precio_cotizado en
-    materiales-service)."""
+    una cotizacion. No es entrega real, no toca cantidad_disponible."""
     if not linea.precio_unitario:
         return
     _llamar_materiales_service(
@@ -349,12 +327,9 @@ def _sincronizar_precio_cotizado(cotizacion, linea):
 
 
 class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):
-    """Bitacora de recepcion de mercancia contra una OrdenCompra - puede
-    haber varias entradas por orden (entregas parciales). `create` valida
-    cada linea contra lo que falta por recibir y acumula
-    OrdenCompraLinea.cantidad_recibida con select_for_update (mismo
-    criterio anti-condicion-de-carrera que SolicitudMaterialViewSet.
-    entregar en materiales-service)."""
+    """Bitacora de recepcion de mercancia contra una OrdenCompra, puede
+    haber varias entradas por orden. `create` valida cantidad pendiente y
+    acumula con select_for_update para evitar condicion de carrera."""
 
     serializer_class = RecepcionSerializer
     filter_backends = [SearchFilter]

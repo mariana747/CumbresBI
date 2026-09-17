@@ -1,5 +1,5 @@
 """Cliente de Google Drive - unico lugar del proyecto que habla con la API
-real (docs/architecture/pld-fase2-alcance.md sec. 1.3: Drive es transversal
+real (docs/architecture/pld/pld-fase2-alcance.md sec. 1.3: Drive es transversal
 - PLD, contratos de Tesoreria y Excels lo van a reusar - por eso vive en su
 propio servicio, sin depender de document-intelligence-service/Gemini).
 

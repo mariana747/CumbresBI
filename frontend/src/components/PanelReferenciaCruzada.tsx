@@ -28,11 +28,9 @@ export type ReferenciaCruzada =
   | { tipo: "nomina"; id: string }
   | null;
 
-// Panel de referencias cruzadas (10/Sep/2026, "replica el patron en
-// Facturas y Flujos") - extraido de Conciliacion de Facturas para
+// Panel de referencias cruzadas - extraido de Conciliacion de Facturas para
 // reusarse tal cual en cualquier pantalla que muestre un id de
-// contrato/proveedor y quiera un boton "Ver X" junto al dato. Ver receta
-// completa en memoria de sesion "feedback-patron-referencias-cruzadas":
+// contrato/proveedor y quiera un boton "Ver X" junto al dato.
 // Drawer (no modal ni redireccion) con z-index por encima de cualquier
 // Dialog abierto detras, boton de pantalla completa, Flujos asociados
 // expandibles con el detalle interno completo, sin bordes redondeados.

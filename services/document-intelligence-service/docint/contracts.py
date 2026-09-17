@@ -1,6 +1,6 @@
 """Contrato del Motor Inteligente de Procesamiento Documental.
 
-Tal cual documentado en docs/architecture/README.md sec. 10. Este contrato
+Tal cual documentado en /README.md sec. 10. Este contrato
 NO cambia entre AI Studio (dev, documentos ficticios) y Vertex AI
 (produccion, documentos reales) - lo unico que cambia es el provider usado
 por debajo (ver providers/).

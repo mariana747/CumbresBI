@@ -126,13 +126,33 @@ class ViviendaVentasExpediente(models.Model):
 
     ESTADO_PENDIENTE = "PENDIENTE"
     ESTADO_EN_PROCESO = "EN PROCESO"
+    ESTADO_FIRMADO = "FIRMADO"
     ESTADO_CONCLUIDO = "CONCLUIDO"
     ESTADO_CANCELADO = "CANCELADO"
     ESTADO_CHOICES = [
         (ESTADO_PENDIENTE, "Pendiente"),
         (ESTADO_EN_PROCESO, "En proceso"),
+        (ESTADO_FIRMADO, "Firmado"),
         (ESTADO_CONCLUIDO, "Concluido"),
         (ESTADO_CANCELADO, "Cancelado"),
+    ]
+
+    # medio_pago/pagos_efectivo: columnas reales del legacy (ver
+    # information_schema.columns de administracion.vivienda_ventas_expedientes,
+    # 17/Sep/2026) que nunca se habian agregado aqui - descubierto al mapear
+    # el esquema para la migracion de datos, se agregan para no perder ese
+    # dato al migrar.
+    MEDIO_PAGO_CONTADO = "CONTADO"
+    MEDIO_PAGO_INFONAVIT = "INFONAVIT"
+    MEDIO_PAGO_FOVISSSTE = "FOVISSSTE"
+    MEDIO_PAGO_COFINAVIT = "COFINAVIT"
+    MEDIO_PAGO_HIPOTECARIO = "HIPOTECARIO"
+    MEDIO_PAGO_CHOICES = [
+        (MEDIO_PAGO_CONTADO, "Contado"),
+        (MEDIO_PAGO_INFONAVIT, "Infonavit"),
+        (MEDIO_PAGO_FOVISSSTE, "Fovissste"),
+        (MEDIO_PAGO_COFINAVIT, "Cofinavit"),
+        (MEDIO_PAGO_HIPOTECARIO, "Hipotecario"),
     ]
 
     id_expediente = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
@@ -149,6 +169,8 @@ class ViviendaVentasExpediente(models.Model):
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
     fecha_cierre = models.DateField(blank=True, null=True)
     link_expediente = models.CharField(max_length=2083, blank=True, null=True)
+    medio_pago = models.CharField(max_length=20, choices=MEDIO_PAGO_CHOICES, blank=True, null=True)
+    pagos_efectivo = models.BooleanField(blank=True, null=True)
     comentarios = models.CharField(max_length=500, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=8)
@@ -232,14 +254,37 @@ class ViviendaRelExpedienteCliente(models.Model):
 
 class ViviendaVentasExpedienteItem(models.Model):
     STATUS_PENDIENTE = "PENDIENTE"
+    STATUS_NO_APLICA = "NO APLICA"
     STATUS_INCOMPLETO = "INCOMPLETO"
     STATUS_ENTREGADO = "ENTREGADO"
     STATUS_APROBADO = "APROBADO"
+    STATUS_RECHAZADO = "RECHAZADO"
+    STATUS_POSPUESTO = "POSPUESTO"
     STATUS_CHOICES = [
         (STATUS_PENDIENTE, "Pendiente"),
+        (STATUS_NO_APLICA, "No aplica"),
         (STATUS_INCOMPLETO, "Incompleto"),
         (STATUS_ENTREGADO, "Entregado"),
         (STATUS_APROBADO, "Aprobado"),
+        (STATUS_RECHAZADO, "Rechazado"),
+        (STATUS_POSPUESTO, "Pospuesto"),
+    ]
+
+    # responsable: columna real del legacy (ver information_schema.columns de
+    # administracion.vivienda_ventas_expedientes_items, 17/Sep/2026) que nunca
+    # se habia agregado aqui - descubierto al mapear el esquema para la
+    # migracion de datos, se agrega para no perder ese dato al migrar.
+    RESPONSABLE_VENTAS = "VENTAS"
+    RESPONSABLE_ESCRITURACION = "ESCRITURACION"
+    RESPONSABLE_TESORERIA = "TESORERIA"
+    RESPONSABLE_CONTABILIDAD = "CONTABILIDAD"
+    RESPONSABLE_LEGAL = "LEGAL"
+    RESPONSABLE_CHOICES = [
+        (RESPONSABLE_VENTAS, "Ventas"),
+        (RESPONSABLE_ESCRITURACION, "Escrituración"),
+        (RESPONSABLE_TESORERIA, "Tesorería"),
+        (RESPONSABLE_CONTABILIDAD, "Contabilidad"),
+        (RESPONSABLE_LEGAL, "Legal"),
     ]
 
     id_item = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
@@ -254,6 +299,7 @@ class ViviendaVentasExpedienteItem(models.Model):
     fecha_limite = models.DateField()
     fecha_entrega = models.DateField(blank=True, null=True)
     fecha_cierre = models.DateField(blank=True, null=True)
+    responsable = models.CharField(max_length=20, choices=RESPONSABLE_CHOICES, blank=True, null=True)
     comentarios = models.CharField(max_length=500, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=8)

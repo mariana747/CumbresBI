@@ -97,9 +97,8 @@ class IamRoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = IamRole
         fields = ["role_id", "role_key", "role_name", "description", "tipo", "activo", "permisos"]
-        # 31/Ago/2026 (pedido de Mariana: "super admin debe poder crear
-        # roles para colaboradores externos") - role_key/role_name/
-        # description/tipo ahora se pueden mandar al crear (ver
+        # Super admin puede crear roles para colaboradores externos:
+        # role_key/role_name/description/tipo ahora se pueden mandar al crear (ver
         # IamRoleViewSet.perform_create); antes todo el serializer era de
         # solo lectura y "crear un rol" no tenia forma real de llenarse.
         # role_id sigue siendo autogenerado, permisos sigue siendo
@@ -118,7 +117,7 @@ class IamRoleSerializer(serializers.ModelSerializer):
 class IamUserRoleSerializer(serializers.ModelSerializer):
     """Otorgar/revocar roles (Fase 1, Semana 5). granted_by queda null por
     ahora - no hay JWT real todavia, asi que no sabemos quien es el actor
-    (ver docs/architecture/README.md sec. 8); se completa cuando iam-service
+    (ver /README.md sec. 8); se completa cuando iam-service
     empiece a emitir/validar tokens."""
 
     role_key = serializers.CharField(source="role.role_key", read_only=True)

@@ -4,23 +4,11 @@ from django.db import models
 
 class RrhhEmpleado(models.Model):
     """id_empleado es varchar(255) y no autogenerado: viene del sistema de
-    origen (AppSheet heredado), a diferencia de los ids cortos de 8 caracteres
-    usados en iam-service. iam_users.employee_id referencia esta PK desde
-    iam-service (fuera de este esquema, no es ForeignKey real aqui tampoco -
-    la relacion inversa vive del lado de iam-service).
-
-    01/Sep/2026 (auditoria de scope RLS, ver memoria de sesion
-    "auditoria-scope-rls-por-servicio") - RrhhEmpleado no tiene columna de
-    sociedad/proyecto propia (es PII pura), el alcance real le llega via su
-    relacion inversa con RrhhPuesto - mismo criterio que
-    TesoreriaFlujo.SCOPE_FIELD_SOCIEDAD = "contrato__sociedad" en
-    tesoreria-service, solo que aqui es 1:N (un empleado puede tener varios
-    puestos) en vez de N:1 - una vista real que use esto debe agregar
-    .distinct() para no duplicar filas si el empleado tiene mas de un puesto
-    que matchea el mismo scope. Todavia no hay views.py/serializers.py en
-    este servicio (API sin construir) - se agrega este manager de una vez
-    para que nadie exponga un ViewSet sin scope despues, no porque haya una
-    fuga activa hoy."""
+    origen (AppSheet heredado). RrhhEmpleado no tiene columna de
+    sociedad/proyecto propia (es PII pura); el alcance le llega via su
+    relacion inversa con RrhhPuesto - cualquier vista debe agregar
+    .distinct() para no duplicar filas si el empleado tiene mas de un
+    puesto que matchea el mismo scope."""
 
     CIVIL_SOLTERO = "SOLTERO"
     CIVIL_CASADO = "CASADO"
@@ -88,14 +76,9 @@ class RrhhEmpleado(models.Model):
 
 class RrhhPuesto(models.Model):
     """sociedad referencia general_sociedades.rfc (iam-service, fuera de este
-    esquema) - se guarda como CharField plano, no ForeignKey real, mismo
-    criterio de aislamiento documentado en docs/architecture/README.md
-    sec. 11.2 #1.
-
-    01/Sep/2026 (auditoria de scope RLS): este es el modelo con las columnas
-    de scope reales del servicio (sociedad/proyecto) - mismo patron que
-    TesoreriaContrato.SCOPE_FIELD_SOCIEDAD/PROYECTO en tesoreria-service.
-    """
+    esquema) - se guarda como CharField plano, no ForeignKey real. Este es
+    el modelo con las columnas de scope reales del servicio
+    (sociedad/proyecto)."""
 
     id_puesto = models.CharField(max_length=255, primary_key=True)
     empleado = models.ForeignKey(

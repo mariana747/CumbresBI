@@ -45,11 +45,10 @@ SERVICIOS = [
     # PLD_APROBADOR no se toca (su rol es aprobar/rechazar el expediente,
     # no gestionar archivos - eso todavia no esta contemplado).
     "pld-documentos",
-    # Solicitud de Pago (tesoreria-service, 04/Sep/2026) - pago de
+    # Solicitud de Pago (tesoreria-service) - pago de
     # servicios/licencias/renovaciones, dividido por proyecto. Servicio
-    # separado de "tesoreria" a proposito (pedido explicito de Mariana:
-    # "agregalo como servicio, como el pld-documentos") en vez de un
-    # permiso nuevo fuera del esquema L/C/E/A: a diferencia de Reembolso
+    # separado de "tesoreria" a proposito (mismo patron que pld-documentos)
+    # en vez de un permiso nuevo fuera del esquema L/C/E/A: a diferencia de Reembolso
     # (abierto a cualquier empleado via _EsEmpleadoAutenticado, sin
     # perm_key), "no todos los colaboradores pueden solicitar pago" - un
     # servicio propio permite restringir el "C" (solicitud-pago.crear) a
@@ -82,18 +81,15 @@ ROLE_ACCESS = {
         "materiales": "LE", "tesoreria": "L",
     },
     "OBRA_COORDINADOR": {"iam": "L", "ventas-vivienda": "LE", "materiales": "LCE", "obra": "LCE"},
-    # SUPERVISOR_OBRA (21/Ago/2026, PENDIENTE confirmar con el cliente): rol
-    # mencionado por Mariana para el corte semanal de obra - captura y
-    # aprueba/cierra el corte del viernes (obra.aprobar), a diferencia de
+    # SUPERVISOR_OBRA (PENDIENTE confirmar con el cliente): captura y
+    # aprueba/cierra el corte semanal del viernes (obra.aprobar), a diferencia de
     # OBRA_COORDINADOR que no tiene la "A". Alcance PROYECTO.
     "SUPERVISOR_OBRA": {"iam": "L", "obra": "LCEA"},
-    # facturacion-cfdi solo "L" (+ "A") para todo mundo salvo SUPER_ADMIN
-    # (finanzas.md sec. "General Notes": "The user cannot create, delete
-    # or modify invoices, just see, export and link them to transactions",
-    # decision 26/Ago/2026: SUPER_ADMIN conserva LCEA como excepcion
-    # operativa - el resto de los roles pierde C/E aqui). La "A" (aprobar)
-    # SI se conserva para FINANZAS_MANAGER/TESORERIA_ANALISTA (decision
-    # 27/Ago/2026, confirmado con Mariana) porque marcar_estado y
+    # facturacion-cfdi solo "L" (+ "A") para todo mundo salvo SUPER_ADMIN:
+    # las facturas no se crean/editan/borran a mano, solo se ven, exportan y
+    # vinculan a transacciones (SUPER_ADMIN conserva LCEA como excepcion
+    # operativa). La "A" (aprobar) SI se conserva para
+    # FINANZAS_MANAGER/TESORERIA_ANALISTA porque marcar_estado y
     # confirmar_extraccion son el flujo de revision (cambiar el estado del
     # proceso, o confirmar lo que propuso el Motor Documental), no
     # "modificar la factura" en el sentido de editar los campos del CFDI a
@@ -104,9 +100,8 @@ ROLE_ACCESS = {
         "docint": "LC", "solicitud-pago": "LCEA",
     },
     # TESORERIA_ANALISTA solicita el pago (C) pero no se autoriza a si
-    # mismo (sin "A" aqui) - separacion de funciones pedida por Mariana
-    # ("autorizado por... la persona que lo autorizo debe hacerlo
-    # manualmente"), FINANZAS_MANAGER es quien aprueba.
+    # mismo (sin "A" aqui) - separacion de funciones: FINANZAS_MANAGER es
+    # quien aprueba.
     "TESORERIA_ANALISTA": {
         "iam": "L", "contrapartes": "L", "tesoreria": "LCE", "facturacion-cfdi": "LA",
         "docint": "LC", "solicitud-pago": "LC",

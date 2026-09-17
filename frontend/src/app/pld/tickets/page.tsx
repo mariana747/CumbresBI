@@ -63,12 +63,10 @@ export default function TicketsClientePage() {
   const [tickets, setTickets] = useState<PldTicketCliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
-  // 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener filtro",
-  // "esta parte que sea igual para tickets de clientes" - misma fila
-  // Buscar/Estado/Sociedad que /pld). Sociedad va al backend (acota el
-  // scope real de la vista); Buscar/Estado son del lado del cliente - el
-  // "estado" de un ticket (Activo/Revocado/Expirado/Usado) se calcula en
-  // memoria (ver estadoDe() mas abajo), no es una columna propia.
+  // Misma fila Buscar/Estado/Sociedad que /pld. Sociedad va al backend
+  // (acota el scope real de la vista); Buscar/Estado son del lado del
+  // cliente - el "estado" de un ticket (Activo/Revocado/Expirado/Usado)
+  // se calcula en memoria (ver estadoDe() mas abajo), no es una columna propia.
   const [filtroSociedad, setFiltroSociedad] = useState("");
   const [search, setSearch] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("");
@@ -109,9 +107,7 @@ export default function TicketsClientePage() {
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("pld-compliance.editar") ?? false;
 
-  // 31/Ago/2026 (pedido de Mariana: "en el filtro de sociedades solo
-  // deben aparecer las activas para ese rol - en global o super admin asi
-  // esta bien") - mismo criterio que /pld.
+  // Mismo criterio que /pld.
   const sociedadesDelFiltro =
     session?.is_global || !session ? sociedades : sociedades.filter((s) => session.sociedad_rfcs.includes(s.rfc));
 

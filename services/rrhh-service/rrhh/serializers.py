@@ -4,8 +4,7 @@ from .models import RrhhEmpleado, RrhhPuesto
 
 
 class RrhhEmpleadoSerializer(serializers.ModelSerializer):
-    """CRUD de Empleados (10/Sep/2026, Fase 2 del modulo de Nominas - ver
-    memoria de sesion "tesoreria-nominas-diseno-09sep") - primer serializer
+    """CRUD de Empleados - Fase 2 del modulo de Nominas. Primer serializer
     real de rrhh-service, hasta ahora solo tenia modelos (ver docstring de
     RrhhEmpleado en models.py). `id_empleado` se genera en el backend si no
     se manda (ver RrhhEmpleadoViewSet.perform_create) - mismo criterio que
@@ -62,13 +61,9 @@ class RrhhEmpleadoSerializer(serializers.ModelSerializer):
 
 
 class RrhhPuestoSerializer(serializers.ModelSerializer):
-    """Historial de sueldo (10/Sep/2026, notas de Jenny 09/Sep: "los cambios
-    de sueldo se realizan a traves de la tabla Puestos") - NO se edita
-    salario_diario en el mismo renglon: se da de baja el Puesto vigente
-    (fecha_baja) y se crea uno nuevo con el sueldo actualizado (ver
-    RrhhPuestoViewSet.dar_de_baja). El esquema ya soportaba esto (id_puesto
-    es su propia PK, 1:N con el empleado) - solo faltaba la pantalla.
-    `id_puesto` se genera en el backend igual que id_empleado."""
+    """Historial de sueldo: NO se edita salario_diario en el mismo renglon,
+    se da de baja el Puesto vigente y se crea uno nuevo con el sueldo
+    actualizado (ver RrhhPuestoViewSet.dar_de_baja)."""
 
     empleado_nombre = serializers.SerializerMethodField()
 

@@ -130,16 +130,15 @@ function TesoreriaContrapartesPageContent() {
   // ver origen en tesoreria.ts) - quedan con email/tipo_persona vacios y
   // nadie se enteraba antes de que existiera este filtro.
   const [soloPendientesIA, setSoloPendientesIA] = useState(false);
-  // "Autorizado por" se llena de colaboradores internos (28/Ago/2026,
-  // pedido explicito de Mariana), no texto libre - filtro access_mode=
-  // STANDARD (interno/Workspace) para no mezclar proveedores/externos que
-  // tambien viven en iam-service (ver docstring de IamUser.access_mode).
+  // "Autorizado por" se llena de colaboradores internos, no texto libre -
+  // filtro access_mode=STANDARD (interno/Workspace) para no mezclar
+  // proveedores/externos que tambien viven en iam-service (ver docstring de
+  // IamUser.access_mode).
   const [colaboradores, setColaboradores] = useState<IamUser[]>([]);
   // created_by/updated_by guardan el user_id crudo (ver perform_create en
-  // views.py) - este mapa lo resuelve al correo para mostrarlo legible
-  // (28/Ago/2026, pedido explicito de Mariana: "no el id, sino el correo
-  // electronico"). Cae de vuelta al ID crudo si el usuario ya no esta en
-  // el directorio STANDARD activo (ej. fue borrado o es externo).
+  // views.py) - este mapa lo resuelve al correo para mostrarlo legible.
+  // Cae de vuelta al ID crudo si el usuario ya no esta en el directorio
+  // STANDARD activo (ej. fue borrado o es externo).
   const emailPorUserId = useMemo(() => {
     const mapa: Record<string, string> = {};
     colaboradores.forEach((u) => {
@@ -152,9 +151,8 @@ function TesoreriaContrapartesPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TesoreriaContraparte | null>(null);
-  // Ver vs. Editar (28/Ago/2026, pedido explicito de Mariana: "en los tres
-  // puntos lo de editar y en su lugar agrega un boton de ver") - mismo
-  // dialogo, mismo formulario, pero con todo deshabilitado y sin boton de
+  // Ver vs. Editar: "Editar" se movio de los tres puntos a un boton de
+  // "Ver" aparte - mismo dialogo, mismo formulario, pero con todo deshabilitado y sin boton de
   // Guardar cuando soloLectura es true. "Ver" queda visible siempre;
   // "Editar" se mueve al menu de tres puntos (gateado por puedeEditar).
   const [soloLectura, setSoloLectura] = useState(false);
@@ -163,9 +161,8 @@ function TesoreriaContrapartesPageContent() {
   const [formError, setFormError] = useState<string | null>(null);
   // ID mostrado en el dialogo de alta - generado al abrirlo, ver abrirAlta().
   const [idNuevo, setIdNuevo] = useState("");
-  // Apellidos y genero solo aplican a personas fisicas (28/Ago/2026, pedido
-  // explicito de Mariana: "no puede pedir apellidos si es moral") - una
-  // razon social (Moral/Fideicomiso) no tiene apellidos ni genero.
+  // Apellidos y genero solo aplican a personas fisicas - una razon social
+  // (Moral/Fideicomiso) no tiene apellidos ni genero.
   const esPersonaFisica = form.tipoPersona === "fisica" || form.tipoPersona === "fisica_act_emp";
   // "Contacto" es un dato legal distinto del Titular (02/Sep/2026,
   // aclaracion explicita: el Titular debe identificarse con sus datos
@@ -221,8 +218,7 @@ function TesoreriaContrapartesPageContent() {
   // Contratos de una contraparte (28/Ago/2026, "para la contraparte que
   // cree, creale varios contratos ya que es una relacion de 1:N") -
   // dialogo de solo lectura por contraparte, mismo patron que Relaciones.
-  // El alta de contratos se quito de aqui (28/Ago/2026, pedido explicito de
-  // Mariana: "quita lo de contrapartes, nuevo contrato") - se crea
+  // El alta de contratos se quito de aqui - se crea
   // exclusivamente desde /tesoreria/contratos; aqui solo se listan los de
   // esta contraparte y cada uno linkea alla.
   const [contratosContraparte, setContratosContraparte] = useState<TesoreriaContraparte | null>(null);
@@ -356,9 +352,9 @@ function TesoreriaContrapartesPageContent() {
       setFormError("La razón social es requerida.");
       return;
     }
-    // email y tipo_persona vuelven a ser obligatorios (28/Ago/2026, pedido
-    // explicito de Mariana, revierte la alta minima del 19/Ago/2026 - ver
-    // TesoreriaContraparte.email/tipo_persona en models.py).
+    // email y tipo_persona vuelven a ser obligatorios, revierte la alta
+    // minima anterior (ver TesoreriaContraparte.email/tipo_persona en
+    // models.py).
     if (!form.email.trim()) {
       setFormError("El correo es requerido.");
       return;
@@ -853,16 +849,14 @@ function TesoreriaContrapartesPageContent() {
                 />
               )}
             </Stack>
-            {/* autorizado_por (28/Ago/2026, campo del ERD sin UI hasta
-            ahora, pedido explicito de Mariana: va justo debajo del ID
-            contraparte) - se elige de los colaboradores internos ("se
-            usara de los colaboradores internos") - guarda el user_id, no
-            un nombre libre, para que quede ligado a un usuario real de
-            iam-service. `permiso` se quito del formulario (28/Ago/2026,
-            confirmado con Mariana) - campo heredado del AppSheet original
-            sin ninguna funcion real en el sistema hoy, generaba confusion
-            sin proposito claro. Sigue existiendo en el modelo/API por si
-            en el futuro se le da un uso real. */}
+            {/* autorizado_por (campo del ERD, va justo debajo del ID
+            contraparte) - se elige de los colaboradores internos, guarda el
+            user_id, no un nombre libre, para que quede ligado a un usuario
+            real de iam-service. `permiso` se quito del formulario - campo
+            heredado del AppSheet original sin ninguna funcion real en el
+            sistema hoy, generaba confusion sin proposito claro. Sigue
+            existiendo en el modelo/API por si en el futuro se le da un uso
+            real. */}
             <FormControl size="small" fullWidth>
               <InputLabel id="autorizado-por-label">Autorizado por</InputLabel>
               <Select
@@ -1242,9 +1236,8 @@ function TesoreriaContrapartesPageContent() {
         </DialogActions>
       </Dialog>
 
-      {/* Contratos de una contraparte (1:N, 28/Ago/2026) - solo lectura, el
-      alta/edicion vive exclusivamente en /tesoreria/contratos (pedido
-      explicito de Mariana: "quita lo de contrapartes, nuevo contrato").
+      {/* Contratos de una contraparte (1:N) - solo lectura, el
+      alta/edicion vive exclusivamente en /tesoreria/contratos.
       Cada renglon linkea a su contrato; el boton del pie linkea a la lista
       completa ya filtrada por esta contraparte. */}
       <Dialog open={!!contratosContraparte} onClose={() => setContratosContraparte(null)} fullWidth maxWidth="sm">
@@ -1305,10 +1298,8 @@ function TesoreriaContrapartesPageContent() {
           </TableContainer>
         </DialogContent>
         <DialogActions>
-          {/* Filtrado por esta contraparte, no la lista completa (28/Ago/2026,
-          pedido explicito de Mariana: "se te redirige a los contratos solo
-          pertenecientes a esa contraparte, no se mostraran lo de otra
-          contraparte") - ver soporte de ?contraparte= en contratos/page.tsx. */}
+          {/* Filtrado por esta contraparte, no la lista completa - ver
+          soporte de ?contraparte= en contratos/page.tsx. */}
           <Button
             href={`/tesoreria/contratos?contraparte=${encodeURIComponent(contratosContraparte?.id_contraparte ?? "")}`}
           >

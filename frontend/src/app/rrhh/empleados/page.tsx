@@ -68,10 +68,10 @@ const FORM_PUESTO_VACIO = {
   tipoPago: "",
 };
 
-// Empleados/Puestos (10/Sep/2026, Fase 2 del modulo de Nominas - primera
-// pantalla real de rrhh-service, hasta ahora solo tenia modelos). El
-// historial de sueldo (09/Sep/2026, notas de Jenny) se logra dando de baja
-// el Puesto vigente y creando uno nuevo con el sueldo actualizado - nunca
+// Empleados/Puestos (Fase 2 del modulo de Nominas - primera pantalla real
+// de rrhh-service, hasta ahora solo tenia modelos). El historial de
+// sueldo se logra dando de baja el Puesto vigente y creando uno nuevo con
+// el sueldo actualizado - nunca
 // se edita salario_diario de un Puesto ya usado, para no perder el
 // historial real. Ver services/rrhh-service/rrhh/views.py::dar_de_baja.
 export default function RrhhEmpleadosPage() {

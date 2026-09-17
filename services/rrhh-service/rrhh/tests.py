@@ -1,9 +1,5 @@
-"""Pruebas de aislamiento por scope (RLS) - primeras del servicio
-(01/Sep/2026, ver memoria de sesion "auditoria-scope-rls-por-servicio").
-No hay views.py/serializers.py todavia (API sin construir), asi que se
-prueba directo contra el manager (Modelo.objects.for_scope(scope)), no via
-requests HTTP como en tesoreria-service/tests.py - ese patron aplica cuando
-ya existe un ViewSet real que lo consuma."""
+"""Pruebas de aislamiento por scope (RLS): se prueba directo contra el
+manager (Modelo.objects.for_scope(scope)), no via requests HTTP."""
 
 from cumbresbi_scope.scope import EffectiveScope
 from django.test import TestCase
@@ -54,9 +50,7 @@ class ScopeRLSTests(TestCase):
 
 
 class RrhhEmpleadoViewSetTests(TestCase):
-    """Primer ViewSet real de este servicio (10/Sep/2026, Fase 2 del modulo
-    de Nominas) - mismo patron de pruebas HTTP que
-    TesoreriaContratoTests en tesoreria-service."""
+    """Mismo patron de pruebas HTTP que TesoreriaContratoTests."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -116,8 +110,7 @@ class RrhhEmpleadoViewSetTests(TestCase):
 
 class RrhhPuestoViewSetTests(TestCase):
     """Historial de sueldo via dar_de_baja + alta de un Puesto nuevo, en vez
-    de editar salario_diario en el mismo renglon (09/Sep/2026, notas de
-    Jenny)."""
+    de editar salario_diario en el mismo renglon."""
 
     def setUp(self):
         self.factory = APIRequestFactory()

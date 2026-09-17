@@ -35,7 +35,7 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
+# Llave publica RS256 (/README.md sec. 8) - publica del
 # par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
 # este default fuera de dev; en un ambiente real viene de Secret Manager.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
@@ -64,8 +64,7 @@ CORS_ALLOWED_ORIGINS = env.list(
 # acepta hasta 5 archivos de 2MB c/u (ver pld/views.py, MAX_ARCHIVOS_POR_LOTE/
 # MAX_TAMANO_ARCHIVO_MB); el default rechazaba de golpe el multipart COMPLETO
 # (suma de todos los archivos, no por archivo) con "RequestDataTooBig" antes
-# de que la vista pudiera dar un mensaje explicito - hallazgo 18/Ago/2026, ver
-# memoria de sesion "el subir documentos solo acepta uno por uno". Margen
+# de que la vista pudiera dar un mensaje explicito. Margen
 # sobre 5*2MB=10MB para el overhead propio del multipart (boundaries, otros
 # campos del form).
 DATA_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
@@ -133,7 +132,7 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# URL interna de drive-service (docs/architecture/pld-fase2-alcance.md sec.
+# URL interna de drive-service (docs/architecture/pld/pld-fase2-alcance.md sec.
 # 1.4) - pld-service le reenvia el archivo subido en PldContraparteDocViewSet.
 # subir(), pasando el JWT del usuario original (no una credencial propia)
 # para que el permiso lo siga decidiendo el rol de quien sube, no
@@ -152,7 +151,7 @@ FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
 AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
 
 # tesoreria-service (24/Ago/2026, cierre de la reconciliacion contraparte
-# maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Semana 19).
+# maestra - ver Plan de Trabajo Semana 19).
 # PldContraparteKycViewSet.create la usa para validar que el id_contraparte
 # que manda el frontend (via ContraparteSelector) exista de verdad en el
 # catalogo maestro, antes de guardar el expediente KYC.
@@ -164,7 +163,7 @@ TESORERIA_SERVICE_URL = env("TESORERIA_SERVICE_URL", default="http://tesoreria-s
 # exista de verdad en el catalogo de sociedades (general_sociedades).
 IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
 
-# Secreto compartido servicio-a-servicio (docs/architecture/README.md sec.
+# Secreto compartido servicio-a-servicio (/README.md sec.
 # 11: "secretos gestionados... secret key de reCAPTCHA"; este es distinto,
 # ver mas abajo) - PldTicketClienteViewSet.subir_documento es PUBLICO (sin
 # sesion, el cliente externo no trae JWT, ver ticket_utils.py) pero SI
@@ -187,16 +186,16 @@ DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
 # tesoreria-service/config/settings.py::TESORERIA_INTERNAL_SECRET.
 TESORERIA_INTERNAL_SECRET = env("TESORERIA_INTERNAL_SECRET", default="")
 
-# Secret key de reCAPTCHA v2 (docs/architecture/README.md sec. 11) - para
+# Secret key de reCAPTCHA v2 (/README.md sec. 11) - para
 # verificar del lado del servidor el token que manda el widget del
 # formulario publico (pld-ticket/[token]/page.tsx). Vacio en dev (modo
 # simulado: cualquier token se acepta, ver PldTicketClienteViewSet.
 # subir_documento) para poder probar sin cuenta real de reCAPTCHA.
 RECAPTCHA_SECRET_KEY = env("RECAPTCHA_SECRET_KEY", default="")
 
-# Rate limiting del formulario publico (docs/architecture/pld-fase2-alcance.md
+# Rate limiting del formulario publico (docs/architecture/pld/pld-fase2-alcance.md
 # sec. 2, pregunta abierta #4: "paginas publicas... necesitan limite de
-# solicitudes" - mismo patron sugerido para Vivienda en CumbresBI_estado.md).
+# solicitudes" - mismo patron sugerido para Vivienda en Estado del proyecto).
 # Solo aplica al scope "pld-ticket-subir" (ver
 # PldTicketClienteViewSet.get_throttles) - por IP, ya que el cliente
 # externo no tiene sesion.

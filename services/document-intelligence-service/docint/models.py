@@ -8,7 +8,7 @@ def _request_id():
 
 
 class AnalysisRequestLog(models.Model):
-    """Unica tabla de este servicio (docs/architecture/README.md sec. 1.1:
+    """Unica tabla de este servicio (/README.md sec. 1.1:
     'Ninguna tabla de negocio, solo su propio log de solicitudes'). El evento
     de auditoria real (async, via outbox) se publica aparte hacia
     audit-service - este log es operativo/debug, no el registro de

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 # demorar ni tumbar la respuesta al usuario de la operacion real (crear/usar/
 # revocar un magic link). Ver docstring de registrar_evento en
 # audit-service/auditoria/views.py - llamada sincrona interina mientras no
-# exista Pub/Sub real (docs/architecture/README.md sec. 9).
+# exista Pub/Sub real (/README.md sec. 9).
 _TIMEOUT_SEGUNDOS = 2
 
 

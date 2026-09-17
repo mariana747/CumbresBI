@@ -75,17 +75,15 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // contraparte ya no se autogenera con un ID propio - el analista busca
   // el cliente/proveedor real en Tesoreria (o lo crea ahi mismo con solo
   // el nombre) y el expediente adopta ESE id_contraparte desde el dia 1.
-  // Ver docs/architecture/README.md sec. 11.2 #7, "contraparte maestra
+  // Ver /README.md sec. 11.2 #7, "contraparte maestra
   // unica".
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
   const [tipoContraparte, setTipoContraparte] = useState<"cliente" | "proveedor">("cliente");
   const [contraparte, setContraparte] = useState<TesoreriaContraparte | null>(null);
   const [sociedadRfc, setSociedadRfc] = useState("");
-  // 31/Ago/2026 (pedido de Mariana: "hay que hacer ese filtro por
-  // sociedad y proyecto" - caso real de un colaborador externo acotado a
-  // un solo proyecto) - opcional, a diferencia de sociedadRfc; sin
-  // catalogo real de Proyecto todavia (texto libre, mismo criterio que
-  // /tesoreria/contratos).
+  // Filtro por proyecto (caso: colaborador externo acotado a un solo
+  // proyecto) - opcional, a diferencia de sociedadRfc; sin catalogo real
+  // de Proyecto todavia (texto libre, mismo criterio que /tesoreria/contratos).
   const [proyecto, setProyecto] = useState("");
   const [creando, setCreando] = useState(false);
   const [creandoError, setCreandoError] = useState<string | null>(null);
@@ -102,28 +100,21 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       .catch(() => setSociedades([]));
   }, []);
 
-  // 31/Ago/2026 (pedido de Mariana: "en el filtro de sociedades solo
-  // deben aparecer las activas para ese rol - en global o super admin asi
-  // esta bien") - el filtro de la lista (a diferencia del selector del
-  // dialogo "Nuevo Expediente", que se queda con el catalogo completo)
-  // solo debe ofrecer sociedades a las que el usuario de verdad tiene
-  // acceso. GLOBAL sigue viendo el catalogo entero.
+  // El filtro de la lista (a diferencia del selector del dialogo "Nuevo
+  // Expediente", que se queda con el catalogo completo) solo debe ofrecer
+  // sociedades a las que el usuario de verdad tiene acceso. GLOBAL sigue
+  // viendo el catalogo entero.
   const sociedadesDelFiltro =
     session?.is_global || !session ? sociedades : sociedades.filter((s) => session.sociedad_rfcs.includes(s.rfc));
 
-  // 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para poder
-  // ver unicamente los de una sociedad o la otra") - un analista con
-  // acceso a varias sociedades (union real del scope) las ve todas
-  // mezcladas por default; este filtro acota la vista sin cambiar el
-  // alcance real de la sesion.
+  // Un analista con acceso a varias sociedades (union real del scope) las
+  // ve todas mezcladas por default; este filtro acota la vista sin cambiar
+  // el alcance real de la sesion.
   const [filtroSociedad, setFiltroSociedad] = useState("");
 
-  // Tabs KYC/KYB (04/Sep/2026, pedido de Mariana: "en pld hay que tener
-  // tabs de KYC y KYB, divide los expedientes segun el KYC/KYB... se
-  // vera los pendientes a revision" - solo 2 tabs, sin "Todos" ni tab
-  // propio para pendientes: PENDIENTE_REVISION aparece en los dos (ver
-  // get_queryset en el backend), distinguido por el color del chip en la
-  // columna Categoria. Default KYC - no hay "Todos" que sea el default.
+  // Tabs KYC/KYB: solo 2 tabs, sin "Todos" ni tab propio para pendientes:
+  // PENDIENTE_REVISION aparece en los dos (ver get_queryset en el backend),
+  // distinguido por el color del chip en la columna Categoria. Default KYC.
   const [tabCategoria, setTabCategoria] = useState<Extract<PldCategoriaCumplimiento, "KYC" | "KYB">>("KYC");
 
   function cargar() {
@@ -146,9 +137,8 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, estadoLlenado, filtroSociedad, tabCategoria]);
 
-  // Aprobar/reactivar se movieron a la vista de detalle (/pld/[idKyc],
-  // 17/Ago/2026) - la lista ya solo tiene "Ver", igual que se acordo con
-  // Mariana.
+  // Aprobar/reactivar se movieron a la vista de detalle (/pld/[idKyc]) -
+  // la lista ya solo tiene "Ver".
 
   async function handleCrearExpediente(e: React.FormEvent) {
     e.preventDefault();
@@ -363,8 +353,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
               expediente (sociedad_nombre, snapshot de sociedad_rfc al
               crear, ver models.py), no hay que derivarla de nada mas. */}
               <TableCell>Sociedad</TableCell>
-              {/* Categoría (04/Sep/2026, decision de Mariana: "vamos a
-              tener KYC y KYB") - se deriva sola de tipo_persona, ver
+              {/* Categoría se deriva sola de tipo_persona, ver
               PldContraparteKyc.save() en el backend. */}
               <TableCell>Categoría</TableCell>
               <TableCell>Estado</TableCell>
@@ -453,12 +442,12 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   );
 }
 
-// PLD / Cumplimiento (Fase 2, Semana 7-10; docs/architecture/README.md
+// PLD / Cumplimiento (Fase 2, Semana 7-10; /README.md
 // sec. 2). La tabla de expedientes ya esta conectada a pld-service
 // (PldContraparteKycViewSet) - reemplaza el placeholder "Sin expedientes
 // todavía" de Fase 0. Sigue pendiente: workflow completo de estados,
 // formularios publicos con reCAPTCHA/Drive, y auditoria especifica del
-// Motor Documental dentro de PLD (ver docs/CumbresBI_estado.md, Fase 2).
+// Motor Documental dentro de PLD (ver Estado del proyecto, Fase 2).
 export default function PldPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
 

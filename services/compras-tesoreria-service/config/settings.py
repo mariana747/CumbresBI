@@ -33,9 +33,8 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
-# par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
-# este default fuera de dev; en un ambiente real viene de Secret Manager.
+# Llave publica RS256 de DESARROLLO. NUNCA usar este default fuera de dev;
+# en un ambiente real viene de Secret Manager.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
     "CUMBRESBI_SCOPE_JWT_PUBLIC_KEY",
     default="""-----BEGIN PUBLIC KEY-----
@@ -111,10 +110,10 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Conexion servicio-a-servicio con materiales-service (02/Sep/2026,
-# Recepcion de Compras actualiza el inventario de Obra - pedido de
-# Mariana: "compras es la base", el registro de una recepcion aqui se
-# propaga solo hacia MaterialCatalogo.cantidad_disponible). Mismo patron
+# Conexion servicio-a-servicio con materiales-service: Recepcion de
+# Compras actualiza el inventario de Obra. Compras es la base - el
+# registro de una recepcion aqui se propaga solo hacia
+# MaterialCatalogo.cantidad_disponible. Mismo patron
 # que TESORERIA_SERVICE_URL/TESORERIA_INTERNAL_SECRET en pld-service - URL
 # interna de docker-compose por default, secreto vacio en dev hasta
 # configurarlo explicitamente en ambos lados (ver .env.example).

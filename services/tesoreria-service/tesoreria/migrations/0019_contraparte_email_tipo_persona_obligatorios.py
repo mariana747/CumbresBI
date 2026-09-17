@@ -1,12 +1,11 @@
 from django.db import migrations, models
 
-# Reversion (28/Ago/2026, pedido explicito de Mariana, vuelve al ERD
-# original) de la relajacion del 19/Ago/2026 ("contraparte maestra unica")
-# - email y tipo_persona vuelven a ser obligatorios. Antes de poder poner
-# NOT NULL hay que rellenar los registros que ya existen sin esos datos
-# (ver TesoreriaContraparte.email/tipo_persona en models.py) - hoy solo
-# aplica a la contraparte generica de reembolsos (GENREEMB, ver migracion
-# 0011_contrato_obligatorio_en_flujo), pero se recorre por si hay mas.
+# Reversion a ERD original: email y tipo_persona vuelven a ser
+# obligatorios. Antes de poner NOT NULL hay que rellenar los registros
+# existentes sin esos datos (ver TesoreriaContraparte.email/tipo_persona en
+# models.py) - hoy solo aplica a la contraparte generica de reembolsos
+# (GENREEMB, ver migracion 0011_contrato_obligatorio_en_flujo), pero se
+# recorre por si hay mas.
 CONTRAPARTE_REEMBOLSOS_ID = "GENREEMB"
 
 

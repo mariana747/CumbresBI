@@ -1,28 +1,21 @@
-"""Calculo de la ventana mensual de reembolsos (minuta 03/Sep/2026 + ajuste
-04/Sep/2026, pedido explicito de Mariana - reemplaza por completo la regla
-anterior de "cierre bloqueado + periodo de gracia del mes siguiente"):
+"""Calculo de la ventana mensual de reembolsos:
 
 - Durante el mes, cualquier fecha_gasto del mismo mes/año que hoy se acepta
   (sin importar el dia), salvo que sea una fecha futura.
-- En NINGUN caso se acepta una fecha_gasto de un mes distinto al que corre -
-  "no se pueden reembolsar facturas de agosto en septiembre", sin excepcion
-  ni periodo de gracia (esto reemplaza la gracia que existia antes para el
-  mes anterior).
+- En NINGUN caso se acepta una fecha_gasto de un mes distinto al que corre,
+  sin excepcion ni periodo de gracia.
 - En los ULTIMOS 2 DIAS HABILES del mes, la regla se vuelve mas estricta:
-  solo se acepta un comprobante fechado EXACTAMENTE ese mismo dia - "el 29
-  de septiembre puede subir una factura del 29 de septiembre pero no del
-  28" (ejemplo real dado por Mariana).
+  solo se acepta un comprobante fechado EXACTAMENTE ese mismo dia.
 - El ULTIMO dia habil del mes ademas solo recibe tickets hasta MEDIODIA
   (12:00 hrs, hora local) - despues de esa hora la ventana del mes ya
   cerro por completo, sin excepcion.
 
 Festivos oficiales: en vez de un catalogo mantenido a mano, se sincronizan
 de Nager.Date (https://date.nager.at, API publica gratuita, sin API key,
-cubre MX) - pedido explicito de Mariana 03/Sep/2026 ("usemos Nager.Date o
-OpenHolidays API"). TesoreriaDiaFestivo actua como cache local: se
-sincroniza como mucho una vez por año natural (perezoso, la primera vez que
-se necesita ese año), asi el calculo de dias habiles nunca depende de una
-llamada de red en el camino caliente de crear un ticket."""
+cubre MX). TesoreriaDiaFestivo actua como cache local: se sincroniza como
+mucho una vez por año natural (perezoso), asi el calculo de dias habiles
+nunca depende de una llamada de red en el camino caliente de crear un
+ticket."""
 
 import logging
 from calendar import monthrange
@@ -112,9 +105,7 @@ def validar_fecha_limite(ahora: datetime, fecha_gasto: date | None) -> str | Non
         return "La fecha del gasto no puede ser una fecha futura."
 
     # En ningun caso se acepta un mes distinto al que corre - sin periodo
-    # de gracia para el mes anterior (04/Sep/2026: "no se pueden reembolsar
-    # facturas de agosto en septiembre", confirmado explicitamente por
-    # Mariana, sin excepcion - esto reemplaza la gracia que existia antes).
+    # de gracia para el mes anterior.
     if fecha_gasto.year != hoy.year or fecha_gasto.month != hoy.month:
         return "Solo se pueden solicitar reembolsos de comprobantes emitidos en el mes en curso."
 

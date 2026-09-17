@@ -1,7 +1,7 @@
 ﻿// Cliente de iam-service - directorio de usuarios (Fase 1).
 // Contrato: services/iam-service/iam/views.py (GET /api/users/, GET /api/roles/).
 import { apiFetch, friendlyApiError } from "./apiError";
-import { GATEWAY_URL } from "./gatewayUrl";
+import { IAM_API_BASE_URL } from "./gatewayUrl";
 
 export interface IamUser {
   user_id: string;
@@ -18,11 +18,9 @@ export interface IamUser {
   updated_at: string;
 }
 
-// 31/Ago/2026 (pedido de Mariana: "en matriz de permisos hay que dividir
-// entre internos y externos, ya que en externos se debe asignar su
-// sociedad y proyecto") - un rol EXTERNO nunca se puede otorgar en
-// alcance GLOBAL (ver IamUserRoleViewSet.perform_create) y
-// RoleAssignmentDialog exige Sociedad Y Proyecto, los dos.
+// Un rol EXTERNO nunca se puede otorgar en alcance GLOBAL (ver
+// IamUserRoleViewSet.perform_create); RoleAssignmentDialog exige Sociedad
+// Y Proyecto, los dos.
 export type IamRoleTipo = "INTERNO" | "EXTERNO";
 
 export interface IamRole {
@@ -56,7 +54,6 @@ export interface IamGroup {
   alias: string | null;
 }
 
-const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? `${GATEWAY_URL}/iam`;
 
 export async function listUsers({
   search,
@@ -73,8 +70,7 @@ export async function listUsers({
   // Interno (STANDARD, Workspace) vs externo (RESTRICTED, ver
   // IamExternalCollaboratorViewSet.create) - filtro del directorio.
   accessMode?: string;
-  // Decision de producto: acceso de empleados nuevos via login libre, no
-  // invitacion formal - ver memoria de sesion "iam-invitacion-alcance-incierto".
+  // Acceso de empleados nuevos via login libre, no invitacion formal.
   sinRol?: boolean;
 } = {}): Promise<IamUser[]> {
   const params = new URLSearchParams();
@@ -152,10 +148,8 @@ export async function listRoles(): Promise<IamRole[]> {
   return response.json();
 }
 
-// Crear un rol nuevo de cero (31/Ago/2026, pedido de Mariana: "super admin
-// debe poder crear roles para colaboradores externos" - antes solo se
-// podian editar los permisos de un rol ya existente en el catalogo, no
-// crear uno nuevo con exactamente los permisos que hacen falta). Requiere
+// Crear un rol nuevo de cero, con exactamente los permisos que hacen
+// falta (distinto de editar permisos de un rol ya existente). Requiere
 // iam.crear (ver IamRoleViewSet.get_permissions). El actor se resuelve del
 // JWT en el backend, no se manda aqui.
 export async function createRole(
@@ -257,8 +251,8 @@ export async function revokeRolePermission(
 // - CRUD real (pantalla /admin/organizacion, Gestion organizacional) ademas
 // de alimentar el autocomplete de RFC en RoleAssignmentDialog. Centro y
 // Proyecto NO tienen equivalente aqui a proposito - no son catalogos
-// genericos reales (pertenecen a modulos que todavia no se construyen,
-// Tickets/Vivienda - ver memoria de sesion, decision 10/Ago/2026).
+// genericos reales (pertenecen a modulos Tickets/Vivienda, todavia no
+// construidos).
 export interface GeneralSociedad {
   rfc: string;
   razon_social: string | null;
@@ -390,9 +384,8 @@ export async function removeUserGroup(userGroupId: number): Promise<IamUserGroup
 // nivel se reconozca de un vistazo sin leer el texto. Un solo lugar
 // (aqui) para que no se desincronicen los colores entre pantallas
 // (Directorio de usuarios, Reportes > Historial/Matriz de acceso).
-// GRUPO NO esta aqui a proposito - decision revertida, se queda como los
-// 4 niveles que marca el onboarding de Dylan (ver memoria de sesion
-// "nivel-grupo-holding-confirmado").
+// GRUPO NO esta aqui a proposito - decision revertida, se queda en 4
+// niveles (GLOBAL/SOCIEDAD/PROYECTO/CENTRO).
 export const SCOPE_LABELS: Record<string, string> = {
   GLOBAL: "Global",
   SOCIEDAD: "Sociedad",
@@ -598,11 +591,11 @@ export async function revokeMagicLink(magicLinkId: string, actorUserId?: string)
   return response.json();
 }
 
-// Invitacion formal de colaborador nuevo (gate hibrido 10/Ago/2026, ver
-// iam/auth_views.py y memoria de sesion "iam-invitacion-alcance-incierto"):
-// a diferencia de Magic Link (acceso puntual sin cuenta de Workspace),
-// aqui no hay token que copiar/enviar - basta con que exista esta fila
-// pendiente para que el correo pueda iniciar sesion con Google.
+// Invitacion formal de colaborador nuevo (gate hibrido, ver
+// iam/auth_views.py): a diferencia de Magic Link (acceso puntual sin
+// cuenta de Workspace), aqui no hay token que copiar/enviar - basta con
+// que exista esta fila pendiente para que el correo pueda iniciar sesion
+// con Google.
 export interface IamInvitation {
   invitation_id: string;
   email: string;
@@ -649,12 +642,11 @@ export async function revokeInvitation(invitationId: string, actorUserId?: strin
   return response.json();
 }
 
-// 3er tipo de acceso externo (14/Ago/2026, ver iam/models.py
-// IamExternalCollaborator y memoria de sesion
-// "tercer-tipo-invitacion-externo-sin-workspace"): a diferencia de Magic
-// Link (accion puntual, vence en minutos) e IamInvitation (correo de
-// Workspace, canjea iniciando sesion con Google), aqui el colaborador NO
-// tiene Workspace - el link no vence por tiempo, solo se revoca a mano, y
+// 3er tipo de acceso externo (ver iam/models.py IamExternalCollaborator):
+// a diferencia de Magic Link (accion puntual, vence en minutos) e
+// IamInvitation (correo de Workspace, canjea iniciando sesion con
+// Google), aqui el colaborador NO tiene Workspace - el link no vence por
+// tiempo, solo se revoca a mano, y
 // al canjearlo obtiene una sesion real (con sus roles/permisos
 // asignados via /admin/directorio, no un JWT de alcance limitado).
 export interface IamExternalCollaborator {

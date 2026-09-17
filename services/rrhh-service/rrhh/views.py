@@ -19,14 +19,9 @@ def _short_id():
 
 
 class _PermisosRrhhMixin:
-    """Mismo gate de permisos en Empleados/Puestos (10/Sep/2026, Fase 2 del
-    modulo de Nominas - primer corte de API real de rrhh-service):
-    crear=rrhh.crear, editar/borrar=rrhh.editar, lectura abierta a quien
-    tenga rrhh.leer (via ScopedManager, no todos ven todo). Mismo criterio
-    que _PermisosMaterialesMixin en materiales-service. Los perm_keys
-    rrhh.leer/crear/editar/aprobar ya estaban seedeados en iam-service
-    (permission_matrix.py: RRHH_ADMIN="LCEA", RRHH_SUPERVISOR_CENTRO="LE") -
-    no hizo falta agregar nada ahi."""
+    """Gate de permisos comun a Empleados/Puestos: crear=rrhh.crear,
+    editar/borrar=rrhh.editar, lectura abierta a quien tenga rrhh.leer (via
+    ScopedManager). Mismo criterio que _PermisosMaterialesMixin."""
 
     def get_permissions(self):
         if self.action == "create":
@@ -37,11 +32,9 @@ class _PermisosRrhhMixin:
 
 
 class RrhhEmpleadoViewSet(_PermisosRrhhMixin, ModelViewSet):
-    """Empleados (datos generales/bancarios/expediente) - el alcance real
-    llega via la relacion inversa con Puestos (SCOPE_FIELD_SOCIEDAD =
-    "puestos__sociedad", ver models.py), por eso .distinct() aqui: un
-    empleado con mas de un Puesto que matchea el scope saldria duplicado
-    sin esto (advertencia explicita en el docstring del modelo)."""
+    """El alcance real llega via la relacion inversa con Puestos
+    (SCOPE_FIELD_SOCIEDAD = "puestos__sociedad"), por eso .distinct(): un
+    empleado con mas de un Puesto que matchea el scope saldria duplicado."""
 
     serializer_class = RrhhEmpleadoSerializer
     filter_backends = [SearchFilter]
@@ -57,12 +50,9 @@ class RrhhEmpleadoViewSet(_PermisosRrhhMixin, ModelViewSet):
 
 
 class RrhhPuestoViewSet(_PermisosRrhhMixin, ModelViewSet):
-    """Puestos - primer modelo de este servicio con columnas de scope
-    propias (sociedad/proyecto). El historial de sueldo (09/Sep/2026, notas
-    de Jenny) se logra dando de baja el Puesto vigente y creando uno nuevo
-    con el sueldo actualizado (ver dar_de_baja) - nunca se edita
-    salario_diario de un Puesto ya usado en nomina, para no perder el
-    historial real de cuanto gano cada quien en cada periodo.
+    """El historial de sueldo se logra dando de baja el Puesto vigente y
+    creando uno nuevo con el sueldo actualizado (ver dar_de_baja) - nunca se
+    edita salario_diario de un Puesto ya usado en nomina.
 
     Filtros por query param: ?empleado=, ?sociedad=, ?proyecto=, ?vigente=true
     (solo puestos sin fecha_baja)."""
@@ -93,10 +83,8 @@ class RrhhPuestoViewSet(_PermisosRrhhMixin, ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def dar_de_baja(self, request, pk=None):
-        """Cierra este Puesto (fecha_baja=hoy o la fecha enviada,
-        motivo_fin opcional) - paso previo a crear el Puesto nuevo con el
-        sueldo actualizado (el frontend hace ambas llamadas seguidas, ver
-        frontend/src/app/rrhh/page.tsx)."""
+        """Cierra este Puesto - paso previo a crear el Puesto nuevo con el
+        sueldo actualizado (el frontend hace ambas llamadas seguidas)."""
         puesto = self.get_object()
         puesto.fecha_baja = request.data.get("fecha_baja") or timezone.now().date()
         motivo_fin = request.data.get("motivo_fin")

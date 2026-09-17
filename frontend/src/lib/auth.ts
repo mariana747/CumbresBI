@@ -1,11 +1,9 @@
-// Sesion real via OIDC (Fase 1, Semana 4; docs/architecture/README.md sec.
+// Sesion real via OIDC (Fase 1, Semana 4; /README.md sec.
 // 6.1). Reemplaza la sesion simulada de localStorage - ahora la sesion
 // vive en una cookie HttpOnly que pone iam-service (services/iam-service/
 // iam/auth_views.py), esta libreria solo la consulta via /api/me.
 import { apiFetch } from "./apiError";
-import { GATEWAY_URL } from "./gatewayUrl";
-
-const IAM_API_BASE_URL = process.env.NEXT_PUBLIC_IAM_API_BASE_URL ?? `${GATEWAY_URL}/iam`;
+import { IAM_API_BASE_URL } from "./gatewayUrl";
 
 export interface SessionUser {
   user_id: string;
@@ -32,11 +30,9 @@ export async function getSession(): Promise<SessionUser | null> {
   }
 }
 
-// SSO silencioso (decision de producto confirmada, ver memoria de sesion
-// "oidc-sso-silencioso-sin-boton-login"): no hay pantalla propia de login,
-// esto salta directo al backend, que a su vez salta directo a Google. Si
-// el usuario ya tiene sesion activa de Google, todo el salto es
-// invisible para el.
+// SSO silencioso: no hay pantalla propia de login, esto salta directo al
+// backend, que a su vez salta directo a Google. Si el usuario ya tiene
+// sesion activa de Google, todo el salto es invisible para el.
 export function startGoogleLogin(): void {
   window.location.href = `${IAM_API_BASE_URL}/auth/google/start`;
 }
@@ -45,8 +41,8 @@ export async function logout(): Promise<void> {
   await apiFetch("IAM", `${IAM_API_BASE_URL}/auth/logout`, { credentials: "include" });
 }
 
-// Opcion A (ver memoria de sesion): reemite la cookie de sesion con los
-// roles/permisos ACTUALES de BD, sin pedirle al usuario que vuelva a hacer
+// Reemite la cookie de sesion con los roles/permisos ACTUALES de BD, sin
+// pedirle al usuario que vuelva a hacer
 // login. AppShell.tsx la llama en un poll periodico para que un cambio de
 // rol hecho por un admin se refleje solo, con el desfase del intervalo de
 // poll (no instantaneo). true = se renovo, false = sesion invalida/
