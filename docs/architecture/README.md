@@ -1,6 +1,13 @@
-# CumbresBI — Documentación Oficial de Arquitectura
+# CumbresBI — Documentación Oficial de Arquitectura (diseño original v2.0)
 
 **Cumbres Consultoría y Proyectos** · Documento de arquitectura — v2.0 (microservicios) · Fase 0
+
+> **17/Sep/2026 — este documento describe el diseño PLANEADO (microservicios de grano fino +
+> Pub/Sub), que en la práctica se construyó distinto y más simple (menos servicios, sin bus de
+> eventos, HTTP síncrono directo). La versión real y vigente vive en [`/README.md`](../../README.md)
+> — usa esa como fuente de verdad. Este archivo se conserva intacto, con su numeración de secciones
+> sin cambios, porque decenas de comentarios en el código citan secciones específicas de aquí
+> (ej. "ver docs/architecture/README.md sec. 11.2 #1") — no se debe renumerar ni borrar.
 
 > **Cambio de versión:** la v1.0 de este documento recomendaba un monolito modular Django. Por decisión explícita del cliente, la arquitectura se rediseñó a **microservicios de grano fino**, con una única Cloud SQL compartida (esquema lógico por servicio) y comunicación asíncrona basada en eventos (Google Pub/Sub). La v1.0 queda en el historial de `con-base-en-el-delightful-mccarthy.md`; este documento la reemplaza como fuente de verdad vigente. La sección 11 documenta honestamente las contrapartidas de este cambio — no se minimizan.
 

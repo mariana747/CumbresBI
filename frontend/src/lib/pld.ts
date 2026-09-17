@@ -958,7 +958,7 @@ export async function validarTicketCliente(
   return { ticket, kyc, documentosEliminados: documentos_eliminados ?? [] };
 }
 
-// Formulario publico de KYC externo (docs/architecture/pld-fase2-alcance.md
+// Formulario publico de KYC externo (docs/architecture/pld/pld-fase2-alcance.md
 // sec. 2): el cliente sube un documento sin sesion, canjeando el mismo
 // token del link. No consume el "uso" del ticket (eso ya lo maneja
 // validarTicketCliente, llamado al cargar la pagina) - ver

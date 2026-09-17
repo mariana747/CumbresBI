@@ -367,7 +367,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
     `fecha_pago` los llenan las acciones `aprobar`/`registrar_pago` del
     ViewSet, no un PATCH directo - ver views.py. Mismo criterio que
     PldContraparteKycViewSet: "quien captura no aprueba"
-    (docs/architecture/roles-y-permisos.md sec. 2).
+    (docs/architecture/iam/roles-y-permisos.md sec. 2).
 
     `estado_cfdi`/`requiere_complemento`/`comprobacion_asignada_a`/
     `aprobacion_lista`/`permiso_enviar_pago`/`informacion_envio`/

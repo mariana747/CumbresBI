@@ -133,7 +133,7 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# URL interna de drive-service (docs/architecture/pld-fase2-alcance.md sec.
+# URL interna de drive-service (docs/architecture/pld/pld-fase2-alcance.md sec.
 # 1.4) - pld-service le reenvia el archivo subido en PldContraparteDocViewSet.
 # subir(), pasando el JWT del usuario original (no una credencial propia)
 # para que el permiso lo siga decidiendo el rol de quien sube, no
@@ -194,7 +194,7 @@ TESORERIA_INTERNAL_SECRET = env("TESORERIA_INTERNAL_SECRET", default="")
 # subir_documento) para poder probar sin cuenta real de reCAPTCHA.
 RECAPTCHA_SECRET_KEY = env("RECAPTCHA_SECRET_KEY", default="")
 
-# Rate limiting del formulario publico (docs/architecture/pld-fase2-alcance.md
+# Rate limiting del formulario publico (docs/architecture/pld/pld-fase2-alcance.md
 # sec. 2, pregunta abierta #4: "paginas publicas... necesitan limite de
 # solicitudes" - mismo patron sugerido para Vivienda en CumbresBI_estado.md).
 # Solo aplica al scope "pld-ticket-subir" (ver

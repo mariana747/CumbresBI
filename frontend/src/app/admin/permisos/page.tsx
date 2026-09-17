@@ -64,7 +64,7 @@ import {
 // permiso individual (18 roles x ~40 permisos seria una tabla enorme e
 // ilegible), se agrupa por servicio y se muestra que acciones (L/C/E/A)
 // tiene el rol en ese servicio - mismo formato que
-// docs/architecture/roles-y-permisos.md sec. 3, que el cliente ya conoce.
+// docs/architecture/iam/roles-y-permisos.md sec. 3, que el cliente ya conoce.
 // En "modo edicion" cada celda se abre en 4 checkboxes (uno por accion).
 const LETRA_POR_ACCION: Record<string, string> = {
   leer: "L",

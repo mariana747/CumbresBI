@@ -733,7 +733,7 @@ class PldContraparteKycViewSet(ModelViewSet):
     def confirmar_extraccion(self, request, pk=None):
         """Guarda en el expediente los datos que salieron del Motor
         Documental (docint AnalyzeView) DESPUES de que el analista los revisó
-        y corrigió en pantalla - ver docs/architecture/pld-fase2-alcance.md y
+        y corrigió en pantalla - ver docs/architecture/pld/pld-fase2-alcance.md y
         memoria de sesion "pld-flujo-extraccion-vs-archivo": la IA propone,
         un humano confirma antes de que el dato quede como verdad de negocio.
 
@@ -899,7 +899,7 @@ class PldContraparteKycViewSet(ModelViewSet):
     def reportes(self, request):
         """Dashboard interno de cumplimiento PLD/AML (07/Sep/2026) - v1 con
         los datos que YA existen en pld-service, sin depender de un
-        proveedor externo de KYC/AML (ver docs/architecture/pld-fase2-alcance.md
+        proveedor externo de KYC/AML (ver docs/architecture/pld/pld-fase2-alcance.md
         sec. 7, todavia sin elegir). Respeta el mismo alcance por
         sociedad/proyecto que la lista de expedientes (self.get_queryset()).
         Mismo permiso que "list" (sin gate extra) - quien puede ver
@@ -980,7 +980,7 @@ class PldContraparteKycViewSet(ModelViewSet):
         - Resumen_KYC: una fila por expediente. "Nivel_Riesgo" y el
           screening real (pestaña 2) van como "Sin evaluar"/"Sin
           verificar" a proposito - no hay proveedor externo de KYC/AML
-          conectado todavia (ver docs/architecture/pld-fase2-alcance.md
+          conectado todavia (ver docs/architecture/pld/pld-fase2-alcance.md
           sec. 7), y poner "NO"/limpio ahi seria fabricar una diligencia
           que nunca paso - un riesgo real de integridad para un auditor.
         - Detalle_Screening: misma razon, todo "Sin verificar".
@@ -1247,7 +1247,7 @@ class PldContraparteDocViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir(self, request, pk=None):
         """Sube el archivo real de este documento a Drive (via drive-service,
-        docs/architecture/pld-fase2-alcance.md sec. 1.4) y guarda la
+        docs/architecture/pld/pld-fase2-alcance.md sec. 1.4) y guarda la
         referencia (drive_file_id/mime_type/tamano_bytes/subido_en) - separado
         de create() porque el registro de metadata (denominacion, fecha
         limite, etc.) puede existir antes de que llegue el archivo real

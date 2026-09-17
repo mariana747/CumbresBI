@@ -3,7 +3,7 @@ from django.db import migrations
 from iam.permission_matrix import ACCION_POR_LETRA, ROLE_ACCESS
 
 # Matriz de permisos por servicio confirmada por el cliente
-# (docs/architecture/roles-y-permisos.md sec. 3) - dict movido a
+# (docs/architecture/iam/roles-y-permisos.md sec. 3) - dict movido a
 # iam/permission_matrix.py (11/Ago/2026) para que el frontend (fixture de
 # pruebas) y dev_views.py (switch de rol sin Google) lo reutilicen sin
 # copiarlo a mano; ver ese modulo para el detalle de cada rol.

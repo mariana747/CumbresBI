@@ -263,7 +263,7 @@ class IamGroup(ScopedAuditMixin):
     """Equipos internos / "empresa" del usuario en el directorio.
 
     No confundir con el nivel de alcance GRUPO (descartado, ver
-    docs/architecture/roles-y-permisos.md) - esto es solo un catalogo de
+    docs/architecture/iam/roles-y-permisos.md) - esto es solo un catalogo de
     equipos/empresa para filtrar el directorio de usuarios, sin relacion
     con RLS. Tabla nueva pedida explicitamente para este arranque; no
     aparece en el ERD ni en la arquitectura v2.0 aprobada.

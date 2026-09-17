@@ -32,7 +32,7 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-only-insecure-key")
 DEBUG = env.bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
 
-# Servicio dedicado a Google Drive (docs/architecture/pld-fase2-alcance.md
+# Servicio dedicado a Google Drive (docs/architecture/pld/pld-fase2-alcance.md
 # sec. 1.2-1.3, decision 11/Ago/2026: Drive es transversal - PLD, contratos
 # de Tesoreria y subida/descarga de Excels lo van a usar, no solo PLD - y
 # NO debe depender de document-intelligence-service (Gemini). Sin base de

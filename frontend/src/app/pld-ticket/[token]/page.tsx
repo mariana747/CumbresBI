@@ -193,7 +193,7 @@ const CAMPOS_SIN_PRECARGAR = new Set<keyof PldDatosEditables>([
 // tiene llave privada - no hay JWT que mostrar, solo confirma el acceso y
 // el expediente asociado.
 //
-// Formulario de subida (docs/architecture/pld-fase2-alcance.md sec. 2,
+// Formulario de subida (docs/architecture/pld/pld-fase2-alcance.md sec. 2,
 // decision de Mariana 12/Ago/2026): solo sube documentos (sin campos de
 // datos personales) + reCAPTCHA v2 - el archivo va al mismo flujo de
 // Drive que usaria un analista interno (ver pld/views.py::subir_documento).

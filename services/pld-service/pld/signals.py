@@ -1,5 +1,5 @@
 """Workflow hibrido de estado_llenado (decision de Mariana, 12/Ago/2026, ver
-docs/architecture/pld-fase2-alcance.md sec. 3): el estado del expediente se
+docs/architecture/pld/pld-fase2-alcance.md sec. 3): el estado del expediente se
 recalcula solo a partir del status de sus documentos, salvo que el analista
 ya lo haya sobreescrito a mano (PldContraparteKyc.estado_llenado_manual).
 

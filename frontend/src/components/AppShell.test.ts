@@ -1,5 +1,5 @@
 // Primera prueba automatizada del proyecto (11/Ago/2026) - recorre los 17
-// roles del catalogo (docs/architecture/roles-y-permisos.md sec. 2-3)
+// roles del catalogo (docs/architecture/iam/roles-y-permisos.md sec. 2-3)
 // contra la logica REAL de gating del sidebar (buildNavItems) y de
 // lib/auth.ts, en vez de una lista fija de "que debe ver cada rol"
 // (eso seria reinventar la matriz a mano otra vez, y se desalinearia con

@@ -1064,7 +1064,7 @@ class CatalogoDocumentosPldTests(TestCase):
 
 
 class ConfirmarExtraccionTests(TestCase):
-    """confirmar_extraccion (docs/architecture/pld-fase2-alcance.md sec. 1,
+    """confirmar_extraccion (docs/architecture/pld/pld-fase2-alcance.md sec. 1,
     memoria de sesion "pld-flujo-extraccion-vs-archivo"): guarda en el
     expediente solo los campos ya validados por el analista, filtrados
     contra CAMPOS_CONFIRMABLES."""

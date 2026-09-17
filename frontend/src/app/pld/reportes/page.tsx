@@ -29,7 +29,7 @@ import {
 
 // Dashboard interno de cumplimiento PLD/AML (07/Sep/2026) - v1 con los
 // datos que YA existen en pld-service, sin depender del proveedor externo
-// de KYC/AML todavia sin elegir (ver docs/architecture/pld-fase2-alcance.md
+// de KYC/AML todavia sin elegir (ver docs/architecture/pld/pld-fase2-alcance.md
 // sec. 7). 4 bloques: resumen por categoria/estado, documentos pendientes
 // (obligatorios sin archivo o vencidos), cuentas en riesgo (sospechosa/
 // congelada) y expedientes viejos sin aprobar.
