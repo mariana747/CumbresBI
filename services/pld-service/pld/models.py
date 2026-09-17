@@ -28,8 +28,7 @@ class PldContraparteKyc(models.Model):
         (ESTADO_ENTREGADO, "Entregado"),
     ]
 
-    # 5 opciones estandar de la industria para Mexico (25/Ago/2026 - antes
-    # solo tenia Soltero/Casado, "se va a ampliar" segun Mariana).
+    # 5 opciones estandar de la industria para Mexico.
     CIVIL_SOLTERO = "SOLTERO"
     CIVIL_CASADO = "CASADO"
     CIVIL_DIVORCIADO = "DIVORCIADO"
@@ -68,10 +67,9 @@ class PldContraparteKyc(models.Model):
     # que se reconciliara con la contraparte maestra compartida hasta la
     # Fase 4. default=_short_id (17/Ago/2026) para que el analista no tenga
     # que inventar un identificador a mano al crear un expediente nuevo.
-    # Sin unique=True (24/Ago/2026, decision explicita de Mariana: seguir
-    # el ERD real - 20260727_Cumbres_ERD.sql linea 195 solo declara
-    # `id_contraparte varchar(8) NOT NULL`, sin restriccion de unicidad -
-    # una misma contraparte puede tener mas de un expediente KYC (ej.
+    # Sin unique=True: sigue el ERD real - 20260727_Cumbres_ERD.sql linea 195
+    # solo declara `id_contraparte varchar(8) NOT NULL`, sin restriccion de
+    # unicidad - una misma contraparte puede tener mas de un expediente KYC (ej.
     # historico/renovacion), no es un duplicado invalido por definicion.
     # La existencia real contra tesoreria-service SI se valida en
     # PldContraparteKycViewSet.create (ver views.py).
@@ -96,19 +94,16 @@ class PldContraparteKyc(models.Model):
     # (pld-ticket/[token]/page.tsx) sin que esa pagina publica, sin sesion,
     # tenga que llamar a iam-service (que si requiere permiso real).
     sociedad_nombre = models.CharField(max_length=250, blank=True, null=True)
-    # 31/Ago/2026 (pedido de Mariana: "hay que hacer ese filtro por
-    # sociedad y proyecto" - caso real de Dellanira, abogada externa que
-    # solo debe ver el PLD de un proyecto) - cierra el pendiente
-    # documentado en la memoria de sesion "pld-necesita-scope-por-
-    # proyecto". Igual que TesoreriaContrato.proyecto: CharField libre,
+    # Filtro por sociedad y proyecto: permite dar acceso a un externo que
+    # solo debe ver el PLD de un proyecto especifico.
+    # Igual que TesoreriaContrato.proyecto: CharField libre,
     # sin catalogo real todavia (ver "centro-proyecto-no-son-catalogo-
     # generico"), opcional (a diferencia de sociedad_rfc, que ya es
     # obligatorio para expedientes nuevos) - no todo expediente pertenece
     # a un proyecto especifico.
     proyecto = models.CharField(max_length=3, blank=True, null=True)
     # A partir de aqui, los campos de "datos del cliente" son opcionales al
-    # crear (decision 17/Ago/2026, Opcion B: expediente minimo autonomo -
-    # ver memoria de sesion "pld-crear-expediente-opcion-b"): el analista
+    # crear (expediente minimo autonomo): el analista
     # da de alta un expediente vacio y el propio cliente los llena despues
     # via el link publico (pld-ticket/[token]/page.tsx, actualizar_datos).
     # Antes eran obligatorios porque no existia ese formulario publico.
@@ -162,11 +157,10 @@ class PldContraparteKyc(models.Model):
     ]
     tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES, blank=True, null=True)
 
-    # categoria_cumplimiento (04/Sep/2026, decision de Mariana: "vamos a
-    # tener KYC y KYB" - separa el expediente en dos flujos explicitos en
-    # vez de un "KYC" generico para cualquier tipo_persona). Regla de
+    # categoria_cumplimiento separa el expediente en dos flujos explicitos en
+    # vez de un "KYC" generico para cualquier tipo_persona. Regla de
     # derivacion automatica: fisica -> KYC, moral -> KYB; fideicomiso y
-    # tipo_persona vacio son "casos raros" (palabras de Mariana) que se
+    # tipo_persona vacio son casos atipicos que se
     # dejan en PENDIENTE_REVISION para que un analista los clasifique a
     # mano, nunca se fuerzan a KYC o KYB por default. Se recalcula solo en
     # PldContraparteKyc.save() (ver metodo abajo) - PERO no si
@@ -242,8 +236,8 @@ class PldContraparteKyc(models.Model):
     estado_llenado = models.CharField(
         max_length=20, choices=ESTADO_LLENADO_CHOICES, default=ESTADO_PENDIENTE
     )
-    # Workflow hibrido (decision de Mariana, 12/Ago/2026, ver
-    # docs/architecture/pld/pld-fase2-alcance.md sec. 3): estado_llenado se
+    # Workflow hibrido (ver docs/architecture/pld/pld-fase2-alcance.md
+    # sec. 3): estado_llenado se
     # recalcula solo cada vez que cambia el status de un documento del
     # expediente (ver pld/signals.py) - PERO si el analista lo edita a mano
     # via PATCH, se marca este flag en True y deja de recalcularse encima
@@ -323,9 +317,8 @@ class PldContraparteDoc(models.Model):
     # cerrado completo: identidad (Acta, Constancia Fiscal, RPC,
     # identificacion, domicilio, info bancaria, Opinion de Cumplimiento) +
     # lo especifico de cumplimiento (cuestionario de riesgo, origen de
-    # fondos, PEP, organigrama accionario). Decision de Mariana 04/Sep:
-    # "no importa si se piden lo mismo" que en el checklist por contrato de
-    # tesoreria-service (TesoreriaContratoDocumento.NOMBRE_CHOICES) - se
+    # fondos, PEP, organigrama accionario). Coincide con el checklist por
+    # contrato de tesoreria-service (TesoreriaContratoDocumento.NOMBRE_CHOICES) - se
     # duplica a proposito en vez de forzar que todo viva en un solo lado.
     # Cada tipo aplica a KYC (fisica), KYB (moral), o ambos - ver
     # TIPOS_DOCUMENTO_POR_CATEGORIA abajo, que el frontend usa para no
@@ -476,23 +469,11 @@ class PldContraparteDoc(models.Model):
 
 
 class PldRepresentanteLegal(models.Model):
-    """Representante legal / apoderado de una contraparte Moral (02/Sep/2026,
-    pedido explicito del checklist de cumplimiento: "Incluir como requisito
-    obligatorio los datos e identificacion oficial del Representante Legal /
-    Apoderado"). Modelo separado (no campos sueltos en PldContraparteKyc) -
-    una Moral puede tener mas de un representante/apoderado real (ej. dos
-    apoderados con firma mancomunada), un solo set de campos no alcanzaba.
-
-    No confundir con TesoreriaContraparteRelacion (tesoreria-service, tipo
-    REP LEGAL/BENEF CONTROLADOR) - es el mismo concepto de negocio pero una
-    base de datos distinta (microservicios separados); no hay FK real entre
-    ambos, solo el mismo criterio conceptual replicado aqui para el
-    expediente KYC de PLD.
-
-    "Obligatorio para Moral" se aplica en el formulario (frontend: al menos
-    1 representante antes de poder aprobar el expediente), no como
-    constraint de base de datos - mismo criterio que el resto de "datos del
-    cliente" en un expediente de alta autonoma (Opcion B)."""
+    """Representante legal / apoderado de una contraparte Moral. Modelo
+    separado (no campos en PldContraparteKyc) porque puede haber mas de
+    uno. Obligatorio para Moral se valida en frontend, no como constraint
+    de BD. Distinto de TesoreriaContraparteRelacion (otro microservicio,
+    sin FK real entre ambos)."""
 
     TIPO_REPRESENTANTE_LEGAL = "REPRESENTANTE_LEGAL"
     TIPO_APODERADO = "APODERADO"
@@ -586,19 +567,10 @@ class PldRepresentanteLegal(models.Model):
 
 
 class PldSolicitudEliminacionDoc(models.Model):
-    """Solicitud de eliminacion de un documento (25/Ago/2026, requerimiento
-    real del cliente): desde que se separo "gestionar archivos" de "editar
-    datos" (ver PldContraparteDoc/permission_matrix.py, pld-documentos
-    exclusivo Admin), el analista ya no puede borrar un archivo el mismo -
-    si de verdad hace falta (ej. un duplicado viejo), manda esta solicitud
-    con una razon breve; solo Admin la aprueba o la rechaza. Aprobar borra
-    el documento de verdad (mismo criterio de auditoria que el destroy()
-    directo); rechazar solo cierra la solicitud, el documento se queda.
-
-    Quien puede CREAR una solicitud (pld-compliance.editar, mismo permiso
-    que ya tiene el analista para editar el expediente - no es un permiso
-    nuevo) es distinto de quien puede RESOLVERLA (pld-documentos.editar,
-    Admin) - ver PldSolicitudEliminacionDocViewSet.get_permissions."""
+    """Solicitud de eliminacion de un documento: el analista ya no puede
+    borrar archivos directo, solo Admin aprueba o rechaza. Aprobar borra el
+    documento; rechazar solo cierra la solicitud. Crear y resolver usan
+    permisos distintos (ver get_permissions)."""
 
     ESTADO_PENDIENTE = "PENDIENTE"
     ESTADO_APROBADA = "APROBADA"
@@ -656,14 +628,10 @@ class PldSolicitudEliminacionDoc(models.Model):
 
 
 class PldTicketCliente(models.Model):
-    """Magic link de un solo uso para KYC externo (sec. 6.2 del doc de
-    arquitectura). Mismo patron que IamMagicLink (iam-service): token_hash
-    (nunca el token en claro), uses_count/revoked_at para el ciclo de vida.
-    pld-service no tiene llave privada para emitir JWT propio (solo verifica
-    el de cumbresbi_scope, ver config/settings.py), asi que a diferencia de
-    iam-service este ticket no emite sesion externa - "validar" regresa el
-    ticket/expediente directamente (ver views.py).
-    """
+    """Magic link de un solo uso para KYC externo. Mismo patron que
+    IamMagicLink: token_hash (nunca el token en claro), uses_count/
+    revoked_at. A diferencia de iam-service, no emite sesion externa -
+    "validar" regresa el ticket/expediente directo."""
 
     id_pld_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     kyc = models.ForeignKey(
@@ -686,15 +654,9 @@ class PldTicketCliente(models.Model):
     last_used_at = models.DateTimeField(blank=True, null=True)
     revoked_at = models.DateTimeField(blank=True, null=True)
 
-    # 31/Ago/2026 (auditoria de scope, "hay que hacer ese filtro por
-    # sociedad y proyecto"): antes sin columna propia de alcance, solo el
-    # gate binario GLOBAL/no-GLOBAL. Ahora hereda sociedad/proyecto del
-    # expediente via kyc (mismo criterio que PldContraparteDoc) - un
-    # ticket sin kyc asignado (blank=True, null=True arriba) sigue sin
-    # coincidir con ningun alcance no-GLOBAL (fail-closed, no un caso
-    # especial). El endpoint publico "validar" usa
-    # PldTicketCliente.objects.get(...) directo, sin for_scope, a
-    # proposito - es la unica via de acceso sin sesion interna.
+    # Hereda sociedad/proyecto del expediente via kyc (fail-closed si no
+    # tiene kyc asignado). El endpoint publico "validar" usa .get() directo
+    # sin for_scope a proposito, unica via de acceso sin sesion interna.
     SCOPE_FIELD_SOCIEDAD = "kyc__sociedad_rfc"
     SCOPE_FIELD_PROYECTO = "kyc__proyecto"
     objects = ScopedManager()
@@ -707,15 +669,9 @@ class PldTicketCliente(models.Model):
 
 
 class PldDocumentoTicket(models.Model):
-    """Ticket publico de UN documento del checklist, sin login (04/Sep/2026,
-    pedido explicito de Mariana: "hay que unificar la solicitud de
-    documento como en contratos" - mismo patron exacto que
-    TesoreriaDocumentoTicket en tesoreria-service). Ligado a UN
-    PldContraparteDoc especifico en vez de al expediente completo
-    (PldTicketCliente, que es de proposito general) - un ticket = un
-    documento, generado al llamar
-    PldContraparteKycViewSet.enviar_recordatorio_documentos (nunca se
-    reusa el mismo ticket para dos documentos)."""
+    """Ticket publico de UN documento del checklist, sin login. Mismo patron
+    que TesoreriaDocumentoTicket. Ligado a un PldContraparteDoc especifico,
+    no al expediente completo - un ticket = un documento, nunca se reusa."""
 
     id_ticket = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     documento = models.ForeignKey(

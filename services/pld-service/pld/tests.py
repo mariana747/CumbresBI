@@ -120,8 +120,7 @@ class PldContraparteKycScopeTests(TestCase):
         self.assertEqual(len(response.data), 0)
 
     def test_filtro_sociedad_acota_dentro_del_scope_union(self):
-        # 31/Ago/2026 (pedido de Mariana: "de ahi debe tener filtro para
-        # poder ver unicamente los de una sociedad o la otra") - un
+        # Filtro por sociedad: un
         # analista con acceso a AMBAS sociedades (union real del scope)
         # puede acotar la vista a una sola sin cambiar su alcance real.
         scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA, RFC_CAPITAL))
@@ -569,8 +568,7 @@ class PldTicketClienteTests(TestCase):
     """Frontend de PldTicketCliente (magic link de KYC externo, Fase 2
     Semana 9): crear/revocar requieren permiso real, "validar" es publico
     (el cliente externo canjea por token, sin sesion previa - mismo
-    criterio que IamMagicLink, ver memoria de sesion
-    "iam-magic-link-alcance")."""
+    criterio que IamMagicLink)."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -737,8 +735,7 @@ class PldTicketClienteScopeTests(TestCase):
         self.assertEqual(len(response.data), 0)
 
     def test_filtro_sociedad_acota_dentro_del_scope_union(self):
-        # 31/Ago/2026 (pedido de Mariana: "igual en tickets debe tener
-        # filtro") - un usuario con acceso a AMBAS sociedades puede acotar
+        # Filtro por sociedad: un usuario con acceso a AMBAS sociedades puede acotar
         # la vista a una sola sin cambiar su alcance real.
         request = self.factory.get(f"/api/ticket-cliente/?sociedad={RFC_TIZARA}")
         request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA, RFC_CAPITAL))
@@ -766,7 +763,7 @@ class PldTicketClienteScopeTests(TestCase):
 
 class WorkflowEstadoLlenadoTests(TestCase):
     """Workflow hibrido de estado_llenado (docs/architecture/
-    pld-fase2-alcance.md sec. 3, decision de Mariana 12/Ago/2026): se
+    pld-fase2-alcance.md sec. 3): se
     recalcula solo segun el status de los documentos, salvo override
     manual via PATCH."""
 
@@ -834,8 +831,7 @@ class WorkflowEstadoLlenadoTests(TestCase):
 
 
 class CategoriaCumplimientoKycKybTests(TestCase):
-    """KYC/KYB (04/Sep/2026, decision de Mariana: "vamos a tener KYC y
-    KYB") - categoria_cumplimiento se deriva sola de tipo_persona salvo
+    """KYC/KYB: categoria_cumplimiento se deriva sola de tipo_persona salvo
     override manual, mismo patron hibrido que estado_llenado_manual."""
 
     def setUp(self):
@@ -854,7 +850,7 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
 
     def test_fideicomiso_y_tipo_persona_vacio_quedan_pendientes_de_revision(self):
-        # "casos raros se revisan a mano" (Mariana, 04/Sep/2026) - nunca se
+        # Casos atipicos se revisan a mano - nunca se
         # fuerzan a KYC o KYB por default.
         fideicomiso = _kyc("cp000062", RFC_TIZARA)
         fideicomiso.tipo_persona = PldContraparteKyc.TIPO_FIDEICOMISO
@@ -895,7 +891,7 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         self.assertEqual(kyc.categoria_cumplimiento, PldContraparteKyc.CATEGORIA_KYB)
 
     def test_reactivar_auto_categoria_apaga_el_override_y_recalcula(self):
-        # "se debe poner en auto" (Mariana, 04/Sep/2026) - mismo patron que
+        # Mismo patron que
         # reactivar_auto_estado.
         kyc = _kyc("cp000069", RFC_TIZARA)
         kyc.tipo_persona = PldContraparteKyc.TIPO_FISICA
@@ -914,8 +910,7 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         self.assertEqual(response.data["categoria_cumplimiento"], PldContraparteKyc.CATEGORIA_KYC)
 
     def test_filtro_categoria_cumplimiento_en_la_lista(self):
-        # 04/Sep/2026, pedido de Mariana: "en pld hay que tener tabs de
-        # KYC y KYB" - mismo criterio de filtro server-side que
+        # Tabs de KYC y KYB - mismo criterio de filtro server-side que
         # estado_llenado/sociedad.
         fisica = _kyc("cp000066", RFC_TIZARA)
         fisica.tipo_persona = PldContraparteKyc.TIPO_FISICA
@@ -932,8 +927,7 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         self.assertNotIn(moral.id_kyc, ids)
 
     def test_pendiente_de_revision_se_ve_en_ambos_tabs_kyc_y_kyb(self):
-        # 04/Sep/2026, pedido de Mariana: "se veran los pendientes a
-        # revision" - solo 2 tabs (KYC/KYB), sin tab propio para
+        # Solo 2 tabs (KYC/KYB), sin tab propio para
         # PENDIENTE_REVISION; los casos raros deben verse en los dos para
         # que un analista los reclasifique, no quedar escondidos.
         pendiente = _kyc("cp000068", RFC_TIZARA)  # tipo_persona vacio
@@ -948,10 +942,10 @@ class CategoriaCumplimientoKycKybTests(TestCase):
 
 
 class CatalogoDocumentosPldTests(TestCase):
-    """tipo_documento (04/Sep/2026, checklist de proveedores) - catalogo
+    """tipo_documento (checklist de proveedores) - catalogo
     cerrado completo (identidad + especifico de cumplimiento), se duplica
-    a proposito contra el catalogo de tesoreria-service ("no importa si se
-    piden lo mismo", Mariana) - ver docstring del campo en models.py."""
+    a proposito contra el catalogo de tesoreria-service -
+    ver docstring del campo en models.py."""
 
     def setUp(self):
         self.kyc = _kyc("cp000070", RFC_TIZARA)
@@ -1064,8 +1058,8 @@ class CatalogoDocumentosPldTests(TestCase):
 
 
 class ConfirmarExtraccionTests(TestCase):
-    """confirmar_extraccion (docs/architecture/pld/pld-fase2-alcance.md sec. 1,
-    memoria de sesion "pld-flujo-extraccion-vs-archivo"): guarda en el
+    """confirmar_extraccion (docs/architecture/pld/pld-fase2-alcance.md sec. 1):
+    guarda en el
     expediente solo los campos ya validados por el analista, filtrados
     contra CAMPOS_CONFIRMABLES."""
 
@@ -1170,8 +1164,7 @@ class ConfirmarExtraccionTests(TestCase):
 
 class SubirDocumentoPublicoTests(TestCase):
     """Formulario publico de KYC externo (docs/architecture/
-    pld-fase2-alcance.md sec. 2, memoria de sesion
-    "motor-documental-seleccion-archivos-drive"): subir_documento es
+    pld-fase2-alcance.md sec. 2): subir_documento es
     publico (sin sesion), verifica reCAPTCHA y sube a Drive usando el
     secreto interno servicio-a-servicio, no un JWT de usuario."""
 
@@ -1359,9 +1352,7 @@ class ActualizarDatosPublicoTests(TestCase):
         self.assertIsNotNone(self.kyc.veracidad_declarada_en)
 
     def test_tipo_persona_capturado_por_el_cliente_reclasifica_solo_a_kyc_kyb(self):
-        # 04/Sep/2026, pregunta real de Mariana: "si el usuario cuando dio
-        # sus datos coloco es persona fisica o si es moral, porque no se
-        # coloca automaticamente" - SI se coloca automatico: tipo_persona
+        # tipo_persona capturado por el cliente se reclasifica automatico:
         # ya esta en CAMPOS_CONFIRMABLES (whitelist publica) y
         # actualizar_datos guarda via el serializer normal, que llama a
         # PldContraparteKyc.save() - mismo recalculo automatico que si lo
@@ -2381,8 +2372,7 @@ class ReportesCumplimientoTests(TestCase):
 
 
 class ExportarExcelCumplimientoTests(TestCase):
-    """Export de 3 pestañas (07/Sep/2026, diseño propuesto por Mariana,
-    adaptado a datos reales) - lo mas importante a probar en duro: la
+    """Export de 3 pestañas, adaptado a datos reales - lo mas importante a probar en duro: la
     pestaña de screening y el nivel de riesgo NUNCA dicen "limpio"/un
     numero inventado, siempre "Sin evaluar"/"Sin verificar" mientras no
     haya proveedor externo de KYC/AML conectado."""
