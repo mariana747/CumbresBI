@@ -89,7 +89,7 @@ class RrhhEmpleado(models.Model):
 class RrhhPuesto(models.Model):
     """sociedad referencia general_sociedades.rfc (iam-service, fuera de este
     esquema) - se guarda como CharField plano, no ForeignKey real, mismo
-    criterio de aislamiento documentado en docs/architecture/README.md
+    criterio de aislamiento documentado en /README.md
     sec. 11.2 #1.
 
     01/Sep/2026 (auditoria de scope RLS): este es el modelo con las columnas

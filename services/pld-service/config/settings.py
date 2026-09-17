@@ -35,7 +35,7 @@ MIDDLEWARE = [
     "cumbresbi_scope.EffectiveScopeMiddleware",
 ]
 
-# Llave publica RS256 (docs/architecture/README.md sec. 8) - publica del
+# Llave publica RS256 (/README.md sec. 8) - publica del
 # par de DESARROLLO ya usado por iam-service (JWT_PRIVATE_KEY). NUNCA usar
 # este default fuera de dev; en un ambiente real viene de Secret Manager.
 CUMBRESBI_SCOPE_JWT_PUBLIC_KEY = env(
@@ -164,7 +164,7 @@ TESORERIA_SERVICE_URL = env("TESORERIA_SERVICE_URL", default="http://tesoreria-s
 # exista de verdad en el catalogo de sociedades (general_sociedades).
 IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
 
-# Secreto compartido servicio-a-servicio (docs/architecture/README.md sec.
+# Secreto compartido servicio-a-servicio (/README.md sec.
 # 11: "secretos gestionados... secret key de reCAPTCHA"; este es distinto,
 # ver mas abajo) - PldTicketClienteViewSet.subir_documento es PUBLICO (sin
 # sesion, el cliente externo no trae JWT, ver ticket_utils.py) pero SI
@@ -187,7 +187,7 @@ DRIVE_INTERNAL_SECRET = env("DRIVE_INTERNAL_SECRET", default="")
 # tesoreria-service/config/settings.py::TESORERIA_INTERNAL_SECRET.
 TESORERIA_INTERNAL_SECRET = env("TESORERIA_INTERNAL_SECRET", default="")
 
-# Secret key de reCAPTCHA v2 (docs/architecture/README.md sec. 11) - para
+# Secret key de reCAPTCHA v2 (/README.md sec. 11) - para
 # verificar del lado del servidor el token que manda el widget del
 # formulario publico (pld-ticket/[token]/page.tsx). Vacio en dev (modo
 # simulado: cualquier token se acepta, ver PldTicketClienteViewSet.

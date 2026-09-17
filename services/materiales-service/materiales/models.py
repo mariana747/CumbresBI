@@ -9,7 +9,7 @@ def _short_id():
 
 
 # Esqueleto de modelos (19/Ago/2026) - servicio nuevo, planeado en
-# docs/architecture/README.md sec. 1.1.2 como "materiales-service (futuro)":
+# /README.md sec. 1.1.2 como "materiales-service (futuro)":
 # catalogo de materiales + motor de presupuesto/conceptos automatizado,
 # construido de forma AUTONOMA dentro de Fase 3 (Ventas/Vivienda) y
 # extendido/reconciliado despues por Compras (Fase 4) - mismo principio de
@@ -17,7 +17,7 @@ def _short_id():
 # Contrapartes (PLD/Ventas/Tesoreria).
 #
 # Fuente de los campos: docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md,
-# Fase 3 Semana 13, y docs/architecture/README.md sec. 3 (tabla de
+# Fase 3 Semana 13, y /README.md sec. 3 (tabla de
 # refactorizacion, fila "Conceptos y Firmas (nueva)"). Solo modelos +
 # migraciones en este primer corte - sin serializers/views/tests todavia
 # (mismo orden que se siguio en tesoreria-service: modelos heredados

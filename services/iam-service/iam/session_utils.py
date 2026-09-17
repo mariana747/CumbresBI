@@ -25,7 +25,7 @@ def _public_key_pem() -> bytes:
 def issue_session_jwt(user) -> str:
     """Firma el JWT de sesion (RS256) que se guarda en la cookie HttpOnly.
     Lleva los mismos claims de EffectiveScope que consume cumbresbi-scope
-    (docs/architecture/README.md sec. 8) mas 'sub'/'email' para /api/me -
+    (/README.md sec. 8) mas 'sub'/'email' para /api/me -
     es el mismo token que, en produccion, tambien se reenvia como
     Authorization: Bearer hacia el resto de los servicios."""
     now = timezone.now()

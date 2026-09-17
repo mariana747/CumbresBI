@@ -152,7 +152,7 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
         """Registro directo de un evento de auditoria (llamada sincrona
         service-to-service), mismo criterio interino que
         confirmar_envio_drive: mientras no exista Pub/Sub real
-        (docs/architecture/README.md sec. 9), los servicios consumidores
+        (/README.md sec. 9), los servicios consumidores
         POSTean aqui en vez de publicar al outbox. Reemplazar por el
         consumidor real de `audit.events` cuando exista GCP/Pub-Sub.
 

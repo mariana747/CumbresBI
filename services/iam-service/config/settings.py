@@ -116,7 +116,7 @@ KIYLz1XLfh9TeCisjfT5wQ==
 JWT_PRIVATE_KEY = env("JWT_PRIVATE_KEY", default=_DEV_JWT_PRIVATE_KEY)
 
 # --- Login OIDC real (Google Workspace) - Fase 1, Semana 4 ---
-# docs/architecture/README.md sec. 6.1. Client ID/Secret ya existen en
+# /README.md sec. 6.1. Client ID/Secret ya existen en
 # Secret Manager (docs/architecture/infraestructura-gcp/oidc-login.md);
 # en dev local se leen de .env (cliente OAuth "iam-service-oidc" con las
 # URIs de localhost). SSO silencioso (sin boton "Iniciar sesion con
@@ -159,7 +159,7 @@ OIDC_PKCE_COOKIE_NAME = "oidc_pkce"
 OIDC_PKCE_MAX_AGE_SECONDS = 300
 
 # Fase 0: el frontend (Next.js, localhost:3000) llama a este servicio directo
-# desde el navegador, sin API Gateway todavia (docs/architecture/README.md
+# desde el navegador, sin API Gateway todavia (/README.md
 # sec. 8, pendiente). CORS solo para orígenes de desarrollo local.
 CORS_ALLOWED_ORIGINS = env.list(
     "IAM_CORS_ALLOWED_ORIGINS",

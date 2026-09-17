@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 class EffectiveScope:
     """Alcance efectivo de un usuario autenticado, agregado por iam-service.
 
-    Ver docs/architecture/README.md sec. 8 y roles-y-permisos.md sec. 4: si el
+    Ver /README.md sec. 8 y roles-y-permisos.md sec. 4: si el
     usuario tiene varios roles activos, cada claim es la UNION de lo que aporta
     cada rol (no la interseccion), y is_global=True de cualquier rol domina
     sobre el resto. CENTRO/CONTRATO son grants planos, no jerarquicos (gap

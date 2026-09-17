@@ -11,7 +11,7 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-only-insecure-key")
 DEBUG = env.bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
 
-# Gateway local de desarrollo (docs/architecture/README.md sec. 8) -
+# Gateway local de desarrollo (/README.md sec. 8) -
 # reemplaza a Cloud Endpoints ESPv2 mientras no exista Cloud Run real. Es el
 # UNICO servicio que el frontend llama directo; todo lo demas pasa por aqui
 # (ver gateway/views.py). Sin base de datos propia - no tiene modelos, solo

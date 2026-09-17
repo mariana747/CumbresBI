@@ -80,7 +80,7 @@ const DRAWER_WIDTH = 240;
 const HEADER_HEIGHT = 56;
 
 // Catalogo de modulos de negocio en el orden confirmado del Plan de Trabajo
-// v2.0 (docs/architecture/README.md sec. 2): Admin -> PLD -> Ventas/Vivienda
+// v2.0 (/README.md sec. 2): Admin -> PLD -> Ventas/Vivienda
 // -> Compras/Tesoreria -> RRHH. Ninguno tiene ruta real todavia (Fase 0) -
 // href queda en "#" hasta que exista el modulo correspondiente.
 //

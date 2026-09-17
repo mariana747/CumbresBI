@@ -11,7 +11,7 @@ class BitacoraAuditoria(models.Model):
     """Bitacora central de auditoria, inmutable / append-only.
 
     Unico escritor: audit-service, consumiendo `audit.events` de Pub/Sub
-    via patron Transactional Outbox (docs/architecture/README.md sec. 9).
+    via patron Transactional Outbox (/README.md sec. 9).
     No lleva ForeignKey real a iam_users (otro servicio, otro esquema
     logico) - servicio_origen + actor_user_id son referencias laxas.
     La inmutabilidad se refuerza con triggers SQL BEFORE UPDATE/DELETE

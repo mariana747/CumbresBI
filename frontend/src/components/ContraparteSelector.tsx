@@ -7,7 +7,7 @@ import { TesoreriaContraparte, createContraparte, generarIdCorto, listContrapart
 const OPCION_NUEVA_ID = "__nueva__";
 
 // Selector reusable de la contraparte maestra (19/Ago/2026, "un solo lugar
-// para dar de alta clientes y proveedores" - ver docs/architecture/README.md
+// para dar de alta clientes y proveedores" - ver /README.md
 // sec. 11.2 #7). Busca contra el catalogo real de tesoreria-service
 // (?search=, con la lista completa ya visible al abrir el campo - sin
 // esperar a que se escriba algo) y, si no existe, permite crear una nueva

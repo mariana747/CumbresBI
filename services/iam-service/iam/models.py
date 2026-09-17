@@ -13,7 +13,7 @@ class ScopedAuditMixin(models.Model):
     """Campos transversales de RLS y auditoria de negocio.
 
     alcance_tipo/alcance_id: mismo mecanismo documentado en
-    docs/architecture/README.md sec. 8 (ScopedManager / EffectiveScope).
+    /README.md sec. 8 (ScopedManager / EffectiveScope).
     scope_type hoy solo cubre GLOBAL/SOCIEDAD/PROYECTO (gap de CENTRO/CONTRATO
     documentado en roles-y-permisos.md sec. 5 punto 5 - se maneja aparte via
     iam_user_centro_access / iam_user_contrato_access, no aqui).
@@ -103,7 +103,7 @@ class IamUser(models.Model):
     # FK real es a rrhh_empleados.id_empleado (servicio rrhh-service, fuera de
     # este microservicio) - se guarda como referencia laxa, no ForeignKey real,
     # para no acoplar iam-service a la BD de otro servicio (regla de aislamiento
-    # de esquema, sec. 11.2 #1 de docs/architecture/README.md).
+    # de esquema, sec. 11.2 #1 de /README.md).
     employee_id = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -298,7 +298,7 @@ class IamUserGroup(ScopedAuditMixin):
 
 class IamMagicLink(models.Model):
     """Magic Link de un solo uso para usuarios externos (Fase 1, Semana 4;
-    docs/architecture/README.md sec. 6.2). Mismo patron que
+    /README.md sec. 6.2). Mismo patron que
     pld_ticket_cliente (pld-service), pero generico a nivel iam-service para
     cualquier modulo que necesite dar acceso externo sin contrasena.
 

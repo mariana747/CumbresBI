@@ -1,5 +1,5 @@
 """Primera suite del servicio (18/Ago/2026, arranque formal de Fase 4:
-docs/architecture/README.md sec. 11.2 #7/#9 - Contrapartes y Facturacion
+/README.md sec. 11.2 #7/#9 - Contrapartes y Facturacion
 CFDI fusionadas de forma definitiva dentro de tesoreria-service, no
 microservicios propios). CRUD real de Contrapartes/Bancos/Cuentas - los
 tres catalogos sin dependencia de Contrato/Flujo/Factura, primer corte

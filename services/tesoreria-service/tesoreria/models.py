@@ -48,7 +48,7 @@ CATEGORIA_GASTO_CHOICES = [
 
 # Nota general: este servicio agrupa Tesoreria + CFDI/Facturacion + el
 # maestro de Contrapartes (tesoreria_contrapartes) en un solo esquema, tal
-# como estaba documentado en docs/architecture/README.md sec. 1.1 - separado
+# como estaba documentado en /README.md sec. 1.1 - separado
 # de compras-tesoreria-service (que se queda sin tablas de negocio propias
 # hasta que exista el dominio real de Compras en Fase 4, ver su models.py).
 
@@ -523,7 +523,7 @@ class TesoreriaNomina(models.Model):
     # vivienda-service.ViviendaProyecto.id_proyecto (10/Sep/2026, pedido
     # explicito de Mariana: "el proyecto de nominas...son los mismos" que
     # Vivienda/Obra) - CharField plano de 8 (mismo largo que id_proyecto),
-    # no ForeignKey real (cruza de servicio, ver docs/architecture/README.md
+    # no ForeignKey real (cruza de servicio, ver /README.md
     # sec. 11.2 #1). El frontend resuelve alias/denominacion llamando a
     # vivienda-service (ver listProyectos en frontend/src/lib/vivienda.ts).
     proyecto = models.CharField(max_length=8, blank=True, null=True)
@@ -1192,7 +1192,7 @@ class TesoreriaRecNomina(models.Model):
 class TesoreriaFlujo(models.Model):
     """id_empleado/id_empleado_reembolso referencian rrhh_empleados.id_empleado
     (rrhh-service, fuera de este esquema) - CharField plano, no ForeignKey
-    real (docs/architecture/README.md sec. 11.2 #1)."""
+    real (/README.md sec. 11.2 #1)."""
 
     VALIDACION_PENDIENTE = "PENDIENTE"
     VALIDACION_APROBADA = "APROBADA"

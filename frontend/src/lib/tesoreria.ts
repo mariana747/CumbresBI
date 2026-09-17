@@ -47,7 +47,7 @@ export interface TesoreriaContraparte {
   // opcional desde 19/Ago/2026 (migracion 0002) - la contraparte maestra
   // unica se puede dar de alta con solo razon_social, el resto se llena
   // despues (mismo criterio que ya usaba PLD por su cuenta, ver
-  // docs/architecture/README.md sec. 11.2 #7).
+  // /README.md sec. 11.2 #7).
   tipo_persona: TesoreriaTipoPersona | null;
   genero: "MUJER" | "HOMBRE" | "X" | null;
   contacto: string | null;

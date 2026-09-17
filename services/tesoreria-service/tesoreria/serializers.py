@@ -31,7 +31,7 @@ from .models import (
 
 class TesoreriaContraparteSerializer(serializers.ModelSerializer):
     """Catalogo maestro de contrapartes (Fase 4, arranque formal 18/Ago/2026:
-    docs/architecture/README.md sec. 11.2 #7 - "fusion definitiva", Contrapartes
+    /README.md sec. 11.2 #7 - "fusion definitiva", Contrapartes
     vive dentro de tesoreria-service, no un microservicio propio). Sin
     ScopedManager a proposito - el modelo no tiene columna de sociedad (es un
     catalogo compartido entre todas las sociedades, igual criterio que

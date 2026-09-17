@@ -75,7 +75,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // contraparte ya no se autogenera con un ID propio - el analista busca
   // el cliente/proveedor real en Tesoreria (o lo crea ahi mismo con solo
   // el nombre) y el expediente adopta ESE id_contraparte desde el dia 1.
-  // Ver docs/architecture/README.md sec. 11.2 #7, "contraparte maestra
+  // Ver /README.md sec. 11.2 #7, "contraparte maestra
   // unica".
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
   const [tipoContraparte, setTipoContraparte] = useState<"cliente" | "proveedor">("cliente");
@@ -453,7 +453,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   );
 }
 
-// PLD / Cumplimiento (Fase 2, Semana 7-10; docs/architecture/README.md
+// PLD / Cumplimiento (Fase 2, Semana 7-10; /README.md
 // sec. 2). La tabla de expedientes ya esta conectada a pld-service
 // (PldContraparteKycViewSet) - reemplaza el placeholder "Sin expedientes
 // todavía" de Fase 0. Sigue pendiente: workflow completo de estados,

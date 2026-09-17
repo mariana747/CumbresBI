@@ -16,7 +16,7 @@ class PldContraparteKyc(models.Model):
     tesoreria_contrapartes.id_contraparte, dueno real: contrapartes-service /
     tesoreria-service (fuera de este microservicio) - se guarda como
     referencia laxa, no ForeignKey real, para no acoplar esquemas
-    (docs/architecture/README.md sec. 11.2 #1).
+    (/README.md sec. 11.2 #1).
     """
 
     ESTADO_PENDIENTE = "PENDIENTE"

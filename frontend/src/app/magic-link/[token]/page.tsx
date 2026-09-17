@@ -18,7 +18,7 @@ const RECURSO_TIPO_LABELS: Record<string, string> = {
 // la validacion ocurre sola, sin que nadie pegue el token a mano.
 //
 // Sin destino por modulo todavia: una vez valido, el JWT de alcance
-// externo se emite (ver docs/architecture/README.md sec. 6.2) pero ningun
+// externo se emite (ver /README.md sec. 6.2) pero ningun
 // modulo tiene aun la pantalla que lo consuma (ej. el formulario KYC de
 // PLD) - por eso esta pagina solo confirma el acceso y muestra el JWT en
 // modo dev, en lugar de redirigir. Cuando exista ese destino, se reemplaza

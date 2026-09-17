@@ -104,7 +104,7 @@ class RentasContrato(models.Model):
     y fiador referencian tesoreria_contrapartes.id_contraparte (tesoreria-
     service). id_contrato_tesoreria referencia tesoreria_contratos.id_contrato
     (tesoreria-service). Todas fuera de este esquema - CharField plano, no
-    ForeignKey real (docs/architecture/README.md sec. 11.2 #1)."""
+    ForeignKey real (/README.md sec. 11.2 #1)."""
 
     ESTADO_BORRADOR = "BORRADOR"
     ESTADO_PENDIENTE_FIRMA = "PENDIENTE FIRMA"

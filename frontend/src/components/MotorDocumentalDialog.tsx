@@ -234,7 +234,7 @@ interface DocumentResult {
 }
 
 // Motor Inteligente de Procesamiento Documental (docint) - ver
-// docs/architecture/README.md sec. 10. Decision de Mariana (12/Ago/2026,
+// /README.md sec. 10. Decision de Mariana (12/Ago/2026,
 // ver memoria de sesion "motor-documental-seleccion-archivos-drive"): ya
 // NO se suben archivos locales - el analista sube el archivo el mismo en
 // drive.google.com (a la carpeta correspondiente); este dialogo solo

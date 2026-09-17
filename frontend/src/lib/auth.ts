@@ -1,4 +1,4 @@
-// Sesion real via OIDC (Fase 1, Semana 4; docs/architecture/README.md sec.
+// Sesion real via OIDC (Fase 1, Semana 4; /README.md sec.
 // 6.1). Reemplaza la sesion simulada de localStorage - ahora la sesion
 // vive en una cookie HttpOnly que pone iam-service (services/iam-service/
 // iam/auth_views.py), esta libreria solo la consulta via /api/me.

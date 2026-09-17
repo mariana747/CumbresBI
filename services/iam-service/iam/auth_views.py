@@ -1,5 +1,5 @@
 """Login OIDC real via Google Workspace (Fase 1, Semana 4;
-docs/architecture/README.md sec. 6.1). Vistas Django simples (no
+/README.md sec. 6.1). Vistas Django simples (no
 ViewSet/DRF): son parte de un flujo de redirects de navegador, no de una
 API JSON convencional - /api/me es la unica que responde JSON.
 

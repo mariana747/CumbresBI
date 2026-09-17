@@ -631,7 +631,7 @@ class IamUserContratoAccessViewSet(ModelViewSet):
 
 class IamMagicLinkViewSet(ModelViewSet):
     """Magic Links de un solo uso para usuarios externos (Fase 1, Semana 4;
-    docs/architecture/README.md sec. 6.2).
+    /README.md sec. 6.2).
 
     Envio real por correo (13/Ago/2026, ver mail_utils.py): al crear un
     link (uno a uno o masivo por CSV) o reenviarlo, se manda de verdad a

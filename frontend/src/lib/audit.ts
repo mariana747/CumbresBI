@@ -119,7 +119,7 @@ export async function exportarBitacoraCsvADrive(params: {
 
 // Nombres amigables para mostrar en pantalla - solo cubren los servicios,
 // entidades y verbos de accion conocidos hoy (ver services/*/README y
-// docs/architecture/README.md sec. 1.1); un valor no listado se muestra tal
+// /README.md sec. 1.1); un valor no listado se muestra tal
 // cual, nunca se oculta informacion por no tener traduccion.
 const SERVICE_LABELS: Record<string, string> = {
   "iam-service": "IAM (Usuarios y Roles)",

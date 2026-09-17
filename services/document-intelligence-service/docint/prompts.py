@@ -1,11 +1,11 @@
 """Prompts internos por tipo documental, namespaced por servicio consumidor
-(docs/architecture/README.md sec. 10: internal_prompt_key). Los campos que se
+(/README.md sec. 10: internal_prompt_key). Los campos que se
 piden extraer estan alineados a columnas reales de las tablas del ERD
 (pld_contrapartes_kyc, pld_contrapartes_docs) para que el resultado se pueda
 volcar directo sin inventar nombres de campo nuevos.
 
 Regla comun a todos: si un dato no esta en el documento, el modelo debe
-devolver null - nunca inferirlo (ver docs/architecture/README.md sec. 10).
+devolver null - nunca inferirlo (ver /README.md sec. 10).
 """
 
 _REGLA_COMUN = (

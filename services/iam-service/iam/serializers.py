@@ -118,7 +118,7 @@ class IamRoleSerializer(serializers.ModelSerializer):
 class IamUserRoleSerializer(serializers.ModelSerializer):
     """Otorgar/revocar roles (Fase 1, Semana 5). granted_by queda null por
     ahora - no hay JWT real todavia, asi que no sabemos quien es el actor
-    (ver docs/architecture/README.md sec. 8); se completa cuando iam-service
+    (ver /README.md sec. 8); se completa cuando iam-service
     empiece a emitir/validar tokens."""
 
     role_key = serializers.CharField(source="role.role_key", read_only=True)
