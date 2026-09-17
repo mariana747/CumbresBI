@@ -15,6 +15,15 @@ COPY . .
 # var de RUNTIME, no de build time - a diferencia del viejo
 # NEXT_PUBLIC_GATEWAY_URL (15/Sep/2026, ver gatewayUrl.ts), ya no hace
 # falta pasarla como build-arg aqui ni reconstruir la imagen si cambia.
+#
+# NEXT_PUBLIC_GOOGLE_CLIENT_ID / NEXT_PUBLIC_GOOGLE_PICKER_API_KEY (17/Sep/2026,
+# ver googleFolderPicker.ts) SI son build-arg: Next.js las hornea en build
+# time, no se pueden pasar como env var de runtime. Si faltan, el build
+# sigue igual (quedan vacias, el Picker falla controlado, no tumba el sitio).
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID=""
+ARG NEXT_PUBLIC_GOOGLE_PICKER_API_KEY=""
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ENV NEXT_PUBLIC_GOOGLE_PICKER_API_KEY=$NEXT_PUBLIC_GOOGLE_PICKER_API_KEY
 RUN npm run build
 
 # ---- Etapa final: solo el output standalone, sin devDependencies ----
