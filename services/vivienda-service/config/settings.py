@@ -101,7 +101,7 @@ DATABASES = {
 }
 
 # tesoreria-service (24/Ago/2026, cierre de la reconciliacion contraparte
-# maestra - ver documentos/CumbresBI_documentacion_completa.md (sec. 2, Plan de Trabajo) Semana 19,
+# maestra - ver Plan de Trabajo Semana 19,
 # mismo cambio ya hecho en pld-service/config/settings.py).
 # ViviendaRelExpedienteClienteViewSet.create la usa para validar que el
 # id_contraparte que manda el frontend (via ContraparteSelector) exista de

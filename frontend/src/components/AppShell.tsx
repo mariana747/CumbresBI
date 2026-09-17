@@ -392,7 +392,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   }
   // "Compras" (compras-tesoreria-service, 02/Sep/2026) - regresa al
   // sidebar como apartado real: el hueco de 24/Ago ("sigue sin tablas de
-  // negocio propias") ya se cerro (Fase 4B, ver documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)).
+  // negocio propias") ya se cerro (Fase 4B, ver Estado del proyecto).
   // Separado de Tesoreria a proposito - dominio propio (solicitud ->
   // cotizacion -> orden -> recepcion), aunque comparte el catalogo de
   // proveedores (tesoreria_contrapartes) via ContraparteSelector.
@@ -428,7 +428,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // placeholders "en desarrollo" sin nada detras. Si se retoman esos
   // modulos, revivir este bloque (ver git blame) en vez de reinventarlo -
   // el hallazgo original que lo agrego sigue documentado en
-  // documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto).
+  // Estado del proyecto.
   // "Tickets de reembolso" (27/Ago/2026, pantalla PROVISIONAL - ver
   // memoria de sesion "rrhh-mi-cumbres-y-modulo-pendiente") - visible para
   // cualquier sesion real (self-service, sin exigir perm_key alguno,

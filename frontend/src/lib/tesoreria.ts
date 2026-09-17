@@ -1453,7 +1453,7 @@ export async function registrarPagoFlujo(
 }
 
 // Sube el comprobante/referencia de pago real a Drive para un flujo ya
-// creado (documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module), decision 26/Ago/2026 - ver
+// creado (Finance Module, decision 26/Ago/2026 - ver
 // services/tesoreria-service/tesoreria/views.py::TesoreriaFlujoViewSet.
 // subir_comprobante). Mismo patron que lib/pld.ts::subirArchivoDocumento.
 // Llenar link_comprobante_banco a mano en el formulario de "Registrar pago"
@@ -2597,7 +2597,7 @@ export interface EnvioMasivoResultado {
   detail?: string;
 }
 
-// Envio masivo de facturas por correo (documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module): "Multiple invoices can
+// Envio masivo de facturas por correo (Finance Module: "Multiple invoices can
 // be selected to send massively (separately)") - un correo individual por
 // factura, cada uno con su propio destinatario (editable en pantalla, ver
 // facturas/page.tsx). Ver
@@ -3349,7 +3349,7 @@ export async function deleteSaldo(id: string): Promise<void> {
   }
 }
 
-// Reporte diario de saldos (26/Ago/2026, ver documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module):
+// Reporte diario de saldos (26/Ago/2026, ver Finance Module:
 // "Generate daily reports on bank transactions") - por empresa (seleccion
 // multiple), compara las transacciones (Flujos) del dia contra el cambio
 // de saldo de cada cuenta. Calculo real vive en tesoreria-service/
@@ -3410,7 +3410,7 @@ export async function getReporteDiario(sociedades: string[], fecha: string): Pro
   return response.json();
 }
 
-// "Arrastrar" el saldo del dia anterior (documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module): "There must be an
+// "Arrastrar" el saldo del dia anterior (Finance Module: "There must be an
 // option to carry the same balance from the previous day") - crea el
 // TesoreriaSaldo de `fecha` copiando el ultimo saldo capturado antes de
 // esa fecha para esa cuenta. 400 si ya hay un saldo capturado o si no hay

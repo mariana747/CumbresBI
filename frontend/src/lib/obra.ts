@@ -216,7 +216,7 @@ export async function deleteEstimacion(idEstimacion: string): Promise<void> {
   if (!response.ok) throw await friendlyApiError("OBRA", response);
 }
 
-// Foto de evidencia por concepto+lote (documentos/CumbresBI_documentacion_completa.md (sec. 5, Minuta de Reunión, 1 y 2:
+// Foto de evidencia por concepto+lote (Minuta de Reunión, 1 y 2:
 // "Toma de Evidencia") - va a vivir en Google Drive, pero todavia no
 // existe la Unidad compartida para Obra (21/Ago/2026, ver
 // obra-evidencia-fotos-drive-pendiente en memoria del proyecto). Mientras

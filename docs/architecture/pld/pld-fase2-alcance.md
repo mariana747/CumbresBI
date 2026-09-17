@@ -6,7 +6,7 @@ construir sobre supuestos equivocados. Rama de trabajo:
 `feature/pld-drive-integracion`.
 
 > **Estado al 11/Ago/2026: Fase 2 al ~55%.** Seis pendientes quedan para
-> llegar a 100% (ver `documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)`). Este documento cubre los
+> llegar a 100% (ver `Estado del proyecto`). Este documento cubre los
 > seis, pero prioriza el primero — **integración real con Google Drive** —
 > porque es el bloqueo explícito para subir el proyecto a Cloud Run
 > (decisión de Mariana, 11/Ago/2026: "no podemos subir al proyecto a cloud
@@ -16,7 +16,7 @@ construir sobre supuestos equivocados. Rama de trabajo:
 
 Los comentarios en el código (`docint/drive.py`, `docint/views.py`) dicen
 que la integración con Drive está bloqueada porque "depende del proyecto
-GCP (Actividad 1, bloqueada)". Pero `documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)` (Fase 0)
+GCP (Actividad 1, bloqueada)". Pero `Estado del proyecto` (Fase 0)
 ya marca el proyecto GCP real (`cyp-cumbres-461220`) como resuelto desde
 hace tiempo — Cloud SQL, Secret Manager y OIDC ya funcionan contra él.
 
@@ -133,7 +133,7 @@ frontend.
    es una superficie separada? (Debería ser la misma, reutilizando el
    endpoint de subida — evita construir dos veces la misma lógica.)
 4. Rate limiting del lado del servidor (mencionado para Vivienda en
-   `documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)` línea 129 como patrón a replicar) — ¿aplica
+   `Estado del proyecto` línea 129 como patrón a replicar) — ¿aplica
    igual aquí, dado que es acceso público sin cuenta?
 
 **Depende de la sección 1** (necesita el endpoint de subida real primero).
@@ -189,7 +189,7 @@ existe. Hoy es un `CharField` libre, sin catálogo ni validación.
 2. ¿Qué datos lleva una contraparte más allá del `id_contraparte` que ya
    se usa? (¿nombre, tipo de persona física/moral, RFC/CURP, contacto?)
 3. ¿Se comparte entre PLD y el futuro `tesoreria_contrapartes` de Fase 4
-   (`documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)` línea 132 ya anota esta reconciliación pendiente)
+   (`Estado del proyecto` línea 132 ya anota esta reconciliación pendiente)
    o son catálogos independientes?
 
 Es el pendiente más grande y menos definido de los seis — probablemente

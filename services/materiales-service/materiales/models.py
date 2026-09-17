@@ -16,7 +16,7 @@ def _short_id():
 # "autonomia de modulos con dependencias diferidas" que ya se aplico a
 # Contrapartes (PLD/Ventas/Tesoreria).
 #
-# Fuente de los campos: documentos/CumbresBI_documentacion_completa.md (sec. 2, Plan de Trabajo),
+# Fuente de los campos: Plan de Trabajo,
 # Fase 3 Semana 13, y /README.md sec. 3 (tabla de
 # refactorizacion, fila "Conceptos y Firmas (nueva)"). Solo modelos +
 # migraciones en este primer corte - sin serializers/views/tests todavia

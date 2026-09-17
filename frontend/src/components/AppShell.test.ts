@@ -244,7 +244,7 @@ describe("buildNavItems - siempre presentes", () => {
   });
 });
 
-// Hallazgo de esta ronda (11/Ago/2026, ver documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)): hubo
+// Hallazgo de esta ronda (11/Ago/2026, ver Estado del proyecto): hubo
 // dos servicios de la matriz sin ningun apartado dueno en el sidebar -
 // "tickets" (TICKETS_RESPONSABLE, TICKETS_PARTICIPANTE, EMPLEADO_SELF) y
 // "rentas" (FINANZAS_MANAGER, CONTRALOR). Se agregaron placeholders "en

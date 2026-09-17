@@ -84,7 +84,7 @@ MAIL_SERVICE_URL = env("MAIL_SERVICE_URL", default="http://mail-service:8080")
 # mismo patron que pld-service/pld/views.py::_validar_sociedad_rfc.
 IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
 
-# drive-service - subida real de comprobantes/PDF/XML (documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module), decision
+# drive-service - subida real de comprobantes/PDF/XML (Finance Module, decision
 # 26/Ago/2026), ver tesoreria/views.py::TesoreriaFlujoViewSet.subir_comprobante.
 # Mismo default de desarrollo que pld-service/config/settings.py. Sin carpeta
 # propia dada de alta en DRIVE_MODULE_FOLDER_IDS todavia - drive-service cae
