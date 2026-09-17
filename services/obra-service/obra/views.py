@@ -173,9 +173,9 @@ class ObraCorteSemanalViewSet(_PermisosObraMixin, ModelViewSet):
         """Cierra el corte de la semana (Supervisor de Obra) y CONGELA un
         snapshot real del % acumulado de cada concepto+lote del proyecto
         en ese momento (ObraCorteSemanalDetalle) - antes este corte era
-        solo metadata, no un snapshot de verdad (21/Ago/2026, hallazgo de
-        Mariana: "si alguien sigue editando estimaciones despues de
-        aprobar, el corte aprobado ya no refleja lo que se envio").
+        solo metadata, no un snapshot de verdad: si alguien sigue editando
+        estimaciones despues de aprobar, el corte aprobado ya no reflejaba
+        lo que se envio.
         Idempotente: si ya tiene detalle (se re-aprueba por error), no
         duplica filas - primero borra el detalle previo.
 
