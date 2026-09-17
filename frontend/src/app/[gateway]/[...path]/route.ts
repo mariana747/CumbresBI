@@ -58,8 +58,6 @@ async function proxy(request: NextRequest, params: { gateway: string; path: stri
     }
   });
 
-  console.log("[gateway-proxy] incoming cookie header:", request.headers.get("cookie"));
-
   const hasBody = !["GET", "HEAD"].includes(request.method);
 
   let upstream: Response;
@@ -76,18 +74,6 @@ async function proxy(request: NextRequest, params: { gateway: string; path: stri
 
   const responseBody = await upstream.arrayBuffer();
   const response = new NextResponse(responseBody, { status: upstream.status });
-
-  console.log(
-    "[gateway-proxy]",
-    request.method,
-    targetUrl.toString(),
-    "->",
-    upstream.status,
-    "location:",
-    upstream.headers.get("location"),
-    "set-cookie:",
-    JSON.stringify(upstream.headers.getSetCookie()),
-  );
 
   upstream.headers.forEach((value, key) => {
     if (!HOP_BY_HOP.has(key.toLowerCase()) && key.toLowerCase() !== "set-cookie") {
