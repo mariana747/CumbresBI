@@ -55,8 +55,7 @@ gcloud run deploy "${SERVICE}-${ENV_SUFFIX}" \
 #   (JSON, ej. {"PLD": "<id>"}) como --set-env-vars
 #   (no son secretos); DRIVE_SERVICE_ACCOUNT_JSON como --set-secrets
 #   ("DRIVE_SERVICE_ACCOUNT_JSON=DRIVE_SERVICE_ACCOUNT_JSON:latest" - ya
-#   existe en Secret Manager, ver memoria de sesion
-#   "drive-estructura-carpetas-grupos"). Mientras ese secreto no tenga una
+#   existe en Secret Manager). Mientras ese secreto no tenga una
 #   version real cargada, el servicio sigue en modo simulado sin romperse
 #   (ver driveclient.py) - se puede desplegar antes de tener la credencial
 #   final.
