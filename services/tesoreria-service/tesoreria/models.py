@@ -23,7 +23,7 @@ def _short_id():
 # FK nueva. Candidato a futuro (anotado, no implementado): alinear estos
 # valores contra el Codigo Agrupador de Cuentas del SAT (Anexo 24) si algun
 # dia existe un catalogo de cuentas contables real - hoy no aplica, ver
-# docs/manual-usuario/tesoreria/pendiente.md.
+# docs/notas-modulos/tesoreria/pendiente.md.
 CATEGORIA_GASTO_VIATICOS = "VIATICOS"
 CATEGORIA_GASTO_PAPELERIA = "PAPELERIA"
 CATEGORIA_GASTO_TRANSPORTE = "TRANSPORTE"
