@@ -458,7 +458,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
 // (PldContraparteKycViewSet) - reemplaza el placeholder "Sin expedientes
 // todavía" de Fase 0. Sigue pendiente: workflow completo de estados,
 // formularios publicos con reCAPTCHA/Drive, y auditoria especifica del
-// Motor Documental dentro de PLD (ver docs/CumbresBI_estado.md, Fase 2).
+// Motor Documental dentro de PLD (ver documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto), Fase 2).
 export default function PldPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
 

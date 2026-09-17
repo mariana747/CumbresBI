@@ -4,7 +4,7 @@
 
 > **Contexto:** se había asumido (por el correo original y "el SQL ya está") que la instancia Cloud SQL
 > ya estaba lista para CumbresBI. La única instancia que existe en el proyecto es `db-cypcumbres`, la
-> del sistema actual en producción (el que CumbresBI está reemplazando — ver `docs/CumbresBI_estado.md`,
+> del sistema actual en producción (el que CumbresBI está reemplazando — ver `documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)`,
 > el MySQL con los esquemas `iam_*`, `tesoreria_*`, `vivienda_*`, etc.).
 
 ## Decisión de costo: reusar la instancia, no crear una nueva
@@ -122,5 +122,5 @@ debería requerir reinicio de la instancia.
 ## Pendiente
 
 Ninguno de los otros servicios (`vivienda`, `compras-tesoreria`, `rrhh`, `rentas`, `obra`, `materiales`)
-tiene todavía su primer deploy real en Cloud Run (Fase 4) - ver `docs/despliegue-cloud-run-progreso-13sep.md`
+tiene todavía su primer deploy real en Cloud Run (Fase 4) - ver `docs/PROGRESO-CLOUD-RUN.md`
 (nota: ese archivo es local, no versionado en git a propósito - ver `.gitignore`).

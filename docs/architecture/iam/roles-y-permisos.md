@@ -60,7 +60,7 @@ Los cuatro niveles documentados en la arquitectura (`GLOBAL`, `SOCIEDAD`, `PROYE
 | Participante de Ticket | — | — | — | — | — | — | — | — | — | — | L *(solo asignados a mí)*, C *(comentarios)* | — |
 
 `facturacion-cfdi` solo tiene `L` para todos los roles salvo Super Admin
-(decisión 26/Ago/2026, `finanzas.md` sec. "General Notes": *"The user
+(decisión 26/Ago/2026, `documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module)` sec. "General Notes": *"The user
 cannot create, delete or modify invoices, just see, export and link them
 to transactions"*). Super Admin conserva `LCEA` como excepción operativa.
 

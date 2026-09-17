@@ -2203,7 +2203,7 @@ class TesoreriaSaldoTests(TestCase):
 
 
 class ReporteDiarioSaldosTests(TestCase):
-    """Reporte diario de saldos (26/Ago/2026, ver documentos/finanzas.md) -
+    """Reporte diario de saldos (26/Ago/2026, ver documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module)) -
     calculo real probado directo (sin DRF, ver reportes.py) mas los 3
     endpoints nuevos de TesoreriaSaldoViewSet (reporte_diario/arrastrar/
     enviar_reporte)."""

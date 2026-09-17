@@ -152,7 +152,7 @@ FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
 AUDIT_SERVICE_URL = env("AUDIT_SERVICE_URL", default="http://audit-service:8080")
 
 # tesoreria-service (24/Ago/2026, cierre de la reconciliacion contraparte
-# maestra - ver docs/CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md Semana 19).
+# maestra - ver documentos/CumbresBI_documentacion_completa.md (sec. 2, Plan de Trabajo) Semana 19).
 # PldContraparteKycViewSet.create la usa para validar que el id_contraparte
 # que manda el frontend (via ContraparteSelector) exista de verdad en el
 # catalogo maestro, antes de guardar el expediente KYC.
@@ -196,7 +196,7 @@ RECAPTCHA_SECRET_KEY = env("RECAPTCHA_SECRET_KEY", default="")
 
 # Rate limiting del formulario publico (docs/architecture/pld/pld-fase2-alcance.md
 # sec. 2, pregunta abierta #4: "paginas publicas... necesitan limite de
-# solicitudes" - mismo patron sugerido para Vivienda en CumbresBI_estado.md).
+# solicitudes" - mismo patron sugerido para Vivienda en documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)).
 # Solo aplica al scope "pld-ticket-subir" (ver
 # PldTicketClienteViewSet.get_throttles) - por IP, ya que el cliente
 # externo no tiene sesion.

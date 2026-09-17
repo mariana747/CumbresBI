@@ -22,8 +22,7 @@ def _short_id():
 # simple y de menor riesgo que migrar el campo ya vivo de Reembolsos a una
 # FK nueva. Candidato a futuro (anotado, no implementado): alinear estos
 # valores contra el Codigo Agrupador de Cuentas del SAT (Anexo 24) si algun
-# dia existe un catalogo de cuentas contables real - hoy no aplica, ver
-# docs/notas-modulos/tesoreria/pendiente.md.
+# dia existe un catalogo de cuentas contables real - hoy no aplica.
 CATEGORIA_GASTO_VIATICOS = "VIATICOS"
 CATEGORIA_GASTO_PAPELERIA = "PAPELERIA"
 CATEGORIA_GASTO_TRANSPORTE = "TRANSPORTE"
@@ -257,7 +256,7 @@ class TesoreriaContraparteRelacion(models.Model):
 
 class TesoreriaCuenta(models.Model):
     # Catalogo real del ERD, no libre - INVERSION habilita la accion
-    # RENDIMIENTOS en el reporte diario de saldos (ver finanzas.md:
+    # RENDIMIENTOS en el reporte diario de saldos (ver documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module):
     # "In case the account type is investment, the user will have the
     # option to add a transaction record with the description
     # 'RENDIMIENTOS'..."). Default CHEQUES porque es lo que ya tienen todas
@@ -278,7 +277,7 @@ class TesoreriaCuenta(models.Model):
     # Referencia laxa a general_sociedades.rfc (iam-service, fuera de este
     # esquema) - mismo criterio que TesoreriaContrato.sociedad (26/Ago/2026,
     # se agrega para poder filtrar el reporte diario de saldos "por
-    # empresa (seleccion multiple)", ver finanzas.md). Nullable a proposito:
+    # empresa (seleccion multiple)", ver documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module)). Nullable a proposito:
     # las cuentas existentes antes de este cambio no tienen este dato
     # capturado todavia.
     sociedad = models.CharField(max_length=13, blank=True, null=True)
@@ -1236,7 +1235,7 @@ class TesoreriaFlujo(models.Model):
     fecha_pago_original = models.DateField(blank=True, null=True)
     descripcion_pago = models.CharField(max_length=150, blank=True, null=True)
     # link_comprobante_banco se llenaba pegando la URL a mano; desde
-    # subir_comprobante() (finanzas.md, decision 26/Ago/2026: "upload
+    # subir_comprobante() (documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module), decision 26/Ago/2026: "upload
     # receipts/references from their computer") se llena con el
     # web_view_link real que regresa drive-service, y drive_file_id_comprobante
     # guarda el ID del archivo (permite reemplazarlo despues sin duplicar).
@@ -1301,7 +1300,7 @@ class TesoreriaFlujo(models.Model):
     # contrato relacionado - TesoreriaFlujo no tiene su propia columna de
     # sociedad (viene heredado de AppSheet asi), pero ScopedQuerySet.for_scope
     # soporta lookups con doble guion bajo (ver libs/cumbresbi-scope).
-    # `contrato` es obligatorio (finanzas.md sec. "General Notes": "No
+    # `contrato` es obligatorio (documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module, "General Notes": "No
     # transaction can be registered without a linked contract", decision
     # 26/Ago/2026: sin excepcion, incluyendo reembolsos - estos usan un
     # contrato generico de la misma plantilla, ver migracion 0011), asi que
@@ -1336,7 +1335,7 @@ class TesoreriaMovimientoBancario(models.Model):
     """Una linea del estado de cuenta bancario, importada desde el CSV/Excel
     que sube el analista (08/Sep/2026, primer paso de la conciliacion
     bancaria - ver TesoreriaMovimientoBancarioViewSet.importar). Es el lado
-    "banco" de la conciliacion (finanzas.md: "Generate reconciliation
+    "banco" de la conciliacion (documentos/CumbresBI_documentacion_completa.md (sec. 4, Finance Module): "Generate reconciliation
     reports (transactions vs. invoices)") - distinto de TesoreriaFlujo, que
     es el registro INTERNO capturado a mano o via IA (comprobante de pago).
 

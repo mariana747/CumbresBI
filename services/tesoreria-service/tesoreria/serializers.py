@@ -197,7 +197,7 @@ class TesoreriaCuentaSerializer(serializers.ModelSerializer):
 class TesoreriaContratoSerializer(serializers.ModelSerializer):
     """Contrato (Fase 4, tercer corte tras Contrapartes/Cuentas): une una
     Sociedad con una Contraparte - es el registro del que despues cuelgan
-    Flujos y Facturas (docs/CumbresBI_estado.md, notas de Tesoreria).
+    Flujos y Facturas (documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto), notas de Tesoreria).
 
     `id_contrato` se genera en el backend (ver views.py::perform_create),
     formato "{sociedad}-{id_contraparte}-{consecutivo de 3 digitos}"

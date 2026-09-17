@@ -62,7 +62,7 @@ class PldContraparteKyc(models.Model):
 
     id_kyc = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     # Contraparte propia y autonoma de PLD para esta fase (docs/
-    # CumbresBI_V2_Plan_de_Trabajo_y_Cronograma.md, Semana 7): PLD no
+    # documentos/CumbresBI_documentacion_completa.md (sec. 2, Plan de Trabajo), Semana 7): PLD no
     # depende de que otro modulo (Ventas/Tesoreria) exista todavia para dar
     # de alta un cliente - este campo es la referencia externa reservada
     # que se reconciliara con la contraparte maestra compartida hasta la
@@ -428,7 +428,7 @@ class PldContraparteDoc(models.Model):
     # pld-fase2-alcance.md sec. 1.4). blank/null porque los documentos
     # creados antes de esta migracion no tienen valor todavia (no hay
     # backfill pendiente: 0 documentos reales en la base al 11/Ago/2026,
-    # ver CumbresBI_estado.md).
+    # ver documentos/CumbresBI_documentacion_completa.md (sec. 1, Estado del proyecto)).
     link_documento = models.CharField(max_length=2083, blank=True, null=True)
     drive_file_id = models.CharField(max_length=128, blank=True, null=True)
     mime_type = models.CharField(max_length=100, blank=True, null=True)
