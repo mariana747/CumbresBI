@@ -73,15 +73,35 @@ class ObraLote(models.Model):
     """Lote/casa dentro de un proyecto (columna "LOTE N" del Excel).
     Primer modelo con scope real - pertenece a un proyecto especifico
     (SCOPE_FIELD_PROYECTO), mismo criterio que TesoreriaContrato con
-    SCOPE_FIELD_SOCIEDAD."""
+    SCOPE_FIELD_SOCIEDAD.
+
+    18/Sep/2026 - ampliado para cubrir tambien "Obras" que NO son casa
+    dentro del mismo proyecto (red hidrica, caseta de vigilancia, etc,
+    ver obra-jerarquia-proyecto-obra-presupuesto en memoria del proyecto):
+    `tipo` distingue CASA (manzana/numero_lote obligatorios, alta en
+    bloque N manzanas x N lotes) de ESPECIAL (usa `identificador` como
+    nombre libre, sin manzana/lote numerico)."""
+
+    TIPO_CASA = "CASA"
+    TIPO_ESPECIAL = "ESPECIAL"
+    TIPO_CHOICES = [
+        (TIPO_CASA, "Casa"),
+        (TIPO_ESPECIAL, "Especial"),
+    ]
 
     id_lote = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    proyecto = models.CharField(max_length=3)
+    # 18/Sep/2026: era CharField(3) (asumia solo codigos cortos "P01"/"P02")
+    # - truena con id_proyecto real de 8 caracteres (ej. ZOE-VIDA,
+    # "c02c32b4") en cuanto se usa un proyecto real y no de la semilla dev.
+    # Ampliado a 8, mismo largo que Presupuesto.proyecto en materiales-service.
+    proyecto = models.CharField(max_length=8)
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, default=TIPO_CASA)
+    identificador = models.CharField(max_length=100, blank=True, null=True)
     obra = models.CharField(max_length=100, blank=True, null=True)
     lugar = models.CharField(max_length=100, blank=True, null=True)
     ciudad = models.CharField(max_length=100, blank=True, null=True)
     manzana = models.CharField(max_length=20, blank=True, null=True)
-    numero_lote = models.CharField(max_length=20)
+    numero_lote = models.CharField(max_length=20, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=8, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -95,6 +115,8 @@ class ObraLote(models.Model):
         ordering = ["proyecto", "manzana", "numero_lote"]
 
     def __str__(self):
+        if self.tipo == self.TIPO_ESPECIAL:
+            return f"{self.proyecto}-{self.identificador}"
         return f"{self.proyecto}-{self.numero_lote}"
 
 
@@ -162,7 +184,8 @@ class ObraCorteSemanal(models.Model):
     ]
 
     id_corte = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    proyecto = models.CharField(max_length=3)
+    # Mismo bug/fix que ObraLote.proyecto arriba (18/Sep/2026).
+    proyecto = models.CharField(max_length=8)
     fecha_corte = models.DateField()
     semana_de_fase = models.PositiveSmallIntegerField()
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR)

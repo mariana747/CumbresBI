@@ -296,6 +296,12 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      # Route Handler server-to-server (frontend/src/app/[gateway]/[...path]/route.ts)
+      # - sin esto cae al default "http://localhost:8080", que dentro del
+      # contenedor de frontend NO es api-gateway (son contenedores
+      # distintos), causando 502 en cualquier request proxeada (login,
+      # etc.).
+      GATEWAY_INTERNAL_URL: http://api-gateway:8080
       # reCAPTCHA v2 real (registrado en "Default Gemini Project" - no
       # importa funcionalmente en que proyecto GCP viva). Site key es
       # publica por diseno (RecaptchaV2.tsx).

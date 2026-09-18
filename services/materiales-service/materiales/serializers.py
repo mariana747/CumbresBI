@@ -9,6 +9,7 @@ from .models import (
     PresupuestoFirma,
     Requisicion,
     RequisicionLinea,
+    RequisicionObra,
     SolicitudMaterial,
 )
 
@@ -57,6 +58,7 @@ class PresupuestoSerializer(serializers.ModelSerializer):
         fields = [
             "id_presupuesto",
             "proyecto",
+            "obra",
             "denominacion",
             "estado",
             "monto_total",
@@ -66,7 +68,13 @@ class PresupuestoSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_presupuesto", "created_at", "updated_at"]
+        # created_by/updated_by de solo lectura (18/Sep/2026) - los rellena
+        # PresupuestoViewSet.perform_create/actor, no el cliente; si se
+        # dejan como campo normal, ModelSerializer los marca required=True
+        # (CharField sin blank=True) y el POST del frontend truena en
+        # validacion ANTES de llegar a perform_create, mismo bug que ya
+        # tenia RequisicionViewSet resuelto (ver su serializer arriba).
+        read_only_fields = ["id_presupuesto", "created_at", "created_by", "updated_at", "updated_by"]
 
 
 class ConceptoPresupuestoSerializer(serializers.ModelSerializer):
@@ -169,18 +177,13 @@ class SolicitudMaterialSerializer(serializers.ModelSerializer):
 
 
 class RequisicionLineaSerializer(serializers.ModelSerializer):
-    material_nombre = serializers.CharField(source="material.material", read_only=True)
-
     class Meta:
         model = RequisicionLinea
         fields = [
             "id_linea",
             "requisicion",
-            "concepto",
-            "concepto_nombre",
             "material",
             "material_nombre",
-            "cantidad_por_vivienda",
             "cantidad_total",
             "precio_unitario",
             "importe",
@@ -190,18 +193,32 @@ class RequisicionLineaSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_linea", "created_at", "updated_at"]
+        read_only_fields = fields
+
+
+class RequisicionObraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RequisicionObra
+        fields = ["id_requisicion_obra", "requisicion", "obra"]
+        read_only_fields = fields
 
 
 class RequisicionSerializer(serializers.ModelSerializer):
     """`estado`/`folio`/las 3 firmas son de solo lectura via API directa -
     se cambian con las acciones dedicadas del ViewSet (validar/autorizar/
     rechazar), mismo criterio de segregacion captura/decision que
-    SolicitudMaterial. Las lineas (snapshot de ConceptoPresupuesto) se
+    SolicitudMaterial. Las lineas (agregado de Material entre Obras) se
     generan solas al crear, no se mandan en el POST - ver
-    RequisicionViewSet.perform_create."""
+    RequisicionViewSet.perform_create.
+
+    `obras` (18/Sep/2026, rediseño) es write-only: lista de id_lote de
+    obra-service a incluir - no es un campo real del modelo, lo consume
+    perform_create para crear RequisicionObra y agregar las lineas. La
+    lectura de las Obras incluidas es via `obras_incluidas`."""
 
     lineas = RequisicionLineaSerializer(many=True, read_only=True)
+    obras_incluidas = RequisicionObraSerializer(many=True, read_only=True, source="obras")
+    obras = serializers.ListField(child=serializers.CharField(max_length=8), write_only=True)
     estado_label = serializers.CharField(source="get_estado_display", read_only=True)
 
     class Meta:
@@ -210,11 +227,11 @@ class RequisicionSerializer(serializers.ModelSerializer):
             "id_requisicion",
             "folio",
             "proyecto",
-            "presupuesto",
+            "obras",
+            "obras_incluidas",
             "etapa_constructiva",
             "empresa",
             "responsable",
-            "num_viviendas",
             "presupuesto_asignado",
             "estado",
             "estado_label",

@@ -360,10 +360,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // nomenclatura del Excel legado. Mismo criterio que Tesoreria: children
   // con URL propio por pantalla, no pestañas dentro de un solo /obra.
   //
-  // OCULTO del nav - el backend/rutas siguen intactos,
-  // solo se oculta la entrada del sidebar. Quitar el "false &&" para
-  // reactivar cuando Tesoreria este cerrada.
-  if (false && tieneAlgunPermiso(session, ["obra", "materiales"])) {
+  if (tieneAlgunPermiso(session, ["obra", "materiales"])) {
     items.push({
       label: "Obra",
       href: "/obra/avance",
@@ -373,6 +370,10 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Avance", href: "/obra/avance", icon: HardHat },
         { label: "Cortes Semanales", href: "/obra/cortes", icon: CalendarCheck },
         { label: "Catálogo (Etapas/Conceptos)", href: "/obra/catalogo", icon: ListTree },
+        // Obras por Proyecto (18/Sep/2026) - alta de ObraLote (casas por
+        // Manzana/Lote, o Obras ESPECIAL como red hidrica/caseta), dispara
+        // el Presupuesto por Obra desde aqui.
+        { label: "Obras", href: "/obra/obras", icon: Building2 },
         // Materiales vive aqui - antes colgaba de Ventas/Vivienda; el
         // backend (materiales-service) no cambio, solo el menu y la ruta
         // del frontend.

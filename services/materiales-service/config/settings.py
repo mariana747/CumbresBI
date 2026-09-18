@@ -11,6 +11,15 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-only-insecure-key")
 DEBUG = env.bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
 
+# Default False a proposito (seguro por default): Cloud Run no fija esta
+# variable (ver deploy.yml/gcp_setup.sh), asi que cualquier ambiente real
+# donde nadie la configure queda protegido sin esfuerzo extra. Solo
+# docker-compose (.env local) la pone en True. Usada por las migraciones
+# de datos de ejemplo/DEMO para nunca sembrar nada fuera de local, sin
+# depender de que alguien se acuerde de revertirlas a mano (ver iam.
+# 0019_borra_sociedades_placeholder y tesoreria.0051_borra_datos_demo).
+IS_LOCAL_DEV = env.bool("IS_LOCAL_DEV", default=False)
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -119,3 +128,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # example). Vacio en dev = ese bypass queda deshabilitado (solo
 # materiales.editar via JWT sirve).
 MATERIALES_INTERNAL_SECRET = env("MATERIALES_INTERNAL_SECRET", default="")
+
+# GET simple contra obra-service (18/Sep/2026, alta en bloque de Lotes ->
+# snapshot de Presupuesto) - mismo patron de lectura sin secreto que usa
+# pld-service contra tesoreria-service (las lecturas cruzadas no exigen
+# X-Internal-Secret, solo las escrituras).
+OBRA_SERVICE_URL = env("OBRA_SERVICE_URL", default="http://obra-service:8080")
