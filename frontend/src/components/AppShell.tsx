@@ -373,6 +373,10 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Avance", href: "/obra/avance", icon: HardHat },
         { label: "Cortes Semanales", href: "/obra/cortes", icon: CalendarCheck },
         { label: "Catálogo (Etapas/Conceptos)", href: "/obra/catalogo", icon: ListTree },
+        // Obras por Proyecto (18/Sep/2026) - alta de ObraLote (casas por
+        // Manzana/Lote, o Obras ESPECIAL como red hidrica/caseta), dispara
+        // el Presupuesto por Obra desde aqui.
+        { label: "Obras", href: "/obra/obras", icon: Building2 },
         // Materiales vive aqui - antes colgaba de Ventas/Vivienda; el
         // backend (materiales-service) no cambio, solo el menu y la ruta
         // del frontend.

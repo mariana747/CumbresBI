@@ -282,6 +282,7 @@ export async function createEvidenciaRecepcion(params: {
 export interface Presupuesto {
   id_presupuesto: string;
   proyecto: string;
+  obra: string | null;
   denominacion: string | null;
   estado: string;
   monto_total: string;
@@ -296,6 +297,34 @@ export async function listPresupuestos(search?: string): Promise<Presupuesto[]> 
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/presupuestos/?${params.toString()}`);
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+// Presupuesto por Obra (18/Sep/2026, ver obra-jerarquia-proyecto-obra-
+// presupuesto en memoria del proyecto) - se crea al generar la Obra en
+// /obra/obras, y de inmediato se le llena el snapshot en $0 vía
+// generarPresupuestoDesdeCatalogo.
+export async function createPresupuesto(params: {
+  proyecto: string;
+  obra: string;
+  denominacion?: string | null;
+}): Promise<Presupuesto> {
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/presupuestos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proyecto: params.proyecto, obra: params.obra, denominacion: params.denominacion || null }),
+  });
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+export async function generarPresupuestoDesdeCatalogo(idPresupuesto: string): Promise<ConceptoPresupuesto[]> {
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/presupuestos/${idPresupuesto}/generar_desde_catalogo/`,
+    { method: "POST" }
+  );
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
   return response.json();
 }
