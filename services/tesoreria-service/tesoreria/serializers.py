@@ -583,10 +583,24 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
         ]
 
     def get_conceptos(self, obj):
-        conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)
+        # En list() el ViewSet precarga conceptos_por_uuid en el contexto
+        # (18/Sep/2026, hallazgo real: con datos migrados del legacy la
+        # lista completa de facturas hacia una query de conceptos POR
+        # factura - N+1 - y el gunicorn worker tronaba con timeout en
+        # produccion). retrieve() de un solo objeto sigue igual (1 query,
+        # no hace falta batch).
+        conceptos_por_uuid = self.context.get("conceptos_por_uuid")
+        if conceptos_por_uuid is not None:
+            conceptos = conceptos_por_uuid.get(obj.timbre_uuid, [])
+        else:
+            conceptos = FacturaConcepto.objects.filter(uuid=obj.timbre_uuid)
         return FacturaConceptoSerializer(conceptos, many=True).data
 
     def get_saldo_pendiente_exhibiciones(self, obj):
+        # Mismo criterio que get_conceptos - ver comentario ahi.
+        saldo_por_uuid = self.context.get("saldo_por_uuid")
+        if saldo_por_uuid is not None:
+            return saldo_por_uuid.get(obj.timbre_uuid)
         ultima_parcialidad = (
             FacturaDoctoRelacionado.objects.filter(id_documento=obj.timbre_uuid)
             .exclude(imp_saldo_insoluto__isnull=True)
