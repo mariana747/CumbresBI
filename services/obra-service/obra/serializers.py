@@ -53,6 +53,8 @@ class ObraLoteSerializer(serializers.ModelSerializer):
         fields = [
             "id_lote",
             "proyecto",
+            "tipo",
+            "identificador",
             "obra",
             "lugar",
             "ciudad",
