@@ -45,8 +45,8 @@ NOTA_CREDITO_DEMO = {
 
 
 def seed(apps, schema_editor):
-    # Ver settings.TESTING - mismo motivo que 0004_seed_saldos_demo.
-    if settings.TESTING:
+    # Ver settings.TESTING/IS_LOCAL_DEV - mismo motivo que 0004_seed_saldos_demo.
+    if settings.TESTING or not settings.IS_LOCAL_DEV:
         return
     TesoreriaNotaCredito = apps.get_model("tesoreria", "TesoreriaNotaCredito")
     TesoreriaNotaCredito.objects.get_or_create(

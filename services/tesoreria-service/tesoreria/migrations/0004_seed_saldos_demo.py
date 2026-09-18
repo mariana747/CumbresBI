@@ -31,7 +31,10 @@ SALDOS_DEMO = [
 def seed(apps, schema_editor):
     # Ver settings.TESTING - no insertar filas demo en la base de pruebas,
     # tronaba conteos exactos en tests.py que asumen una base vacia.
-    if settings.TESTING:
+    # settings.IS_LOCAL_DEV - datos de ejemplo solo en local (docker
+    # compose), nunca en un ambiente real (Cloud Run no la fija, default
+    # False protege sin esfuerzo extra).
+    if settings.TESTING or not settings.IS_LOCAL_DEV:
         return
     TesoreriaBanco = apps.get_model("tesoreria", "TesoreriaBanco")
     TesoreriaCuenta = apps.get_model("tesoreria", "TesoreriaCuenta")
