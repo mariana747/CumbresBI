@@ -297,54 +297,76 @@ class MaterialesScopeTests(TestCase):
 
 
 class RequisicionCicloTests(TestCase):
-    """perform_create genera el folio y el snapshot de RequisicionLinea a
-    partir de ConceptoPresupuesto; validar/autorizar/rechazar mueven el
-    estado con las reglas de orden (no se autoriza sin validar antes)."""
+    """perform_create agrega RequisicionLinea por Material sumando
+    ConceptoPresupuesto entre las Obras incluidas (18/Sep/2026, rediseño -
+    ver obra-requisicion-flujo-completo-rediseno en memoria del proyecto);
+    validar/autorizar/rechazar mueven el estado con las reglas de orden
+    (no se autoriza sin validar antes).
+
+    La validacion de que las Obras pertenezcan al proyecto llama a
+    obra-service (GET) - se mockea aqui, no hay obra-service real en los
+    tests de este servicio."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
-        self.presupuesto = Presupuesto.objects.create(proyecto="AAA", monto_total=Decimal("50000.00"))
+        self.obra_a = "obraaaaa"
+        self.obra_b = "obrabbbb"
+        self.presupuesto_a = Presupuesto.objects.create(proyecto="AAA", obra=self.obra_a, monto_total=Decimal("25000.00"))
+        self.presupuesto_b = Presupuesto.objects.create(proyecto="AAA", obra=self.obra_b, monto_total=Decimal("25000.00"))
         self.material = MaterialCatalogo.objects.create(
             material="Cemento gris", unidad_medida="saco", precio_unitario="180.00", proveedor="cp000abc"
         )
-        ConceptoPresupuesto.objects.create(
-            presupuesto=self.presupuesto,
-            etapa_constructiva="Losa cimentacion",
-            concepto="Cemento para losa",
-            material=self.material,
-            cantidad=Decimal("10"),
-            precio_unitario=Decimal("180.00"),
-            importe=Decimal("1800.00"),
-        )
+        for presupuesto in (self.presupuesto_a, self.presupuesto_b):
+            ConceptoPresupuesto.objects.create(
+                presupuesto=presupuesto,
+                etapa_constructiva="Losa cimentacion",
+                concepto="Cemento para losa",
+                material=self.material,
+                cantidad=Decimal("10"),
+                precio_unitario=Decimal("180.00"),
+                importe=Decimal("1800.00"),
+            )
         self.scope_crear = EffectiveScope(is_global=True, perm_keys=("materiales.crear",))
         self.scope_editar = EffectiveScope(is_global=True, perm_keys=("materiales.editar",))
 
-    def _crear_requisicion(self, num_viviendas=2):
+    def _mock_lotes_obra_service(self, mock_get):
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = [
+            {"id_lote": self.obra_a, "proyecto": "AAA"},
+            {"id_lote": self.obra_b, "proyecto": "AAA"},
+        ]
+        mock_get.return_value.raise_for_status.return_value = None
+
+    def _crear_requisicion(self, obras=None):
         request = self.factory.post(
             "/api/requisiciones/",
             {
                 "proyecto": "AAA",
-                "presupuesto": self.presupuesto.id_presupuesto,
+                "obras": obras or [self.obra_a, self.obra_b],
                 "etapa_constructiva": "Losa cimentacion",
-                "num_viviendas": num_viviendas,
             },
             format="json",
         )
         request.effective_scope = self.scope_crear
         view = RequisicionViewSet.as_view({"post": "create"})
-        return view(request)
+        with patch("materiales.views.requests.get") as mock_get:
+            self._mock_lotes_obra_service(mock_get)
+            return view(request)
 
-    def test_crear_genera_folio_y_snapshot_de_lineas(self):
-        response = self._crear_requisicion(num_viviendas=2)
+    def test_crear_genera_folio_y_agrega_lineas_por_material(self):
+        response = self._crear_requisicion()
         self.assertEqual(response.status_code, 201)
         self.assertTrue(response.data["folio"].startswith("AAA-"))
         self.assertEqual(len(response.data["lineas"]), 1)
 
         linea = response.data["lineas"][0]
-        self.assertEqual(linea["cantidad_por_vivienda"], "10.0000")
+        # 10 (Obra A) + 10 (Obra B) = 20, precio del Catalogo (no del
+        # concepto), importe = 20 * 180.
         self.assertEqual(linea["cantidad_total"], "20.00")
+        self.assertEqual(linea["precio_unitario"], "180.00")
         self.assertEqual(linea["importe"], "3600.00")
         self.assertEqual(linea["proveedor_cotizacion"], "cp000abc")
+        self.assertEqual(len(response.data["obras_incluidas"]), 2)
 
     def test_no_se_puede_autorizar_sin_validar_primero(self):
         creado = self._crear_requisicion()
