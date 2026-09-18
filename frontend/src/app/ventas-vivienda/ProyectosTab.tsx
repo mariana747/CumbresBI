@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Button,
   CircularProgress,
   Dialog,
@@ -23,6 +24,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   ViviendaProyecto,
   createProyecto,
@@ -30,6 +32,10 @@ import {
   listProyectos,
   updateProyecto,
 } from "@/lib/vivienda";
+
+function nombreSociedad(s: GeneralSociedad) {
+  return s.alias_sociedad || s.razon_social || s.rfc;
+}
 
 const FORM_VACIO = {
   denominacion: "",
@@ -56,6 +62,7 @@ export default function ProyectosTab({
   actorId: string;
 }) {
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +71,16 @@ export default function ProyectosTab({
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listSociedades().then(setSociedades).catch(() => {});
+  }, []);
+
+  function nombreDePropietario(rfc: string | null) {
+    if (!rfc) return "—";
+    const sociedad = sociedades.find((s) => s.rfc === rfc);
+    return sociedad ? nombreSociedad(sociedad) : rfc;
+  }
 
   function refresh() {
     setLoading(true);
@@ -228,9 +245,7 @@ export default function ProyectosTab({
                     <TableCell>
                       {p.dom_municipio_alcaldia}, {p.dom_estado}
                     </TableCell>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
-                      {p.propietario || "—"}
-                    </TableCell>
+                    <TableCell>{nombreDePropietario(p.propietario)}</TableCell>
                     <TableCell align="right">
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(p)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
@@ -275,12 +290,14 @@ export default function ProyectosTab({
               onChange={(e) => setForm({ ...form, aliasProyecto: e.target.value.slice(0, 5) })}
               fullWidth
             />
-            <TextField
+            <Autocomplete
               size="small"
-              label="Propietario (RFC de la sociedad)"
-              value={form.propietario}
-              onChange={(e) => setForm({ ...form, propietario: e.target.value })}
-              fullWidth
+              options={sociedades}
+              getOptionLabel={nombreSociedad}
+              value={sociedades.find((s) => s.rfc === form.propietario) ?? null}
+              onChange={(_, valor) => setForm({ ...form, propietario: valor?.rfc ?? "" })}
+              isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
+              renderInput={(params) => <TextField {...params} label="Propietario (Empresa/Sociedad)" />}
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField

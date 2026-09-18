@@ -117,24 +117,61 @@ export async function deleteConcepto(idConcepto: string): Promise<void> {
   if (!response.ok) throw await friendlyApiError("OBRA", response);
 }
 
+export type ObraLoteTipo = "CASA" | "ESPECIAL";
+
 export interface ObraLote {
   id_lote: string;
   proyecto: string;
+  tipo: ObraLoteTipo;
+  identificador: string | null;
   obra: string | null;
   lugar: string | null;
   ciudad: string | null;
   manzana: string | null;
-  numero_lote: string;
+  numero_lote: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
   updated_by: string | null;
 }
 
-export async function listLotes(search?: string): Promise<ObraLote[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  const response = await apiFetch("OBRA", `${OBRA_API_BASE_URL}/api/lotes/?${params.toString()}`);
+export async function listLotes(params?: { search?: string; proyecto?: string }): Promise<ObraLote[]> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.proyecto) query.set("proyecto", params.proyecto);
+  const response = await apiFetch("OBRA", `${OBRA_API_BASE_URL}/api/lotes/?${query.toString()}`);
+  if (!response.ok) throw await friendlyApiError("OBRA", response);
+  return response.json();
+}
+
+// Alta en bloque de Lotes tipo CASA (18/Sep/2026, pantalla de Obras por
+// Proyecto) - N manzanas con N lotes cada una, ver generar_lotes en
+// obra-service/obra/views.py.
+export async function generarLotes(params: {
+  proyecto: string;
+  manzanas: { manzana: string; num_lotes: number }[];
+}): Promise<ObraLote[]> {
+  const response = await apiFetch("OBRA", `${OBRA_API_BASE_URL}/api/lotes/generar_lotes/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) throw await friendlyApiError("OBRA", response);
+  return response.json();
+}
+
+// Alta individual de Obra ESPECIAL (red hidrica, caseta de vigilancia,
+// etc) - a diferencia de CASA, no tiene manzana/numero_lote, usa
+// `identificador` como nombre libre.
+export async function crearLoteEspecial(params: {
+  proyecto: string;
+  identificador: string;
+}): Promise<ObraLote> {
+  const response = await apiFetch("OBRA", `${OBRA_API_BASE_URL}/api/lotes/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proyecto: params.proyecto, tipo: "ESPECIAL", identificador: params.identificador }),
+  });
   if (!response.ok) throw await friendlyApiError("OBRA", response);
   return response.json();
 }

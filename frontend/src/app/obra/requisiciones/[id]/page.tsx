@@ -7,7 +7,7 @@ import { ArrowLeft, Check, FileSpreadsheet, FileText, X as XIcon } from "lucide-
 import AppShell from "@/components/AppShell";
 import { DOC, DocCampo, DocPanel } from "@/components/RequisicionDoc";
 import { SessionUser, getSession } from "@/lib/auth";
-import { ObraEtapa, listEtapas } from "@/lib/obra";
+import { ObraEtapa, ObraLote, listEtapas, listLotes } from "@/lib/obra";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
   Requisicion,
@@ -35,6 +35,10 @@ function moneda(valor: string | number) {
   return n.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
 
+function nombreObra(l: ObraLote) {
+  return l.tipo === "CASA" ? `Mz ${l.manzana} - Lote ${l.numero_lote}` : l.identificador || l.id_lote;
+}
+
 // Requisicion de materiales (21/Ago/2026) - vista de detalle 1:1 con el
 // mockup de Ruben: documento oscuro, tarjetas de informacion general,
 // etapa constructiva en tabs, tabla de conceptos con cotizacion, y las
@@ -50,6 +54,7 @@ export default function RequisicionDetallePage() {
   const [requisicion, setRequisicion] = useState<Requisicion | null>(null);
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   const [etapas, setEtapas] = useState<ObraEtapa[]>([]);
+  const [obrasIncluidas, setObrasIncluidas] = useState<ObraLote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [accionando, setAccionando] = useState(false);
@@ -67,7 +72,11 @@ export default function RequisicionDetallePage() {
         setRequisicion(r);
         setProyectos(p);
         setEtapas(e);
+        return listLotes({ proyecto: r.proyecto }).then((lotes) =>
+          lotes.filter((l) => r.obras_incluidas.some((o) => o.obra === l.id_lote))
+        );
       })
+      .then((lotes) => setObrasIncluidas(lotes))
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -106,13 +115,12 @@ export default function RequisicionDetallePage() {
       ["Empresa", requisicion.empresa || ""],
       ["Responsable", requisicion.responsable || ""],
       ["Etapa constructiva", requisicion.etapa_constructiva],
-      ["Viviendas", requisicion.num_viviendas],
+      ["Obras", obrasIncluidas.map(nombreObra).join("; ")],
       ["Presupuesto asignado", requisicion.presupuesto_asignado],
       [],
-      ["Concepto", "Cant./vivienda", "Cant. total", "Precio unitario", "Importe", "Cotización"],
+      ["Material", "Cantidad", "Precio unitario", "Importe", "Cotización"],
       ...requisicion.lineas.map((l) => [
-        l.concepto_nombre,
-        l.cantidad_por_vivienda,
+        l.material_nombre,
         l.cantidad_total,
         l.precio_unitario,
         l.importe,
@@ -142,8 +150,7 @@ export default function RequisicionDetallePage() {
     const filasHtml = requisicion.lineas
       .map(
         (l) => `<tr>
-          <td>${l.concepto_nombre}</td>
-          <td style="text-align:right">${l.cantidad_por_vivienda}</td>
+          <td>${l.material_nombre}</td>
           <td style="text-align:right">${l.cantidad_total}</td>
           <td style="text-align:right">${moneda(l.precio_unitario)}</td>
           <td style="text-align:right">${moneda(l.importe)}</td>
@@ -169,13 +176,13 @@ export default function RequisicionDetallePage() {
   <div class="grid">
     <div><span>Empresa</span>${requisicion.empresa || "—"}</div>
     <div><span>Responsable</span>${requisicion.responsable || "—"}</div>
-    <div><span>Viviendas</span>${requisicion.num_viviendas}</div>
+    <div><span>Obras</span>${obrasIncluidas.map(nombreObra).join(", ") || "—"}</div>
     <div><span>Presupuesto asignado</span>${moneda(requisicion.presupuesto_asignado)}</div>
   </div>
   <table>
-    <thead><tr><th>Concepto</th><th>Cant./vivienda</th><th>Cant. total</th><th>Precio unitario</th><th>Importe</th><th>Cotización</th></tr></thead>
+    <thead><tr><th>Material</th><th>Cantidad</th><th>Precio unitario</th><th>Importe</th><th>Cotización</th></tr></thead>
     <tbody>${filasHtml}</tbody>
-    <tfoot><tr><td colspan="4" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>${moneda(total)}</strong></td><td></td></tr></tfoot>
+    <tfoot><tr><td colspan="3" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>${moneda(total)}</strong></td><td></td></tr></tfoot>
   </table>
   <div class="grid" style="margin-top:32px">
     <div><span>Solicitó</span>${requisicion.solicito_por || "—"}</div>
@@ -276,27 +283,18 @@ export default function RequisicionDetallePage() {
             </Stack>
           </DocPanel>
 
-          {/* Viviendas que comprende */}
-          <DocPanel title="Viviendas que comprende el presupuesto">
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <Box
-                sx={{
-                  bgcolor: "#0f2233",
-                  border: "1px solid #1b3a52",
-                  borderRadius: 1.5,
-                  px: 2,
-                  py: 1,
-                  minWidth: 120,
-                }}
-              >
-                <Typography sx={{ fontSize: 20, fontWeight: 700, color: "#5aa8e0" }}>
-                  {requisicion.num_viviendas}
-                </Typography>
-                <Typography sx={{ fontSize: 11, color: DOC.textMuted }}>viviendas</Typography>
-              </Box>
-              <Typography sx={{ fontSize: 12, color: DOC.textFaint }}>
-                (catálogo de lotes por vivienda pendiente de conectar)
-              </Typography>
+          {/* Obras que comprende (18/Sep/2026, rediseño) - reemplaza el
+          contador suelto de "viviendas": cada Obra tiene su propio
+          Presupuesto, ver docstring del modelo. */}
+          <DocPanel title="Obras que comprende">
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {obrasIncluidas.length === 0 ? (
+                <Typography sx={{ fontSize: 13, color: DOC.textFaint }}>—</Typography>
+              ) : (
+                obrasIncluidas.map((o) => (
+                  <Chip key={o.id_lote} size="small" label={nombreObra(o)} sx={{ bgcolor: "#0f2233", color: "#5aa8e0" }} />
+                ))
+              )}
             </Stack>
           </DocPanel>
 
@@ -325,7 +323,7 @@ export default function RequisicionDetallePage() {
               <Box component="table" sx={{ width: "100%", borderCollapse: "collapse" }}>
                 <Box component="thead">
                   <Box component="tr">
-                    {["Concepto", "Cant./vivienda", "Cant. total", "Precio unitario", "Importe", "Cotización"].map(
+                    {["Material", "Cantidad", "Precio unitario", "Importe", "Cotización"].map(
                       (h, i) => (
                         <Box
                           component="th"
@@ -349,8 +347,8 @@ export default function RequisicionDetallePage() {
                 <Box component="tbody">
                   {requisicion.lineas.length === 0 ? (
                     <Box component="tr">
-                      <Box component="td" colSpan={6} sx={{ py: 3, textAlign: "center", color: DOC.textMuted, fontSize: 13 }}>
-                        Esta etapa no tiene conceptos presupuestados todavía.
+                      <Box component="td" colSpan={5} sx={{ py: 3, textAlign: "center", color: DOC.textMuted, fontSize: 13 }}>
+                        Esta etapa no tiene materiales agregados todavía.
                       </Box>
                     </Box>
                   ) : (
@@ -360,10 +358,7 @@ export default function RequisicionDetallePage() {
                         key={l.id_linea}
                         sx={{ "& td": { borderBottom: `1px solid ${DOC.divider}`, py: 1.25, fontSize: 13, color: DOC.text } }}
                       >
-                        <Box component="td">{l.concepto_nombre}</Box>
-                        <Box component="td" sx={{ textAlign: "right" }}>
-                          {l.cantidad_por_vivienda}
-                        </Box>
+                        <Box component="td">{l.material_nombre}</Box>
                         <Box component="td" sx={{ textAlign: "right" }}>
                           {l.cantidad_total}
                         </Box>
@@ -392,7 +387,7 @@ export default function RequisicionDetallePage() {
                 {requisicion.lineas.length > 0 && (
                   <Box component="tfoot">
                     <Box component="tr">
-                      <Box component="td" colSpan={4} sx={{ pt: 1.5, textAlign: "right", fontSize: 13, color: DOC.textMuted }}>
+                      <Box component="td" colSpan={3} sx={{ pt: 1.5, textAlign: "right", fontSize: 13, color: DOC.textMuted }}>
                         Total etapa · {requisicion.etapa_constructiva}
                       </Box>
                       <Box component="td" sx={{ pt: 1.5, textAlign: "right", fontSize: 15, fontWeight: 700, color: DOC.text }}>

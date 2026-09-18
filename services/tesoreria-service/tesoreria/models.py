@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 
 from cumbresbi_scope.managers import ScopedManager
@@ -40,6 +41,17 @@ CATEGORIA_GASTO_CHOICES = [
     (CATEGORIA_GASTO_RECURSOSHUMANOS, "Recursos Humanos"),
     (CATEGORIA_GASTO_LEGAL, "Legal"),
     (CATEGORIA_GASTO_EXTRAORDINARIOS, "Extraordinarios"),
+]
+
+
+# Catalogo real del SAT (c_MetodoPago del CFDI) - solo estos 2 valores
+# existen: PUE (Pago en una sola exhibicion) o PPD (Pago en parcialidades
+# o diferido). 18/Sep/2026: antes comprobante_metodo_pago era texto libre
+# sin choices en TesoreriaFactura/TesoreriaNotaCredito (confirmado sin
+# datos reales fuera de estos 2 valores/NULL antes de restringir).
+METODO_PAGO_CHOICES = [
+    ("PUE", "Pago en una sola exhibición"),
+    ("PPD", "Pago en parcialidades o diferido"),
 ]
 
 
@@ -430,17 +442,37 @@ def contrato_generico_nomina(sociedad: str) -> "TesoreriaContrato":
     return contrato
 
 
-CONTRAPARTE_REEMBOLSO_ID = "GENREEMB"
 CONTRATO_REEMBOLSO_PREFIJO = "GEN-REEMBOLSOS-"
 
 
+def _id_contraparte_reembolso(sociedad: str) -> str:
+    """id_contraparte determinista por sociedad, corto (CharField(8), ver
+    TesoreriaContraparte.id_contraparte) - "GENREEMB" + sociedad no cabe,
+    de ahi el hash: mismo sociedad siempre da el mismo id (necesario para
+    que get_or_create sea idempotente)."""
+    return "RE" + hashlib.sha1(sociedad.encode()).hexdigest()[:6].upper()
+
+
 def contrato_generico_reembolso(sociedad: str) -> "TesoreriaContrato":
-    """Contrato generico de reembolso, uno POR SOCIEDAD (mismo criterio
-    que contrato_generico_nomina) en vez de un GEN-REEMBOLSOS-001 global.
+    """Contrato Y Contraparte genericos de reembolso, uno POR SOCIEDAD
+    (18/Sep/2026, corrige el criterio viejo de una sola Contraparte
+    GENREEMB compartida por todas las sociedades) - mismo criterio que
+    contrato_generico_nomina para el Contrato. Los reembolsos de una
+    sociedad son un gasto de ESA sociedad, no deben mezclarse con los de
+    otra en la misma Contraparte generica.
+
+    Nota: esto NO cambia el criterio general de Contraparte - una
+    Contraparte real (proveedor externo) SI puede seguir trabajando con
+    una o mas sociedades a la vez (eso vive en Contrato.sociedad, no en
+    Contraparte). Este prefijo por sociedad aplica solo a esta
+    Contraparte generica/placeholder de reembolsos, no al catalogo en
+    general.
+
     get_or_create es idempotente."""
+    id_contraparte = _id_contraparte_reembolso(sociedad)
     TesoreriaContraparte.objects.get_or_create(
-        id_contraparte=CONTRAPARTE_REEMBOLSO_ID,
-        defaults={"razon_social": "Reembolsos a empleados (genérico)"},
+        id_contraparte=id_contraparte,
+        defaults={"razon_social": f"Reembolsos a empleados (genérico) - {sociedad}"},
     )
     id_contrato = f"{CONTRATO_REEMBOLSO_PREFIJO}{sociedad}"
     contrato, _ = TesoreriaContrato.objects.get_or_create(
@@ -448,7 +480,7 @@ def contrato_generico_reembolso(sociedad: str) -> "TesoreriaContrato":
         defaults={
             "sociedad": sociedad,
             "tipo": TesoreriaContrato.TIPO_INTERNO,
-            "contraparte_id": CONTRAPARTE_REEMBOLSO_ID,
+            "contraparte_id": id_contraparte,
             "concepto_factura": "Reembolsos a empleados",
             "status": TesoreriaContrato.STATUS_ACTIVO,
             "requiere_factura": False,
@@ -765,7 +797,7 @@ class TesoreriaFactura(models.Model):
         db_column="Comprobante_TipoDeComprobante", max_length=2, blank=True, null=True
     )
     comprobante_metodo_pago = models.CharField(
-        db_column="Comprobante_MetodoPago", max_length=5, blank=True, null=True
+        db_column="Comprobante_MetodoPago", max_length=5, blank=True, null=True, choices=METODO_PAGO_CHOICES
     )
     comprobante_lugar_expedicion = models.CharField(
         db_column="Comprobante_LugarExpedicion", max_length=300, blank=True, null=True
@@ -881,7 +913,7 @@ class TesoreriaNotaCredito(models.Model):
         db_column="Comprobante_TipoDeComprobante", max_length=2, blank=True, null=True
     )
     comprobante_metodo_pago = models.CharField(
-        db_column="Comprobante_MetodoPago", max_length=5, blank=True, null=True
+        db_column="Comprobante_MetodoPago", max_length=5, blank=True, null=True, choices=METODO_PAGO_CHOICES
     )
     comprobante_lugar_expedicion = models.CharField(
         db_column="Comprobante_LugarExpedicion", max_length=200, blank=True, null=True

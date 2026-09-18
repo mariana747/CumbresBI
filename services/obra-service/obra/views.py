@@ -75,11 +75,66 @@ class ObraLoteViewSet(_PermisosObraMixin, ModelViewSet):
         # numero_lote es CharField (mismo criterio que el resto del ERD,
         # ver models.py) - ordenar por texto pondria "10" antes de "2".
         # Cast a entero para el orden real (1, 2, 3... 41), no lexicografico.
-        return (
+        # Las ESPECIAL no tienen numero_lote (NULL) - Cast de NULL sigue
+        # siendo NULL, ordenan al final sin reventar la consulta.
+        queryset = (
             ObraLote.objects.for_scope(self.request.effective_scope)
             .annotate(numero_lote_int=Cast("numero_lote", IntegerField()))
             .order_by("proyecto", "manzana", "numero_lote_int")
         )
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(proyecto=proyecto)
+        return queryset
+
+    def get_permissions(self):
+        if self.action == "generar_lotes":
+            return [require_permission("obra.crear")()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=["post"])
+    def generar_lotes(self, request):
+        """Alta en bloque de Lotes tipo CASA (18/Sep/2026, pantalla nueva de
+        Obras por Proyecto): recibe N filas de {manzana, num_lotes} y crea
+        una fila ObraLote por cada combinacion Manzana x Lote (numero_lote
+        1..num_lotes), todas TIPO_CASA. No usa el alta individual normal
+        (POST /) porque esa es 1 por 1 - esta es la que arma el "N manzanas
+        con N lotes" pedido por Mariana.
+
+        Body: {"proyecto": str, "manzanas": [{"manzana": str, "num_lotes": int}, ...]}"""
+        proyecto = (request.data.get("proyecto") or "").strip()
+        if not proyecto:
+            return Response({"proyecto": ["Este campo es requerido."]}, status=400)
+        manzanas = request.data.get("manzanas") or []
+        if not manzanas:
+            return Response({"manzanas": ["Se requiere al menos una manzana."]}, status=400)
+
+        actor = getattr(request.effective_scope, "identity_user_id", None) or "sistema"
+        creados = []
+        for fila in manzanas:
+            manzana = (fila.get("manzana") or "").strip()
+            try:
+                num_lotes = int(fila.get("num_lotes"))
+            except (TypeError, ValueError):
+                return Response({"manzanas": [f"num_lotes invalido para la manzana {manzana!r}."]}, status=400)
+            if not manzana or num_lotes <= 0:
+                return Response({"manzanas": ["Cada manzana requiere nombre y num_lotes > 0."]}, status=400)
+            for numero_lote in range(1, num_lotes + 1):
+                creados.append(
+                    ObraLote.objects.create(
+                        proyecto=proyecto,
+                        tipo=ObraLote.TIPO_CASA,
+                        # 18/Sep/2026 (pedido de Mariana): identificador
+                        # tambien se llena para CASA (fijo "Casa"), no solo
+                        # para ESPECIAL - antes quedaba en blanco.
+                        identificador="Casa",
+                        manzana=manzana,
+                        numero_lote=str(numero_lote),
+                        created_by=actor,
+                        updated_by=actor,
+                    )
+                )
+        return Response(ObraLoteSerializer(creados, many=True).data, status=201)
 
 
 class ObraEstimacionViewSet(_PermisosObraMixin, ModelViewSet):
