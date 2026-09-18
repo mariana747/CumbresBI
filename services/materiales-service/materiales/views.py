@@ -2,11 +2,14 @@ import uuid
 from decimal import Decimal, InvalidOperation
 
 import requests
+from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
@@ -21,6 +24,7 @@ from .models import (
     PresupuestoFirma,
     Requisicion,
     RequisicionLinea,
+    RequisicionObra,
     SolicitudMaterial,
 )
 from .serializers import (
@@ -200,7 +204,14 @@ class PresupuestoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     search_fields = ["proyecto", "denominacion"]
 
     def get_queryset(self):
-        return Presupuesto.objects.for_scope(self.request.effective_scope).order_by("-created_at")
+        queryset = Presupuesto.objects.for_scope(self.request.effective_scope).order_by("-created_at")
+        # Filtro real por Obra (18/Sep/2026, Nueva Requisicion necesita el
+        # Presupuesto de cada Obra elegida) - "obra" NO esta en
+        # search_fields, un ?search=<id_obra> no lo encontraria.
+        obra = self.request.query_params.get("obra")
+        if obra:
+            queryset = queryset.filter(obra=obra)
+        return queryset
 
     def perform_create(self, serializer):
         # created_by/updated_by son requeridos por el serializer pero el
@@ -404,8 +415,7 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
     def get_queryset(self):
         queryset = (
             Requisicion.objects.for_scope(self.request.effective_scope)
-            .select_related("presupuesto")
-            .prefetch_related("lineas")
+            .prefetch_related("lineas", "obras")
             .order_by("-created_at")
         )
         proyecto = self.request.query_params.get("proyecto")
@@ -414,36 +424,79 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        presupuesto = serializer.validated_data["presupuesto"]
+        proyecto = serializer.validated_data["proyecto"]
         etapa = serializer.validated_data["etapa_constructiva"]
-        num_viviendas = serializer.validated_data.get("num_viviendas") or 1
+        obras_ids = serializer.validated_data.pop("obras")
+        if not obras_ids:
+            raise ValidationError({"obras": ["Se requiere al menos una Obra."]})
+
+        # Nunca mezclar Obras de proyectos distintos (regla explicita del
+        # diseño, ver obra-requisicion-flujo-completo-rediseno) - se valida
+        # contra obra-service (GET simple, mismo patron sin secreto que el
+        # resto de lecturas cruzadas de este servicio).
+        # ObraLote SI tiene RLS por proyecto (a diferencia de Etapas/
+        # Conceptos, catalogo abierto) - una llamada anonima siempre
+        # regresaria 0 filas. Reenvia el JWT/cookie del usuario original
+        # (forward_auth_headers, misma utilidad ya usada en pld-service)
+        # para que obra-service resuelva el scope de ese mismo usuario.
+        headers, cookies = forward_auth_headers(self.request)
+        try:
+            resp = requests.get(
+                f"{settings.OBRA_SERVICE_URL}/api/lotes/",
+                params={"proyecto": proyecto},
+                headers=headers,
+                cookies=cookies,
+                timeout=10,
+            )
+            resp.raise_for_status()
+        except requests.RequestException:
+            raise ValidationError({"obras": ["No se pudo validar las Obras contra obra-service."]})
+        ids_del_proyecto = {lote["id_lote"] for lote in resp.json()}
+        invalidas = set(obras_ids) - ids_del_proyecto
+        if invalidas:
+            raise ValidationError({"obras": [f"Estas Obras no pertenecen al proyecto {proyecto}: {sorted(invalidas)}"]})
+
         actor = getattr(self.request.effective_scope, "identity_user_id", None) or "sistema"
 
-        folio = f"{serializer.validated_data['proyecto']}-{timezone.now().strftime('%y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+        # Cada Obra tiene su propio Presupuesto (18/Sep/2026, rediseño -
+        # ver docstring del modelo) - se agrega sumando ConceptoPresupuesto
+        # de esa etapa entre TODAS las Obras incluidas, agrupado por
+        # Material. Solo cuenta lo que ya tiene Material asignado (lo que
+        # sigue en $0/sin material del snapshot de generar_desde_catalogo
+        # todavia no esta listo para pedirse).
+        presupuestos = Presupuesto.objects.filter(obra__in=obras_ids)
+        conceptos = ConceptoPresupuesto.objects.filter(
+            presupuesto__in=presupuestos, etapa_constructiva=etapa, material__isnull=False
+        ).select_related("material")
+
+        cantidades_por_material = {}
+        for concepto in conceptos:
+            cantidades_por_material[concepto.material_id] = (
+                cantidades_por_material.get(concepto.material_id, Decimal("0")) + concepto.cantidad
+            )
+        presupuesto_asignado = presupuestos.aggregate(total=Sum("monto_total"))["total"] or 0
+
+        folio = f"{proyecto}-{timezone.now().strftime('%y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
         requisicion = serializer.save(
             folio=folio,
-            presupuesto_asignado=presupuesto.monto_total,
+            presupuesto_asignado=presupuesto_asignado,
             solicito_por=actor,
             created_by=actor,
             updated_by=actor,
         )
+        for obra_id in obras_ids:
+            RequisicionObra.objects.create(requisicion=requisicion, obra=obra_id)
 
-        # Snapshot de los conceptos ya presupuestados para esa etapa -
-        # `cantidad` de ConceptoPresupuesto se interpreta como cantidad POR
-        # VIVIENDA (ver docstring de Requisicion).
-        conceptos = ConceptoPresupuesto.objects.filter(presupuesto=presupuesto, etapa_constructiva=etapa)
-        for concepto in conceptos:
-            cantidad_total = concepto.cantidad * num_viviendas
+        for material_id, cantidad_total in cantidades_por_material.items():
+            material = MaterialCatalogo.objects.get(id_material=material_id)
             RequisicionLinea.objects.create(
                 requisicion=requisicion,
-                concepto=concepto,
-                concepto_nombre=concepto.concepto,
-                material=concepto.material,
-                cantidad_por_vivienda=concepto.cantidad,
+                material=material,
+                material_nombre=material.material,
                 cantidad_total=cantidad_total,
-                precio_unitario=concepto.precio_unitario,
-                importe=cantidad_total * concepto.precio_unitario,
-                proveedor_cotizacion=concepto.material.proveedor if concepto.material_id else None,
+                precio_unitario=material.precio_unitario,
+                importe=cantidad_total * material.precio_unitario,
+                proveedor_cotizacion=material.proveedor,
                 created_by=actor,
                 updated_by=actor,
             )

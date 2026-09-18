@@ -306,14 +306,23 @@ class Requisicion(models.Model):
     viviendas que comprende, etapa constructiva con sus conceptos,
     3 firmas) aprobado 17/Ago/2026 sobre el mockup original de Ruben.
 
-    V1 (21/Ago/2026): las lineas (RequisicionLinea) son un SNAPSHOT tomado
-    de ConceptoPresupuesto al crear la requisicion - `cantidad` de
-    ConceptoPresupuesto se interpreta aqui como cantidad POR VIVIENDA,
-    multiplicada por `num_viviendas` para la cantidad total. Pendiente:
-    generar el archivo .xlsx real con el formato de Ruben (hoy solo se
-    expone la data via API) y conectar `autorizo_compra_por`/`valido_por`
-    a informacion real de quien firma (hoy son ids de usuario simples, sin
-    firma electronica - mismo criterio que PresupuestoFirma)."""
+    V2 (18/Sep/2026, rediseño completo - ver obra-requisicion-flujo-
+    completo-rediseno en memoria del proyecto): la jerarquia real es
+    Proyecto -> Obra -> Presupuesto propio (cada Obra/ObraLote tiene su
+    propio Presupuesto, YA NO hay un solo Presupuesto por Proyecto
+    escalado por num_viviendas). Una Requisicion cubre N Obras del MISMO
+    proyecto (mezcla CASA/ESPECIAL libremente, ver RequisicionObra) para
+    una Etapa constructiva - las lineas (RequisicionLinea) se generan
+    sumando el `ConceptoPresupuesto.cantidad` (ya con Material asignado)
+    de esa etapa entre TODAS las Obras incluidas, agrupado por Material;
+    el precio_unitario de cada linea sale de MaterialCatalogo.precio_unitario
+    vigente al generar (NUNCA del presupuesto), ver
+    RequisicionViewSet.perform_create.
+
+    Pendiente: generar el archivo .xlsx real con el formato de Ruben (hoy
+    solo se expone la data via API), conectar `autorizo_compra_por`/
+    `valido_por` a firma electronica real, y conectar `autorizar` con la
+    creacion de Cotizacion en compras-tesoreria-service (fase aparte)."""
 
     ESTADO_PENDIENTE = "PENDIENTE"
     ESTADO_AUTORIZADA = "AUTORIZADA"
@@ -327,13 +336,9 @@ class Requisicion(models.Model):
     id_requisicion = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     folio = models.CharField(max_length=40, unique=True, editable=False)
     proyecto = models.CharField(max_length=8)
-    presupuesto = models.ForeignKey(
-        Presupuesto, db_column="id_presupuesto", on_delete=models.PROTECT, related_name="requisiciones"
-    )
     etapa_constructiva = models.CharField(max_length=150)
     empresa = models.CharField(max_length=200, blank=True, null=True)
     responsable = models.CharField(max_length=150, blank=True, null=True)
-    num_viviendas = models.PositiveIntegerField(default=1)
     presupuesto_asignado = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
     solicito_por = models.CharField(max_length=8, blank=True, null=True)
@@ -356,33 +361,42 @@ class Requisicion(models.Model):
         return self.folio
 
 
+class RequisicionObra(models.Model):
+    """Una fila por cada Obra (ObraLote de obra-service, CASA o ESPECIAL)
+    incluida en la Requisicion (18/Sep/2026, ver docstring de Requisicion
+    arriba) - referencia laxa a obra_lotes.id_lote, mismo criterio sin FK
+    real entre servicios que Presupuesto.obra."""
+
+    id_requisicion_obra = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    requisicion = models.ForeignKey(
+        Requisicion, db_column="id_requisicion", on_delete=models.CASCADE, related_name="obras"
+    )
+    obra = models.CharField(max_length=8)
+
+    class Meta:
+        db_table = "materiales_requisicion_obras"
+        unique_together = [("requisicion", "obra")]
+
+    def __str__(self):
+        return f"{self.requisicion_id}-{self.obra}"
+
+
 class RequisicionLinea(models.Model):
-    """Una fila de la requisicion - snapshot de un ConceptoPresupuesto al
-    momento de generar el documento (precio/cantidad pueden variar despues
-    en el presupuesto sin afectar una requisicion ya generada)."""
+    """Una fila de la requisicion - Material agregado (suma de
+    ConceptoPresupuesto.cantidad de esa etapa entre TODAS las Obras
+    incluidas, ver Requisicion.perform_create) al momento de generar el
+    documento. `precio_unitario` es el de MaterialCatalogo vigente en ese
+    momento, no cambia despues aunque el catalogo si (snapshot real, mismo
+    criterio que el resto de la requisicion)."""
 
     id_linea = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     requisicion = models.ForeignKey(
         Requisicion, db_column="id_requisicion", on_delete=models.CASCADE, related_name="lineas"
     )
-    concepto = models.ForeignKey(
-        ConceptoPresupuesto,
-        db_column="id_concepto",
-        on_delete=models.SET_NULL,
-        related_name="lineas_requisicion",
-        blank=True,
-        null=True,
-    )
-    concepto_nombre = models.CharField(max_length=250)
     material = models.ForeignKey(
-        MaterialCatalogo,
-        db_column="id_material",
-        on_delete=models.PROTECT,
-        related_name="lineas_requisicion",
-        blank=True,
-        null=True,
+        MaterialCatalogo, db_column="id_material", on_delete=models.PROTECT, related_name="lineas_requisicion"
     )
-    cantidad_por_vivienda = models.DecimalField(max_digits=14, decimal_places=4)
+    material_nombre = models.CharField(max_length=200)
     cantidad_total = models.DecimalField(max_digits=14, decimal_places=2)
     precio_unitario = models.DecimalField(max_digits=14, decimal_places=2)
     importe = models.DecimalField(max_digits=16, decimal_places=2)
@@ -394,7 +408,7 @@ class RequisicionLinea(models.Model):
 
     class Meta:
         db_table = "materiales_requisicion_lineas"
-        ordering = ["concepto_nombre"]
+        ordering = ["material_nombre"]
 
     def __str__(self):
-        return f"{self.requisicion_id}-{self.concepto_nombre}"
+        return f"{self.requisicion_id}-{self.material_nombre}"
