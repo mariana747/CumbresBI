@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import logging
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -884,7 +885,10 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     def get_queryset(self):
         queryset = (
             TesoreriaFlujo.objects.for_scope(self.request.effective_scope)
-            .select_related("contrato", "contrato__contraparte", "cuenta")
+            # periodo_nomina (18/Sep/2026) - el serializer lo consulta via
+            # periodo_nomina.serie, faltaba aqui (mismo hallazgo N+1 que
+            # Facturas, ver TesoreriaFacturaViewSet.list()).
+            .select_related("contrato", "contrato__contraparte", "cuenta", "periodo_nomina")
             .order_by("-created_at")
         )
         contrato_id = self.request.query_params.get("contrato")
@@ -2728,6 +2732,33 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         if estado:
             queryset = queryset.filter(estado=estado)
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        # Batch-prefetch de conceptos/saldo pendiente para toda la pagina
+        # en 2 queries en vez de 2 por factura (18/Sep/2026, hallazgo real
+        # post-migracion de datos legacy: N+1 tronaba por timeout con
+        # volumen real - ver comentario en TesoreriaFacturaSerializer.get_conceptos).
+        facturas = list(self.filter_queryset(self.get_queryset()))
+        uuids = [f.timbre_uuid for f in facturas if f.timbre_uuid]
+
+        conceptos_por_uuid = defaultdict(list)
+        for concepto in FacturaConcepto.objects.filter(uuid__in=uuids):
+            conceptos_por_uuid[concepto.uuid].append(concepto)
+
+        saldo_por_uuid = {}
+        doctos = (
+            FacturaDoctoRelacionado.objects.filter(id_documento__in=uuids)
+            .exclude(imp_saldo_insoluto__isnull=True)
+            .order_by("id_documento", "-num_parcialidad")
+        )
+        for docto in doctos:
+            saldo_por_uuid.setdefault(docto.id_documento, docto.imp_saldo_insoluto)
+
+        context = self.get_serializer_context()
+        context["conceptos_por_uuid"] = conceptos_por_uuid
+        context["saldo_por_uuid"] = saldo_por_uuid
+        serializer = self.get_serializer(facturas, many=True, context=context)
+        return Response(serializer.data)
 
     @action(detail=False, methods=["get"])
     def exportar_csv(self, request):
