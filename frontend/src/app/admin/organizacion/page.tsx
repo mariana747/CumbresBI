@@ -33,21 +33,21 @@ import {
   listSociedades,
   updateSociedad,
 } from "@/lib/iam";
+import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 
 // Gestion organizacional (onboarding sec. 7.2: "CRUD de empresas
 // (Sociedades), centros de trabajo (Centros) y visibilidad de proyectos").
 //
 // Solo Sociedades tiene CRUD real aqui - es el UNICO catalogo generico
-// real del ERD (general_sociedades). Centro y Proyecto NO son catalogos
-// genericos: en el esquema real solo existen tickets_centros/
-// tickets_proyectos (modulo Tickets, Fase 2+) y vivienda_proyectos
-// (modulo Vivienda, Fase 3) - construir un catalogo generico aqui
-// inventaria una estructura que no existe en el ERD y probablemente no
-// coincidiria con la real cuando esos modulos se construyan (decision de
-// sesion, 10/Ago/2026 - ver memoria "pendiente-quitar-grupo-del-codigo"
-// y conversacion sobre schema.csv).
+// real del ERD (general_sociedades). Centro NO es catalogo generico: en
+// el esquema real solo existe tickets_centros (modulo Tickets, todavia
+// sin construir). Proyecto ya se lista aqui de solo lectura, tomado del
+// catalogo real de vivienda_proyectos (modulo Ventas/Vivienda) - el alta
+// se hace desde ese modulo, no desde aqui.
 export default function OrganizacionPage() {
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
+  const [loadingProyectos, setLoadingProyectos] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -77,6 +77,14 @@ export default function OrganizacionPage() {
 
   useEffect(() => {
     refresh();
+  }, []);
+
+  useEffect(() => {
+    setLoadingProyectos(true);
+    listProyectos()
+      .then(setProyectos)
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoadingProyectos(false));
   }, []);
 
   function abrirAlta() {
@@ -286,20 +294,85 @@ export default function OrganizacionPage() {
         </Typography>
       </Paper>
 
-      {/* Proyectos - no es catalogo generico, pertenece al modulo de Vivienda */}
-      <Paper variant="outlined" sx={{ opacity: 0.7 }}>
+      {/* Proyectos - catalogo real de vivienda-service, solo lectura aqui.
+      El alta/edicion vive en el modulo Ventas/Vivienda. */}
+      <Paper variant="outlined">
         <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
           <Milestone size={18} strokeWidth={1.5} />
           <Typography variant="subtitle1" fontWeight={600}>
             Proyectos
           </Typography>
-          <Chip size="small" color="warning" label="Pendiente de construir" sx={{ ml: "auto" }} />
         </Stack>
-        <Typography variant="body2" color="text.secondary" sx={{ px: 2, pb: 2 }}>
-          En el esquema real, "Proyecto" es una tabla propia del módulo de Ventas/Vivienda
-          (<code>vivienda_proyectos</code>), Fase 3 — todavía no arranca. Hoy el ID de proyecto se
-          escribe a mano al otorgar un rol con alcance PROYECTO.
-        </Typography>
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Denominación</TableCell>
+                  <TableCell>Alias</TableCell>
+                  <TableCell>Propietario</TableCell>
+                  <TableCell>Ubicación</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {loadingProyectos ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                      <CircularProgress size={20} />
+                    </TableCell>
+                  </TableRow>
+                ) : proyectos.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Sin proyectos registrados.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  proyectos.map((p) => (
+                    <TableRow key={p.id_proyecto} hover>
+                      <TableCell>{p.denominacion || "—"}</TableCell>
+                      <TableCell>{p.alias_proyecto || "—"}</TableCell>
+                      <TableCell>{p.propietario || "—"}</TableCell>
+                      <TableCell>
+                        {[p.dom_municipio_alcaldia, p.dom_estado].filter(Boolean).join(", ") || "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {loadingProyectos ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : proyectos.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              Sin proyectos registrados.
+            </Typography>
+          ) : (
+            proyectos.map((p) => (
+              <Paper key={p.id_proyecto} variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="subtitle2">{p.denominacion || "—"}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {p.alias_proyecto || "—"}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  <strong>Propietario:</strong> {p.propietario || "—"}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Ubicación:</strong>{" "}
+                  {[p.dom_municipio_alcaldia, p.dom_estado].filter(Boolean).join(", ") || "—"}
+                </Typography>
+              </Paper>
+            ))
+          )}
+        </Stack>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs">
