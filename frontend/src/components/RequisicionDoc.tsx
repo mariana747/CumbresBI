@@ -21,34 +21,60 @@ export const DOC = {
   divider: "#2c2c2c",
 };
 
-// sx para TextField (incluye los selects nativos) sobre fondo oscuro -
-// MUI por default asume fondo claro, hay que forzar cada color.
-export const docFieldSx = {
-  "& .MuiInputLabel-root": { color: DOC.textFaint },
-  "& .MuiInputLabel-root.Mui-focused": { color: DOC.accent },
-  "& .MuiOutlinedInput-root": {
-    color: DOC.text,
-    "& fieldset": { borderColor: DOC.panelBorder },
-    "&:hover fieldset": { borderColor: DOC.textMuted },
-    "&.Mui-focused fieldset": { borderColor: DOC.accent },
-  },
-  "& .MuiSelect-select, & input, & select": { color: DOC.text },
-  "& option": { color: "#000" },
+// Misma "hoja"/documento, en blanco (18/Sep/2026, pedido de Mariana para
+// /obra/requisiciones/nueva: "mantengo como si fuera hoja [pero] en
+// blanco, no en negro") - el detalle (/obra/requisiciones/[id]) sigue
+// usando DOC (oscuro), ese no cambio.
+export const DOC_LIGHT = {
+  bg: "#f5f5f5",
+  panel: "#ffffff",
+  panelBorder: "#e0e0e0",
+  text: "#1a1a1a",
+  textMuted: "#5f5f5f",
+  textFaint: "#8a8a8a",
+  accent: "#c9762f",
+  green: "#2e7d32",
+  divider: "#e0e0e0",
 };
+
+type DocTokens = typeof DOC;
+
+// sx para TextField (incluye los selects nativos) - MUI por default asume
+// fondo claro, con DOC (oscuro) hay que forzar cada color; con DOC_LIGHT
+// coincide con el tema normal de la app pero se deja explicito para que
+// los panels luzcan consistentes entre si.
+export function buildDocFieldSx(tokens: DocTokens = DOC) {
+  return {
+    "& .MuiInputLabel-root": { color: tokens.textFaint },
+    "& .MuiInputLabel-root.Mui-focused": { color: tokens.accent },
+    "& .MuiOutlinedInput-root": {
+      color: tokens.text,
+      "& fieldset": { borderColor: tokens.panelBorder },
+      "&:hover fieldset": { borderColor: tokens.textMuted },
+      "&.Mui-focused fieldset": { borderColor: tokens.accent },
+    },
+    "& .MuiSelect-select, & input, & select": { color: tokens.text },
+    "& option": { color: tokens === DOC ? "#000" : tokens.text },
+  };
+}
+
+export const docFieldSx = buildDocFieldSx(DOC);
 
 export function DocPanel({
   title,
   action,
   children,
+  tokens = DOC,
 }: {
   title: string;
   action?: React.ReactNode;
   children: React.ReactNode;
+  tokens?: DocTokens;
 }) {
   return (
-    <Box sx={{ bgcolor: DOC.panel, border: `1px solid ${DOC.panelBorder}`, borderRadius: 2, p: 3 }}>
+    <Box sx={{ bgcolor: tokens.panel, border: `1px solid ${tokens.panelBorder}`, borderRadius: 2, p: 3 }}>
       <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: DOC.text }}>{title}</Typography>
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: tokens.text }}>{title}</Typography>
         {action && <Box sx={{ ml: "auto" }}>{action}</Box>}
       </Stack>
       {children}
@@ -56,13 +82,13 @@ export function DocPanel({
   );
 }
 
-export function DocCampo({ label, value }: { label: string; value: string }) {
+export function DocCampo({ label, value, tokens = DOC }: { label: string; value: string; tokens?: DocTokens }) {
   return (
     <Stack spacing={0.25}>
-      <Typography sx={{ fontSize: 11, letterSpacing: 0.5, color: DOC.textFaint, textTransform: "uppercase" }}>
+      <Typography sx={{ fontSize: 11, letterSpacing: 0.5, color: tokens.textFaint, textTransform: "uppercase" }}>
         {label}
       </Typography>
-      <Typography sx={{ fontSize: 14, color: DOC.text, fontWeight: 600 }}>{value}</Typography>
+      <Typography sx={{ fontSize: 14, color: tokens.text, fontWeight: 600 }}>{value}</Typography>
     </Stack>
   );
 }
