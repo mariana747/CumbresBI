@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal, InvalidOperation
 
+import requests
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
 from django.db import transaction
@@ -200,6 +201,70 @@ class PresupuestoViewSet(_PermisosMaterialesMixin, ModelViewSet):
 
     def get_queryset(self):
         return Presupuesto.objects.for_scope(self.request.effective_scope).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        # created_by/updated_by son requeridos por el serializer pero el
+        # frontend nunca los mandaba (bug pre-existente, ver
+        # obra-requisicion-materiales-diseno en memoria del proyecto) - lo
+        # corrijo de paso aqui porque el alta en bloque nueva de Presupuesto
+        # (generar Obra -> Presupuesto automatico) depende de que este POST
+        # funcione solo, mismo criterio que RequisicionViewSet.perform_create.
+        actor = getattr(self.request.effective_scope, "identity_user_id", None) or "sistema"
+        serializer.save(created_by=actor, updated_by=actor)
+
+    @action(detail=True, methods=["post"])
+    def generar_desde_catalogo(self, request, pk=None):
+        """Snapshot inicial en $0 (18/Sep/2026, alta en bloque de Lotes en
+        obra-service -> "que automaticamente se asignen las fases", ver
+        obra-requisicion-flujo-completo-rediseno en memoria del proyecto):
+        crea un ConceptoPresupuesto por cada ObraConcepto del catalogo
+        estandar de Etapas/Conceptos (obra-service), con cantidad=0,
+        listo para llenar despues. Solo agrega lo que falte - si ya existe
+        un concepto con el mismo id_concepto de obra-service (guardado en
+        `comentarios` como referencia) no lo duplica, para poder llamarse
+        mas de una vez sin generar filas repetidas.
+
+        GET simple sin secreto contra obra-service (mismo criterio que
+        pld-service -> tesoreria-service: las lecturas cruzadas no exigen
+        X-Internal-Secret)."""
+        presupuesto = self.get_object()
+        try:
+            resp_etapas = requests.get(f"{settings.OBRA_SERVICE_URL}/api/etapas/", timeout=10)
+            resp_etapas.raise_for_status()
+            resp_conceptos = requests.get(f"{settings.OBRA_SERVICE_URL}/api/conceptos/", timeout=10)
+            resp_conceptos.raise_for_status()
+        except requests.RequestException:
+            return Response({"detail": "No se pudo leer el catálogo de Etapas/Conceptos de Obra."}, status=502)
+
+        etapas_por_id = {e["id_etapa"]: e["nombre"] for e in resp_etapas.json()}
+        ya_generados = set(
+            ConceptoPresupuesto.objects.filter(presupuesto=presupuesto, comentarios__startswith="obra_concepto:")
+            .values_list("comentarios", flat=True)
+        )
+        actor = getattr(request.effective_scope, "identity_user_id", None) or "sistema"
+        creados = []
+        for concepto in resp_conceptos.json():
+            referencia = f"obra_concepto:{concepto['id_concepto']}"
+            if referencia in ya_generados:
+                continue
+            # `concepto` es CharField(250) - ObraConcepto.descripcion es un
+            # TextField libre sin tope, puede exceder eso (visto en la
+            # semilla real: "Data too long for column 'concepto'").
+            texto_concepto = f"{concepto['numero']} {concepto['descripcion']}"[:250]
+            creados.append(
+                ConceptoPresupuesto.objects.create(
+                    presupuesto=presupuesto,
+                    etapa_constructiva=etapas_por_id.get(concepto["etapa"], ""),
+                    concepto=texto_concepto,
+                    cantidad=0,
+                    precio_unitario=0,
+                    importe=0,
+                    comentarios=referencia,
+                    created_by=actor,
+                    updated_by=actor,
+                )
+            )
+        return Response(ConceptoPresupuestoSerializer(creados, many=True).data, status=201)
 
 
 class ConceptoPresupuestoViewSet(_PermisosMaterialesMixin, ModelViewSet):

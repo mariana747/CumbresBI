@@ -57,6 +57,7 @@ class PresupuestoSerializer(serializers.ModelSerializer):
         fields = [
             "id_presupuesto",
             "proyecto",
+            "obra",
             "denominacion",
             "estado",
             "monto_total",
@@ -66,7 +67,13 @@ class PresupuestoSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_presupuesto", "created_at", "updated_at"]
+        # created_by/updated_by de solo lectura (18/Sep/2026) - los rellena
+        # PresupuestoViewSet.perform_create/actor, no el cliente; si se
+        # dejan como campo normal, ModelSerializer los marca required=True
+        # (CharField sin blank=True) y el POST del frontend truena en
+        # validacion ANTES de llegar a perform_create, mismo bug que ya
+        # tenia RequisicionViewSet resuelto (ver su serializer arriba).
+        read_only_fields = ["id_presupuesto", "created_at", "created_by", "updated_at", "updated_by"]
 
 
 class ConceptoPresupuestoSerializer(serializers.ModelSerializer):

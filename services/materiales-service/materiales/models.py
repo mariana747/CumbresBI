@@ -101,6 +101,14 @@ class Presupuesto(models.Model):
 
     id_presupuesto = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     proyecto = models.CharField(max_length=8)
+    # 18/Sep/2026 (jerarquia real Proyecto->Obra->Presupuesto, ver
+    # obra-jerarquia-proyecto-obra-presupuesto en memoria del proyecto):
+    # cada Obra/Lote (casa o especial, ver ObraLote en obra-service) tiene
+    # su propio Presupuesto - `obra` referencia laxa a obra_lotes.id_lote,
+    # mismo criterio sin FK real que `proyecto` ya usa contra
+    # vivienda_proyectos.id_proyecto. Nullable porque los Presupuesto
+    # viejos (previos a esta fecha) no tienen Obra asignada todavia.
+    obra = models.CharField(max_length=8, blank=True, null=True)
     denominacion = models.CharField(max_length=250, blank=True, null=True)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR)
     monto_total = models.DecimalField(max_digits=16, decimal_places=2, default=0)

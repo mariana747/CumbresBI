@@ -119,3 +119,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # example). Vacio en dev = ese bypass queda deshabilitado (solo
 # materiales.editar via JWT sirve).
 MATERIALES_INTERNAL_SECRET = env("MATERIALES_INTERNAL_SECRET", default="")
+
+# GET simple contra obra-service (18/Sep/2026, alta en bloque de Lotes ->
+# snapshot de Presupuesto) - mismo patron de lectura sin secreto que usa
+# pld-service contra tesoreria-service (las lecturas cruzadas no exigen
+# X-Internal-Secret, solo las escrituras).
+OBRA_SERVICE_URL = env("OBRA_SERVICE_URL", default="http://obra-service:8080")
