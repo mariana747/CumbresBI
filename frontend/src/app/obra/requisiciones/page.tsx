@@ -120,7 +120,7 @@ export default function RequisicionesPage() {
                     <TableCell>Folio</TableCell>
                     <TableCell>Proyecto</TableCell>
                     <TableCell>Etapa constructiva</TableCell>
-                    <TableCell align="right">Viviendas</TableCell>
+                    <TableCell align="right">Obras</TableCell>
                     <TableCell>Estado</TableCell>
                     <TableCell align="right">Acciones</TableCell>
                   </TableRow>
@@ -147,7 +147,7 @@ export default function RequisicionesPage() {
                           {proyectos.find((p) => p.id_proyecto === r.proyecto)?.alias_proyecto || r.proyecto}
                         </TableCell>
                         <TableCell>{r.etapa_constructiva}</TableCell>
-                        <TableCell align="right">{r.num_viviendas}</TableCell>
+                        <TableCell align="right">{r.obras_incluidas.length}</TableCell>
                         <TableCell>
                           <Chip size="small" label={ESTADO_LABELS[r.estado]} color={ESTADO_COLOR[r.estado]} />
                         </TableCell>
@@ -190,7 +190,7 @@ export default function RequisicionesPage() {
                       <strong>Etapa:</strong> {r.etapa_constructiva}
                     </Typography>
                     <Typography variant="body2">
-                      <strong>Viviendas:</strong> {r.num_viviendas}
+                      <strong>Obras:</strong> {r.obras_incluidas.length}
                     </Typography>
                   </Stack>
                 </Paper>

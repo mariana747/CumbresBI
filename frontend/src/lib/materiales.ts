@@ -293,10 +293,11 @@ export interface Presupuesto {
   updated_by: string | null;
 }
 
-export async function listPresupuestos(search?: string): Promise<Presupuesto[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/presupuestos/?${params.toString()}`);
+export async function listPresupuestos(params?: { search?: string; obra?: string }): Promise<Presupuesto[]> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.obra) query.set("obra", params.obra);
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/presupuestos/?${query.toString()}`);
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
   return response.json();
 }
@@ -364,26 +365,28 @@ export type RequisicionEstado = "PENDIENTE" | "AUTORIZADA" | "RECHAZADA";
 export interface RequisicionLinea {
   id_linea: string;
   requisicion: string;
-  concepto: string | null;
-  concepto_nombre: string;
-  material: string | null;
-  material_nombre: string | null;
-  cantidad_por_vivienda: string;
+  material: string;
+  material_nombre: string;
   cantidad_total: string;
   precio_unitario: string;
   importe: string;
   proveedor_cotizacion: string | null;
 }
 
+export interface RequisicionObraIncluida {
+  id_requisicion_obra: string;
+  requisicion: string;
+  obra: string;
+}
+
 export interface Requisicion {
   id_requisicion: string;
   folio: string;
   proyecto: string;
-  presupuesto: string;
+  obras_incluidas: RequisicionObraIncluida[];
   etapa_constructiva: string;
   empresa: string | null;
   responsable: string | null;
-  num_viviendas: number;
   presupuesto_asignado: string;
   estado: RequisicionEstado;
   estado_label: string;
@@ -411,11 +414,10 @@ export async function listRequisiciones(proyecto?: string): Promise<Requisicion[
 
 export async function createRequisicion(params: {
   proyecto: string;
-  presupuesto: string;
+  obras: string[];
   etapaConstructiva: string;
   empresa?: string | null;
   responsable?: string | null;
-  numViviendas: number;
   comentarios?: string | null;
 }): Promise<Requisicion> {
   const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/requisiciones/`, {
@@ -423,11 +425,10 @@ export async function createRequisicion(params: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       proyecto: params.proyecto,
-      presupuesto: params.presupuesto,
+      obras: params.obras,
       etapa_constructiva: params.etapaConstructiva,
       empresa: params.empresa || null,
       responsable: params.responsable || null,
-      num_viviendas: params.numViviendas,
       comentarios: params.comentarios || null,
     }),
   });
