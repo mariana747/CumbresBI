@@ -360,10 +360,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // nomenclatura del Excel legado. Mismo criterio que Tesoreria: children
   // con URL propio por pantalla, no pestañas dentro de un solo /obra.
   //
-  // OCULTO del nav - el backend/rutas siguen intactos,
-  // solo se oculta la entrada del sidebar. Quitar el "false &&" para
-  // reactivar cuando Tesoreria este cerrada.
-  if (false && tieneAlgunPermiso(session, ["obra", "materiales"])) {
+  if (tieneAlgunPermiso(session, ["obra", "materiales"])) {
     items.push({
       label: "Obra",
       href: "/obra/avance",
