@@ -51,8 +51,8 @@ FLUJO_DEMO = {
 
 
 def seed(apps, schema_editor):
-    # Ver settings.TESTING - mismo motivo que 0004_seed_saldos_demo.
-    if settings.TESTING:
+    # Ver settings.TESTING/IS_LOCAL_DEV - mismo motivo que 0004_seed_saldos_demo.
+    if settings.TESTING or not settings.IS_LOCAL_DEV:
         return
     TesoreriaContraparte = apps.get_model("tesoreria", "TesoreriaContraparte")
     TesoreriaCuenta = apps.get_model("tesoreria", "TesoreriaCuenta")
