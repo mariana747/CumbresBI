@@ -312,15 +312,17 @@ def _obtener_sociedad_en_iam(sociedad_rfc, headers, cookies):
     try:
         # quote() (02/Sep/2026, hallazgo real: "Hubo un problema en el
         # servidor" PLD-500 al crear un expediente con la sociedad
-        # "CONSULTORÍA Y PROYECTOS CUMBRES") - su RFC real es literalmente
-        # "#####3" (decision permanente de Fase 1: no hay RFC fiscal real
-        # y no lo va a haber, ver iam-service). "#" es el delimitador de
+        # "CONSULTORÍA Y PROYECTOS CUMBRES") - su RFC hoy es el placeholder
+        # "#####3" (RFC real todavia sin capturar, ver iam-service
+        # migracion 0006_seed_sociedades). "#" es el delimitador de
         # fragmento de una URL - sin escaparlo, todo lo que sigue al
         # primer "#" se descartaba ANTES de salir de este proceso (ni
         # siquiera le llegaba a iam-service), asi que la peticion real
         # terminaba siendo GET /api/sociedades/ (la lista completa, no el
         # detalle) - de ahi 'list' object has no attribute 'get' al leer
         # upstream.json().get('razon_social') mas abajo, esperando un dict.
+        # NOTA: este quote() se queda aunque se capture el RFC real, es
+        # buena practica para cualquier RFC/ID en una URL.
         upstream = requests.get(
             f"{settings.IAM_SERVICE_URL}/api/sociedades/{quote(sociedad_rfc, safe='')}/",
             headers=headers,
