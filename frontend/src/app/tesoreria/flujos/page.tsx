@@ -246,6 +246,11 @@ function TesoreriaFlujosPageContent() {
   // tipo=nomina) y se ve en Flujos y en Nominas por sus propios caminos.
   const [flujosDelContrato, setFlujosDelContrato] = useState<TesoreriaFlujo[]>([]);
   const [cargandoFlujosContrato, setCargandoFlujosContrato] = useState(false);
+  // "ID de empleado" (pestana Referencias) solo aplica a Flujos de nomina -
+  // periodo_nomina es la liga real, pero hay Flujos legacy con id_empleado
+  // capturado sin periodo_nomina (ver auditoria 17/Sep/2026), de ahi el
+  // fallback al prefijo GEN-NOMINA- del contrato generico.
+  const esFlujoDeNomina = !!editing?.periodo_nomina || !!editing?.contrato?.startsWith("GEN-NOMINA");
   const [form, setForm] = useState(FORM_VACIO);
   const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -1612,39 +1617,20 @@ function TesoreriaFlujosPageContent() {
           {tab === "Referencias" && (
             <>
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-              <TextField
-                size="small"
-                label="ID de empleado"
-                value={form.idEmpleado}
-                onChange={(e) => setForm({ ...form, idEmpleado: e.target.value })}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label={
-                  <LabelTip
-                    text="ID de requisición"
-                    tip="ID de la requisición de materiales relacionada, si aplica. Texto libre, no valida contra el catálogo."
-                  />
-                }
-                value={form.idRequisicion}
-                onChange={(e) => setForm({ ...form, idRequisicion: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label={
-                  <LabelTip
-                    text="Link de referencia"
-                    tip="Liga externa de apoyo (cotización, correo, etc.), distinta del comprobante de pago."
-                  />
-                }
-                value={form.linkReferencia}
-                onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-              />
+              {/* ID de requisicion y Link de referencia se quitaron
+              (17/Sep/2026): 0 de 28 Flujos reales los han usado alguna vez.
+              ID de empleado solo aplica a Flujos de nomina (contrato
+              GEN-NOMINA-<sociedad>) - en el resto tambien queda siempre
+              vacio en la practica. */}
+              {esFlujoDeNomina && (
+                <TextField
+                  size="small"
+                  label="ID de empleado"
+                  value={form.idEmpleado}
+                  onChange={(e) => setForm({ ...form, idEmpleado: e.target.value })}
+                  fullWidth
+                />
+              )}
             </Stack>
 
             {editing && editing.contrato && (
@@ -1691,6 +1677,7 @@ function TesoreriaFlujosPageContent() {
                             href={urlVerComprobanteFlujo(f.id_flujo)}
                             target="_blank"
                             rel="noopener noreferrer"
+                            sx={{ ml: 1 }}
                           >
                             Ver comprobante
                           </Button>

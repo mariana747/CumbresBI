@@ -340,7 +340,7 @@ export default function PanelReferenciaCruzada({
                               href={urlVerComprobanteFlujo(f.id_flujo)}
                               target="_blank"
                               rel="noopener noreferrer"
-                              sx={{ alignSelf: "flex-start" }}
+                              sx={{ alignSelf: "flex-start", mt: 0.5 }}
                             >
                               Ver comprobante
                             </Button>
