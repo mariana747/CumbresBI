@@ -100,10 +100,15 @@ export interface Recepcion {
 
 // --- Solicitudes de compra ---
 
-export async function listSolicitudesCompra(params?: { proyecto?: string; search?: string }): Promise<SolicitudCompra[]> {
+export async function listSolicitudesCompra(params?: {
+  proyecto?: string;
+  search?: string;
+  estado?: SolicitudCompra["estado"];
+}): Promise<SolicitudCompra[]> {
   const qs = new URLSearchParams();
   if (params?.proyecto) qs.set("proyecto", params.proyecto);
   if (params?.search) qs.set("search", params.search);
+  if (params?.estado) qs.set("estado", params.estado);
   const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/solicitudes/?${qs.toString()}`);
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();
@@ -126,9 +131,15 @@ export async function createSolicitudCompra(params: {
 
 // --- Cotizaciones ---
 
-export async function listCotizaciones(solicitud?: string): Promise<Cotizacion[]> {
+export async function listCotizaciones(params?: {
+  solicitud?: string;
+  search?: string;
+  estado?: Cotizacion["estado"];
+}): Promise<Cotizacion[]> {
   const qs = new URLSearchParams();
-  if (solicitud) qs.set("solicitud", solicitud);
+  if (params?.solicitud) qs.set("solicitud", params.solicitud);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.estado) qs.set("estado", params.estado);
   const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/cotizaciones/?${qs.toString()}`);
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();
@@ -178,9 +189,15 @@ export async function confirmarExtraccionCotizacion(
 
 // --- Órdenes de compra ---
 
-export async function listOrdenesCompra(proyecto?: string): Promise<OrdenCompra[]> {
+export async function listOrdenesCompra(params?: {
+  proyecto?: string;
+  search?: string;
+  estado?: OrdenCompra["estado"];
+}): Promise<OrdenCompra[]> {
   const qs = new URLSearchParams();
-  if (proyecto) qs.set("proyecto", proyecto);
+  if (params?.proyecto) qs.set("proyecto", params.proyecto);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.estado) qs.set("estado", params.estado);
   const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/ordenes/?${qs.toString()}`);
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();

@@ -8,7 +8,11 @@ import {
   Chip,
   CircularProgress,
   Collapse,
+  FormControl,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -20,6 +24,7 @@ import {
 } from "@mui/material";
 import { FileText } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import { OrdenCompra, listOrdenesCompra } from "@/lib/compras";
 
 const ESTADO_LABELS: Record<OrdenCompra["estado"], string> = {
@@ -48,14 +53,16 @@ function OrdenesPageInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandido, setExpandido] = useState<string | null>(ordenResaltada || null);
+  const [search, setSearch] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<OrdenCompra["estado"] | "">("");
 
   useEffect(() => {
     setLoading(true);
-    listOrdenesCompra()
+    listOrdenesCompra({ search: search || undefined, estado: filtroEstado || undefined })
       .then(setOrdenes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [search, filtroEstado]);
 
   return (
     <AppShell>
@@ -73,6 +80,27 @@ function OrdenesPageInner() {
           {error}
         </Alert>
       )}
+
+      <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por folio o proveedor...">
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="filtro-estado-orden-label">Filtrar por estado</InputLabel>
+          <Select
+            labelId="filtro-estado-orden-label"
+            label="Filtrar por estado"
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value as OrdenCompra["estado"] | "")}
+          >
+            <MenuItem value="">
+              <em>Todos los estados</em>
+            </MenuItem>
+            {Object.entries(ESTADO_LABELS).map(([valor, label]) => (
+              <MenuItem key={valor} value={valor}>
+                {label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </FiltrosBar>
 
       {loading ? (
         <Stack alignItems="center" sx={{ py: 4 }}>
