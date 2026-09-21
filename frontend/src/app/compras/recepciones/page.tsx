@@ -98,6 +98,10 @@ export default function RecepcionesPage() {
       setError("Captura al menos una cantidad recibida.");
       return;
     }
+    if (!evidencia) {
+      setError("Sube la evidencia fotográfica antes de registrar la recepción.");
+      return;
+    }
     setGuardando(true);
     setError(null);
     try {
@@ -279,7 +283,7 @@ export default function RecepcionesPage() {
                           </Button>
                         )}
                         <Button component="label" variant="outlined" startIcon={<ImagePlus size={16} strokeWidth={1.5} />}>
-                          Evidencia (opcional)
+                          Evidencia (requerida)
                           <input
                             type="file"
                             hidden
@@ -300,7 +304,7 @@ export default function RecepcionesPage() {
                       <Button
                         sx={{ mt: 2 }}
                         variant="contained"
-                        disabled={guardando}
+                        disabled={guardando || !evidencia}
                         onClick={handleRegistrar}
                       >
                         {guardando ? <CircularProgress size={20} /> : "Registrar recepción"}
