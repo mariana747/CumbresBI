@@ -234,7 +234,9 @@ export default function ConciliacionFacturasPage() {
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
-    listContratos().then(setContratos).catch(() => setContratos([]));
+    listContratos(undefined, undefined, undefined, 200)
+      .then((res) => setContratos(res.results))
+      .catch(() => setContratos([]));
   }, []);
 
   useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps

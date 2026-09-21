@@ -621,8 +621,8 @@ export default function TesoreriaFacturasPage() {
   }, []);
 
   useEffect(() => {
-    listContrapartes(undefined, "proveedor")
-      .then(setProveedores)
+    listContrapartes(undefined, "proveedor", undefined, undefined, 200)
+      .then((res) => setProveedores(res.results))
       .catch(() => undefined);
   }, []);
 
@@ -664,8 +664,8 @@ export default function TesoreriaFacturasPage() {
   }, []);
 
   useEffect(() => {
-    listContrapartes(undefined, "proveedor")
-      .then(setOpcionesProveedor)
+    listContrapartes(undefined, "proveedor", undefined, undefined, 200)
+      .then((res) => setOpcionesProveedor(res.results))
       .catch(() => setOpcionesProveedor([]));
   }, []);
 

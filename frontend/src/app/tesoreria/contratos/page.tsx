@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Alert,
@@ -30,6 +30,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -70,6 +71,7 @@ import {
   createContratoDocumento,
   deleteContratoDocumento,
   enviarRecordatorioDocumentos,
+  getContrato,
   listContrapartes,
   listContratoDocumentos,
   listContratos,
@@ -160,6 +162,11 @@ function TesoreriaContratosPageContent() {
   const [filtroProyecto, setFiltroProyecto] = useState("");
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
+  // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
+  // Flujos/Facturas - ver TesoreriaContratoViewSet.pagination_class).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [totalContratos, setTotalContratos] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -212,7 +219,9 @@ function TesoreriaContratosPageContent() {
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
-    listContrapartes().then(setContrapartes).catch(() => setContrapartes([]));
+    listContrapartes(undefined, undefined, undefined, undefined, 200)
+      .then((res) => setContrapartes(res.results))
+      .catch(() => setContrapartes([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
@@ -227,8 +236,20 @@ function TesoreriaContratosPageContent() {
 
   function refresh() {
     setLoading(true);
-    listContratos(search || undefined)
-      .then(setContratos)
+    listContratos(
+      search || undefined,
+      filtroContraparte || undefined,
+      pagina + 1,
+      filasPorPagina,
+      filtroSociedad || undefined,
+      filtroProyecto || undefined,
+      filtroFechaDesde || undefined,
+      filtroFechaHasta || undefined
+    )
+      .then((res) => {
+        setContratos(res.results);
+        setTotalContratos(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -237,42 +258,44 @@ function TesoreriaContratosPageContent() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, filtroSociedad, filtroContraparte, filtroProyecto, filtroFechaDesde, filtroFechaHasta, pagina, filasPorPagina]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (21/Sep/2026,
+  // mismo motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPagina(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filtroSociedad, filtroContraparte, filtroProyecto, filtroFechaDesde, filtroFechaHasta]);
 
   // Deep link "ir a este contrato" (?id_contrato=..., desde el dialogo de
   // Contratos en Contrapartes) - abre la edicion de ese contrato en cuanto
-  // llega en la URL. yaAbierto
-  // evita reabrirlo solo si el usuario lo cierra a mano (sin esto,
-  // cualquier refresh() posterior a cerrar el dialogo lo volveria a abrir
-  // porque el query param sigue en la URL).
+  // llega en la URL. yaAbierto evita reabrirlo solo si el usuario lo cierra
+  // a mano (sin esto, cualquier refresh() posterior a cerrar el dialogo lo
+  // volveria a abrir porque el query param sigue en la URL).
+  //
+  // getContrato() directo por PK (21/Sep/2026, fix paginacion) - antes
+  // buscaba en el array `contratos` ya cargado, que con paginacion real
+  // puede no incluir ese contrato si esta en otra pagina/filtro.
   const deepLinkYaAbierto = useRef(false);
   useEffect(() => {
-    if (deepLinkYaAbierto.current || !idContratoDeepLink || contratos.length === 0) return;
-    const contrato = contratos.find((c) => c.id_contrato === idContratoDeepLink);
-    if (contrato) {
-      deepLinkYaAbierto.current = true;
-      // Abre en modo "Ver" (28/Ago/2026) - el deep link viene de un boton
-      // de solo lectura ("Ir a este contrato" en Contrapartes); si quiere
-      // editar, usa el menu de tres puntos desde aqui.
-      abrirEdicion(contrato, true);
-    }
+    if (deepLinkYaAbierto.current || !idContratoDeepLink) return;
+    deepLinkYaAbierto.current = true;
+    getContrato(idContratoDeepLink)
+      .then((contrato) => {
+        // Abre en modo "Ver" (28/Ago/2026) - el deep link viene de un boton
+        // de solo lectura ("Ir a este contrato" en Contrapartes); si quiere
+        // editar, usa el menu de tres puntos desde aqui.
+        abrirEdicion(contrato, true);
+      })
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contratos, idContratoDeepLink]);
+  }, [idContratoDeepLink]);
 
-  // Filtros de sociedad y fecha de generacion (25/Ago/2026) - del lado
-  // del cliente: listContratos solo soporta ?search= en el backend (ver
-  // TesoreriaContratoViewSet.search_fields), no hay parametro de sociedad
-  // ni de fecha todavia.
-  const contratosFiltrados = useMemo(() => {
-    return contratos.filter((c) => {
-      if (filtroSociedad && c.sociedad !== filtroSociedad) return false;
-      if (filtroContraparte && c.contraparte !== filtroContraparte) return false;
-      if (filtroProyecto && !(c.proyecto || "").toLowerCase().includes(filtroProyecto.toLowerCase())) return false;
-      if (filtroFechaDesde && (!c.fecha_generacion || c.fecha_generacion < filtroFechaDesde)) return false;
-      if (filtroFechaHasta && (!c.fecha_generacion || c.fecha_generacion > filtroFechaHasta)) return false;
-      return true;
-    });
-  }, [contratos, filtroSociedad, filtroContraparte, filtroProyecto, filtroFechaDesde, filtroFechaHasta]);
+  // Filtros de sociedad/contraparte/proyecto/fecha (25/Ago/2026, movidos al
+  // servidor 21/Sep/2026 - con paginacion el cliente ya no tiene todas las
+  // filas para filtrar localmente, ver refresh() y
+  // TesoreriaContratoViewSet.get_queryset).
+  const contratosFiltrados = contratos;
 
   function abrirAlta() {
     setEditing(null);
@@ -294,10 +317,11 @@ function TesoreriaContratosPageContent() {
       if (!editing) setIdContratoPrevio("");
       return;
     }
-    listContratos()
-      .then((todos) => {
-        const consecutivo =
-          todos.filter((c) => c.sociedad === form.sociedad && c.contraparte === form.contraparte).length + 1;
+    // pageSize:1 (21/Sep/2026, fix paginacion) - solo hace falta el conteo
+    // total (res.count), mismo patron que idFlujoPrevio en flujos/page.tsx.
+    listContratos(undefined, form.contraparte, 1, 1, form.sociedad)
+      .then((res) => {
+        const consecutivo = res.count + 1;
         setIdContratoPrevio(`${form.sociedad}-${form.contraparte}-${consecutivo.toString().padStart(3, "0")}`);
       })
       .catch(() => setIdContratoPrevio(""));
@@ -701,6 +725,21 @@ function TesoreriaContratosPageContent() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalContratos}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={filasPorPagina}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPagina(parseInt(e.target.value, 10));
+            setPagina(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       {/* Menu compacto de acciones por fila - un solo lugar para tabla y

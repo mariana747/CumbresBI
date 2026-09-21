@@ -24,6 +24,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -253,6 +254,11 @@ function PanelFacturasPpdALiquidar({ timbreUuid, puedeEditar }: { timbreUuid: st
 export default function TesoreriaComplementosPagoPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [items, setItems] = useState<TesoreriaComplementoPago[]>([]);
+  // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
+  // Flujos/Facturas - ver TesoreriaComplementoPagoViewSet.pagination_class).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [totalItems, setTotalItems] = useState(0);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -300,8 +306,11 @@ export default function TesoreriaComplementosPagoPage() {
 
   function refresh() {
     setLoading(true);
-    listComplementosPago(search || undefined, undefined, filtroReceptor || undefined)
-      .then(setItems)
+    listComplementosPago(search || undefined, undefined, filtroReceptor || undefined, pagina + 1, filasPorPagina)
+      .then((res) => {
+        setItems(res.results);
+        setTotalItems(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -309,6 +318,13 @@ export default function TesoreriaComplementosPagoPage() {
   useEffect(() => {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filtroReceptor, pagina, filasPorPagina]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (21/Sep/2026,
+  // mismo motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPagina(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filtroReceptor]);
 
@@ -531,6 +547,21 @@ export default function TesoreriaComplementosPagoPage() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalItems}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={filasPorPagina}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPagina(parseInt(e.target.value, 10));
+            setPagina(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">

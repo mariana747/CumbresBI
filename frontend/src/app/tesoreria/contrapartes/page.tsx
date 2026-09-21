@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Alert,
@@ -30,6 +30,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -65,6 +66,7 @@ import {
   deleteContraparte,
   deleteContraparteRelacion,
   generarIdCorto,
+  getContraparte,
   listComplementosPago,
   listContraparteRelaciones,
   listContrapartes,
@@ -126,10 +128,19 @@ function TesoreriaContrapartesPageContent() {
   const searchParams = useSearchParams();
   const [session, setSession] = useState<SessionUser | null>(null);
   const [contrapartes, setContrapartes] = useState<TesoreriaContraparte[]>([]);
+  // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
+  // Flujos/Facturas - ver TesoreriaContraparteViewSet.pagination_class).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [totalContrapartes, setTotalContrapartes] = useState(0);
   // Filtro "pendientes de revision" (creadas por IA en confirmar_conciliacion,
   // ver origen en tesoreria.ts) - quedan con email/tipo_persona vacios y
   // nadie se enteraba antes de que existiera este filtro.
   const [soloPendientesIA, setSoloPendientesIA] = useState(false);
+  // Conteo real de pendientes IA (21/Sep/2026, fix paginacion) - independiente
+  // de la pagina/filtro actual, se refresca por separado (pageSize:1, solo
+  // interesa res.count).
+  const [totalPendientesIA, setTotalPendientesIA] = useState(0);
   // "Autorizado por" se llena de colaboradores internos, no texto libre -
   // filtro access_mode=STANDARD (interno/Workspace) para no mezclar
   // proveedores/externos que tambien viven en iam-service (ver docstring de
@@ -266,8 +277,18 @@ function TesoreriaContrapartesPageContent() {
 
   function refresh() {
     setLoading(true);
-    listContrapartes(search || undefined, undefined, filtroSociedad || undefined)
-      .then(setContrapartes)
+    listContrapartes(
+      search || undefined,
+      undefined,
+      filtroSociedad || undefined,
+      pagina + 1,
+      filasPorPagina,
+      soloPendientesIA
+    )
+      .then((res) => {
+        setContrapartes(res.results);
+        setTotalContrapartes(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -276,32 +297,54 @@ function TesoreriaContrapartesPageContent() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroSociedad]);
+  }, [search, filtroSociedad, soloPendientesIA, pagina, filasPorPagina]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (21/Sep/2026,
+  // mismo motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPagina(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filtroSociedad, soloPendientesIA]);
+
+  // Conteo real de pendientes IA para el badge del toggle (21/Sep/2026, fix
+  // paginacion - antes se derivaba de `contrapartes`, que con paginacion
+  // solo tiene la pagina actual). pageSize:1, solo interesa res.count.
+  useEffect(() => {
+    listContrapartes(undefined, undefined, undefined, 1, 1, true)
+      .then((res) => setTotalPendientesIA(res.count))
+      .catch(() => undefined);
+  }, [contrapartes]);
 
   // ?revisar=<id_contraparte> - link directo desde flujos/page.tsx cuando
   // confirmar_conciliacion detecta/crea una contraparte por IA (ver
   // handleConfirmarConciliacionFlujo) - abre de una vez el dialogo de
   // edicion para completar email/tipo_persona sin que el analista tenga
   // que buscarla a mano.
+  //
+  // getContraparte() directo por PK (21/Sep/2026, fix paginacion) - antes
+  // buscaba en el array `contrapartes` ya cargado, que con paginacion real
+  // puede no incluir esa contraparte si esta en otra pagina/filtro.
   const revisarId = searchParams.get("revisar");
+  const revisarYaAbierto = useRef(false);
   useEffect(() => {
-    if (!revisarId || contrapartes.length === 0) return;
-    const c = contrapartes.find((x) => x.id_contraparte === revisarId);
-    if (c) abrirEdicion(c);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revisarId, contrapartes]);
+    if (revisarYaAbierto.current || !revisarId) return;
+    revisarYaAbierto.current = true;
+    getContraparte(revisarId)
+      .then((c) => abrirEdicion(c))
+      .catch(() => undefined);
+  }, [revisarId]);
 
   // Pendiente de revision = creada por IA y todavia le falta lo que Tesoreria
-  // exige para una alta manual (email/tipo_persona, ver models.py).
+  // exige para una alta manual (email/tipo_persona, ver models.py). Solo se
+  // usa ya para resaltar filas/chip - el filtro real (?pendiente_ia=1) se
+  // mueve al servidor, ver refresh().
   function pendienteRevisionIA(c: TesoreriaContraparte): boolean {
     return c.origen === "ia" && (!c.email || !c.tipo_persona);
   }
 
-  const contrapartesMostradas = useMemo(
-    () => (soloPendientesIA ? contrapartes.filter(pendienteRevisionIA) : contrapartes),
-    [contrapartes, soloPendientesIA]
-  );
-  const totalPendientesIA = useMemo(() => contrapartes.filter(pendienteRevisionIA).length, [contrapartes]);
+  // La lista ya viene filtrada del servidor cuando soloPendientesIA esta
+  // activo (21/Sep/2026, fix paginacion).
+  const contrapartesMostradas = contrapartes;
 
   function abrirAlta() {
     setEditing(null);
@@ -421,13 +464,13 @@ function TesoreriaContrapartesPageContent() {
     setLoadingDocumentos(true);
     Promise.all([
       listFacturas({ contraparte: c.id_contraparte, pageSize: 200 }),
-      listComplementosPago(undefined, c.id_contraparte),
-      listNotasCredito(undefined, c.id_contraparte),
+      listComplementosPago(undefined, c.id_contraparte, undefined, undefined, 200),
+      listNotasCredito(undefined, c.id_contraparte, undefined, undefined, 200),
     ])
-      .then(([facturasPage, complementos, notas]) => {
+      .then(([facturasPage, complementosPage, notasPage]) => {
         setDocFacturas(facturasPage.results);
-        setDocComplementos(complementos);
-        setDocNotasCredito(notas);
+        setDocComplementos(complementosPage.results);
+        setDocNotasCredito(notasPage.results);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoadingDocumentos(false));
@@ -493,8 +536,8 @@ function TesoreriaContrapartesPageContent() {
 
   function refreshContratos(idContraparte: string) {
     setLoadingContratos(true);
-    listContratos(undefined, idContraparte)
-      .then(setContratos)
+    listContratos(undefined, idContraparte, undefined, 200)
+      .then((res) => setContratos(res.results))
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoadingContratos(false));
   }
@@ -727,6 +770,21 @@ function TesoreriaContrapartesPageContent() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalContrapartes}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={filasPorPagina}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPagina(parseInt(e.target.value, 10));
+            setPagina(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       {/* Menu compacto de acciones por fila - un solo lugar para tabla y
