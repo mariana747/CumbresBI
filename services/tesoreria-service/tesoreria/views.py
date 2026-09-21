@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import logging
+import uuid
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
@@ -882,6 +883,18 @@ def _aplicar_filtro_fecha_conciliacion(request, queryset):
     return queryset
 
 
+def _generar_id_flujo() -> str:
+    # 8 hex minusculas (17/Sep/2026, "podemos dejar este FLJ-000001 atras?")
+    # - mismo formato que los Flujos migrados del legacy (ej. "0ca3e654"),
+    # reemplaza el "FLJ-{consecutivo:06d}" anterior. Reintenta en el
+    # remotisimo caso de colision contra un id_flujo ya existente.
+    for _ in range(10):
+        candidato = uuid.uuid4().hex[:8]
+        if not TesoreriaFlujo.objects.filter(id_flujo=candidato).exists():
+            return candidato
+    raise RuntimeError("No se pudo generar un id_flujo unico tras 10 intentos.")
+
+
 class TesoreriaFlujoViewSet(ModelViewSet):
     """Flujo de caja - un movimiento real de
     dinero (pago a proveedor, reembolso, nomina) ligado a un contrato.
@@ -1222,14 +1235,11 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             )
 
     def perform_create(self, serializer):
-        # id_flujo = "FLJ-{consecutivo global de 6 digitos}" (ver ejemplo
-        # real en piezas-de-tesoreria.html: "FLJ-000452") - consecutivo
-        # global, no por contrato/sociedad como id_contrato, porque aqui el
-        # ERD original (tesoreria_flujos.id_flujo) no trae de por si una
-        # composicion legible con otro campo de negocio.
+        # id_flujo (17/Sep/2026) - ver _generar_id_flujo(): antes era
+        # "FLJ-{consecutivo:06d}", cambiado a hash corto para verse igual
+        # que los Flujos migrados del legacy (ej. "0ca3e654").
         self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
-        consecutivo = TesoreriaFlujo.objects.count() + 1
-        serializer.save(id_flujo=f"FLJ-{consecutivo:06d}")
+        serializer.save(id_flujo=_generar_id_flujo())
 
     def perform_update(self, serializer):
         # El estado "cerrado" vive en la Nomina, no en el Flujo - se valida
@@ -3849,9 +3859,8 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         except TesoreriaContrato.DoesNotExist:
             return Response({"detail": "Contrato no encontrado."}, status=400)
 
-        consecutivo = TesoreriaFlujo.objects.count() + 1
         flujo = TesoreriaFlujo.objects.create(
-            id_flujo=f"FLJ-{consecutivo:06d}",
+            id_flujo=_generar_id_flujo(),
             contrato=contrato,
             cuenta=movimiento.cuenta,
             concepto=movimiento.descripcion,
