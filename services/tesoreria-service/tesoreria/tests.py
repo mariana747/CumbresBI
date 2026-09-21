@@ -634,13 +634,17 @@ class TesoreriaFlujoTests(TestCase):
         self.assertEqual(len(response2.data["results"]), 1)
         self.assertEqual(response2.data["results"][0]["contrato"], self.contrato.id_contrato)
 
-    def test_id_flujo_se_genera_con_consecutivo(self):
+    def test_id_flujo_se_genera_como_hash_corto_unico(self):
+        # 17/Sep/2026 - antes "FLJ-{consecutivo:06d}", ahora hash de 8 hex
+        # (ver _generar_id_flujo), mismo formato que los Flujos legacy.
         response = self._crear_flujo()
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["id_flujo"], "FLJ-000001")
+        id_flujo = response.data["id_flujo"]
+        self.assertRegex(id_flujo, r"^[0-9a-f]{8}$")
 
         response2 = self._crear_flujo()
-        self.assertEqual(response2.data["id_flujo"], "FLJ-000002")
+        self.assertRegex(response2.data["id_flujo"], r"^[0-9a-f]{8}$")
+        self.assertNotEqual(response2.data["id_flujo"], id_flujo)
 
     def test_usuario_de_una_sociedad_no_ve_flujos_de_otra(self):
         self._crear_flujo()
