@@ -69,7 +69,7 @@ export default function RecepcionesPage() {
   useEffect(() => {
     setLoading(true);
     listOrdenesCompra()
-      .then((data) => setOrdenes(data.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA")))
+      .then((data) => setOrdenes(data.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA" && o.estado !== "CERRADA_CON_FALTANTE")))
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }, []);
@@ -121,7 +121,7 @@ export default function RecepcionesPage() {
         listRecepciones(ordenSeleccionada.id_orden),
       ]);
       const actualizada = ordenesActualizadas.find((o) => o.id_orden === ordenSeleccionada.id_orden) || null;
-      setOrdenes(ordenesActualizadas.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA"));
+      setOrdenes(ordenesActualizadas.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA" && o.estado !== "CERRADA_CON_FALTANTE"));
       setOrdenSeleccionada(actualizada);
       setRecepciones(recepcionesActualizadas);
       setCantidades({});

@@ -71,7 +71,7 @@ export interface OrdenCompra {
   proveedor_nombre: string | null;
   fecha_orden: string;
   monto_total: string;
-  estado: "BORRADOR" | "ENVIADA" | "RECIBIDA_PARCIAL" | "RECIBIDA_TOTAL" | "CANCELADA";
+  estado: "BORRADOR" | "ENVIADA" | "RECIBIDA_PARCIAL" | "RECIBIDA_TOTAL" | "CANCELADA" | "CERRADA_CON_FALTANTE";
   estado_label: string;
   autorizado_por: string | null;
   comentarios: string | null;
@@ -223,6 +223,17 @@ export async function generarOrdenDesdeCotizacion(idCotizacion: string): Promise
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cotizacion: idCotizacion }),
+  });
+  if (!response.ok) throw await friendlyApiError("COMPRAS", response);
+  return response.json();
+}
+
+// Cierra una orden "Recibida parcial" cuando el faltante es definitivo
+// (21/Sep/2026, "y que pasa si llega menos de lo esperado") - requiere
+// compras.aprobar.
+export async function cerrarOrdenConFaltante(idOrden: string): Promise<OrdenCompra> {
+  const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/ordenes/${idOrden}/cerrar_con_faltante/`, {
+    method: "POST",
   });
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();

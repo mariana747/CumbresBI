@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import {
   Alert,
   Box,
+  Button,
   Chip,
   CircularProgress,
   Collapse,
@@ -25,7 +26,8 @@ import {
 import { FileText } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import FiltrosBar from "@/components/FiltrosBar";
-import { OrdenCompra, listOrdenesCompra } from "@/lib/compras";
+import { SessionUser, getSession } from "@/lib/auth";
+import { OrdenCompra, cerrarOrdenConFaltante, listOrdenesCompra } from "@/lib/compras";
 
 const ESTADO_LABELS: Record<OrdenCompra["estado"], string> = {
   BORRADOR: "Borrador",
@@ -33,6 +35,7 @@ const ESTADO_LABELS: Record<OrdenCompra["estado"], string> = {
   RECIBIDA_PARCIAL: "Recibida parcial",
   RECIBIDA_TOTAL: "Recibida total",
   CANCELADA: "Cancelada",
+  CERRADA_CON_FALTANTE: "Cerrada con faltante",
 };
 const ESTADO_COLOR: Record<OrdenCompra["estado"], "default" | "warning" | "info" | "success" | "error"> = {
   BORRADOR: "default",
@@ -40,6 +43,7 @@ const ESTADO_COLOR: Record<OrdenCompra["estado"], "default" | "warning" | "info"
   RECIBIDA_PARCIAL: "warning",
   RECIBIDA_TOTAL: "success",
   CANCELADA: "error",
+  CERRADA_CON_FALTANTE: "error",
 };
 
 // Fase 4B - Compras (02/Sep/2026). Solo lectura - una orden nace completa
@@ -49,20 +53,43 @@ function OrdenesPageInner() {
   const searchParams = useSearchParams();
   const ordenResaltada = searchParams.get("orden") || undefined;
 
+  const [session, setSession] = useState<SessionUser | null>(null);
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandido, setExpandido] = useState<string | null>(ordenResaltada || null);
   const [search, setSearch] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<OrdenCompra["estado"] | "">("");
+  const [cerrando, setCerrando] = useState<string | null>(null);
 
   useEffect(() => {
+    getSession().then(setSession);
+  }, []);
+
+  const puedeAprobar = session?.perm_keys.includes("compras.aprobar") ?? false;
+
+  function recargar() {
     setLoading(true);
     listOrdenesCompra({ search: search || undefined, estado: filtroEstado || undefined })
       .then(setOrdenes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
-  }, [search, filtroEstado]);
+  }
+
+  useEffect(recargar, [search, filtroEstado]);
+
+  async function handleCerrarConFaltante(idOrden: string) {
+    setCerrando(idOrden);
+    setError(null);
+    try {
+      await cerrarOrdenConFaltante(idOrden);
+      recargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setCerrando(null);
+    }
+  }
 
   return (
     <AppShell>
@@ -174,6 +201,18 @@ function OrdenesPageInner() {
                                   ))}
                                 </TableBody>
                               </Table>
+                              {puedeAprobar && o.estado === "RECIBIDA_PARCIAL" && (
+                                <Box sx={{ p: 1 }}>
+                                  <Button
+                                    size="small"
+                                    color="error"
+                                    disabled={cerrando === o.id_orden}
+                                    onClick={(e) => { e.stopPropagation(); handleCerrarConFaltante(o.id_orden); }}
+                                  >
+                                    {cerrando === o.id_orden ? "Cerrando…" : "Cerrar con faltante"}
+                                  </Button>
+                                </Box>
+                              )}
                             </Collapse>
                           </TableCell>
                         </TableRow>
@@ -229,6 +268,17 @@ function OrdenesPageInner() {
                         </Stack>
                       ))}
                     </Stack>
+                    {puedeAprobar && o.estado === "RECIBIDA_PARCIAL" && (
+                      <Button
+                        size="small"
+                        color="error"
+                        disabled={cerrando === o.id_orden}
+                        onClick={(e) => { e.stopPropagation(); handleCerrarConFaltante(o.id_orden); }}
+                        sx={{ mt: 1 }}
+                      >
+                        {cerrando === o.id_orden ? "Cerrando…" : "Cerrar con faltante"}
+                      </Button>
+                    )}
                   </Collapse>
                 </Paper>
               ))

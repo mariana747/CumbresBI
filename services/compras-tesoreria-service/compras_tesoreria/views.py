@@ -277,7 +277,7 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
         return queryset
 
     def get_permissions(self):
-        if self.action == "generar_desde_cotizacion":
+        if self.action in ("generar_desde_cotizacion", "cerrar_con_faltante"):
             return [require_permission("compras.aprobar")()]
         return super().get_permissions()
 
@@ -341,6 +341,25 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
             solicitud.save(update_fields=["estado", "updated_by", "updated_at"])
 
         return Response(self.get_serializer(orden).data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def cerrar_con_faltante(self, request, pk=None):
+        """Cierra una orden con RECIBIDA_PARCIAL cuando el faltante es
+        definitivo (21/Sep/2026, "y que pasa si llega menos de lo
+        esperado") - antes no habia forma de sacarla de "Recibida parcial"
+        si el proveedor ya no iba a mandar el resto. Solo aplica a ordenes
+        con al menos una recepcion ya registrada (RECIBIDA_PARCIAL); una
+        orden sin nada recibido se cancela (estado CANCELADA), no se cierra
+        con faltante."""
+        orden = self.get_object()
+        if orden.estado != OrdenCompra.ESTADO_RECIBIDA_PARCIAL:
+            return Response(
+                {"detail": "Solo se puede cerrar con faltante una orden en estado 'Recibida parcial'."}, status=400
+            )
+        orden.estado = OrdenCompra.ESTADO_CERRADA_CON_FALTANTE
+        orden.updated_by = _actor(request)
+        orden.save(update_fields=["estado", "updated_by", "updated_at"])
+        return Response(self.get_serializer(orden).data)
 
 
 def _llamar_materiales_service(endpoint, payload, contexto):

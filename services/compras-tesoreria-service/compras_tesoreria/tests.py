@@ -475,3 +475,48 @@ class SubirEvidenciaRecepcionTests(TestCase):
         self.assertEqual(response.status_code, 502)
         self.recepcion.refresh_from_db()
         self.assertIsNone(self.recepcion.link_drive)
+
+
+class CerrarConFaltanteTests(TestCase):
+    """Cerrar una orden con faltante definitivo (21/Sep/2026, "y que pasa
+    si llega menos de lo esperado") - solo aplica si ya esta
+    RECIBIDA_PARCIAL, requiere compras.aprobar."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        solicitud = SolicitudCompra.objects.create(
+            proyecto="PRYA", descripcion="Cemento", created_by="u001", updated_by="u001"
+        )
+        cotizacion = Cotizacion.objects.create(
+            solicitud=solicitud, proveedor="CP0001", proveedor_nombre="Materiales del Norte",
+            created_by="u001", updated_by="u001",
+        )
+        self.orden = OrdenCompra.objects.create(
+            folio="OC-TEST-0003", proyecto="PRYA", solicitud=solicitud, cotizacion=cotizacion,
+            proveedor="CP0001", proveedor_nombre="Materiales del Norte", created_by="u001", updated_by="u001",
+        )
+
+    def _cerrar(self, perm_keys=("compras.aprobar",)):
+        request = self.factory.post(f"/api/ordenes/{self.orden.id_orden}/cerrar_con_faltante/", {}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=perm_keys, identity_user_id="u001")
+        view = OrdenCompraViewSet.as_view({"post": "cerrar_con_faltante"})
+        return view(request, pk=self.orden.id_orden)
+
+    def test_sin_permiso_da_403(self):
+        response = self._cerrar(perm_keys=("compras.crear",))
+        self.assertEqual(response.status_code, 403)
+
+    def test_no_se_puede_cerrar_si_no_esta_recibida_parcial(self):
+        self.orden.estado = OrdenCompra.ESTADO_ENVIADA
+        self.orden.save(update_fields=["estado"])
+        response = self._cerrar()
+        self.assertEqual(response.status_code, 400)
+
+    def test_cierra_una_orden_recibida_parcial(self):
+        self.orden.estado = OrdenCompra.ESTADO_RECIBIDA_PARCIAL
+        self.orden.save(update_fields=["estado"])
+        response = self._cerrar()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "CERRADA_CON_FALTANTE")
+        self.orden.refresh_from_db()
+        self.assertEqual(self.orden.estado, OrdenCompra.ESTADO_CERRADA_CON_FALTANTE)
