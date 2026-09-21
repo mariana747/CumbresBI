@@ -111,9 +111,14 @@ function menorValor(valores: Array<number | null>): number | null {
 export default function CotizacionesPanel({
   solicitudId,
   mostrarEncabezado = false,
+  soloLectura = false,
 }: {
   solicitudId?: string;
   mostrarEncabezado?: boolean;
+  /** Vista de solo lectura (21/Sep/2026, panel lateral desde Solicitudes) -
+  oculta Nueva Cotizacion, Analizar con IA, editar/agregar/quitar lineas,
+  Guardar lineas y Generar orden. Solo se puede consultar. */
+  soloLectura?: boolean;
 }) {
   const router = useRouter();
 
@@ -136,8 +141,8 @@ export default function CotizacionesPanel({
     getSession().then(setSession);
   }, []);
 
-  const puedeCrear = session?.perm_keys.includes("compras.crear") ?? false;
-  const puedeAprobar = session?.perm_keys.includes("compras.aprobar") ?? false;
+  const puedeCrear = (session?.perm_keys.includes("compras.crear") ?? false) && !soloLectura;
+  const puedeAprobar = (session?.perm_keys.includes("compras.aprobar") ?? false) && !soloLectura;
 
   function recargar() {
     setLoading(true);
@@ -249,26 +254,28 @@ export default function CotizacionesPanel({
         </Alert>
       )}
 
-      <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por proveedor...">
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel id="filtro-estado-cotizacion-label">Filtrar por estado</InputLabel>
-          <Select
-            labelId="filtro-estado-cotizacion-label"
-            label="Filtrar por estado"
-            value={filtroEstado}
-            onChange={(e) => setFiltroEstado(e.target.value as Cotizacion["estado"] | "")}
-          >
-            <MenuItem value="">
-              <em>Todos los estados</em>
-            </MenuItem>
-            {Object.entries(ESTADO_LABELS).map(([valor, label]) => (
-              <MenuItem key={valor} value={valor}>
-                {label}
+      {!soloLectura && (
+        <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por proveedor...">
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="filtro-estado-cotizacion-label">Filtrar por estado</InputLabel>
+            <Select
+              labelId="filtro-estado-cotizacion-label"
+              label="Filtrar por estado"
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value as Cotizacion["estado"] | "")}
+            >
+              <MenuItem value="">
+                <em>Todos los estados</em>
               </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </FiltrosBar>
+              {Object.entries(ESTADO_LABELS).map(([valor, label]) => (
+                <MenuItem key={valor} value={valor}>
+                  {label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </FiltrosBar>
+      )}
 
       {loading ? (
         <Stack alignItems="center" sx={{ py: 4 }}>
@@ -318,13 +325,15 @@ export default function CotizacionesPanel({
                   {c.moneda || "MXN"} {c.total || "—"}
                 </Typography>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ ml: { xs: 0, sm: "auto" } }}>
-                  <Button
-                    size="small"
-                    startIcon={<Sparkles size={14} strokeWidth={2} />}
-                    onClick={() => setMotorCotizacion(c)}
-                  >
-                    Analizar con IA
-                  </Button>
+                  {!soloLectura && (
+                    <Button
+                      size="small"
+                      startIcon={<Sparkles size={14} strokeWidth={2} />}
+                      onClick={() => setMotorCotizacion(c)}
+                    >
+                      Analizar con IA
+                    </Button>
+                  )}
                   {puedeAprobar && c.estado !== "GANADORA" && c.estado !== "DESCARTADA" && (
                     <Button size="small" variant="contained" onClick={() => handleGenerarOrden(c.id_cotizacion)}>
                       Generar orden
@@ -358,6 +367,7 @@ export default function CotizacionesPanel({
                               variant="standard"
                               value={linea.descripcion}
                               onChange={(e) => actualizarLinea(c.id_cotizacion, index, "descripcion", e.target.value)}
+                              disabled={soloLectura}
                               fullWidth
                             />
                           </TableCell>
@@ -367,6 +377,7 @@ export default function CotizacionesPanel({
                               variant="standard"
                               value={linea.cantidad}
                               onChange={(e) => actualizarLinea(c.id_cotizacion, index, "cantidad", e.target.value)}
+                              disabled={soloLectura}
                               sx={{ width: 80 }}
                             />
                           </TableCell>
@@ -378,6 +389,7 @@ export default function CotizacionesPanel({
                               onChange={(e) =>
                                 actualizarLinea(c.id_cotizacion, index, "precio_unitario", e.target.value)
                               }
+                              disabled={soloLectura}
                               sx={{ width: 100 }}
                             />
                           </TableCell>
@@ -387,13 +399,16 @@ export default function CotizacionesPanel({
                               variant="standard"
                               value={linea.importe}
                               onChange={(e) => actualizarLinea(c.id_cotizacion, index, "importe", e.target.value)}
+                              disabled={soloLectura}
                               sx={{ width: 100 }}
                             />
                           </TableCell>
                           <TableCell align="right">
-                            <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
-                              <Trash2 size={14} strokeWidth={2} />
-                            </IconButton>
+                            {!soloLectura && (
+                              <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
+                                <Trash2 size={14} strokeWidth={2} />
+                              </IconButton>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -407,17 +422,20 @@ export default function CotizacionesPanel({
               <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" } }}>
                 {(lineasCotizacion[c.id_cotizacion] || []).map((linea, index) => (
                   <Paper key={index} variant="outlined" sx={{ p: 1.5 }}>
-                    <Stack direction="row" justifyContent="flex-end">
-                      <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
-                        <Trash2 size={14} strokeWidth={2} />
-                      </IconButton>
-                    </Stack>
+                    {!soloLectura && (
+                      <Stack direction="row" justifyContent="flex-end">
+                        <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
+                          <Trash2 size={14} strokeWidth={2} />
+                        </IconButton>
+                      </Stack>
+                    )}
                     <Stack spacing={1}>
                       <TextField
                         label="Descripción"
                         size="small"
                         value={linea.descripcion}
                         onChange={(e) => actualizarLinea(c.id_cotizacion, index, "descripcion", e.target.value)}
+                        disabled={soloLectura}
                         fullWidth
                       />
                       <Stack direction="row" spacing={1}>
@@ -426,6 +444,7 @@ export default function CotizacionesPanel({
                           size="small"
                           value={linea.cantidad}
                           onChange={(e) => actualizarLinea(c.id_cotizacion, index, "cantidad", e.target.value)}
+                          disabled={soloLectura}
                           fullWidth
                         />
                         <TextField
@@ -435,6 +454,7 @@ export default function CotizacionesPanel({
                           onChange={(e) =>
                             actualizarLinea(c.id_cotizacion, index, "precio_unitario", e.target.value)
                           }
+                          disabled={soloLectura}
                           fullWidth
                         />
                       </Stack>
@@ -443,20 +463,23 @@ export default function CotizacionesPanel({
                         size="small"
                         value={linea.importe}
                         onChange={(e) => actualizarLinea(c.id_cotizacion, index, "importe", e.target.value)}
+                        disabled={soloLectura}
                         fullWidth
                       />
                     </Stack>
                   </Paper>
                 ))}
               </Stack>
-              <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                <Button size="small" onClick={() => agregarLinea(c.id_cotizacion)}>
-                  + Línea
-                </Button>
-                <Button size="small" variant="outlined" onClick={() => handleGuardarLineas(c.id_cotizacion)}>
-                  Guardar líneas
-                </Button>
-              </Stack>
+              {!soloLectura && (
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  <Button size="small" onClick={() => agregarLinea(c.id_cotizacion)}>
+                    + Línea
+                  </Button>
+                  <Button size="small" variant="outlined" onClick={() => handleGuardarLineas(c.id_cotizacion)}>
+                    Guardar líneas
+                  </Button>
+                </Stack>
+              )}
             </Paper>
           ))}
         </Stack>

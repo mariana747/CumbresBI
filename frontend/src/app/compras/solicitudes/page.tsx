@@ -330,7 +330,9 @@ export default function SolicitudesCompraPage() {
             </IconButton>
           </Stack>
           <Divider sx={{ mb: 2 }} />
-          {solicitudSeleccionada && <CotizacionesPanel solicitudId={solicitudSeleccionada.id_solicitud} />}
+          {solicitudSeleccionada && (
+            <CotizacionesPanel solicitudId={solicitudSeleccionada.id_solicitud} soloLectura />
+          )}
         </Box>
       </Drawer>
     </AppShell>
