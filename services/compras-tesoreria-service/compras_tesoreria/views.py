@@ -2,6 +2,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 import requests
+from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
 from django.db import transaction
@@ -479,3 +480,44 @@ class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):
 
         recepcion.refresh_from_db()
         return Response(self.get_serializer(recepcion).data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def subir_evidencia(self, request, pk=None):
+        """Evidencia fotografica real de una Recepcion (21/Sep/2026, "falta
+        el componente de tomar fotos") - mismo patron que
+        TesoreriaFlujoViewSet.subir_comprobante en tesoreria-service: sube a
+        Drive via drive-service y guarda el link. Quien sube es el propio
+        usuario autenticado (forward_auth_headers reenvia su sesion), no
+        una llamada servicio-a-servicio - por eso no usa X-Internal-Secret."""
+        recepcion = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Compras/Recepciones/{recepcion.id_recepcion}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "compras.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir evidencia de %s", recepcion.id_recepcion, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        recepcion.link_drive = resultado["web_view_link"]
+        recepcion.updated_by = _actor(request)
+        recepcion.save(update_fields=["link_drive", "updated_by", "updated_at"])
+        return Response(self.get_serializer(recepcion).data)

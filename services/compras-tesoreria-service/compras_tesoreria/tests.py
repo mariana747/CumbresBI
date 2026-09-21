@@ -6,10 +6,11 @@ from unittest.mock import Mock, patch
 
 from cumbresbi_scope.scope import EffectiveScope
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from .models import Cotizacion, OrdenCompra, OrdenCompraLinea, SolicitudCompra
+from .models import Cotizacion, OrdenCompra, OrdenCompraLinea, Recepcion, SolicitudCompra
 from .views import CotizacionViewSet, OrdenCompraViewSet, RecepcionViewSet, SolicitudCompraViewSet
 
 PROYECTO_A = "PRYA"
@@ -412,3 +413,65 @@ class CrearDesdeRequisicionTests(TestCase):
         with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
             response = self._llamar({"requisicion": "REQ00001"}, secreto="dev-secreto")
         self.assertEqual(response.status_code, 400)
+
+
+class SubirEvidenciaRecepcionTests(TestCase):
+    """Evidencia fotografica real de una Recepcion (21/Sep/2026, "falta el
+    componente de tomar fotos") - sube a Drive via drive-service, mismo
+    patron que TesoreriaFlujoViewSet.subir_comprobante."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("compras.crear",), identity_user_id="u001")
+        solicitud = SolicitudCompra.objects.create(
+            proyecto="PRYA", descripcion="Cemento", created_by="u001", updated_by="u001"
+        )
+        cotizacion = Cotizacion.objects.create(
+            solicitud=solicitud, proveedor="CP0001", proveedor_nombre="Materiales del Norte",
+            created_by="u001", updated_by="u001",
+        )
+        orden = OrdenCompra.objects.create(
+            folio="OC-TEST-0002", proyecto="PRYA", solicitud=solicitud, cotizacion=cotizacion,
+            proveedor="CP0001", proveedor_nombre="Materiales del Norte", created_by="u001", updated_by="u001",
+        )
+        self.recepcion = Recepcion.objects.create(
+            orden=orden, fecha="2026-09-21", hora="10:00:00", created_by="u001", updated_by="u001"
+        )
+
+    def _subir(self, archivo=None):
+        request = self.factory.post(
+            f"/api/recepciones/{self.recepcion.id_recepcion}/subir_evidencia/",
+            {"file": archivo} if archivo else {},
+            format="multipart",
+        )
+        request.effective_scope = self.scope
+        view = RecepcionViewSet.as_view({"post": "subir_evidencia"})
+        return view(request, pk=self.recepcion.id_recepcion)
+
+    def test_sin_archivo_da_400(self):
+        response = self._subir()
+        self.assertEqual(response.status_code, 400)
+
+    def test_con_archivo_sube_a_drive_y_guarda_el_link(self):
+        mock_response = Mock(status_code=201)
+        mock_response.json.return_value = {"web_view_link": "https://drive.google.com/file/x", "file_id": "abc123"}
+        archivo = SimpleUploadedFile("foto.jpg", b"contenido", content_type="image/jpeg")
+        with patch("compras_tesoreria.views.requests.post", return_value=mock_response) as mock_post:
+            response = self._subir(archivo)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["link_drive"], "https://drive.google.com/file/x")
+        self.recepcion.refresh_from_db()
+        self.assertEqual(self.recepcion.link_drive, "https://drive.google.com/file/x")
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["params"]["perm"], "compras.editar")
+        self.assertIn(self.recepcion.id_recepcion, kwargs["data"]["carpeta"])
+
+    def test_fallo_de_red_no_tumba_nada(self):
+        import requests
+
+        archivo = SimpleUploadedFile("foto.jpg", b"contenido", content_type="image/jpeg")
+        with patch("compras_tesoreria.views.requests.post", side_effect=requests.RequestException("caido")):
+            response = self._subir(archivo)
+        self.assertEqual(response.status_code, 502)
+        self.recepcion.refresh_from_db()
+        self.assertIsNone(self.recepcion.link_drive)
