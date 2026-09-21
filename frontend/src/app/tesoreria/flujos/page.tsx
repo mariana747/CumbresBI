@@ -1275,6 +1275,30 @@ function TesoreriaFlujosPageContent() {
           )}
 
           {tab === "Detalles" && (
+            <>
+            {/* Botones "Ver X" fuera del fieldset (17/Sep/2026: un
+            <fieldset disabled> de HTML apaga TODOS sus botones internos,
+            incluida navegacion que si debe funcionar en modo "Ver"). */}
+            {editing && editing.periodo_nomina && (
+              <Button
+                size="small"
+                startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                onClick={() => router.push(`/tesoreria/nominas`)}
+                sx={{ alignSelf: "flex-start", mb: 1 }}
+              >
+                Ver nómina {editing.periodo_nomina_serie ? `(${editing.periodo_nomina_serie})` : ""}
+              </Button>
+            )}
+            {editing && editing.contrato && (
+              <Button
+                size="small"
+                startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                onClick={() => setPanelReferencia({ tipo: "contrato", id: editing.contrato as string })}
+                sx={{ alignSelf: "flex-start", mb: 1 }}
+              >
+                Ver contrato
+              </Button>
+            )}
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
@@ -1376,16 +1400,6 @@ function TesoreriaFlujosPageContent() {
                 <FormHelperText>Si este pago es una línea de nómina, elige el periodo aquí.</FormHelperText>
               </FormControl>
               {editing && editing.periodo_nomina && (
-                <Button
-                  size="small"
-                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
-                  onClick={() => router.push(`/tesoreria/nominas`)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  Ver nómina {editing.periodo_nomina_serie ? `(${editing.periodo_nomina_serie})` : ""}
-                </Button>
-              )}
-              {editing && editing.periodo_nomina && (
                 <Chip
                   size="small"
                   variant="outlined"
@@ -1399,16 +1413,6 @@ function TesoreriaFlujosPageContent() {
                   }
                   sx={{ alignSelf: "flex-start" }}
                 />
-              )}
-              {editing && editing.contrato && (
-                <Button
-                  size="small"
-                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
-                  onClick={() => setPanelReferencia({ tipo: "contrato", id: editing.contrato as string })}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  Ver contrato
-                </Button>
               )}
               {editing && editing.descripcion_pago && (
                 <TextField size="small" label="Descripción de pago" value={editing.descripcion_pago} disabled fullWidth />
@@ -1582,6 +1586,7 @@ function TesoreriaFlujosPageContent() {
                 </Typography>
               )}
             </Stack>
+            </>
           )}
 
           {tab === "Referencias" && (
