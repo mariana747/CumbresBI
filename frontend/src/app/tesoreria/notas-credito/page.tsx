@@ -25,6 +25,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -262,6 +263,11 @@ const FORM_VACIO = {
 export default function TesoreriaNotasCreditoPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [items, setItems] = useState<TesoreriaNotaCredito[]>([]);
+  // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
+  // Flujos/Facturas - ver TesoreriaNotaCreditoViewSet.pagination_class).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [totalItems, setTotalItems] = useState(0);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -319,7 +325,7 @@ export default function TesoreriaNotasCreditoPage() {
     setBuscandoFactura(true);
     const timeout = setTimeout(() => {
       listFacturas({ search: buscaFactura || undefined })
-        .then(setOpcionesFactura)
+        .then((res) => setOpcionesFactura(res.results))
         .catch(() => setOpcionesFactura([]))
         .finally(() => setBuscandoFactura(false));
     }, 300);
@@ -332,8 +338,11 @@ export default function TesoreriaNotasCreditoPage() {
 
   function refresh() {
     setLoading(true);
-    listNotasCredito(search || undefined, undefined, filtroReceptor || undefined)
-      .then(setItems)
+    listNotasCredito(search || undefined, undefined, filtroReceptor || undefined, pagina + 1, filasPorPagina)
+      .then((res) => {
+        setItems(res.results);
+        setTotalItems(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -341,6 +350,13 @@ export default function TesoreriaNotasCreditoPage() {
   useEffect(() => {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filtroReceptor, pagina, filasPorPagina]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (21/Sep/2026,
+  // mismo motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPagina(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filtroReceptor]);
 
@@ -358,7 +374,7 @@ export default function TesoreriaNotasCreditoPage() {
     setBuscaFactura("");
     if (n.uuid_relacionado) {
       listFacturas({ search: n.uuid_relacionado })
-        .then((facturas) => setFacturaRelacionada(facturas.find((f) => f.timbre_uuid === n.uuid_relacionado) || null))
+        .then((res) => setFacturaRelacionada(res.results.find((f) => f.timbre_uuid === n.uuid_relacionado) || null))
         .catch(() => setFacturaRelacionada(null));
     } else {
       setFacturaRelacionada(null);
@@ -585,6 +601,21 @@ export default function TesoreriaNotasCreditoPage() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalItems}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={filasPorPagina}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPagina(parseInt(e.target.value, 10));
+            setPagina(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">

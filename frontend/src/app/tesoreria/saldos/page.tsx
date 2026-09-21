@@ -23,6 +23,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Tooltip,
@@ -85,10 +86,20 @@ export default function TesoreriaSaldosPage() {
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   const [search, setSearch] = useState("");
+  // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
+  // Flujos/Facturas - ver TesoreriaSaldoViewSet.pagination_class). El rango
+  // de fecha se movio al servidor; busqueda/empresa se quedan del lado del
+  // cliente (dentro de la pagina cargada) porque cruzan con el catalogo de
+  // Cuentas (aliasCuenta), que el backend de Saldos no conoce.
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(200);
+  const [totalSaldos, setTotalSaldos] = useState(0);
 
   useEffect(() => {
     getSession().then(setSession);
-    listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listCuentas(undefined, undefined, 200)
+      .then((res) => setCuentas(res.results))
+      .catch(() => setCuentas([]));
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
 
@@ -97,16 +108,35 @@ export default function TesoreriaSaldosPage() {
 
   function refresh() {
     setLoading(true);
-    listSaldos(filtroCuenta || undefined)
-      .then(setSaldos)
+    listSaldos(
+      filtroCuenta || undefined,
+      pagina + 1,
+      filasPorPagina,
+      filtroFechaDesde || undefined,
+      filtroFechaHasta || undefined,
+      filtroEmpresa || undefined,
+      search || undefined
+    )
+      .then((res) => {
+        setSaldos(res.results);
+        setTotalSaldos(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    refresh();
+    const timeout = setTimeout(refresh, 300);
+    return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtroCuenta]);
+  }, [filtroCuenta, filtroFechaDesde, filtroFechaHasta, filtroEmpresa, search, pagina, filasPorPagina]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (21/Sep/2026,
+  // mismo motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPagina(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroCuenta, filtroFechaDesde, filtroFechaHasta, filtroEmpresa, search]);
 
   // Etiqueta completa de la cuenta (08/Sep/2026, pedido explícito: "CTZ/BBVA/1131
   // CHEQUES CIF TIZARA" - abreviatura de sociedad / banco / últimos dígitos de
@@ -132,8 +162,8 @@ export default function TesoreriaSaldosPage() {
 
   // Agrupados por fecha (mas reciente primero, ya viene ordenado -fecha
   // desde el backend) - mismo agrupamiento que el panel real de AppSheet.
-  // El rango de fecha se filtra aqui, del lado del cliente (listSaldos no
-  // tiene parametro de fecha en el backend, solo ?cuenta=).
+  // El rango de fecha ya se filtro en el servidor (ver refresh(), 21/Sep/2026)
+  // - se vuelve a aplicar aqui por defensa/consistencia, no hace trabajo real.
   // Cuentas de la empresa elegida (09/Sep/2026, "filtro por empresa,
   // mostrando las cuentas de los distintos bancos de esa empresa") - el
   // filtro de cuenta ya no muestra TODAS las cuentas del catalogo, solo
@@ -143,21 +173,17 @@ export default function TesoreriaSaldosPage() {
     [cuentas, filtroEmpresa]
   );
 
+  // Fecha/empresa/busqueda ya se filtraron en el servidor (ver refresh(),
+  // 21/Sep/2026) - aqui solo se agrupa por fecha lo que ya llego filtrado.
   const gruposPorFecha = useMemo(() => {
-    const busqueda = search.trim().toLowerCase();
     const mapa = new Map<string, TesoreriaSaldo[]>();
     for (const s of saldos) {
-      if (filtroFechaDesde && s.fecha < filtroFechaDesde) continue;
-      if (filtroFechaHasta && s.fecha > filtroFechaHasta) continue;
-      if (filtroEmpresa && !cuentasDeEmpresa.some((c) => c.id_cuenta_bancaria === s.cuenta)) continue;
-      if (busqueda && !`${s.id} ${aliasCuenta(s.cuenta)}`.toLowerCase().includes(busqueda)) continue;
       const grupo = mapa.get(s.fecha) || [];
       grupo.push(s);
       mapa.set(s.fecha, grupo);
     }
     return Array.from(mapa.entries());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saldos, filtroFechaDesde, filtroFechaHasta, filtroEmpresa, cuentasDeEmpresa, search]);
+  }, [saldos]);
 
   function abrirAlta() {
     setDetalle(null);
@@ -461,6 +487,21 @@ export default function TesoreriaSaldosPage() {
           </Stack>
         ))
       )}
+
+      <TablePagination
+        component="div"
+        count={totalSaldos}
+        page={pagina}
+        onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+        rowsPerPage={filasPorPagina}
+        onRowsPerPageChange={(e) => {
+          setFilasPorPagina(parseInt(e.target.value, 10));
+          setPagina(0);
+        }}
+        rowsPerPageOptions={[50, 100, 200]}
+        labelRowsPerPage="Filas por página"
+        labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+      />
 
       {/* Detalle de un saldo (25/Ago/2026, igual criterio que el panel del
       AppSheet original: click en la tarjeta abre esto, no la edicion

@@ -317,7 +317,7 @@ export default function SolicitudesPagoPage() {
     setBuscandoFlujo(true);
     const timeout = setTimeout(() => {
       listFlujos({ search: buscaFlujo || undefined })
-        .then(setOpcionesFlujo)
+        .then((res) => setOpcionesFlujo(res.results))
         .catch(() => setOpcionesFlujo([]))
         .finally(() => setBuscandoFlujo(false));
     }, 300);

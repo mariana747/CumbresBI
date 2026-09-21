@@ -25,12 +25,14 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
 } from "@mui/material";
 import { FileText, Landmark, Pencil, Plus, Trash2, Wallet, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
@@ -85,6 +87,15 @@ export default function TesoreriaCuentasPage() {
   const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
   const [loadingCuentas, setLoadingCuentas] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Division por Empresa/Banco (21/Sep/2026, pedido explicito) + paginacion
+  // server-side (mismo fix del 503 aplicado a Flujos/Facturas - ver
+  // TesoreriaCuentaViewSet.pagination_class).
+  const [searchCuentas, setSearchCuentas] = useState("");
+  const [filtroSociedadCuenta, setFiltroSociedadCuenta] = useState("");
+  const [filtroBancoCuenta, setFiltroBancoCuenta] = useState("");
+  const [paginaCuentas, setPaginaCuentas] = useState(0);
+  const [filasPorPaginaCuentas, setFilasPorPaginaCuentas] = useState(50);
+  const [totalCuentas, setTotalCuentas] = useState(0);
   const [cuentaDialogOpen, setCuentaDialogOpen] = useState(false);
   const [editingCuenta, setEditingCuenta] = useState<TesoreriaCuenta | null>(null);
   const [cuentaForm, setCuentaForm] = useState(CUENTA_FORM_VACIO);
@@ -128,11 +139,33 @@ export default function TesoreriaCuentasPage() {
 
   function refreshCuentas() {
     setLoadingCuentas(true);
-    listCuentas()
-      .then(setCuentas)
+    listCuentas(
+      searchCuentas || undefined,
+      paginaCuentas + 1,
+      filasPorPaginaCuentas,
+      filtroSociedadCuenta || undefined,
+      filtroBancoCuenta || undefined
+    )
+      .then((res) => {
+        setCuentas(res.results);
+        setTotalCuentas(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoadingCuentas(false));
   }
+
+  useEffect(() => {
+    const timeout = setTimeout(refreshCuentas, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchCuentas, filtroSociedadCuenta, filtroBancoCuenta, paginaCuentas, filasPorPaginaCuentas]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (21/Sep/2026,
+  // mismo motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPaginaCuentas(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchCuentas, filtroSociedadCuenta, filtroBancoCuenta]);
 
   function refreshBancos() {
     setLoadingBancos(true);
@@ -143,7 +176,6 @@ export default function TesoreriaCuentasPage() {
   }
 
   useEffect(() => {
-    refreshCuentas();
     refreshBancos();
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
@@ -371,6 +403,54 @@ export default function TesoreriaCuentasPage() {
             </Button>
           )}
         </Stack>
+
+        {/* Division por Empresa y Banco (21/Sep/2026, pedido explicito -
+        ver TesoreriaCuentaViewSet.get_queryset), filtros combinables
+        (AND) mismo patron que Facturas/Flujos. */}
+        <Box sx={{ px: 2, pb: 1 }}>
+          <FiltrosBar
+            search={searchCuentas}
+            onSearchChange={setSearchCuentas}
+            searchPlaceholder="Buscar por alias, titular o CLABE..."
+          >
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="filtro-sociedad-cuenta-label">Empresa</InputLabel>
+              <Select
+                labelId="filtro-sociedad-cuenta-label"
+                label="Empresa"
+                value={filtroSociedadCuenta}
+                onChange={(e) => setFiltroSociedadCuenta(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Todas las empresas</em>
+                </MenuItem>
+                {sociedades.map((s) => (
+                  <MenuItem key={s.rfc} value={s.rfc}>
+                    {s.alias_sociedad || s.razon_social || s.rfc}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="filtro-banco-cuenta-label">Banco</InputLabel>
+              <Select
+                labelId="filtro-banco-cuenta-label"
+                label="Banco"
+                value={filtroBancoCuenta}
+                onChange={(e) => setFiltroBancoCuenta(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>Todos los bancos</em>
+                </MenuItem>
+                {bancos.map((b) => (
+                  <MenuItem key={b.id_banxico} value={b.id_banxico}>
+                    {b.banco || b.id_banxico}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </FiltrosBar>
+        </Box>
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
         tarjetas apiladas (ver abajo) - una tabla de 6+ columnas no cabe en
         un telefono sin scroll horizontal incomodo. */}
@@ -493,6 +573,21 @@ export default function TesoreriaCuentasPage() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalCuentas}
+          page={paginaCuentas}
+          onPageChange={(_, nuevaPagina) => setPaginaCuentas(nuevaPagina)}
+          rowsPerPage={filasPorPaginaCuentas}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPaginaCuentas(parseInt(e.target.value, 10));
+            setPaginaCuentas(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Paper variant="outlined">

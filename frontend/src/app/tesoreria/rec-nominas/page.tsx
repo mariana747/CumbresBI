@@ -19,6 +19,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -64,6 +65,11 @@ const FORM_VACIO = {
 export default function TesoreriaRecNominasPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [items, setItems] = useState<TesoreriaRecNomina[]>([]);
+  // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
+  // Flujos/Facturas - ver TesoreriaRecNominaViewSet.pagination_class).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [totalItems, setTotalItems] = useState(0);
   // Vinculado a un Flujo (10/Sep/2026, "y agrega un indicador de vinculado
   // a FLJ-XXX") - mismo criterio que las referencias cruzadas: se resuelve
   // del lado del cliente contra la lista completa de Flujos, no hay filtro
@@ -98,7 +104,12 @@ export default function TesoreriaRecNominasPage() {
 
   useEffect(() => {
     getSession().then(setSession);
-    listFlujos().then(setFlujos).catch(() => setFlujos([]));
+    // pageSize alto (20/Sep/2026, fix paginacion) - esta pantalla matchea
+    // recibos contra flujos por el campo "nomina" en el cliente, sin filtro
+    // de backend disponible para ese campo.
+    listFlujos({ pageSize: 200 })
+      .then((res) => setFlujos(res.results))
+      .catch(() => setFlujos([]));
   }, []);
 
   function flujoVinculado(timbreUuid: string | null): TesoreriaFlujo | null {
@@ -111,8 +122,11 @@ export default function TesoreriaRecNominasPage() {
 
   function refresh() {
     setLoading(true);
-    listRecNominas(search || undefined)
-      .then(setItems)
+    listRecNominas(search || undefined, pagina + 1, filasPorPagina)
+      .then((res) => {
+        setItems(res.results);
+        setTotalItems(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -121,6 +135,12 @@ export default function TesoreriaRecNominasPage() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, pagina, filasPorPagina]);
+
+  // Volver a la primera pagina cuando cambia el filtro (21/Sep/2026, mismo
+  // motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPagina(0);
   }, [search]);
 
   function abrirAlta() {
@@ -397,6 +417,21 @@ export default function TesoreriaRecNominasPage() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalItems}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={filasPorPagina}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPagina(parseInt(e.target.value, 10));
+            setPagina(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">

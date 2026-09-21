@@ -27,6 +27,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tab,
   Tabs,
@@ -513,6 +514,11 @@ export default function TesoreriaFacturasPage() {
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
   const [facturas, setFacturas] = useState<TesoreriaFactura[]>([]);
   const [search, setSearch] = useState("");
+  // Paginacion server-side (20/Sep/2026, mismo fix del 503 en produccion
+  // aplicado en Flujos - ver TesoreriaFacturaViewSet.pagination_class).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [totalFacturas, setTotalFacturas] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -615,8 +621,8 @@ export default function TesoreriaFacturasPage() {
   }, []);
 
   useEffect(() => {
-    listContrapartes(undefined, "proveedor")
-      .then(setProveedores)
+    listContrapartes(undefined, "proveedor", undefined, undefined, 200)
+      .then((res) => setProveedores(res.results))
       .catch(() => undefined);
   }, []);
 
@@ -658,8 +664,8 @@ export default function TesoreriaFacturasPage() {
   }, []);
 
   useEffect(() => {
-    listContrapartes(undefined, "proveedor")
-      .then(setOpcionesProveedor)
+    listContrapartes(undefined, "proveedor", undefined, undefined, 200)
+      .then((res) => setOpcionesProveedor(res.results))
       .catch(() => setOpcionesProveedor([]));
   }, []);
 
@@ -673,8 +679,13 @@ export default function TesoreriaFacturasPage() {
       fechaHasta: filtroFechaHasta || undefined,
       estado: filtroEstado || undefined,
       categoriaGasto: filtroCategoriaGasto || undefined,
+      page: pagina + 1,
+      pageSize: filasPorPagina,
     })
-      .then(setFacturas)
+      .then((res) => {
+        setFacturas(res.results);
+        setTotalFacturas(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -682,6 +693,24 @@ export default function TesoreriaFacturasPage() {
   useEffect(() => {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    search,
+    filtroReceptor,
+    filtroProveedor,
+    filtroFechaDesde,
+    filtroFechaHasta,
+    filtroEstado,
+    filtroCategoriaGasto,
+    pagina,
+    filasPorPagina,
+  ]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (20/Sep/2026,
+  // mismo motivo que en Flujos - una pagina que ya no existe con el nuevo
+  // total devolvia una lista vacia).
+  useEffect(() => {
+    setPagina(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filtroReceptor, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroEstado, filtroCategoriaGasto]);
 
@@ -1274,6 +1303,21 @@ export default function TesoreriaFacturasPage() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalFacturas}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={filasPorPagina}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPagina(parseInt(e.target.value, 10));
+            setPagina(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
         </>
       </Paper>
 
