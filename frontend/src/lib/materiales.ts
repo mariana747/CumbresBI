@@ -393,6 +393,7 @@ export interface Requisicion {
   solicito_por: string | null;
   valido_por: string | null;
   autorizo_compra_por: string | null;
+  id_solicitud_compra: string | null;
   comentarios: string | null;
   lineas: RequisicionLinea[];
   created_at: string;
