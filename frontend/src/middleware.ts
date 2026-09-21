@@ -13,6 +13,8 @@ const PUBLIC_PATH_PREFIXES = [
   "/tesoreria-ticket",
   "/tesoreria-documento",
   "/pld-documento",
+  "/privacidad",
+  "/terminos",
 ];
 
 // Prefijos del Gateway (proxeados por el Route Handler): nunca deben pasar

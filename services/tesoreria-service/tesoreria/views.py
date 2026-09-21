@@ -944,7 +944,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             # periodo_nomina.serie, faltaba aqui (mismo hallazgo N+1 que
             # Facturas, ver TesoreriaFacturaViewSet.list()).
             .select_related("contrato", "contrato__contraparte", "cuenta", "periodo_nomina")
-            .order_by("-created_at")
+            .order_by("-fecha_efectiva", "-created_at")
         )
         contrato_id = self.request.query_params.get("contrato")
         if contrato_id:
