@@ -127,6 +127,10 @@ export default function TesoreriaCuentasPage() {
   const [bancosTabla, setBancosTabla] = useState<TesoreriaBanco[]>([]);
   const [loadingBancos, setLoadingBancos] = useState(true);
   const [searchBancos, setSearchBancos] = useState("");
+  // Filtro "Banco" (21/Sep/2026, mismo selector que ya existia en la tab
+  // Cuentas, agregado tambien aqui) - filtra la propia tabla de bancos a
+  // uno especifico via ?id_banxico=.
+  const [filtroBancoTabla, setFiltroBancoTabla] = useState("");
   const [paginaBancos, setPaginaBancos] = useState(0);
   const [filasPorPaginaBancos, setFilasPorPaginaBancos] = useState(20);
   const [totalBancos, setTotalBancos] = useState(0);
@@ -193,7 +197,7 @@ export default function TesoreriaCuentasPage() {
 
   function refreshBancos() {
     setLoadingBancos(true);
-    listBancos(searchBancos || undefined, paginaBancos + 1, filasPorPaginaBancos)
+    listBancos(searchBancos || undefined, paginaBancos + 1, filasPorPaginaBancos, filtroBancoTabla || undefined)
       .then((res) => {
         setBancosTabla(res.results);
         setTotalBancos(res.count);
@@ -211,14 +215,14 @@ export default function TesoreriaCuentasPage() {
     const timeout = setTimeout(refreshBancos, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchBancos, paginaBancos, filasPorPaginaBancos]);
+  }, [searchBancos, filtroBancoTabla, paginaBancos, filasPorPaginaBancos]);
 
-  // Volver a la primera pagina cuando cambia la busqueda (21/Sep/2026,
+  // Volver a la primera pagina cuando cambia la busqueda/filtro (21/Sep/2026,
   // mismo motivo que en Flujos/Facturas).
   useEffect(() => {
     setPaginaBancos(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchBancos]);
+  }, [searchBancos, filtroBancoTabla]);
 
   function abrirAltaCuenta() {
     setEditingCuenta(null);
@@ -655,7 +659,26 @@ export default function TesoreriaCuentasPage() {
                 search={searchBancos}
                 onSearchChange={setSearchBancos}
                 searchPlaceholder="Buscar por nombre o alias..."
-              />
+              >
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel id="filtro-banco-tabla-label">Banco</InputLabel>
+                  <Select
+                    labelId="filtro-banco-tabla-label"
+                    label="Banco"
+                    value={filtroBancoTabla}
+                    onChange={(e) => setFiltroBancoTabla(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>Todos los bancos</em>
+                    </MenuItem>
+                    {bancos.map((b) => (
+                      <MenuItem key={b.id_banxico} value={b.id_banxico}>
+                        {b.banco || b.id_banxico}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </FiltrosBar>
             </Box>
             {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
             tarjetas apiladas (ver abajo). */}
