@@ -65,6 +65,10 @@ export default function PanelReferenciaCruzada({
     setFiltroEmpleado(null);
     setCargando(true);
     setCargandoFlujos(true);
+    // Empleado (id_empleado) no es exclusivo de Nomina - cualquier Flujo
+    // puede tenerlo (ej. reembolso ligado a un contrato generico) - se
+    // resuelve siempre, no solo cuando referencia.tipo === "nomina".
+    listEmpleados().then(setEmpleados).catch(() => setEmpleados([]));
     if (referencia.tipo === "contrato") {
       getContrato(referencia.id)
         .then(setDatosContrato)
@@ -92,7 +96,6 @@ export default function PanelReferenciaCruzada({
         .then((res) => setFlujos(res.results))
         .catch(() => setFlujos([]))
         .finally(() => setCargandoFlujos(false));
-      listEmpleados().then(setEmpleados).catch(() => setEmpleados([]));
     }
   }, [referencia]);
 
@@ -299,7 +302,7 @@ export default function PanelReferenciaCruzada({
                           <Typography variant="caption">
                             <strong>Cuenta:</strong> {f.cuenta_alias || f.cuenta}
                           </Typography>
-                          {referencia.tipo === "nomina" && (
+                          {f.id_empleado && (
                             <Typography variant="caption">
                               <strong>Empleado:</strong> {nombreEmpleado(f.id_empleado)}
                             </Typography>
