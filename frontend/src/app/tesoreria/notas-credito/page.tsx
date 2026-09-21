@@ -266,7 +266,7 @@ export default function TesoreriaNotasCreditoPage() {
   // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
   // Flujos/Facturas - ver TesoreriaNotaCreditoViewSet.pagination_class).
   const [pagina, setPagina] = useState(0);
-  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [filasPorPagina, setFilasPorPagina] = useState(20);
   const [totalItems, setTotalItems] = useState(0);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);

@@ -20,6 +20,7 @@ import {
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
@@ -27,6 +28,7 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -83,6 +85,11 @@ const TIPO_CUENTA_LABELS: Record<TesoreriaCuentaTipo, string> = {
 // tesoreria/serializers.py).
 export default function TesoreriaCuentasPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
+  // Tabs Cuentas/Bancos (21/Sep/2026, pedido explicito: separar en tabs en
+  // vez de apilar las dos tablas completas en una sola pagina, mismo
+  // patron que PLD - ver pld/page.tsx). El boton de alta cambia segun la
+  // tab activa.
+  const [tab, setTab] = useState<"Cuentas" | "Bancos">("Cuentas");
 
   const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
   const [loadingCuentas, setLoadingCuentas] = useState(true);
@@ -94,7 +101,7 @@ export default function TesoreriaCuentasPage() {
   const [filtroSociedadCuenta, setFiltroSociedadCuenta] = useState("");
   const [filtroBancoCuenta, setFiltroBancoCuenta] = useState("");
   const [paginaCuentas, setPaginaCuentas] = useState(0);
-  const [filasPorPaginaCuentas, setFilasPorPaginaCuentas] = useState(50);
+  const [filasPorPaginaCuentas, setFilasPorPaginaCuentas] = useState(20);
   const [totalCuentas, setTotalCuentas] = useState(0);
   const [cuentaDialogOpen, setCuentaDialogOpen] = useState(false);
   const [editingCuenta, setEditingCuenta] = useState<TesoreriaCuenta | null>(null);
@@ -105,13 +112,28 @@ export default function TesoreriaCuentasPage() {
   const [idCuentaNueva, setIdCuentaNueva] = useState("");
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
 
+  // Catalogo completo de bancos (pageSize alto, sin filtrar) - alimenta los
+  // selects (filtro de Cuentas, banco del alta de Cuenta), no la tabla de
+  // la tab Bancos (ver bancosTabla abajo).
   const [bancos, setBancos] = useState<TesoreriaBanco[]>([]);
-  const [loadingBancos, setLoadingBancos] = useState(true);
   const [bancoDialogOpen, setBancoDialogOpen] = useState(false);
   const [editingBanco, setEditingBanco] = useState<TesoreriaBanco | null>(null);
   const [bancoForm, setBancoForm] = useState({ idBanxico: "", banco: "", alias: "" });
   const [savingBanco, setSavingBanco] = useState(false);
   const [bancoFormError, setBancoFormError] = useState<string | null>(null);
+
+  // Tabla paginada de la tab Bancos (21/Sep/2026, 90 bancos reales
+  // migrados - mismo fix del 503 aplicado al resto de catalogos).
+  const [bancosTabla, setBancosTabla] = useState<TesoreriaBanco[]>([]);
+  const [loadingBancos, setLoadingBancos] = useState(true);
+  const [searchBancos, setSearchBancos] = useState("");
+  // Filtro "Banco" (21/Sep/2026, mismo selector que ya existia en la tab
+  // Cuentas, agregado tambien aqui) - filtra la propia tabla de bancos a
+  // uno especifico via ?id_banxico=.
+  const [filtroBancoTabla, setFiltroBancoTabla] = useState("");
+  const [paginaBancos, setPaginaBancos] = useState(0);
+  const [filasPorPaginaBancos, setFilasPorPaginaBancos] = useState(20);
+  const [totalBancos, setTotalBancos] = useState(0);
 
   // Cortes/EDC (bloque 5, reportes) - dialogo por cuenta, ver
   // TesoreriaCorteEdcViewSet (filtro ?cuenta=<id>).
@@ -167,18 +189,40 @@ export default function TesoreriaCuentasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchCuentas, filtroSociedadCuenta, filtroBancoCuenta]);
 
+  function refreshBancoCatalogo() {
+    listBancos(undefined, undefined, 200)
+      .then((res) => setBancos(res.results))
+      .catch(() => setBancos([]));
+  }
+
   function refreshBancos() {
     setLoadingBancos(true);
-    listBancos()
-      .then(setBancos)
+    listBancos(searchBancos || undefined, paginaBancos + 1, filasPorPaginaBancos, filtroBancoTabla || undefined)
+      .then((res) => {
+        setBancosTabla(res.results);
+        setTotalBancos(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoadingBancos(false));
   }
 
   useEffect(() => {
-    refreshBancos();
+    refreshBancoCatalogo();
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
+
+  useEffect(() => {
+    const timeout = setTimeout(refreshBancos, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchBancos, filtroBancoTabla, paginaBancos, filasPorPaginaBancos]);
+
+  // Volver a la primera pagina cuando cambia la busqueda/filtro (21/Sep/2026,
+  // mismo motivo que en Flujos/Facturas).
+  useEffect(() => {
+    setPaginaBancos(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchBancos, filtroBancoTabla]);
 
   function abrirAltaCuenta() {
     setEditingCuenta(null);
@@ -289,6 +333,7 @@ export default function TesoreriaCuentasPage() {
       }
       setBancoDialogOpen(false);
       refreshBancos();
+      refreshBancoCatalogo();
     } catch (err) {
       setBancoFormError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
@@ -303,6 +348,7 @@ export default function TesoreriaCuentasPage() {
     try {
       await deleteBanco(b.id_banxico);
       refreshBancos();
+      refreshBancoCatalogo();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     }
@@ -385,317 +431,360 @@ export default function TesoreriaCuentasPage() {
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ mb: 3 }}>
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2, pb: 1 }}>
-          <Wallet size={18} strokeWidth={1.5} />
-          <Typography variant="subtitle1" fontWeight={600}>
-            Cuentas
-          </Typography>
-          {puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAltaCuenta}
-              sx={{ ml: "auto" }}
-            >
-              Nueva Cuenta
-            </Button>
-          )}
-        </Stack>
-
-        {/* Division por Empresa y Banco (21/Sep/2026, pedido explicito -
-        ver TesoreriaCuentaViewSet.get_queryset), filtros combinables
-        (AND) mismo patron que Facturas/Flujos. */}
-        <Box sx={{ px: 2, pb: 1 }}>
-          <FiltrosBar
-            search={searchCuentas}
-            onSearchChange={setSearchCuentas}
-            searchPlaceholder="Buscar por alias, titular o CLABE..."
-          >
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="filtro-sociedad-cuenta-label">Empresa</InputLabel>
-              <Select
-                labelId="filtro-sociedad-cuenta-label"
-                label="Empresa"
-                value={filtroSociedadCuenta}
-                onChange={(e) => setFiltroSociedadCuenta(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Todas las empresas</em>
-                </MenuItem>
-                {sociedades.map((s) => (
-                  <MenuItem key={s.rfc} value={s.rfc}>
-                    {s.alias_sociedad || s.razon_social || s.rfc}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="filtro-banco-cuenta-label">Banco</InputLabel>
-              <Select
-                labelId="filtro-banco-cuenta-label"
-                label="Banco"
-                value={filtroBancoCuenta}
-                onChange={(e) => setFiltroBancoCuenta(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Todos los bancos</em>
-                </MenuItem>
-                {bancos.map((b) => (
-                  <MenuItem key={b.id_banxico} value={b.id_banxico}>
-                    {b.banco || b.id_banxico}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </FiltrosBar>
-        </Box>
-        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
-        tarjetas apiladas (ver abajo) - una tabla de 6+ columnas no cabe en
-        un telefono sin scroll horizontal incomodo. */}
-        <Box sx={{ display: { xs: "none", sm: "block" } }}>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>ID</TableCell>
-                <TableCell>Alias</TableCell>
-                <TableCell>Banco</TableCell>
-                <TableCell>CLABE</TableCell>
-                <TableCell>Titular</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loadingCuentas ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
-                </TableRow>
-              ) : cuentas.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin cuentas registradas.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                cuentas.map((c) => (
-                  <TableRow key={c.id_cuenta_bancaria} hover>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_cuenta_bancaria}</TableCell>
-                    <TableCell>{c.alias || c.label || "—"}</TableCell>
-                    <TableCell>{c.banco_nombre || "—"}</TableCell>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.clabe || "—"}</TableCell>
-                    <TableCell>{c.rfc_razon_social || "—"}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={c.activa ? "Activa" : "Cerrada"}
-                        color={c.activa ? "success" : "default"}
-                        variant="outlined"
-                      />
-                    </TableCell>
-                    <TableCell align="right">
-                      <IconButton size="small" aria-label="Cortes / EDC" onClick={() => abrirCortes(c)}>
-                        <FileText size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionCuenta(c)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarCuenta(c)} disabled={!puedeEditar}>
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        </Box>
-
-        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
-        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
-          {loadingCuentas ? (
-            <Stack alignItems="center" sx={{ py: 3 }}>
-              <CircularProgress size={20} />
-            </Stack>
-          ) : cuentas.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
-              Sin cuentas registradas.
-            </Typography>
-          ) : (
-            cuentas.map((c) => (
-              <Paper key={c.id_cuenta_bancaria} variant="outlined" sx={{ p: 2 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
-                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle2">{c.alias || c.label || "—"}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
-                      {c.id_cuenta_bancaria}
-                    </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                    <IconButton size="small" aria-label="Cortes / EDC" onClick={() => abrirCortes(c)}>
-                      <FileText size={14} strokeWidth={1.5} />
-                    </IconButton>
-                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionCuenta(c)} disabled={!puedeEditar}>
-                      <Pencil size={14} strokeWidth={1.5} />
-                    </IconButton>
-                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarCuenta(c)} disabled={!puedeEditar}>
-                      <Trash2 size={14} strokeWidth={1.5} />
-                    </IconButton>
-                  </Stack>
-                </Stack>
-                <Stack spacing={0.5} sx={{ mt: 1 }}>
-                  <Typography variant="body2">
-                    <strong>Banco:</strong> {c.banco_nombre || "—"}
-                  </Typography>
-                  <Typography variant="body2">
-                    <strong>CLABE:</strong> {c.clabe || "—"}
-                  </Typography>
-                  <Typography variant="body2">
-                    <strong>Titular:</strong> {c.rfc_razon_social || "—"}
-                  </Typography>
-                  <Stack direction="row" spacing={0.5}>
-                    <Chip
-                      size="small"
-                      label={c.activa ? "Activa" : "Cerrada"}
-                      color={c.activa ? "success" : "default"}
-                      variant="outlined"
-                    />
-                  </Stack>
-                </Stack>
-              </Paper>
-            ))
-          )}
-        </Stack>
-
-        <TablePagination
-          component="div"
-          count={totalCuentas}
-          page={paginaCuentas}
-          onPageChange={(_, nuevaPagina) => setPaginaCuentas(nuevaPagina)}
-          rowsPerPage={filasPorPaginaCuentas}
-          onRowsPerPageChange={(e) => {
-            setFilasPorPaginaCuentas(parseInt(e.target.value, 10));
-            setPaginaCuentas(0);
-          }}
-          rowsPerPageOptions={[20, 50, 100]}
-          labelRowsPerPage="Filas por página"
-          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
-        />
-      </Paper>
-
       <Paper variant="outlined">
         <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2, pb: 1 }}>
-          <Landmark size={18} strokeWidth={1.5} />
+          {tab === "Cuentas" ? <Wallet size={18} strokeWidth={1.5} /> : <Landmark size={18} strokeWidth={1.5} />}
           <Typography variant="subtitle1" fontWeight={600}>
-            Bancos
+            {tab}
           </Typography>
           {puedeCrear && (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAltaBanco}
+              onClick={tab === "Cuentas" ? abrirAltaCuenta : abrirAltaBanco}
               sx={{ ml: "auto" }}
             >
-              Nuevo Banco
+              {tab === "Cuentas" ? "Nueva Cuenta" : "Nuevo Banco"}
             </Button>
           )}
         </Stack>
-        {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
-        tarjetas apiladas (ver abajo). */}
-        <Box sx={{ display: { xs: "none", sm: "block" } }}>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>ID Banxico</TableCell>
-                <TableCell>Banco</TableCell>
-                <TableCell>Alias</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loadingBancos ? (
-                <TableRow>
-                  <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
-                </TableRow>
-              ) : bancos.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin bancos registrados.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                bancos.map((b) => (
-                  <TableRow key={b.id_banxico} hover>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{b.id_banxico}</TableCell>
-                    <TableCell>{b.banco || "—"}</TableCell>
-                    <TableCell>{b.alias || "—"}</TableCell>
-                    <TableCell align="right">
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionBanco(b)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarBanco(b)} disabled={!puedeEditar}>
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </IconButton>
-                    </TableCell>
+
+        {/* Tabs Cuentas/Bancos (21/Sep/2026, pedido explicito - antes eran
+        dos Paper apiladas, con volumen real (90 bancos) se volvia una
+        pagina muy larga de scrollear). Mismo patron que PLD: Tabs con
+        borderBottom en el mismo Paper del contenido. */}
+        <Tabs
+          value={tab}
+          onChange={(_, nuevoTab) => setTab(nuevoTab)}
+          sx={{ px: 2, borderBottom: 1, borderColor: "divider" }}
+        >
+          <Tab value="Cuentas" label="Cuentas" />
+          <Tab value="Bancos" label="Bancos" />
+        </Tabs>
+
+        {tab === "Cuentas" && (
+          <>
+            {/* Division por Empresa y Banco (21/Sep/2026, pedido explicito -
+            ver TesoreriaCuentaViewSet.get_queryset), filtros combinables
+            (AND) mismo patron que Facturas/Flujos. */}
+            <Box sx={{ px: 2, pt: 1, pb: 1 }}>
+              <FiltrosBar
+                search={searchCuentas}
+                onSearchChange={setSearchCuentas}
+                searchPlaceholder="Buscar por alias, titular o CLABE..."
+              >
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel id="filtro-sociedad-cuenta-label">Empresa</InputLabel>
+                  <Select
+                    labelId="filtro-sociedad-cuenta-label"
+                    label="Empresa"
+                    value={filtroSociedadCuenta}
+                    onChange={(e) => setFiltroSociedadCuenta(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>Todas las empresas</em>
+                    </MenuItem>
+                    {sociedades.map((s) => (
+                      <MenuItem key={s.rfc} value={s.rfc}>
+                        {s.alias_sociedad || s.razon_social || s.rfc}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel id="filtro-banco-cuenta-label">Banco</InputLabel>
+                  <Select
+                    labelId="filtro-banco-cuenta-label"
+                    label="Banco"
+                    value={filtroBancoCuenta}
+                    onChange={(e) => setFiltroBancoCuenta(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>Todos los bancos</em>
+                    </MenuItem>
+                    {bancos.map((b) => (
+                      <MenuItem key={b.id_banxico} value={b.id_banxico}>
+                        {b.banco || b.id_banxico}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </FiltrosBar>
+            </Box>
+            {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+            tarjetas apiladas (ver abajo) - una tabla de 6+ columnas no cabe en
+            un telefono sin scroll horizontal incomodo. */}
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>ID</TableCell>
+                    <TableCell>Alias</TableCell>
+                    <TableCell>Banco</TableCell>
+                    <TableCell>CLABE</TableCell>
+                    <TableCell>Titular</TableCell>
+                    <TableCell>Estado</TableCell>
+                    <TableCell align="right">Acciones</TableCell>
                   </TableRow>
+                </TableHead>
+                <TableBody>
+                  {loadingCuentas ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                        <CircularProgress size={20} />
+                      </TableCell>
+                    </TableRow>
+                  ) : cuentas.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Sin cuentas registradas.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    cuentas.map((c) => (
+                      <TableRow key={c.id_cuenta_bancaria} hover>
+                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_cuenta_bancaria}</TableCell>
+                        <TableCell>{c.alias || c.label || "—"}</TableCell>
+                        <TableCell>{c.banco_nombre || "—"}</TableCell>
+                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.clabe || "—"}</TableCell>
+                        <TableCell>{c.rfc_razon_social || "—"}</TableCell>
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            label={c.activa ? "Activa" : "Cerrada"}
+                            color={c.activa ? "success" : "default"}
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <IconButton size="small" aria-label="Cortes / EDC" onClick={() => abrirCortes(c)}>
+                            <FileText size={14} strokeWidth={1.5} />
+                          </IconButton>
+                          <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionCuenta(c)} disabled={!puedeEditar}>
+                            <Pencil size={14} strokeWidth={1.5} />
+                          </IconButton>
+                          <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarCuenta(c)} disabled={!puedeEditar}>
+                            <Trash2 size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            </Box>
+
+            {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+            <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+              {loadingCuentas ? (
+                <Stack alignItems="center" sx={{ py: 3 }}>
+                  <CircularProgress size={20} />
+                </Stack>
+              ) : cuentas.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                  Sin cuentas registradas.
+                </Typography>
+              ) : (
+                cuentas.map((c) => (
+                  <Paper key={c.id_cuenta_bancaria} variant="outlined" sx={{ p: 2 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2">{c.alias || c.label || "—"}</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                          {c.id_cuenta_bancaria}
+                        </Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                        <IconButton size="small" aria-label="Cortes / EDC" onClick={() => abrirCortes(c)}>
+                          <FileText size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionCuenta(c)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarCuenta(c)} disabled={!puedeEditar}>
+                          <Trash2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </Stack>
+                    </Stack>
+                    <Stack spacing={0.5} sx={{ mt: 1 }}>
+                      <Typography variant="body2">
+                        <strong>Banco:</strong> {c.banco_nombre || "—"}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>CLABE:</strong> {c.clabe || "—"}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Titular:</strong> {c.rfc_razon_social || "—"}
+                      </Typography>
+                      <Stack direction="row" spacing={0.5}>
+                        <Chip
+                          size="small"
+                          label={c.activa ? "Activa" : "Cerrada"}
+                          color={c.activa ? "success" : "default"}
+                          variant="outlined"
+                        />
+                      </Stack>
+                    </Stack>
+                  </Paper>
                 ))
               )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        </Box>
-
-        {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
-        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
-          {loadingBancos ? (
-            <Stack alignItems="center" sx={{ py: 3 }}>
-              <CircularProgress size={20} />
             </Stack>
-          ) : bancos.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
-              Sin bancos registrados.
-            </Typography>
-          ) : (
-            bancos.map((b) => (
-              <Paper key={b.id_banxico} variant="outlined" sx={{ p: 2 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
-                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle2">{b.banco || "—"}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
-                      {b.id_banxico}
-                    </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionBanco(b)} disabled={!puedeEditar}>
-                      <Pencil size={14} strokeWidth={1.5} />
-                    </IconButton>
-                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarBanco(b)} disabled={!puedeEditar}>
-                      <Trash2 size={14} strokeWidth={1.5} />
-                    </IconButton>
-                  </Stack>
+
+            <TablePagination
+              component="div"
+              count={totalCuentas}
+              page={paginaCuentas}
+              onPageChange={(_, nuevaPagina) => setPaginaCuentas(nuevaPagina)}
+              rowsPerPage={filasPorPaginaCuentas}
+              onRowsPerPageChange={(e) => {
+                setFilasPorPaginaCuentas(parseInt(e.target.value, 10));
+                setPaginaCuentas(0);
+              }}
+              rowsPerPageOptions={[20, 50, 100]}
+              labelRowsPerPage="Filas por página"
+              labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+            />
+          </>
+        )}
+
+        {tab === "Bancos" && (
+          <>
+            <Box sx={{ px: 2, pt: 1, pb: 1 }}>
+              <FiltrosBar
+                search={searchBancos}
+                onSearchChange={setSearchBancos}
+                searchPlaceholder="Buscar por nombre o alias..."
+              >
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel id="filtro-banco-tabla-label">Banco</InputLabel>
+                  <Select
+                    labelId="filtro-banco-tabla-label"
+                    label="Banco"
+                    value={filtroBancoTabla}
+                    onChange={(e) => setFiltroBancoTabla(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>Todos los bancos</em>
+                    </MenuItem>
+                    {bancos.map((b) => (
+                      <MenuItem key={b.id_banxico} value={b.id_banxico}>
+                        {b.banco || b.id_banxico}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </FiltrosBar>
+            </Box>
+            {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
+            tarjetas apiladas (ver abajo). */}
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>ID Banxico</TableCell>
+                    <TableCell>Banco</TableCell>
+                    <TableCell>Alias</TableCell>
+                    <TableCell align="right">Acciones</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {loadingBancos ? (
+                    <TableRow>
+                      <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                        <CircularProgress size={20} />
+                      </TableCell>
+                    </TableRow>
+                  ) : bancosTabla.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Sin bancos registrados.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    bancosTabla.map((b) => (
+                      <TableRow key={b.id_banxico} hover>
+                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{b.id_banxico}</TableCell>
+                        <TableCell>{b.banco || "—"}</TableCell>
+                        <TableCell>{b.alias || "—"}</TableCell>
+                        <TableCell align="right">
+                          <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionBanco(b)} disabled={!puedeEditar}>
+                            <Pencil size={14} strokeWidth={1.5} />
+                          </IconButton>
+                          <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarBanco(b)} disabled={!puedeEditar}>
+                            <Trash2 size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            </Box>
+
+            {/* Tarjetas apiladas - solo celular (xs), ver comentario arriba. */}
+            <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+              {loadingBancos ? (
+                <Stack alignItems="center" sx={{ py: 3 }}>
+                  <CircularProgress size={20} />
                 </Stack>
-                <Stack spacing={0.5} sx={{ mt: 1 }}>
-                  <Typography variant="body2">
-                    <strong>Alias:</strong> {b.alias || "—"}
-                  </Typography>
-                </Stack>
-              </Paper>
-            ))
-          )}
-        </Stack>
+              ) : bancosTabla.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                  Sin bancos registrados.
+                </Typography>
+              ) : (
+                bancosTabla.map((b) => (
+                  <Paper key={b.id_banxico} variant="outlined" sx={{ p: 2 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2">{b.banco || "—"}</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                          {b.id_banxico}
+                        </Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionBanco(b)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarBanco(b)} disabled={!puedeEditar}>
+                          <Trash2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </Stack>
+                    </Stack>
+                    <Stack spacing={0.5} sx={{ mt: 1 }}>
+                      <Typography variant="body2">
+                        <strong>Alias:</strong> {b.alias || "—"}
+                      </Typography>
+                    </Stack>
+                  </Paper>
+                ))
+              )}
+            </Stack>
+
+            <TablePagination
+              component="div"
+              count={totalBancos}
+              page={paginaBancos}
+              onPageChange={(_, nuevaPagina) => setPaginaBancos(nuevaPagina)}
+              rowsPerPage={filasPorPaginaBancos}
+              onRowsPerPageChange={(e) => {
+                setFilasPorPaginaBancos(parseInt(e.target.value, 10));
+                setPaginaBancos(0);
+              }}
+              rowsPerPageOptions={[20, 50, 100]}
+              labelRowsPerPage="Filas por página"
+              labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+            />
+          </>
+        )}
       </Paper>
 
       {/* Alta/edicion de cuenta */}

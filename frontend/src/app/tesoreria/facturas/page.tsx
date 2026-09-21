@@ -517,7 +517,7 @@ export default function TesoreriaFacturasPage() {
   // Paginacion server-side (20/Sep/2026, mismo fix del 503 en produccion
   // aplicado en Flujos - ver TesoreriaFacturaViewSet.pagination_class).
   const [pagina, setPagina] = useState(0);
-  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [filasPorPagina, setFilasPorPagina] = useState(20);
   const [totalFacturas, setTotalFacturas] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
