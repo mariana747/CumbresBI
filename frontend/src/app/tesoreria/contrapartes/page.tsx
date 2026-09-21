@@ -420,12 +420,12 @@ function TesoreriaContrapartesPageContent() {
     setDocumentosContraparte(c);
     setLoadingDocumentos(true);
     Promise.all([
-      listFacturas({ contraparte: c.id_contraparte }),
+      listFacturas({ contraparte: c.id_contraparte, pageSize: 200 }),
       listComplementosPago(undefined, c.id_contraparte),
       listNotasCredito(undefined, c.id_contraparte),
     ])
-      .then(([facturas, complementos, notas]) => {
-        setDocFacturas(facturas);
+      .then(([facturasPage, complementos, notas]) => {
+        setDocFacturas(facturasPage.results);
         setDocComplementos(complementos);
         setDocNotasCredito(notas);
       })

@@ -98,7 +98,12 @@ export default function TesoreriaRecNominasPage() {
 
   useEffect(() => {
     getSession().then(setSession);
-    listFlujos().then(setFlujos).catch(() => setFlujos([]));
+    // pageSize alto (20/Sep/2026, fix paginacion) - esta pantalla matchea
+    // recibos contra flujos por el campo "nomina" en el cliente, sin filtro
+    // de backend disponible para ese campo.
+    listFlujos({ pageSize: 200 })
+      .then((res) => setFlujos(res.results))
+      .catch(() => setFlujos([]));
   }, []);
 
   function flujoVinculado(timbreUuid: string | null): TesoreriaFlujo | null {

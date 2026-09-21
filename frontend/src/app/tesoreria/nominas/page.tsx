@@ -252,10 +252,11 @@ export default function TesoreriaNominasPage() {
       Promise.all(
         n.sociedades.map((sociedad) => listPuestos({ sociedad, proyecto: n.proyecto || undefined, vigente: true }))
       ).then((listas) => listas.flat()),
-      listFlujos({ nomina: n.id_nomina }),
+      listFlujos({ nomina: n.id_nomina, pageSize: 200 }),
     ])
-      .then(([puestos, flujos]) => {
+      .then(([puestos, flujosPage]) => {
         setPuestosVigentes(puestos);
+        const flujos = flujosPage.results;
         const yaTienenFlujo = new Set(flujos.map((f) => f.id_empleado).filter((id): id is string => !!id));
         setEmpleadosConFlujo(yaTienenFlujo);
         setSeleccionPuestos(new Set(puestos.filter((p) => p.empleado && !yaTienenFlujo.has(p.empleado)).map((p) => p.id_puesto)));

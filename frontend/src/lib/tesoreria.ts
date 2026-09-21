@@ -8,6 +8,17 @@
 import { apiFetch, friendlyApiError } from "./apiError";
 import { DriveArchivo } from "./drive";
 import { GATEWAY_URL } from "./gatewayUrl";
+
+// Respuesta paginada de DRF (ListadoGrandePagination, ver
+// tesoreria-service/tesoreria/pagination.py) - Flujos y Facturas (20/Sep/2026,
+// fix del 503 en Cloud Run por listados sin paginar con volumen real
+// post-migracion de datos legacy).
+export interface TesoreriaPaginado<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
 // TesoreriaCategoriaGasto (09/Sep/2026) - mismo catalogo de 9 categorias
 // que ya vivia solo en Reembolsos (lib/miCumbres.ts), ahora compartido
 // tambien por Flujos/Facturas/Solicitudes de Pago.
@@ -1116,7 +1127,11 @@ export async function listFlujos(params?: {
   nomina?: string;
   id_empleado?: string;
   categoriaGasto?: TesoreriaCategoriaGasto;
-}): Promise<TesoreriaFlujo[]> {
+  fechaDesde?: string;
+  fechaHasta?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<TesoreriaPaginado<TesoreriaFlujo>> {
   const query = new URLSearchParams();
   if (params?.search) query.set("search", params.search);
   if (params?.contrato) query.set("contrato", params.contrato);
@@ -1125,6 +1140,10 @@ export async function listFlujos(params?: {
   if (params?.nomina) query.set("nomina", params.nomina);
   if (params?.id_empleado) query.set("id_empleado", params.id_empleado);
   if (params?.categoriaGasto) query.set("categoria_gasto", params.categoriaGasto);
+  if (params?.fechaDesde) query.set("fecha_desde", params.fechaDesde);
+  if (params?.fechaHasta) query.set("fecha_hasta", params.fechaHasta);
+  query.set("page", String(params?.page ?? 1));
+  query.set("page_size", String(params?.pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -2365,7 +2384,9 @@ export async function listFacturas(opciones?: {
   fechaHasta?: string;
   estado?: TesoreriaFacturaEstado;
   categoriaGasto?: TesoreriaCategoriaGasto;
-}): Promise<TesoreriaFactura[]> {
+  page?: number;
+  pageSize?: number;
+}): Promise<TesoreriaPaginado<TesoreriaFactura>> {
   const params = new URLSearchParams();
   if (opciones?.search) params.set("search", opciones.search);
   if (opciones?.contraparte) params.set("contraparte", opciones.contraparte);
@@ -2374,6 +2395,8 @@ export async function listFacturas(opciones?: {
   if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
   if (opciones?.estado) params.set("estado", opciones.estado);
   if (opciones?.categoriaGasto) params.set("categoria_gasto", opciones.categoriaGasto);
+  params.set("page", String(opciones?.page ?? 1));
+  params.set("page_size", String(opciones?.pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
