@@ -796,6 +796,21 @@ function TesoreriaContratosPageContent() {
           )}
 
           {tab === "Detalles" && (
+            <>
+            {/* "Ver proveedor" fuera del fieldset (17/Sep/2026: un
+            <fieldset disabled> de HTML apaga TODOS sus botones internos,
+            incluida navegacion que si debe funcionar en modo "Ver" -
+            mismo hallazgo que Flujos). */}
+            {editing && editing.contraparte && (
+              <Button
+                size="small"
+                startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                onClick={() => setPanelReferencia({ tipo: "proveedor", id: editing.contraparte as string })}
+                sx={{ alignSelf: "flex-start", mb: 1 }}
+              >
+                Ver proveedor
+              </Button>
+            )}
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
@@ -808,16 +823,6 @@ function TesoreriaContratosPageContent() {
                 disabled
                 fullWidth
               />
-              {editing && editing.contraparte && (
-                <Button
-                  size="small"
-                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
-                  onClick={() => setPanelReferencia({ tipo: "proveedor", id: editing.contraparte as string })}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  Ver proveedor
-                </Button>
-              )}
               {/* Categoria (07/Sep/2026) - distingue la naturaleza del
                   gasto/relacion; opcional, sin default forzado (a
                   diferencia de Tipo) porque los contratos viejos no la
@@ -943,6 +948,7 @@ function TesoreriaContratosPageContent() {
                 </>
               )}
             </Stack>
+            </>
           )}
 
           {tab === "Pago" && (
