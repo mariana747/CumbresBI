@@ -242,11 +242,11 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     // arriba, solo que la etiqueta viene de TesoreriaContraparte.razon_social.
     if (recursoTipo === "tesoreria_proveedor" && !catalogoRecursos.tesoreria_proveedor) {
       setCargandoRecursos(true);
-      listContrapartes(undefined, "proveedor")
-        .then((proveedores) =>
+      listContrapartes(undefined, "proveedor", undefined, undefined, 200)
+        .then((res) =>
           setCatalogoRecursos((prev) => ({
             ...prev,
-            tesoreria_proveedor: proveedores.map((p) => ({ value: p.id_contraparte, label: p.razon_social })),
+            tesoreria_proveedor: res.results.map((p) => ({ value: p.id_contraparte, label: p.razon_social })),
           }))
         )
         .catch((err) => setError(err instanceof Error ? err.message : "Error al cargar proveedores"))

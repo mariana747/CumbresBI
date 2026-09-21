@@ -91,12 +91,24 @@ export interface TesoreriaContraparte {
 export async function listContrapartes(
   search?: string,
   tipoFiltro?: "cliente" | "proveedor",
-  sociedadRfc?: string
-): Promise<TesoreriaContraparte[]> {
+  sociedadRfc?: string,
+  // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
+  // Flujos/Facturas - ver TesoreriaContraparteViewSet.pagination_class).
+  // Opcional y al final para no romper los ~6 callers existentes: sin
+  // pageSize, el backend regresa 50 (default de ListadoGrandePagination).
+  page?: number,
+  pageSize?: number,
+  // "Solo pendientes IA" movido al servidor (21/Sep/2026, fix paginacion) -
+  // ver TesoreriaContraparteViewSet.get_queryset.
+  pendienteIa?: boolean
+): Promise<TesoreriaPaginado<TesoreriaContraparte>> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (tipoFiltro) params.set(tipoFiltro, "1");
   if (sociedadRfc) params.set("sociedad", sociedadRfc);
+  if (pendienteIa) params.set("pendiente_ia", "1");
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contrapartes/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -375,9 +387,22 @@ export interface TesoreriaCuenta {
   updated_by: string | null;
 }
 
-export async function listCuentas(search?: string): Promise<TesoreriaCuenta[]> {
+export async function listCuentas(
+  search?: string,
+  // Paginacion server-side (21/Sep/2026) - ver comentario en listContrapartes.
+  page?: number,
+  pageSize?: number,
+  // Division por Empresa/Banco (21/Sep/2026, pedido explicito para esta
+  // pantalla) - ver TesoreriaCuentaViewSet.get_queryset.
+  sociedad?: string,
+  banco?: string
+): Promise<TesoreriaPaginado<TesoreriaCuenta>> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (sociedad) params.set("sociedad", sociedad);
+  if (banco) params.set("banco", banco);
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/cuentas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -837,10 +862,30 @@ export interface TesoreriaContrato {
   updated_by: string | null;
 }
 
-export async function listContratos(search?: string, contraparteId?: string): Promise<TesoreriaContrato[]> {
+export async function listContratos(
+  search?: string,
+  contraparteId?: string,
+  // Paginacion server-side (21/Sep/2026) - ver comentario en listContrapartes.
+  page?: number,
+  pageSize?: number,
+  // Filtros movidos al servidor (21/Sep/2026, ver TesoreriaContratoViewSet.
+  // get_queryset) - con pagination_class el cliente ya no tiene todas las
+  // filas para filtrar localmente, al final para no romper los callers
+  // existentes que solo mandan page/pageSize.
+  sociedad?: string,
+  proyecto?: string,
+  fechaDesde?: string,
+  fechaHasta?: string
+): Promise<TesoreriaPaginado<TesoreriaContrato>> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (contraparteId) params.set("contraparte", contraparteId);
+  if (sociedad) params.set("sociedad", sociedad);
+  if (proyecto) params.set("proyecto", proyecto);
+  if (fechaDesde) params.set("fecha_desde", fechaDesde);
+  if (fechaHasta) params.set("fecha_hasta", fechaHasta);
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/contratos/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -2814,12 +2859,17 @@ export interface TesoreriaComplementoPago {
 export async function listComplementosPago(
   search?: string,
   contraparte?: string,
-  receptorRfc?: string
-): Promise<TesoreriaComplementoPago[]> {
+  receptorRfc?: string,
+  // Paginacion server-side (21/Sep/2026) - ver comentario en listContrapartes.
+  page?: number,
+  pageSize?: number
+): Promise<TesoreriaPaginado<TesoreriaComplementoPago>> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (contraparte) params.set("contraparte", contraparte);
   if (receptorRfc) params.set("receptor_rfc", receptorRfc);
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/complementos-pago/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -3004,12 +3054,17 @@ export interface TesoreriaNotaCredito {
 export async function listNotasCredito(
   search?: string,
   contraparte?: string,
-  receptorRfc?: string
-): Promise<TesoreriaNotaCredito[]> {
+  receptorRfc?: string,
+  // Paginacion server-side (21/Sep/2026) - ver comentario en listContrapartes.
+  page?: number,
+  pageSize?: number
+): Promise<TesoreriaPaginado<TesoreriaNotaCredito>> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (contraparte) params.set("contraparte", contraparte);
   if (receptorRfc) params.set("receptor_rfc", receptorRfc);
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/notas-credito/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -3173,9 +3228,16 @@ export interface TesoreriaRecNomina {
   updated_by: string | null;
 }
 
-export async function listRecNominas(search?: string): Promise<TesoreriaRecNomina[]> {
+export async function listRecNominas(
+  search?: string,
+  // Paginacion server-side (21/Sep/2026) - ver comentario en listContrapartes.
+  page?: number,
+  pageSize?: number
+): Promise<TesoreriaPaginado<TesoreriaRecNomina>> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/rec-nominas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -3302,9 +3364,29 @@ export interface TesoreriaSaldo {
   updated_by: string | null;
 }
 
-export async function listSaldos(cuenta?: string): Promise<TesoreriaSaldo[]> {
+export async function listSaldos(
+  cuenta?: string,
+  // Paginacion server-side (21/Sep/2026) - ver comentario en listContrapartes.
+  page?: number,
+  pageSize?: number,
+  // Rango de fecha movido al servidor (21/Sep/2026, mismo criterio que
+  // listContratos/listFlujos) - ver TesoreriaSaldoViewSet.get_queryset.
+  fechaDesde?: string,
+  fechaHasta?: string,
+  // Empresa/busqueda movidas al servidor (21/Sep/2026) - antes vivian del
+  // lado del cliente via aliasCuenta() en saldos/page.tsx, ver docstring
+  // de TesoreriaSaldoViewSet.get_queryset.
+  sociedad?: string,
+  search?: string
+): Promise<TesoreriaPaginado<TesoreriaSaldo>> {
   const params = new URLSearchParams();
   if (cuenta) params.set("cuenta", cuenta);
+  if (fechaDesde) params.set("fecha_desde", fechaDesde);
+  if (fechaHasta) params.set("fecha_hasta", fechaHasta);
+  if (sociedad) params.set("sociedad", sociedad);
+  if (search) params.set("search", search);
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

@@ -230,7 +230,9 @@ export default function TesoreriaNominasPage() {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listProyectos().then(setProyectos).catch(() => setProyectos([]));
-    listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listCuentas(undefined, undefined, 200)
+      .then((res) => setCuentas(res.results))
+      .catch(() => setCuentas([]));
   }, []);
 
   function diasDelPeriodo(n: TesoreriaNomina): number {

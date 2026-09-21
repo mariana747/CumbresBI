@@ -450,11 +450,13 @@ export default function PldExpedienteDetallePage() {
     setTransaccionesError(null);
     Promise.all([
       listFacturas({ contraparte: kyc.id_contraparte, pageSize: 200 }),
-      listComplementosPago(undefined, kyc.id_contraparte),
-      listNotasCredito(undefined, kyc.id_contraparte),
+      listComplementosPago(undefined, kyc.id_contraparte, undefined, undefined, 200),
+      listNotasCredito(undefined, kyc.id_contraparte, undefined, undefined, 200),
     ])
-      .then(([facturasPage, complementos, notas]) => {
+      .then(([facturasPage, complementosPage, notasPage]) => {
         const facturas = facturasPage.results;
+        const complementos = complementosPage.results;
+        const notas = notasPage.results;
         const filaFactura = (f: TesoreriaFactura): TransaccionUnificada => ({
           id: `factura-${f.id}`,
           tipo: "Factura",

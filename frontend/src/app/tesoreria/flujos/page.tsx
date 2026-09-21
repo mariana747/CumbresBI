@@ -347,8 +347,8 @@ function TesoreriaFlujosPageContent() {
     if (!vinculando) return;
     setBuscandoComplemento(true);
     const timeout = setTimeout(() => {
-      listComplementosPago(buscaComplemento || undefined)
-        .then(setOpcionesComplemento)
+      listComplementosPago(buscaComplemento || undefined, undefined, undefined, undefined, 200)
+        .then((res) => setOpcionesComplemento(res.results))
         .catch(() => setOpcionesComplemento([]))
         .finally(() => setBuscandoComplemento(false));
     }, 300);
@@ -358,17 +358,27 @@ function TesoreriaFlujosPageContent() {
 
   useEffect(() => {
     getSession().then(setSession);
-    listContratos().then(setContratos).catch(() => setContratos([]));
-    listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    // pageSize alto (20-21/Sep/2026, fix paginacion) - estas listas solo se
+    // usan para resolver referencias localmente (folioFactura(), selects de
+    // contrato/cuenta/etc en el formulario), no son la pantalla dedicada de
+    // cada catalogo.
+    listContratos(undefined, undefined, undefined, 200)
+      .then((res) => setContratos(res.results))
+      .catch(() => setContratos([]));
+    listCuentas(undefined, undefined, 200)
+      .then((res) => setCuentas(res.results))
+      .catch(() => setCuentas([]));
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
-    // pageSize alto (20/Sep/2026, fix paginacion) - esta lista solo se usa
-    // para resolver folioFactura() localmente, no es la pantalla de Facturas.
     listFacturas({ pageSize: 200 })
       .then((res) => setFacturas(res.results))
       .catch(() => setFacturas([]));
-    listComplementosPago().then(setComplementos).catch(() => setComplementos([]));
+    listComplementosPago(undefined, undefined, undefined, undefined, 200)
+      .then((res) => setComplementos(res.results))
+      .catch(() => setComplementos([]));
     listNominas().then(setNominas).catch(() => setNominas([]));
-    listRecNominas().then(setRecNominas).catch(() => setRecNominas([]));
+    listRecNominas(undefined, undefined, 200)
+      .then((res) => setRecNominas(res.results))
+      .catch(() => setRecNominas([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;

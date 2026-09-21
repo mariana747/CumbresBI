@@ -153,8 +153,12 @@ export default function TesoreriaConciliacionPage() {
 
   useEffect(() => {
     getSession().then(setSession);
-    listCuentas().then(setCuentas).catch(() => setCuentas([]));
-    listContratos().then(setContratos).catch(() => setContratos([]));
+    listCuentas(undefined, undefined, 200)
+      .then((res) => setCuentas(res.results))
+      .catch(() => setCuentas([]));
+    listContratos(undefined, undefined, undefined, 200)
+      .then((res) => setContratos(res.results))
+      .catch(() => setContratos([]));
   }, []);
 
   useEffect(() => {
