@@ -340,6 +340,10 @@ class TesoreriaBancoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     serializer_class = TesoreriaBancoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["banco", "alias"]
+    # 21/Sep/2026, Cuentas Bancarias se rediseña con Tabs Cuentas/Bancos -
+    # 90 bancos reales migrados, mismo criterio que el resto de catalogos
+    # con volumen real (ver ListadoGrandePagination).
+    pagination_class = ListadoGrandePagination
 
 
 class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
