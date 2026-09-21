@@ -12,6 +12,7 @@ import {
   TesoreriaContraparte,
   TesoreriaContrato,
   TesoreriaFlujo,
+  urlVerComprobanteFlujo,
 } from "@/lib/tesoreria";
 import { RrhhEmpleado, listEmpleados } from "@/lib/rrhh";
 
@@ -331,6 +332,19 @@ export default function PanelReferenciaCruzada({
                           <Typography variant="caption">
                             <strong>Comentarios:</strong> {f.comentarios || "—"}
                           </Typography>
+                          {f.drive_file_id_comprobante && (
+                            <Button
+                              size="small"
+                              startIcon={<Eye size={14} strokeWidth={1.5} />}
+                              component="a"
+                              href={urlVerComprobanteFlujo(f.id_flujo)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              sx={{ alignSelf: "flex-start" }}
+                            >
+                              Ver comprobante
+                            </Button>
+                          )}
                           <Typography variant="caption" color="text.secondary">
                             Creado {f.created_at?.slice(0, 10)} por {f.created_by || "—"} · Actualizado{" "}
                             {f.updated_at?.slice(0, 10)} por {f.updated_by || "—"}
