@@ -1,3 +1,4 @@
+import logging
 import uuid
 from decimal import Decimal, InvalidOperation
 
@@ -37,6 +38,44 @@ from .serializers import (
     RequisicionSerializer,
     SolicitudMaterialSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _crear_solicitud_compra(requisicion, actor):
+    """POST interno a compras-tesoreria-service al autorizar una
+    Requisicion (21/Sep/2026, ver docstring de Requisicion). Fail-open:
+    si compras-tesoreria-service no responde, la Requisicion igual queda
+    AUTORIZADA - no se revierte nada, mismo criterio que
+    _sincronizar_precio_cotizado en compras-tesoreria-service/views.py.
+    Idempotente del lado de Compras (crear_desde_requisicion regresa la
+    ya existente si vuelve a llamarse)."""
+    if not settings.COMPRAS_INTERNAL_SECRET:
+        return None
+    try:
+        upstream = requests.post(
+            f"{settings.COMPRAS_TESORERIA_SERVICE_URL}/api/solicitudes/crear_desde_requisicion/",
+            json={
+                "requisicion": requisicion.id_requisicion,
+                "proyecto": requisicion.proyecto,
+                "descripcion": f"Requisición {requisicion.folio} — {requisicion.etapa_constructiva}",
+                "solicitado_por": actor,
+            },
+            headers={"X-Internal-Secret": settings.COMPRAS_INTERNAL_SECRET},
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning("compras-tesoreria-service no respondio al autorizar %s", requisicion.id_requisicion, exc_info=True)
+        return None
+    if upstream.status_code not in (200, 201):
+        logger.warning(
+            "compras-tesoreria-service rechazo crear_desde_requisicion para %s: %s %s",
+            requisicion.id_requisicion,
+            upstream.status_code,
+            upstream.text[:300],
+        )
+        return None
+    return upstream.json().get("id_solicitud")
 
 
 class _PermisosMaterialesMixin:
@@ -521,7 +560,12 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         actor = getattr(request.effective_scope, "identity_user_id", None) or "sistema"
         requisicion.estado = Requisicion.ESTADO_AUTORIZADA
         requisicion.autorizo_compra_por = actor
-        requisicion.save(update_fields=["estado", "autorizo_compra_por", "updated_at"])
+        id_solicitud_compra = _crear_solicitud_compra(requisicion, actor)
+        update_fields = ["estado", "autorizo_compra_por", "updated_at"]
+        if id_solicitud_compra:
+            requisicion.id_solicitud_compra = id_solicitud_compra
+            update_fields.append("id_solicitud_compra")
+        requisicion.save(update_fields=update_fields)
         return Response(RequisicionSerializer(requisicion).data)
 
     @action(detail=True, methods=["post"])
