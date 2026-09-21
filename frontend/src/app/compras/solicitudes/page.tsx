@@ -308,6 +308,12 @@ export default function SolicitudesCompraPage() {
           setSolicitudSeleccionada(null);
           recargar();
         }}
+        // drawer+2 (no modal+1 como PanelReferenciaCruzada): el panel tiene
+        // Dialogs propios anidados (Nueva Cotizacion, Motor Documental) con
+        // el zIndex default de MUI (modal=1300) - si el Drawer fuera mas
+        // alto que eso, esos Dialogs quedarian tapados detras. Con drawer+2
+        // ya queda por encima del AppBar de AppShell (drawer+1) sin chocar.
+        sx={{ zIndex: (theme) => theme.zIndex.drawer + 2 }}
       >
         <Box sx={{ width: { xs: "100vw", sm: 640 }, p: 3 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
