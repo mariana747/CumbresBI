@@ -224,7 +224,7 @@ function TesoreriaFlujosPageContent() {
   // volumen real post-migracion de datos legacy, ver
   // TesoreriaFlujoViewSet.pagination_class).
   const [pagina, setPagina] = useState(0);
-  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [filasPorPagina, setFilasPorPagina] = useState(20);
   const [totalFlujos, setTotalFlujos] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
