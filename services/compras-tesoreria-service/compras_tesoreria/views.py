@@ -85,6 +85,9 @@ class SolicitudCompraViewSet(_PermisosComprasMixin, ModelViewSet):
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset
 
     def perform_create(self, serializer):
@@ -172,6 +175,9 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
         solicitud = self.request.query_params.get("solicitud")
         if solicitud:
             queryset = queryset.filter(solicitud_id=solicitud)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset
 
     def perform_create(self, serializer):
@@ -264,6 +270,9 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset
 
     def get_permissions(self):
