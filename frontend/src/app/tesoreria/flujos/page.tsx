@@ -240,6 +240,12 @@ function TesoreriaFlujosPageContent() {
   // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
   // Flujos") - ver componente PanelReferenciaCruzada.
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
+  // Flujos asociados por mismo contrato, mostrados en la pestana
+  // Referencias (17/Sep/2026) - NO incluye logica de nomina, esa ya vive
+  // aparte (columna Nomina, boton "Ver nomina", PanelReferenciaCruzada
+  // tipo=nomina) y se ve en Flujos y en Nominas por sus propios caminos.
+  const [flujosDelContrato, setFlujosDelContrato] = useState<TesoreriaFlujo[]>([]);
+  const [cargandoFlujosContrato, setCargandoFlujosContrato] = useState(false);
   const [form, setForm] = useState(FORM_VACIO);
   const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -578,6 +584,20 @@ function TesoreriaFlujosPageContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flujos]);
+
+  // Flujos asociados (mismo contrato) para la pestana Referencias - se
+  // piden solo al entrar a esa pestana, no de entrada con el dialogo.
+  useEffect(() => {
+    if (tab !== "Referencias" || !editing?.contrato) {
+      setFlujosDelContrato([]);
+      return;
+    }
+    setCargandoFlujosContrato(true);
+    listFlujos({ contrato: editing.contrato, pageSize: 200 })
+      .then((res) => setFlujosDelContrato(res.results.filter((f) => f.id_flujo !== editing.id_flujo)))
+      .catch(() => setFlujosDelContrato([]))
+      .finally(() => setCargandoFlujosContrato(false));
+  }, [tab, editing?.contrato, editing?.id_flujo]);
 
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
   // hook reusable en lib/useExportarSheets.ts.
@@ -1590,6 +1610,7 @@ function TesoreriaFlujosPageContent() {
           )}
 
           {tab === "Referencias" && (
+            <>
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
@@ -1625,6 +1646,62 @@ function TesoreriaFlujosPageContent() {
                 fullWidth
               />
             </Stack>
+
+            {editing && editing.contrato && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Flujos asociados (mismo contrato) {flujosDelContrato.length > 0 && `(${flujosDelContrato.length})`}
+                </Typography>
+                {cargandoFlujosContrato ? (
+                  <CircularProgress size={16} />
+                ) : flujosDelContrato.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Sin otros flujos en este contrato.
+                  </Typography>
+                ) : (
+                  <Stack spacing={0.5}>
+                    {flujosDelContrato.map((f) => (
+                      <Stack
+                        key={f.id_flujo}
+                        direction="row"
+                        spacing={1}
+                        alignItems="center"
+                        sx={{ border: 1, borderColor: "divider", borderRadius: 0, p: 1 }}
+                      >
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="body2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                            {f.id_flujo}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {f.concepto || "—"} — {f.fecha_efectiva || "—"}
+                          </Typography>
+                        </Box>
+                        <Chip
+                          size="small"
+                          label={f.pagado ? "Pagado" : "Sin pagar"}
+                          color={f.pagado ? "success" : "default"}
+                          variant="outlined"
+                          sx={{ borderRadius: 0.5 }}
+                        />
+                        {f.drive_file_id_comprobante && (
+                          <Button
+                            size="small"
+                            startIcon={<Eye size={14} strokeWidth={1.5} />}
+                            component="a"
+                            href={urlVerComprobanteFlujo(f.id_flujo)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Ver comprobante
+                          </Button>
+                        )}
+                      </Stack>
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            )}
+            </>
           )}
 
           {tab === "CFDI" && (
