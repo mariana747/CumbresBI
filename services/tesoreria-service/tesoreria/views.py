@@ -336,10 +336,22 @@ class TesoreriaBancoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     """Catalogo de bancos (Banxico) - alimenta el selector de banco al
     crear una cuenta. Mismo criterio de permisos que Contraparte."""
 
-    queryset = TesoreriaBanco.objects.all().order_by("banco")
     serializer_class = TesoreriaBancoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["banco", "alias"]
+    # 21/Sep/2026, Cuentas Bancarias se rediseña con Tabs Cuentas/Bancos -
+    # 90 bancos reales migrados, mismo criterio que el resto de catalogos
+    # con volumen real (ver ListadoGrandePagination).
+    pagination_class = ListadoGrandePagination
+
+    def get_queryset(self):
+        # ?id_banxico= (21/Sep/2026) - filtro exacto para la tab Bancos,
+        # mismo selector "Banco" que ya existia en la tab Cuentas.
+        queryset = TesoreriaBanco.objects.all().order_by("banco")
+        id_banxico = self.request.query_params.get("id_banxico")
+        if id_banxico:
+            queryset = queryset.filter(id_banxico=id_banxico)
+        return queryset
 
 
 class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -932,7 +944,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             # periodo_nomina.serie, faltaba aqui (mismo hallazgo N+1 que
             # Facturas, ver TesoreriaFacturaViewSet.list()).
             .select_related("contrato", "contrato__contraparte", "cuenta", "periodo_nomina")
-            .order_by("-created_at")
+            .order_by("-fecha_efectiva", "-created_at")
         )
         contrato_id = self.request.query_params.get("contrato")
         if contrato_id:

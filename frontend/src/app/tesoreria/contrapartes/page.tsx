@@ -131,7 +131,7 @@ function TesoreriaContrapartesPageContent() {
   // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
   // Flujos/Facturas - ver TesoreriaContraparteViewSet.pagination_class).
   const [pagina, setPagina] = useState(0);
-  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [filasPorPagina, setFilasPorPagina] = useState(20);
   const [totalContrapartes, setTotalContrapartes] = useState(0);
   // Filtro "pendientes de revision" (creadas por IA en confirmar_conciliacion,
   // ver origen en tesoreria.ts) - quedan con email/tipo_persona vacios y

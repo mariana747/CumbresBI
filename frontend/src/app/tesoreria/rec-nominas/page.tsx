@@ -68,7 +68,7 @@ export default function TesoreriaRecNominasPage() {
   // Paginacion server-side (21/Sep/2026, mismo fix del 503 aplicado a
   // Flujos/Facturas - ver TesoreriaRecNominaViewSet.pagination_class).
   const [pagina, setPagina] = useState(0);
-  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [filasPorPagina, setFilasPorPagina] = useState(20);
   const [totalItems, setTotalItems] = useState(0);
   // Vinculado a un Flujo (10/Sep/2026, "y agrega un indicador de vinculado
   // a FLJ-XXX") - mismo criterio que las referencias cruzadas: se resuelve

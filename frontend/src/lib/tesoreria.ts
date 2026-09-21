@@ -314,9 +314,21 @@ export interface TesoreriaBanco {
   updated_by: string | null;
 }
 
-export async function listBancos(search?: string): Promise<TesoreriaBanco[]> {
+export async function listBancos(
+  search?: string,
+  // Paginacion server-side (21/Sep/2026, 90 bancos reales migrados) - ver
+  // comentario en listContrapartes.
+  page?: number,
+  pageSize?: number,
+  // Filtro exacto por banco (21/Sep/2026, mismo selector "Banco" que ya
+  // existia en la tab Cuentas, agregado tambien en la tab Bancos).
+  idBanxico?: string
+): Promise<TesoreriaPaginado<TesoreriaBanco>> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (idBanxico) params.set("id_banxico", idBanxico);
+  params.set("page", String(page ?? 1));
+  params.set("page_size", String(pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/bancos/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

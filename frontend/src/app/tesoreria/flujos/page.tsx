@@ -224,7 +224,7 @@ function TesoreriaFlujosPageContent() {
   // volumen real post-migracion de datos legacy, ver
   // TesoreriaFlujoViewSet.pagination_class).
   const [pagina, setPagina] = useState(0);
-  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [filasPorPagina, setFilasPorPagina] = useState(20);
   const [totalFlujos, setTotalFlujos] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -240,6 +240,17 @@ function TesoreriaFlujosPageContent() {
   // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
   // Flujos") - ver componente PanelReferenciaCruzada.
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
+  // Flujos asociados por mismo contrato, mostrados en la pestana
+  // Referencias (17/Sep/2026) - NO incluye logica de nomina, esa ya vive
+  // aparte (columna Nomina, boton "Ver nomina", PanelReferenciaCruzada
+  // tipo=nomina) y se ve en Flujos y en Nominas por sus propios caminos.
+  const [flujosDelContrato, setFlujosDelContrato] = useState<TesoreriaFlujo[]>([]);
+  const [cargandoFlujosContrato, setCargandoFlujosContrato] = useState(false);
+  // "ID de empleado" (pestana Referencias) solo aplica a Flujos de nomina -
+  // periodo_nomina es la liga real, pero hay Flujos legacy con id_empleado
+  // capturado sin periodo_nomina (ver auditoria 17/Sep/2026), de ahi el
+  // fallback al prefijo GEN-NOMINA- del contrato generico.
+  const esFlujoDeNomina = !!editing?.periodo_nomina || !!editing?.contrato?.startsWith("GEN-NOMINA");
   const [form, setForm] = useState(FORM_VACIO);
   const [tab, setTab] = useState<TabFlujo>("Detalles");
   const [saving, setSaving] = useState(false);
@@ -578,6 +589,20 @@ function TesoreriaFlujosPageContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flujos]);
+
+  // Flujos asociados (mismo contrato) para la pestana Referencias - se
+  // piden solo al entrar a esa pestana, no de entrada con el dialogo.
+  useEffect(() => {
+    if (tab !== "Referencias" || !editing?.contrato) {
+      setFlujosDelContrato([]);
+      return;
+    }
+    setCargandoFlujosContrato(true);
+    listFlujos({ contrato: editing.contrato, pageSize: 200 })
+      .then((res) => setFlujosDelContrato(res.results.filter((f) => f.id_flujo !== editing.id_flujo)))
+      .catch(() => setFlujosDelContrato([]))
+      .finally(() => setCargandoFlujosContrato(false));
+  }, [tab, editing?.contrato, editing?.id_flujo]);
 
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
   // hook reusable en lib/useExportarSheets.ts.
@@ -1275,6 +1300,30 @@ function TesoreriaFlujosPageContent() {
           )}
 
           {tab === "Detalles" && (
+            <>
+            {/* Botones "Ver X" fuera del fieldset (17/Sep/2026: un
+            <fieldset disabled> de HTML apaga TODOS sus botones internos,
+            incluida navegacion que si debe funcionar en modo "Ver"). */}
+            {editing && editing.periodo_nomina && (
+              <Button
+                size="small"
+                startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                onClick={() => router.push(`/tesoreria/nominas`)}
+                sx={{ alignSelf: "flex-start", mb: 1 }}
+              >
+                Ver nómina {editing.periodo_nomina_serie ? `(${editing.periodo_nomina_serie})` : ""}
+              </Button>
+            )}
+            {editing && editing.contrato && (
+              <Button
+                size="small"
+                startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                onClick={() => setPanelReferencia({ tipo: "contrato", id: editing.contrato as string })}
+                sx={{ alignSelf: "flex-start", mb: 1 }}
+              >
+                Ver contrato
+              </Button>
+            )}
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
@@ -1376,16 +1425,6 @@ function TesoreriaFlujosPageContent() {
                 <FormHelperText>Si este pago es una línea de nómina, elige el periodo aquí.</FormHelperText>
               </FormControl>
               {editing && editing.periodo_nomina && (
-                <Button
-                  size="small"
-                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
-                  onClick={() => router.push(`/tesoreria/nominas`)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  Ver nómina {editing.periodo_nomina_serie ? `(${editing.periodo_nomina_serie})` : ""}
-                </Button>
-              )}
-              {editing && editing.periodo_nomina && (
                 <Chip
                   size="small"
                   variant="outlined"
@@ -1399,16 +1438,6 @@ function TesoreriaFlujosPageContent() {
                   }
                   sx={{ alignSelf: "flex-start" }}
                 />
-              )}
-              {editing && editing.contrato && (
-                <Button
-                  size="small"
-                  startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
-                  onClick={() => setPanelReferencia({ tipo: "contrato", id: editing.contrato as string })}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  Ver contrato
-                </Button>
               )}
               {editing && editing.descripcion_pago && (
                 <TextField size="small" label="Descripción de pago" value={editing.descripcion_pago} disabled fullWidth />
@@ -1582,44 +1611,84 @@ function TesoreriaFlujosPageContent() {
                 </Typography>
               )}
             </Stack>
+            </>
           )}
 
           {tab === "Referencias" && (
+            <>
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-              <TextField
-                size="small"
-                label="ID de empleado"
-                value={form.idEmpleado}
-                onChange={(e) => setForm({ ...form, idEmpleado: e.target.value })}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label={
-                  <LabelTip
-                    text="ID de requisición"
-                    tip="ID de la requisición de materiales relacionada, si aplica. Texto libre, no valida contra el catálogo."
-                  />
-                }
-                value={form.idRequisicion}
-                onChange={(e) => setForm({ ...form, idRequisicion: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label={
-                  <LabelTip
-                    text="Link de referencia"
-                    tip="Liga externa de apoyo (cotización, correo, etc.), distinta del comprobante de pago."
-                  />
-                }
-                value={form.linkReferencia}
-                onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-              />
+              {/* ID de requisicion y Link de referencia se quitaron
+              (17/Sep/2026): 0 de 28 Flujos reales los han usado alguna vez.
+              ID de empleado solo aplica a Flujos de nomina (contrato
+              GEN-NOMINA-<sociedad>) - en el resto tambien queda siempre
+              vacio en la practica. */}
+              {esFlujoDeNomina && (
+                <TextField
+                  size="small"
+                  label="ID de empleado"
+                  value={form.idEmpleado}
+                  onChange={(e) => setForm({ ...form, idEmpleado: e.target.value })}
+                  fullWidth
+                />
+              )}
             </Stack>
+
+            {editing && editing.contrato && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Flujos asociados (mismo contrato) {flujosDelContrato.length > 0 && `(${flujosDelContrato.length})`}
+                </Typography>
+                {cargandoFlujosContrato ? (
+                  <CircularProgress size={16} />
+                ) : flujosDelContrato.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Sin otros flujos en este contrato.
+                  </Typography>
+                ) : (
+                  <Stack spacing={0.5}>
+                    {flujosDelContrato.map((f) => (
+                      <Stack
+                        key={f.id_flujo}
+                        direction="row"
+                        spacing={1}
+                        alignItems="center"
+                        sx={{ border: 1, borderColor: "divider", borderRadius: 0, p: 1 }}
+                      >
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="body2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                            {f.id_flujo}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {f.concepto || "—"} — {f.fecha_efectiva || "—"}
+                          </Typography>
+                        </Box>
+                        <Chip
+                          size="small"
+                          label={f.pagado ? "Pagado" : "Sin pagar"}
+                          color={f.pagado ? "success" : "default"}
+                          variant="outlined"
+                          sx={{ borderRadius: 0.5 }}
+                        />
+                        {f.drive_file_id_comprobante && (
+                          <Button
+                            size="small"
+                            startIcon={<Eye size={14} strokeWidth={1.5} />}
+                            component="a"
+                            href={urlVerComprobanteFlujo(f.id_flujo)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{ ml: 1 }}
+                          >
+                            Ver comprobante
+                          </Button>
+                        )}
+                      </Stack>
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            )}
+            </>
           )}
 
           {tab === "CFDI" && (
