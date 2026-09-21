@@ -128,3 +128,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # configurarlo explicitamente en ambos lados (ver .env.example).
 MATERIALES_SERVICE_URL = env("MATERIALES_SERVICE_URL", default="http://materiales-service:8080")
 MATERIALES_INTERNAL_SECRET = env("MATERIALES_INTERNAL_SECRET", default="")
+
+# Direccion contraria (21/Sep/2026): al autorizar una Requisicion,
+# materiales-service crea aqui la SolicitudCompra correspondiente
+# (SolicitudCompraViewSet.crear_desde_requisicion). Mismo criterio de
+# secreto compartido que MATERIALES_INTERNAL_SECRET arriba, solo que este
+# lo valida compras-tesoreria-service en vez de materiales-service.
+COMPRAS_INTERNAL_SECRET = env("COMPRAS_INTERNAL_SECRET", default="")

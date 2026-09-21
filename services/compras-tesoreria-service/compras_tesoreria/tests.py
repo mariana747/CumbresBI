@@ -354,3 +354,61 @@ class ConfirmarExtraccionSincronizaCatalogoTests(TestCase):
         self.cotizacion.refresh_from_db()
         self.assertEqual(self.cotizacion.estado, Cotizacion.ESTADO_CONFIRMADA)
         self.assertEqual(self.cotizacion.lineas.count(), 1)
+
+
+class CrearDesdeRequisicionTests(TestCase):
+    """Verifica el endpoint que materiales-service llama al autorizar una
+    Requisicion (21/Sep/2026) - solo el secreto interno debe poder crearla
+    sin compras.crear, y debe ser idempotente por `requisicion`."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def _llamar(self, payload, secreto=None):
+        request = self.factory.post("/api/solicitudes/crear_desde_requisicion/", payload, format="json")
+        if secreto is not None:
+            request.META["HTTP_X_INTERNAL_SECRET"] = secreto
+        view = SolicitudCompraViewSet.as_view({"post": "crear_desde_requisicion"})
+        return view(request)
+
+    def test_sin_secreto_ni_permiso_da_403(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar({"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Cemento"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_con_secreto_correcto_crea_la_solicitud(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Requisición X — Cimentación", "solicitado_por": "u001"},
+                secreto="dev-secreto",
+            )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["requisicion"], "REQ00001")
+        self.assertEqual(response.data["solicitado_por"], "u001")
+        self.assertEqual(SolicitudCompra.objects.count(), 1)
+
+    def test_secreto_incorrecto_da_403(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Cemento"}, secreto="otro-secreto"
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_es_idempotente_por_requisicion(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            primera = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Requisición X"}, secreto="dev-secreto"
+            )
+            segunda = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Requisición X (reintento)"},
+                secreto="dev-secreto",
+            )
+        self.assertEqual(primera.status_code, 201)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertEqual(primera.data["id_solicitud"], segunda.data["id_solicitud"])
+        self.assertEqual(SolicitudCompra.objects.count(), 1)
+
+    def test_campos_faltantes_da_400(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar({"requisicion": "REQ00001"}, secreto="dev-secreto")
+        self.assertEqual(response.status_code, 400)

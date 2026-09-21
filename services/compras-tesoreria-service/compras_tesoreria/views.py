@@ -9,6 +9,7 @@ from django.db.models import F
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
@@ -47,6 +48,25 @@ class _PermisosComprasMixin:
         return super().get_permissions()
 
 
+class _PermiteSecretoInternoOComprasCrear(BasePermission):
+    """Mismo patron que materiales-service/materiales/views.py::
+    _PermiteSecretoInternoOMaterialesEditar - el secreto interno servicio-a-
+    servicio (X-Internal-Secret, ver settings.COMPRAS_INTERNAL_SECRET) es
+    una via ADICIONAL para que materiales-service pueda crear la
+    SolicitudCompra al autorizar una Requisicion, sin que quien autoriza
+    necesite el permiso compras.crear; nunca reemplaza el permiso normal
+    para cualquier otro llamador."""
+
+    message = "No tienes el permiso 'compras.crear' para hacer esto."
+
+    def has_permission(self, request, view):
+        secreto_configurado = settings.COMPRAS_INTERNAL_SECRET
+        secreto_recibido = request.META.get("HTTP_X_INTERNAL_SECRET")
+        if secreto_configurado and secreto_recibido == secreto_configurado:
+            return True
+        return require_permission("compras.crear")().has_permission(request, view)
+
+
 class SolicitudCompraViewSet(_PermisosComprasMixin, ModelViewSet):
     """Cabecera del proceso de compra - puede o no venir de una Requisicion
     ya autorizada de materiales-service (`requisicion`, referencia laxa,
@@ -73,6 +93,48 @@ class SolicitudCompraViewSet(_PermisosComprasMixin, ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save(updated_by=_actor(self.request))
+
+    def get_permissions(self):
+        if self.action == "crear_desde_requisicion":
+            return [_PermiteSecretoInternoOComprasCrear()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=["post"])
+    def crear_desde_requisicion(self, request):
+        """Crea (o regresa la ya existente) SolicitudCompra al autorizar una
+        Requisicion en materiales-service (21/Sep/2026, "conectar
+        `autorizar` con la creacion de Cotizacion en compras-tesoreria-
+        service", ver Requisicion.__doc__ en ese servicio). Idempotente por
+        `requisicion` - un reintento de red no crea una segunda Solicitud
+        para la misma Requisicion.
+
+        Body: {"requisicion": str (id_requisicion), "proyecto": str,
+        "descripcion": str, "solicitado_por": str (opcional, actor que
+        autorizo del lado de Materiales)}. No usa self.get_queryset()/
+        effective_scope (esta llamada no trae sesion de un usuario real,
+        ver _PermiteSecretoInternoOComprasCrear)."""
+        requisicion_id = (request.data.get("requisicion") or "").strip()
+        proyecto = (request.data.get("proyecto") or "").strip()
+        descripcion = (request.data.get("descripcion") or "").strip()
+        if not requisicion_id or not proyecto or not descripcion:
+            return Response(
+                {"detail": "Se requieren 'requisicion', 'proyecto' y 'descripcion'."}, status=400
+            )
+
+        existente = SolicitudCompra.objects.filter(requisicion=requisicion_id).first()
+        if existente:
+            return Response(SolicitudCompraSerializer(existente).data, status=200)
+
+        actor = (request.data.get("solicitado_por") or "").strip() or "sistema"
+        solicitud = SolicitudCompra.objects.create(
+            proyecto=proyecto,
+            requisicion=requisicion_id,
+            descripcion=descripcion,
+            solicitado_por=actor,
+            created_by="sistema",
+            updated_by="sistema",
+        )
+        return Response(SolicitudCompraSerializer(solicitud).data, status=201)
 
 
 class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
