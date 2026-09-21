@@ -31,6 +31,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -218,6 +219,13 @@ function TesoreriaFlujosPageContent() {
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
+  // Paginacion server-side (20/Sep/2026, fix del 503 en produccion - el
+  // listado completo sin paginar tumbaba el contenedor de Cloud Run con
+  // volumen real post-migracion de datos legacy, ver
+  // TesoreriaFlujoViewSet.pagination_class).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
+  const [totalFlujos, setTotalFlujos] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -327,7 +335,7 @@ function TesoreriaFlujosPageContent() {
     setBuscandoFactura(true);
     const timeout = setTimeout(() => {
       listFacturas({ search: buscaFactura || undefined })
-        .then(setOpcionesFactura)
+        .then((res) => setOpcionesFactura(res.results))
         .catch(() => setOpcionesFactura([]))
         .finally(() => setBuscandoFactura(false));
     }, 300);
@@ -339,8 +347,8 @@ function TesoreriaFlujosPageContent() {
     if (!vinculando) return;
     setBuscandoComplemento(true);
     const timeout = setTimeout(() => {
-      listComplementosPago(buscaComplemento || undefined)
-        .then(setOpcionesComplemento)
+      listComplementosPago(buscaComplemento || undefined, undefined, undefined, undefined, 200)
+        .then((res) => setOpcionesComplemento(res.results))
         .catch(() => setOpcionesComplemento([]))
         .finally(() => setBuscandoComplemento(false));
     }, 300);
@@ -350,13 +358,27 @@ function TesoreriaFlujosPageContent() {
 
   useEffect(() => {
     getSession().then(setSession);
-    listContratos().then(setContratos).catch(() => setContratos([]));
-    listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    // pageSize alto (20-21/Sep/2026, fix paginacion) - estas listas solo se
+    // usan para resolver referencias localmente (folioFactura(), selects de
+    // contrato/cuenta/etc en el formulario), no son la pantalla dedicada de
+    // cada catalogo.
+    listContratos(undefined, undefined, undefined, 200)
+      .then((res) => setContratos(res.results))
+      .catch(() => setContratos([]));
+    listCuentas(undefined, undefined, 200)
+      .then((res) => setCuentas(res.results))
+      .catch(() => setCuentas([]));
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
-    listFacturas().then(setFacturas).catch(() => setFacturas([]));
-    listComplementosPago().then(setComplementos).catch(() => setComplementos([]));
+    listFacturas({ pageSize: 200 })
+      .then((res) => setFacturas(res.results))
+      .catch(() => setFacturas([]));
+    listComplementosPago(undefined, undefined, undefined, undefined, 200)
+      .then((res) => setComplementos(res.results))
+      .catch(() => setComplementos([]));
     listNominas().then(setNominas).catch(() => setNominas([]));
-    listRecNominas().then(setRecNominas).catch(() => setRecNominas([]));
+    listRecNominas(undefined, undefined, 200)
+      .then((res) => setRecNominas(res.results))
+      .catch(() => setRecNominas([]));
   }, []);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
@@ -504,8 +526,15 @@ function TesoreriaFlujosPageContent() {
       sociedad: filtroEmpresa || undefined,
       nomina: filtroNomina || undefined,
       categoriaGasto: filtroCategoriaGasto || undefined,
+      fechaDesde: filtroFechaDesde || undefined,
+      fechaHasta: filtroFechaHasta || undefined,
+      page: pagina + 1,
+      pageSize: filasPorPagina,
     })
-      .then(setFlujos)
+      .then((res) => {
+        setFlujos(res.results);
+        setTotalFlujos(res.count);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -514,7 +543,25 @@ function TesoreriaFlujosPageContent() {
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroContrato, filtroEmpresa, filtroNomina, filtroCategoriaGasto]);
+  }, [
+    search,
+    filtroContrato,
+    filtroEmpresa,
+    filtroNomina,
+    filtroCategoriaGasto,
+    filtroFechaDesde,
+    filtroFechaHasta,
+    pagina,
+    filasPorPagina,
+  ]);
+
+  // Volver a la primera pagina cuando cambia cualquier filtro (20/Sep/2026)
+  // - sin esto, filtrar estando en la pagina 3 puede pedir una pagina que
+  // ya no existe con el nuevo total y devolver una lista vacia.
+  useEffect(() => {
+    setPagina(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filtroContrato, filtroEmpresa, filtroNomina, filtroCategoriaGasto, filtroFechaDesde, filtroFechaHasta]);
 
   // Redirigido desde Conciliación Bancaria tras "Crear Flujo" (11/Sep/2026,
   // "quiero que muestre lo importado y para mostrar y redirigir") - abre
@@ -547,16 +594,11 @@ function TesoreriaFlujosPageContent() {
     })
   );
 
-  // Filtro de fecha (25/Ago/2026) - por rango de fecha_efectiva, del lado
-  // del cliente: listFlujos no tiene parametro de fecha en el backend
-  // todavia (solo ?search=/?contrato=, ver TesoreriaFlujoViewSet).
-  const flujosFiltrados = useMemo(() => {
-    return flujos.filter((f) => {
-      if (filtroFechaDesde && (!f.fecha_efectiva || f.fecha_efectiva < filtroFechaDesde)) return false;
-      if (filtroFechaHasta && (!f.fecha_efectiva || f.fecha_efectiva > filtroFechaHasta)) return false;
-      return true;
-    });
-  }, [flujos, filtroFechaDesde, filtroFechaHasta]);
+  // Filtro de fecha (25/Ago/2026, movido al servidor 20/Sep/2026 - con
+  // paginacion el cliente ya no tiene todas las filas para filtrar
+  // localmente, ver fechaDesde/fechaHasta en refresh() y
+  // TesoreriaFlujoViewSet.get_queryset).
+  const flujosFiltrados = flujos;
 
   function abrirAlta() {
     setEditing(null);
@@ -565,8 +607,8 @@ function TesoreriaFlujosPageContent() {
     setTab("Detalles");
     setFormError(null);
     setIdFlujoPrevio("");
-    listFlujos()
-      .then((todos) => setIdFlujoPrevio(`FLJ-${(todos.length + 1).toString().padStart(6, "0")}`))
+    listFlujos({ pageSize: 1 })
+      .then((res) => setIdFlujoPrevio(`FLJ-${(res.count + 1).toString().padStart(6, "0")}`))
       .catch(() => setIdFlujoPrevio(""));
     setDialogOpen(true);
   }
@@ -638,8 +680,8 @@ function TesoreriaFlujosPageContent() {
     setTab("Detalles");
     setFormError(null);
     setIdFlujoPrevio("");
-    listFlujos()
-      .then((todos) => setIdFlujoPrevio(`FLJ-${(todos.length + 1).toString().padStart(6, "0")}`))
+    listFlujos({ pageSize: 1 })
+      .then((res) => setIdFlujoPrevio(`FLJ-${(res.count + 1).toString().padStart(6, "0")}`))
       .catch(() => setIdFlujoPrevio(""));
     setDialogOpen(true);
   }
@@ -1189,6 +1231,21 @@ function TesoreriaFlujosPageContent() {
             ))
           )}
         </Stack>
+
+        <TablePagination
+          component="div"
+          count={totalFlujos}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={filasPorPagina}
+          onRowsPerPageChange={(e) => {
+            setFilasPorPagina(parseInt(e.target.value, 10));
+            setPagina(0);
+          }}
+          rowsPerPageOptions={[20, 50, 100]}
+          labelRowsPerPage="Filas por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">

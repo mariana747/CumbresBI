@@ -144,7 +144,7 @@ class TesoreriaContraparteCrudTests(TestCase):
         view = TesoreriaContraparteViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data["count"], 1)
 
     def test_busqueda_por_razon_social_o_rfc(self):
         TesoreriaContraparte.objects.create(
@@ -154,8 +154,8 @@ class TesoreriaContraparteCrudTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaContraparteViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["razon_social"], "Contraparte de prueba")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["razon_social"], "Contraparte de prueba")
 
 
 class TesoreriaBancoCuentaCrudTests(TestCase):
@@ -194,7 +194,32 @@ class TesoreriaBancoCuentaCrudTests(TestCase):
         view = TesoreriaCuentaViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data["count"], 1)
+
+    def test_filtro_por_sociedad_y_banco(self):
+        # 21/Sep/2026, division real por Empresa y Banco pedida para esta
+        # pantalla - ver TesoreriaCuentaViewSet.get_queryset.
+        otro_banco = TesoreriaBanco.objects.create(id_banxico="00012", banco="Banorte")
+        TesoreriaCuenta.objects.create(
+            banco=self.banco, alias="Cuenta Tizara Banamex", sociedad=RFC_TIZARA, apertura="2026-01-01"
+        )
+        TesoreriaCuenta.objects.create(
+            banco=otro_banco, alias="Cuenta Tizara Banorte", sociedad=RFC_TIZARA, apertura="2026-01-01"
+        )
+        TesoreriaCuenta.objects.create(
+            banco=self.banco, alias="Cuenta Capital Banamex", sociedad=RFC_CAPITAL, apertura="2026-01-01"
+        )
+
+        request = self.factory.get("/api/cuentas/", {"sociedad": RFC_TIZARA})
+        request.effective_scope = EffectiveScope.anonymous()
+        response = TesoreriaCuentaViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(response.data["count"], 2)
+
+        request2 = self.factory.get("/api/cuentas/", {"sociedad": RFC_TIZARA, "banco": self.banco.id_banxico})
+        request2.effective_scope = EffectiveScope.anonymous()
+        response2 = TesoreriaCuentaViewSet.as_view({"get": "list"})(request2)
+        self.assertEqual(response2.data["count"], 1)
+        self.assertEqual(response2.data["results"][0]["alias"], "Cuenta Tizara Banamex")
 
 
 class TesoreriaContratoTests(TestCase):
@@ -269,8 +294,8 @@ class TesoreriaContratoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
         view = TesoreriaContratoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["sociedad"], RFC_TIZARA)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["sociedad"], RFC_TIZARA)
 
     def test_global_ve_ambos_contratos(self):
         self._crear_contrato(RFC_TIZARA)
@@ -280,7 +305,7 @@ class TesoreriaContratoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=True)
         view = TesoreriaContratoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data["count"], 2)
 
     def test_anonimo_no_ve_nada(self):
         self._crear_contrato(RFC_TIZARA)
@@ -288,7 +313,7 @@ class TesoreriaContratoTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaContratoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(response.data["count"], 0)
 
     def test_incluye_nombre_de_la_contraparte(self):
         response = self._crear_contrato(RFC_TIZARA)
@@ -322,8 +347,8 @@ class TesoreriaContratoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, centro_ids=("OBRA",))
         view = TesoreriaContratoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["centro"], "OBRA")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["centro"], "OBRA")
 
     def test_usuario_con_acceso_solo_a_un_contrato_ve_solo_ese_contrato(self):
         # 31/Ago/2026: SCOPE_FIELD_CONTRATO recien declarado - mismo
@@ -335,8 +360,61 @@ class TesoreriaContratoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, contrato_ids=(creado1.data["id_contrato"],))
         view = TesoreriaContratoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["id_contrato"], creado1.data["id_contrato"])
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id_contrato"], creado1.data["id_contrato"])
+
+    def test_filtros_sociedad_proyecto_y_fecha(self):
+        # 21/Sep/2026, filtros movidos al servidor (antes vivian del lado
+        # del cliente sobre la lista completa) - ver
+        # TesoreriaContratoViewSet.get_queryset.
+        TesoreriaContrato.objects.create(
+            id_contrato="CTR-TEST-1",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo="INTERNO",
+            proyecto="ABC",
+            fecha_generacion="2026-01-15",
+        )
+        TesoreriaContrato.objects.create(
+            id_contrato="CTR-TEST-2",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo="INTERNO",
+            proyecto="XYZ",
+            fecha_generacion="2026-06-15",
+        )
+        TesoreriaContrato.objects.create(
+            id_contrato="CTR-TEST-3",
+            sociedad=RFC_CAPITAL,
+            contraparte=self.contraparte,
+            tipo="INTERNO",
+            proyecto="ABC",
+            fecha_generacion="2026-01-15",
+        )
+        scope_global = EffectiveScope(is_global=True)
+        view = TesoreriaContratoViewSet.as_view({"get": "list"})
+
+        request = self.factory.get("/api/contratos/", {"sociedad": RFC_TIZARA})
+        request.effective_scope = scope_global
+        self.assertEqual(view(request).data["count"], 2)
+
+        request2 = self.factory.get("/api/contratos/", {"proyecto": "ABC"})
+        request2.effective_scope = scope_global
+        self.assertEqual(view(request2).data["count"], 2)
+
+        request3 = self.factory.get("/api/contratos/", {"sociedad": RFC_TIZARA, "proyecto": "ABC"})
+        request3.effective_scope = scope_global
+        self.assertEqual(view(request3).data["count"], 1)
+
+        request4 = self.factory.get("/api/contratos/", {"fecha_desde": "2026-03-01"})
+        request4.effective_scope = scope_global
+        response4 = view(request4)
+        self.assertEqual(response4.data["count"], 1)
+        self.assertEqual(response4.data["results"][0]["proyecto"], "XYZ")
+
+        request5 = self.factory.get("/api/contratos/", {"fecha_hasta": "2026-03-01"})
+        request5.effective_scope = scope_global
+        self.assertEqual(view(request5).data["count"], 2)
 
 
 class TesoreriaNominaTests(TestCase):
@@ -553,8 +631,8 @@ class TesoreriaFlujoTests(TestCase):
         request2 = self.factory.get("/api/flujos/", {"sociedad": RFC_TIZARA})
         request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
         response2 = TesoreriaFlujoViewSet.as_view({"get": "list"})(request2)
-        self.assertEqual(len(response2.data), 1)
-        self.assertEqual(response2.data[0]["contrato"], self.contrato.id_contrato)
+        self.assertEqual(len(response2.data["results"]), 1)
+        self.assertEqual(response2.data["results"][0]["contrato"], self.contrato.id_contrato)
 
     def test_id_flujo_se_genera_con_consecutivo(self):
         response = self._crear_flujo()
@@ -571,7 +649,7 @@ class TesoreriaFlujoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_CAPITAL,))
         view = TesoreriaFlujoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(len(response.data["results"]), 0)
 
     def test_ver_comprobante_sin_drive_file_id_da_404(self):
         response = self._crear_flujo()
@@ -620,8 +698,8 @@ class TesoreriaFlujoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, centro_ids=("OBRA",))
         view = TesoreriaFlujoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["contrato"], contrato_obra.id_contrato)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["contrato"], contrato_obra.id_contrato)
 
     def test_usuario_con_acceso_a_un_contrato_ve_solo_sus_flujos(self):
         # 31/Ago/2026: SCOPE_FIELD_CONTRATO recien declarado.
@@ -631,12 +709,12 @@ class TesoreriaFlujoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, contrato_ids=(self.contrato.id_contrato,))
         view = TesoreriaFlujoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data["results"]), 1)
 
         request2 = self.factory.get("/api/flujos/")
         request2.effective_scope = EffectiveScope(is_global=False, contrato_ids=("otro-contrato-que-no-existe",))
         response2 = view(request2)
-        self.assertEqual(len(response2.data), 0)
+        self.assertEqual(len(response2.data["results"]), 0)
 
     def test_no_se_puede_pagar_sin_autorizar_primero(self):
         creado = self._crear_flujo()
@@ -1594,7 +1672,7 @@ class TesoreriaFacturaFiltrosCombinadosTests(TestCase):
         view = TesoreriaFacturaViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
-        return {f["timbre_uuid"] for f in response.data}
+        return {f["timbre_uuid"] for f in response.data["results"]}
 
     def test_filtro_por_proveedor(self):
         self.assertEqual(self._listar(contraparte=self.contraparte_a.id_contraparte), {"uuid-filtro-1"})
@@ -2019,6 +2097,28 @@ class TesoreriaContraparteOrigenTests(TestCase):
         response = self._post({"razon_social": "Detectada por IA SA", "origen": TesoreriaContraparte.ORIGEN_IA})
         self.assertEqual(response.status_code, 201)
 
+    def test_filtro_pendiente_ia(self):
+        # 21/Sep/2026, toggle "Solo pendientes de revision" movido al
+        # servidor (antes vivia del lado del cliente sobre la lista
+        # completa) - ver TesoreriaContraparteViewSet.get_queryset.
+        self._post({"razon_social": "IA sin datos", "origen": TesoreriaContraparte.ORIGEN_IA})
+        self._post(
+            {
+                "razon_social": "IA ya completada",
+                "origen": TesoreriaContraparte.ORIGEN_IA,
+                "email": "completa@ia.com",
+                "tipo_persona": "moral",
+            }
+        )
+        self._post({"razon_social": "Alta manual", "email": "manual@a.com", "tipo_persona": "moral"})
+
+        request = self.factory.get("/api/contrapartes/", {"pendiente_ia": "1"})
+        request.effective_scope = EffectiveScope.anonymous()
+        response = TesoreriaContraparteViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(response.data["count"], 1)
+        # Mayusculas (ver CAMPOS_MAYUSCULAS en el serializer).
+        self.assertEqual(response.data["results"][0]["razon_social"], "IA SIN DATOS")
+
 
 class TesoreriaContraparteFusionTests(TestCase):
     """02/Sep/2026, cierre real de la reconciliacion contraparte maestra:
@@ -2199,6 +2299,59 @@ class TesoreriaSaldoTests(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["id"], "saldo-2026-08-24-cta1")
+
+    def test_lista_paginada(self):
+        # 21/Sep/2026, fix del 503 en produccion (tabla crecio con la
+        # migracion de datos legacy) - ver TesoreriaSaldoViewSet.pagination_class.
+        TesoreriaSaldo.objects.create(id="s1", fecha="2026-09-01", cuenta="CTA1", saldo="100.00")
+        request = APIRequestFactory().get("/api/saldos/")
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaSaldoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("results", response.data)
+        self.assertEqual(response.data["count"], 1)
+
+    def test_filtro_por_sociedad_resuelve_via_catalogo_de_cuentas(self):
+        # TesoreriaSaldo.cuenta es un CharField plano sin FK real (ver
+        # docstring del modelo) - el filtro por sociedad se resuelve
+        # cruzando contra TesoreriaCuenta.id_cuenta_bancaria (21/Sep/2026).
+        banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex")
+        cuenta_tizara = TesoreriaCuenta.objects.create(
+            banco=banco, alias="Cuenta Tizara", sociedad=RFC_TIZARA, apertura="2026-01-01"
+        )
+        cuenta_capital = TesoreriaCuenta.objects.create(
+            banco=banco, alias="Cuenta Capital", sociedad=RFC_CAPITAL, apertura="2026-01-01"
+        )
+        TesoreriaSaldo.objects.create(id="s-tizara", fecha="2026-09-01", cuenta=cuenta_tizara.id_cuenta_bancaria, saldo="100.00")
+        TesoreriaSaldo.objects.create(id="s-capital", fecha="2026-09-01", cuenta=cuenta_capital.id_cuenta_bancaria, saldo="200.00")
+
+        request = APIRequestFactory().get("/api/saldos/", {"sociedad": RFC_TIZARA})
+        request.effective_scope = EffectiveScope.anonymous()
+        view = TesoreriaSaldoViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], "s-tizara")
+
+    def test_busqueda_por_id_o_alias_de_cuenta(self):
+        banco = TesoreriaBanco.objects.create(id_banxico="00002", banco="Banamex")
+        cuenta = TesoreriaCuenta.objects.create(banco=banco, alias="Cuenta Operativa Norte", apertura="2026-01-01")
+        TesoreriaSaldo.objects.create(id="DEMO-SALDO-1", fecha="2026-09-01", cuenta=cuenta.id_cuenta_bancaria, saldo="100.00")
+        TesoreriaSaldo.objects.create(id="s-otro", fecha="2026-09-01", cuenta="otra-cuenta-sin-catalogo", saldo="50.00")
+
+        # Match por ID del saldo.
+        request = APIRequestFactory().get("/api/saldos/", {"search": "DEMO-SALDO"})
+        request.effective_scope = EffectiveScope.anonymous()
+        response = TesoreriaSaldoViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], "DEMO-SALDO-1")
+
+        # Match por alias de la cuenta (via catalogo de Cuentas).
+        request2 = APIRequestFactory().get("/api/saldos/", {"search": "Operativa Norte"})
+        request2.effective_scope = EffectiveScope.anonymous()
+        response2 = TesoreriaSaldoViewSet.as_view({"get": "list"})(request2)
+        self.assertEqual(response2.data["count"], 1)
+        self.assertEqual(response2.data["results"][0]["id"], "DEMO-SALDO-1")
 
 
 class ReporteDiarioSaldosTests(TestCase):
@@ -2555,8 +2708,8 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaFacturaViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["timbre_uuid"], "uuid-vinc-5")
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["timbre_uuid"], "uuid-vinc-5")
 
     def test_filtro_por_contraparte_en_complementos_pago(self):
         TesoreriaComplementoPago.objects.create(timbre_uuid="uuid-comp-vinc-1", folio="C-1", contraparte=self.proveedor)
@@ -2565,8 +2718,8 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaComplementoPagoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["timbre_uuid"], "uuid-comp-vinc-1")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["timbre_uuid"], "uuid-comp-vinc-1")
 
     def test_filtro_por_contraparte_en_notas_credito(self):
         TesoreriaNotaCredito.objects.create(timbre_uuid="uuid-nc-vinc-1", comprobante_folio="N-1", contraparte=self.proveedor)
@@ -2575,8 +2728,8 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaNotaCreditoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["timbre_uuid"], "uuid-nc-vinc-1")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["timbre_uuid"], "uuid-nc-vinc-1")
 
     def test_crear_complemento_pago_con_rfc_conocido_vincula_contraparte(self):
         request = self.factory.post(
@@ -2729,8 +2882,8 @@ class TesoreriaComplementoPagoCrudTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaComplementoPagoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["timbre_uuid"], "uuid-cp-4")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["timbre_uuid"], "uuid-cp-4")
 
 
 class TesoreriaNotaCreditoCrudTests(TestCase):
@@ -2828,8 +2981,8 @@ class TesoreriaRecNominaCrudTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaRecNominaViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["timbre_uuid"], "uuid-rn-3")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["timbre_uuid"], "uuid-rn-3")
 
     def test_editar_requiere_permiso_distinto(self):
         recibo = TesoreriaRecNomina.objects.create(timbre_uuid="uuid-rn-5", folio="RN-5")

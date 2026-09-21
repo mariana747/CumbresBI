@@ -87,7 +87,9 @@ export default function TesoreriaReporteDiarioPage() {
 
   useEffect(() => {
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
-    listCuentas().then(setCuentas).catch(() => setCuentas([]));
+    listCuentas(undefined, undefined, 200)
+      .then((res) => setCuentas(res.results))
+      .catch(() => setCuentas([]));
   }, []);
 
   // Bloquear envio si hay diferencia: no se debe enviar el reporte diario

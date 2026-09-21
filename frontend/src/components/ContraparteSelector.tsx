@@ -46,8 +46,8 @@ export default function ContraparteSelector({
     // hay opciones.
     setBuscando(true);
     const timeout = setTimeout(() => {
-      listContrapartes(inputValue || undefined, tipo)
-        .then(setOpciones)
+      listContrapartes(inputValue || undefined, tipo, undefined, undefined, 200)
+        .then((res) => setOpciones(res.results))
         .catch(() => setOpciones([]))
         .finally(() => setBuscando(false));
     }, 300);

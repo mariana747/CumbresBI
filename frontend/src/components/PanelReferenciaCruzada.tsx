@@ -70,8 +70,8 @@ export default function PanelReferenciaCruzada({
         .then(setDatosContrato)
         .catch(() => setDatosContrato(null))
         .finally(() => setCargando(false));
-      listFlujos({ contrato: referencia.id })
-        .then(setFlujos)
+      listFlujos({ contrato: referencia.id, pageSize: 200 })
+        .then((res) => setFlujos(res.results))
         .catch(() => setFlujos([]))
         .finally(() => setCargandoFlujos(false));
     } else if (referencia.tipo === "proveedor") {
@@ -79,8 +79,8 @@ export default function PanelReferenciaCruzada({
         .then(setDatosProveedor)
         .catch(() => setDatosProveedor(null))
         .finally(() => setCargando(false));
-      listFlujos({ contraparte: referencia.id })
-        .then(setFlujos)
+      listFlujos({ contraparte: referencia.id, pageSize: 200 })
+        .then((res) => setFlujos(res.results))
         .catch(() => setFlujos([]))
         .finally(() => setCargandoFlujos(false));
     } else {
@@ -88,8 +88,8 @@ export default function PanelReferenciaCruzada({
         .then(setDatosNomina)
         .catch(() => setDatosNomina(null))
         .finally(() => setCargando(false));
-      listFlujos({ nomina: referencia.id })
-        .then(setFlujos)
+      listFlujos({ nomina: referencia.id, pageSize: 200 })
+        .then((res) => setFlujos(res.results))
         .catch(() => setFlujos([]))
         .finally(() => setCargandoFlujos(false));
       listEmpleados().then(setEmpleados).catch(() => setEmpleados([]));
@@ -101,8 +101,8 @@ export default function PanelReferenciaCruzada({
   useEffect(() => {
     if (!referencia || referencia.tipo !== "nomina") return;
     setCargandoFlujos(true);
-    listFlujos({ nomina: referencia.id, id_empleado: filtroEmpleado || undefined })
-      .then(setFlujos)
+    listFlujos({ nomina: referencia.id, id_empleado: filtroEmpleado || undefined, pageSize: 200 })
+      .then((res) => setFlujos(res.results))
       .catch(() => setFlujos([]))
       .finally(() => setCargandoFlujos(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
