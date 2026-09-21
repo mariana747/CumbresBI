@@ -165,6 +165,7 @@ class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet)
     serializer_class = TesoreriaContraparteSerializer
     filter_backends = [SearchFilter]
     search_fields = ["razon_social", "rfc", "contacto"]
+    pagination_class = ListadoGrandePagination
 
     def get_permissions(self):
         if self.action == "create":
@@ -194,6 +195,16 @@ class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet)
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
             queryset = queryset.filter(contratos__sociedad=sociedad).distinct()
+        # ?pendiente_ia=1 (21/Sep/2026, fix paginacion) - antes el toggle
+        # "Solo pendientes IA" vivia del lado del cliente sobre la lista
+        # completa; con pagination_class ya no tiene todas las filas para
+        # filtrar localmente. Mismo criterio que pendienteRevisionIA() en
+        # contrapartes/page.tsx: alta por IA con email o tipo_persona sin
+        # completar.
+        if self.request.query_params.get("pendiente_ia") in ("1", "true", "True"):
+            queryset = queryset.filter(origen="ia").filter(
+                Q(email__isnull=True) | Q(email="") | Q(tipo_persona__isnull=True) | Q(tipo_persona="")
+            )
         return queryset
 
     def list(self, request, *args, **kwargs):
@@ -332,12 +343,25 @@ class TesoreriaBancoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
 
 
 class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
-    """Cuentas bancarias. Mismo criterio de permisos que Contraparte/Banco."""
+    """Cuentas bancarias. Mismo criterio de permisos que Contraparte/Banco.
+    Filtros ?sociedad=/?banco= (21/Sep/2026, division real por Empresa y
+    Banco pedida para esta pantalla, mismo criterio que
+    TesoreriaFlujoViewSet.get_queryset)."""
 
-    queryset = TesoreriaCuenta.objects.select_related("banco").order_by("-created_at")
     serializer_class = TesoreriaCuentaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["alias", "label", "rfc_razon_social", "clabe"]
+    pagination_class = ListadoGrandePagination
+
+    def get_queryset(self):
+        queryset = TesoreriaCuenta.objects.select_related("banco").order_by("-created_at")
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(sociedad=sociedad)
+        banco = self.request.query_params.get("banco")
+        if banco:
+            queryset = queryset.filter(banco_id=banco)
+        return queryset
 
 
 class TesoreriaDiaFestivoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -390,6 +414,7 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     serializer_class = TesoreriaContratoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["id_contrato", "sociedad"]
+    pagination_class = ListadoGrandePagination
 
     def get_permissions(self):
         if self.action == "enviar_recordatorio_documentos":
@@ -410,6 +435,22 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         contraparte_id = self.request.query_params.get("contraparte")
         if contraparte_id:
             queryset = queryset.filter(contraparte_id=contraparte_id)
+        # ?sociedad=/?proyecto=/?fecha_desde=/?fecha_hasta= (21/Sep/2026, fix
+        # paginacion - mismo criterio que TesoreriaFlujoViewSet: con
+        # pagination_class el cliente ya no tiene todas las filas para
+        # filtrar localmente, se mueven al servidor).
+        sociedad = self.request.query_params.get("sociedad")
+        if sociedad:
+            queryset = queryset.filter(sociedad=sociedad)
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(proyecto__icontains=proyecto)
+        fecha_desde = self.request.query_params.get("fecha_desde")
+        if fecha_desde:
+            queryset = queryset.filter(fecha_generacion__gte=fecha_desde)
+        fecha_hasta = self.request.query_params.get("fecha_hasta")
+        if fecha_hasta:
+            queryset = queryset.filter(fecha_generacion__lte=fecha_hasta)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -3218,6 +3259,7 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
     serializer_class = TesoreriaComplementoPagoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+    pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
         # Ver comentario equivalente en TesoreriaFacturaViewSet.
@@ -3302,6 +3344,7 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     serializer_class = TesoreriaNotaCreditoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+    pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
         # Ver comentario equivalente en TesoreriaFacturaViewSet.
@@ -3908,8 +3951,10 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     campo (CharField plano, sin FK real - ver models.py)."""
 
     serializer_class = TesoreriaSaldoSerializer
-    filter_backends = [SearchFilter]
-    search_fields = ["cuenta"]
+    # ?search= se resuelve a mano en get_queryset (21/Sep/2026, ver abajo) -
+    # sin SearchFilter/search_fields, para no combinarse en AND con el
+    # filtro de sociedad/alias sobre el catalogo de Cuentas.
+    pagination_class = ListadoGrandePagination
 
     def get_permissions(self):
         # reporte_diario es lectura (mismo criterio abierto que list/
@@ -3925,6 +3970,38 @@ class TesoreriaSaldoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         cuenta = self.request.query_params.get("cuenta")
         if cuenta:
             queryset = queryset.filter(cuenta=cuenta)
+        # ?fecha_desde=/?fecha_hasta= (21/Sep/2026, fix paginacion - mismo
+        # criterio que TesoreriaFlujoViewSet/TesoreriaContratoViewSet: con
+        # pagination_class el cliente ya no tiene todas las filas para
+        # filtrar localmente).
+        fecha_desde = self.request.query_params.get("fecha_desde")
+        if fecha_desde:
+            queryset = queryset.filter(fecha__gte=fecha_desde)
+        fecha_hasta = self.request.query_params.get("fecha_hasta")
+        if fecha_hasta:
+            queryset = queryset.filter(fecha__lte=fecha_hasta)
+        # ?sociedad=/?search= (21/Sep/2026, fix paginacion - TesoreriaSaldo.cuenta
+        # es un CharField plano sin FK real a TesoreriaCuenta (ver docstring del
+        # modelo), asi que no se puede filtrar con un join directo. Se resuelve
+        # en 2 queries: primero los id_cuenta_bancaria que hacen match en el
+        # catalogo de Cuentas (por sociedad y/o alias/label), luego
+        # Saldo.objects.filter(cuenta__in=esos_ids) - reemplaza el filtro que
+        # antes vivia del lado del cliente via aliasCuenta().
+        sociedad = self.request.query_params.get("sociedad")
+        search = self.request.query_params.get("search")
+        if sociedad or search:
+            cuentas_qs = TesoreriaCuenta.objects.all()
+            if sociedad:
+                cuentas_qs = cuentas_qs.filter(sociedad=sociedad)
+            if search:
+                cuentas_qs = cuentas_qs.filter(Q(alias__icontains=search) | Q(label__icontains=search))
+            ids_cuenta_match = list(cuentas_qs.values_list("id_cuenta_bancaria", flat=True))
+            if search:
+                # El ID del saldo tambien cuenta como match de busqueda (igual
+                # que antes, del lado del cliente) - union con las cuentas.
+                queryset = queryset.filter(Q(id__icontains=search) | Q(cuenta__in=ids_cuenta_match))
+            else:
+                queryset = queryset.filter(cuenta__in=ids_cuenta_match)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -4060,6 +4137,7 @@ class TesoreriaRecNominaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     serializer_class = TesoreriaRecNominaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "nom_receptor_num_empleado"]
+    pagination_class = ListadoGrandePagination
 
     def get_permissions(self):
         if self.action == "subir_comprobante":
