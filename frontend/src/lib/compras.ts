@@ -114,6 +114,21 @@ export async function listSolicitudesCompra(params?: {
   return response.json();
 }
 
+// Evidencia fotografica real de una Recepcion (21/Sep/2026, "falta el
+// componente de tomar fotos") - sube a Drive via drive-service, mismo
+// patron que subirComprobanteFlujo en lib/tesoreria.ts.
+export async function subirEvidenciaRecepcion(idRecepcion: string, archivo: File): Promise<Recepcion> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch(
+    "COMPRAS",
+    `${COMPRAS_API_BASE_URL}/api/recepciones/${idRecepcion}/subir_evidencia/`,
+    { method: "POST", body: formData }
+  );
+  if (!response.ok) throw await friendlyApiError("COMPRAS", response);
+  return response.json();
+}
+
 export async function createSolicitudCompra(params: {
   proyecto: string;
   requisicion?: string | null;

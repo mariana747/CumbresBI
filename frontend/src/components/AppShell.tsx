@@ -382,6 +382,12 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         // la compra, distinto de
         // "Materiales" (esa es solo el catalogo + salida de almacen).
         { label: "Requisiciones", href: "/obra/requisiciones", icon: ClipboardList },
+        // Recepciones (21/Sep/2026, "recibir cemento o una silla van
+        // dirigidos a diferentes lugares") - misma pantalla que en
+        // Compras (/compras/recepciones), con entrada tambien aqui porque
+        // quien recibe material de obra no necesariamente entra por
+        // Compras.
+        { label: "Recepciones", href: "/compras/recepciones", icon: Truck },
       ],
     });
   }
