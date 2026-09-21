@@ -1,3 +1,5 @@
+"use client";
+
 import { Box, Container, Link, Paper, Stack, Typography } from "@mui/material";
 import { Footer } from "@/components/Footer";
 import { PublicNavbar } from "@/components/PublicNavbar";
