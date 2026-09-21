@@ -27,6 +27,7 @@ from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from . import google_sheets_utils, recaptcha
 from .audit_utils import emitir_evento_auditoria
+from .pagination import ListadoGrandePagination
 from .mail_utils import (
     enviar_correo_aviso_saldo_ppd,
     enviar_correo_documento_faltante,
@@ -848,6 +849,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     serializer_class = TesoreriaFlujoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["id_flujo", "concepto"]
+    pagination_class = ListadoGrandePagination
 
     # Whitelist de columnas que confirmar_conciliacion puede escribir - mismo
     # criterio que TesoreriaFacturaViewSet.CAMPOS_CONFIRMABLES: la IA
@@ -924,6 +926,18 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         id_empleado = self.request.query_params.get("id_empleado")
         if id_empleado:
             queryset = queryset.filter(id_empleado=id_empleado)
+        # ?fecha_desde=/?fecha_hasta= (20/Sep/2026, fix 503 en produccion -
+        # la tabla crecio con la migracion de datos legacy y el listado sin
+        # paginar tumbaba el contenedor de Cloud Run). Se filtran aqui, no
+        # en el cliente, porque con paginacion el cliente ya no tiene todas
+        # las filas para filtrar localmente (mismo criterio que
+        # TesoreriaFacturaViewSet.get_queryset).
+        fecha_desde = self.request.query_params.get("fecha_desde")
+        if fecha_desde:
+            queryset = queryset.filter(fecha_efectiva__gte=fecha_desde)
+        fecha_hasta = self.request.query_params.get("fecha_hasta")
+        if fecha_hasta:
+            queryset = queryset.filter(fecha_efectiva__lte=fecha_hasta)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -2698,6 +2712,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     serializer_class = TesoreriaFacturaSerializer
     filter_backends = [SearchFilter]
     search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+    pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
         # Filtro ?contraparte=<id> desde la "vista por proveedor" en la
@@ -2738,7 +2753,14 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         # en 2 queries en vez de 2 por factura (18/Sep/2026, hallazgo real
         # post-migracion de datos legacy: N+1 tronaba por timeout con
         # volumen real - ver comentario en TesoreriaFacturaSerializer.get_conceptos).
-        facturas = list(self.filter_queryset(self.get_queryset()))
+        # 20/Sep/2026: se pagina ANTES del batch-prefetch (self.paginate_queryset
+        # ya aplica LIMIT/OFFSET) - el batch-prefetch por si solo evitaba el N+1
+        # pero seguia serializando la tabla completa en una sola respuesta, que
+        # es lo que de verdad tumbaba el contenedor en Cloud Run con volumen real
+        # (mismo fix que TesoreriaFlujoViewSet, ver pagination.ListadoGrandePagination).
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        facturas = page if page is not None else list(queryset)
         uuids = [f.timbre_uuid for f in facturas if f.timbre_uuid]
 
         conceptos_por_uuid = defaultdict(list)
@@ -2758,6 +2780,8 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         context["conceptos_por_uuid"] = conceptos_por_uuid
         context["saldo_por_uuid"] = saldo_por_uuid
         serializer = self.get_serializer(facturas, many=True, context=context)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
     @action(detail=False, methods=["get"])
@@ -2765,7 +2789,8 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         """Exportar a CSV (09/Sep/2026, pendiente real de negocio) - mismos
         filtros que la lista (search + combinados, via filter_queryset),
         para exportar exactamente lo que el analista ya esta viendo en
-        pantalla, no todo el catalogo."""
+        pantalla, no todo el catalogo (sin paginar - exportar_csv sigue
+        iterando el queryset completo a proposito, 20/Sep/2026)."""
         queryset = self.filter_queryset(self.get_queryset())
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="facturas.csv"'

@@ -553,8 +553,8 @@ class TesoreriaFlujoTests(TestCase):
         request2 = self.factory.get("/api/flujos/", {"sociedad": RFC_TIZARA})
         request2.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
         response2 = TesoreriaFlujoViewSet.as_view({"get": "list"})(request2)
-        self.assertEqual(len(response2.data), 1)
-        self.assertEqual(response2.data[0]["contrato"], self.contrato.id_contrato)
+        self.assertEqual(len(response2.data["results"]), 1)
+        self.assertEqual(response2.data["results"][0]["contrato"], self.contrato.id_contrato)
 
     def test_id_flujo_se_genera_con_consecutivo(self):
         response = self._crear_flujo()
@@ -571,7 +571,7 @@ class TesoreriaFlujoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_CAPITAL,))
         view = TesoreriaFlujoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(len(response.data["results"]), 0)
 
     def test_ver_comprobante_sin_drive_file_id_da_404(self):
         response = self._crear_flujo()
@@ -620,8 +620,8 @@ class TesoreriaFlujoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, centro_ids=("OBRA",))
         view = TesoreriaFlujoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["contrato"], contrato_obra.id_contrato)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["contrato"], contrato_obra.id_contrato)
 
     def test_usuario_con_acceso_a_un_contrato_ve_solo_sus_flujos(self):
         # 31/Ago/2026: SCOPE_FIELD_CONTRATO recien declarado.
@@ -631,12 +631,12 @@ class TesoreriaFlujoTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, contrato_ids=(self.contrato.id_contrato,))
         view = TesoreriaFlujoViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data["results"]), 1)
 
         request2 = self.factory.get("/api/flujos/")
         request2.effective_scope = EffectiveScope(is_global=False, contrato_ids=("otro-contrato-que-no-existe",))
         response2 = view(request2)
-        self.assertEqual(len(response2.data), 0)
+        self.assertEqual(len(response2.data["results"]), 0)
 
     def test_no_se_puede_pagar_sin_autorizar_primero(self):
         creado = self._crear_flujo()
@@ -1594,7 +1594,7 @@ class TesoreriaFacturaFiltrosCombinadosTests(TestCase):
         view = TesoreriaFacturaViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
-        return {f["timbre_uuid"] for f in response.data}
+        return {f["timbre_uuid"] for f in response.data["results"]}
 
     def test_filtro_por_proveedor(self):
         self.assertEqual(self._listar(contraparte=self.contraparte_a.id_contraparte), {"uuid-filtro-1"})
@@ -2555,8 +2555,8 @@ class TesoreriaContraparteVistaPorProveedorTests(TestCase):
         request.effective_scope = EffectiveScope.anonymous()
         view = TesoreriaFacturaViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["timbre_uuid"], "uuid-vinc-5")
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["timbre_uuid"], "uuid-vinc-5")
 
     def test_filtro_por_contraparte_en_complementos_pago(self):
         TesoreriaComplementoPago.objects.create(timbre_uuid="uuid-comp-vinc-1", folio="C-1", contraparte=self.proveedor)
