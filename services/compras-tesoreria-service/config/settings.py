@@ -128,3 +128,20 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # configurarlo explicitamente en ambos lados (ver .env.example).
 MATERIALES_SERVICE_URL = env("MATERIALES_SERVICE_URL", default="http://materiales-service:8080")
 MATERIALES_INTERNAL_SECRET = env("MATERIALES_INTERNAL_SECRET", default="")
+
+# Direccion contraria (21/Sep/2026): al autorizar una Requisicion,
+# materiales-service crea aqui la SolicitudCompra correspondiente
+# (SolicitudCompraViewSet.crear_desde_requisicion). Mismo criterio de
+# secreto compartido que MATERIALES_INTERNAL_SECRET arriba, solo que este
+# lo valida compras-tesoreria-service en vez de materiales-service.
+COMPRAS_INTERNAL_SECRET = env("COMPRAS_INTERNAL_SECRET", default="")
+
+# drive-service - evidencia fotografica real de una Recepcion (21/Sep/2026,
+# "falta el componente de tomar fotos"), ver RecepcionViewSet.subir_evidencia.
+# Mismo default de desarrollo que tesoreria-service/pld-service. Sin carpeta
+# propia dada de alta en DRIVE_MODULE_FOLDER_IDS todavia - drive-service cae
+# al fallback de la Unidad compartida CumbresBI con la subcarpeta
+# convencional "Compras/...". No se usa DRIVE_INTERNAL_SECRET aqui: quien
+# sube la evidencia es el propio usuario autenticado con compras.crear, no
+# una llamada servicio-a-servicio sin sesion real.
+DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")

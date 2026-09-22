@@ -174,12 +174,18 @@ class OrdenCompra(models.Model):
     ESTADO_RECIBIDA_PARCIAL = "RECIBIDA_PARCIAL"
     ESTADO_RECIBIDA_TOTAL = "RECIBIDA_TOTAL"
     ESTADO_CANCELADA = "CANCELADA"
+    # CERRADA_CON_FALTANTE (21/Sep/2026, "y que pasa si llega menos de lo
+    # esperado") - antes una orden con faltante definitivo (el proveedor ya
+    # no va a mandar el resto) se quedaba en RECIBIDA_PARCIAL para siempre,
+    # sin forma de cerrarla; ver OrdenCompraViewSet.cerrar_con_faltante.
+    ESTADO_CERRADA_CON_FALTANTE = "CERRADA_CON_FALTANTE"
     ESTADO_CHOICES = [
         (ESTADO_BORRADOR, "Borrador"),
         (ESTADO_ENVIADA, "Enviada al proveedor"),
         (ESTADO_RECIBIDA_PARCIAL, "Recibida parcial"),
         (ESTADO_RECIBIDA_TOTAL, "Recibida total"),
         (ESTADO_CANCELADA, "Cancelada"),
+        (ESTADO_CERRADA_CON_FALTANTE, "Cerrada con faltante"),
     ]
 
     id_orden = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)

@@ -7,6 +7,7 @@ import {
   Box,
   Button,
   CircularProgress,
+  Link,
   Paper,
   Stack,
   Table,
@@ -17,11 +18,21 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
-import { Truck } from "lucide-react";
+import { Camera, ImagePlus, Truck } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import EscanerDocumento from "@/components/EscanerDocumento";
 import { SessionUser, getSession } from "@/lib/auth";
-import { OrdenCompra, Recepcion, createRecepcion, listOrdenesCompra, listRecepciones } from "@/lib/compras";
+import {
+  OrdenCompra,
+  Recepcion,
+  createRecepcion,
+  listOrdenesCompra,
+  listRecepciones,
+  subirEvidenciaRecepcion,
+} from "@/lib/compras";
 
 type CantidadPorLinea = Record<string, string>;
 
@@ -30,6 +41,8 @@ type CantidadPorLinea = Record<string, string>;
 // backend valida que no se reciba mas de lo que falta por linea (ver
 // RecepcionViewSet.create en views.py).
 export default function RecepcionesPage() {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [session, setSession] = useState<SessionUser | null>(null);
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([]);
   const [ordenSeleccionada, setOrdenSeleccionada] = useState<OrdenCompra | null>(null);
@@ -40,6 +53,12 @@ export default function RecepcionesPage() {
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Evidencia fotografica (21/Sep/2026, "falta el componente de tomar
+  // fotos") - mismo patron que MiCumbres > Tickets: la foto pasa por
+  // EscanerDocumento antes de quedar lista para subir; se sube DESPUES de
+  // registrar la recepcion (necesita su id_recepcion).
+  const [evidencia, setEvidencia] = useState<File | null>(null);
+  const [fotoParaEscanear, setFotoParaEscanear] = useState<File | null>(null);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -50,7 +69,7 @@ export default function RecepcionesPage() {
   useEffect(() => {
     setLoading(true);
     listOrdenesCompra()
-      .then((data) => setOrdenes(data.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA")))
+      .then((data) => setOrdenes(data.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA" && o.estado !== "CERRADA_CON_FALTANTE")))
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }, []);
@@ -79,19 +98,34 @@ export default function RecepcionesPage() {
       setError("Captura al menos una cantidad recibida.");
       return;
     }
+    if (!evidencia) {
+      setError("Sube la evidencia fotográfica antes de registrar la recepción.");
+      return;
+    }
     setGuardando(true);
     setError(null);
     try {
-      await createRecepcion({ orden: ordenSeleccionada.id_orden, fecha, hora: `${hora}:00`, lineas });
+      const nueva = await createRecepcion({ orden: ordenSeleccionada.id_orden, fecha, hora: `${hora}:00`, lineas });
+      if (evidencia) {
+        // Fail-open a proposito: si la subida a Drive falla, la recepcion
+        // ya quedo registrada - no se pierde el trabajo de capturar
+        // cantidades por un problema de red al subir la foto.
+        try {
+          await subirEvidenciaRecepcion(nueva.id_recepcion, evidencia);
+        } catch (err) {
+          setError(err instanceof Error ? `Recepción registrada, pero no se pudo subir la evidencia: ${err.message}` : "No se pudo subir la evidencia.");
+        }
+      }
       const [ordenesActualizadas, recepcionesActualizadas] = await Promise.all([
         listOrdenesCompra(),
         listRecepciones(ordenSeleccionada.id_orden),
       ]);
       const actualizada = ordenesActualizadas.find((o) => o.id_orden === ordenSeleccionada.id_orden) || null;
-      setOrdenes(ordenesActualizadas.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA"));
+      setOrdenes(ordenesActualizadas.filter((o) => o.estado !== "RECIBIDA_TOTAL" && o.estado !== "CANCELADA" && o.estado !== "CERRADA_CON_FALTANTE"));
       setOrdenSeleccionada(actualizada);
       setRecepciones(recepcionesActualizadas);
       setCantidades({});
+      setEvidencia(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
@@ -230,14 +264,52 @@ export default function RecepcionesPage() {
                     })}
                   </Stack>
                   {puedeCrear && (
-                    <Button
-                      sx={{ mt: 2 }}
-                      variant="contained"
-                      disabled={guardando}
-                      onClick={handleRegistrar}
-                    >
-                      {guardando ? <CircularProgress size={20} /> : "Registrar recepción"}
-                    </Button>
+                    <>
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 2 }}>
+                        {esMovil && (
+                          <Button component="label" variant="outlined" startIcon={<Camera size={16} strokeWidth={1.5} />}>
+                            Tomar foto
+                            <input
+                              type="file"
+                              hidden
+                              accept="image/*"
+                              capture="environment"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] ?? null;
+                                setFotoParaEscanear(f);
+                                e.target.value = "";
+                              }}
+                            />
+                          </Button>
+                        )}
+                        <Button component="label" variant="outlined" startIcon={<ImagePlus size={16} strokeWidth={1.5} />}>
+                          Evidencia (requerida)
+                          <input
+                            type="file"
+                            hidden
+                            accept="image/*"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] ?? null;
+                              setFotoParaEscanear(f);
+                              e.target.value = "";
+                            }}
+                          />
+                        </Button>
+                      </Stack>
+                      {evidencia && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                          Evidencia lista: {evidencia.name}
+                        </Typography>
+                      )}
+                      <Button
+                        sx={{ mt: 2 }}
+                        variant="contained"
+                        disabled={guardando || !evidencia}
+                        onClick={handleRegistrar}
+                      >
+                        {guardando ? <CircularProgress size={20} /> : "Registrar recepción"}
+                      </Button>
+                    </>
                   )}
                 </>
               )}
@@ -253,6 +325,7 @@ export default function RecepcionesPage() {
                         <TableCell>Fecha</TableCell>
                         <TableCell>Hora</TableCell>
                         <TableCell>Recibido por</TableCell>
+                        <TableCell>Evidencia</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -261,6 +334,15 @@ export default function RecepcionesPage() {
                           <TableCell>{r.fecha}</TableCell>
                           <TableCell>{r.hora}</TableCell>
                           <TableCell>{r.recibido_por || "—"}</TableCell>
+                          <TableCell>
+                            {r.link_drive ? (
+                              <Link href={r.link_drive} target="_blank" rel="noopener noreferrer">
+                                Ver
+                              </Link>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -271,6 +353,16 @@ export default function RecepcionesPage() {
           )}
         </Stack>
       )}
+
+      <EscanerDocumento
+        open={!!fotoParaEscanear}
+        archivo={fotoParaEscanear}
+        onCancelar={() => setFotoParaEscanear(null)}
+        onConfirmar={(archivo) => {
+          setEvidencia(archivo);
+          setFotoParaEscanear(null);
+        }}
+      />
     </AppShell>
   );
 }

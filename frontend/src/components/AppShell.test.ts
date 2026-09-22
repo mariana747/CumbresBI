@@ -139,20 +139,20 @@ describe("buildNavItems - Ventas / Vivienda", () => {
 
 // Materiales vive en Obra - antes colgaba de Ventas/Vivienda; ver AppShell.tsx.
 //
-// OCULTO del nav mientras Tesoreria es prioridad: Obra/Compras/RRHH se
-// ocultan del sidebar sin tocar backend/rutas, ver el "false &&" en
-// AppShell.tsx. El test de abajo
-// se invierte mientras dure: confirma que el apartado NO aparece pase lo
-// que pase el permiso. Revertir junto con el "false &&" de AppShell.tsx.
-describe("buildNavItems - Obra (oculto temporalmente, prioridad Tesorería)", () => {
-  it("ningun perm de obra/materiales muestra el apartado mientras esta oculto", () => {
+// Ya no esta detras de un "false &&" en AppShell.tsx (se reactivo en algun
+// punto sin actualizar este test, hallazgo 21/Sep/2026 al reactivar
+// Compras) - mismo patron positivo que Tesorería/RRHH/Compras abajo.
+describe("buildNavItems - Obra", () => {
+  it("algun perm de obra/materiales muestra el apartado", () => {
     for (const roleKey of Object.keys(ROLES)) {
       const tieneAlguno = ROLES[roleKey].some(
         (p) => p.startsWith("obra.") || p.startsWith("materiales.")
       );
       if (!tieneAlguno) continue;
       const items = buildNavItems(sesionDe(roleKey));
-      expect(buscar(items, "/obra/avance"), `${roleKey} NO deberia ver Obra (oculto)`).toBeUndefined();
+      const obra = buscar(items, "/obra/avance");
+      expect(obra, `${roleKey} deberia ver Obra`).toBeDefined();
+      expect(obra?.enabled).toBe(true);
     }
   });
 
@@ -196,6 +196,7 @@ describe("buildNavItems - Tesorería", () => {
         "Notas de Crédito",
         "Recibos de Nómina",
         "Conciliación de Facturas",
+        "Conciliación de Nómina",
         "Cuentas Bancarias",
         "Contrapartes",
         "Contratos",
@@ -232,6 +233,29 @@ describe("buildNavItems - RRHH y Talento", () => {
   });
 });
 
+// Compras (21/Sep/2026, reactivado - ver AppShell.tsx: "como van a usar
+// los demas [Compras] si esta oculto" - sin el menu nadie llegaba a estas
+// pantallas salvo escribiendo la URL a mano).
+describe("buildNavItems - Compras", () => {
+  it("algun perm de compras.* muestra el apartado con sus pantallas", () => {
+    for (const roleKey of Object.keys(ROLES)) {
+      const tieneAlguno = ROLES[roleKey].some((p) => p.startsWith("compras."));
+      if (!tieneAlguno) continue;
+      const items = buildNavItems(sesionDe(roleKey));
+      const compras = buscar(items, "/compras/solicitudes");
+      expect(compras, `${roleKey} deberia ver Compras`).toBeDefined();
+      expect(compras?.enabled).toBe(true);
+      const labels = hijos(compras).map((c) => c.label);
+      expect(labels).toEqual(["Solicitudes", "Cotizaciones", "Órdenes de Compra", "Recepciones"]);
+    }
+  });
+
+  it("sin compras.* no aparece el apartado", () => {
+    const items = buildNavItems(sesionDe("RRHH_ADMIN"));
+    expect(buscar(items, "/compras/solicitudes")).toBeUndefined();
+  });
+});
+
 describe("buildNavItems - siempre presentes", () => {
   it("Panel y MiCumbres aparecen para cualquier rol", () => {
     for (const roleKey of Object.keys(ROLES)) {
@@ -260,7 +284,10 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
     "pld-compliance": "/pld",
     contrapartes: "/tesoreria/contrapartes",
     "ventas-vivienda": "/ventas-vivienda/proyectos",
-    materiales: "/ventas-vivienda/proyectos",
+    // "obra"/"materiales" viven juntos en el apartado "Obra" (21/Ago/2026 +
+    // 18/Sep/2026 traspaso de Materiales desde Ventas/Vivienda).
+    obra: "/obra/avance",
+    materiales: "/obra/materiales",
     tesoreria: "/tesoreria/contrapartes",
     "facturacion-cfdi": "/tesoreria/contrapartes",
     // "compras" ya tiene apartado real (02/Sep/2026, Fase 4B) - ver
@@ -272,13 +299,12 @@ describe("buildNavItems - servicios sin apartado dueno (hallazgo, en rojo a prop
 
   const SIN_DUEÑO_A_PROPOSITO = new Set(["tickets", "rentas"]);
 
-  // Ocultos temporalmente del nav (08/Sep/2026, prioridad Tesorería) - SI
-  // tienen apartado real en AppShell.tsx (obra/materiales -> "Obra",
-  // compras -> "Compras"), solo esta detras de un "false &&" mientras dura
-  // la prioridad. "rrhh" ya se reactivo (11/Sep/2026), se quita de aqui.
-  // Quitar el resto de esta lista junto con su "false &&" cuando se
-  // reactiven.
-  const OCULTOS_TEMPORALMENTE = new Set(["obra", "materiales", "compras"]);
+  // Ocultos temporalmente del nav (08/Sep/2026, prioridad Tesorería) - vacio
+  // ahora: "rrhh" (11/Sep/2026), "obra"/"materiales" (hallazgo 21/Sep/2026,
+  // ya estaban activos sin que este test se actualizara) y "compras"
+  // (21/Sep/2026) ya se reactivaron. Reagregar aqui el que se vuelva a
+  // ocultar tras un "false &&" en AppShell.tsx.
+  const OCULTOS_TEMPORALMENTE = new Set<string>([]);
 
   it("todo servicio de la matriz tiene un apartado dueno en el sidebar (o esta en SIN_DUEÑO_A_PROPOSITO)", () => {
     const sinDueno: string[] = [];

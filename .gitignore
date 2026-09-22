@@ -91,3 +91,4 @@ services/document-intelligence-service/Maria/
 # Excepcion a la excepcion: este no debe subirse nunca (instruccion de
 # Mariana, 12/Ago/2026), aunque viva dentro de docs/architecture/.
 docs/architecture/CumbresBI_Onboarding_Desarrollador.md
+docs/*.sql

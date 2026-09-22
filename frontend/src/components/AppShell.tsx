@@ -382,6 +382,12 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         // la compra, distinto de
         // "Materiales" (esa es solo el catalogo + salida de almacen).
         { label: "Requisiciones", href: "/obra/requisiciones", icon: ClipboardList },
+        // Recepciones (21/Sep/2026, "recibir cemento o una silla van
+        // dirigidos a diferentes lugares") - misma pantalla que en
+        // Compras (/compras/recepciones), con entrada tambien aqui porque
+        // quien recibe material de obra no necesariamente entra por
+        // Compras.
+        { label: "Recepciones", href: "/compras/recepciones", icon: Truck },
       ],
     });
   }
@@ -392,9 +398,11 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // cotizacion -> orden -> recepcion), aunque comparte el catalogo de
   // proveedores (tesoreria_contrapartes) via ContraparteSelector.
   //
-  // OCULTO del nav (08/Sep/2026, misma decision de arriba) - quitar el
-  // "false &&" para reactivar cuando Tesoreria este cerrada.
-  if (false && tieneAlgunPermiso(session, ["compras"])) {
+  // Reactivado (21/Sep/2026, "como van a usar los demas [Compras] si esta
+  // oculto") - la conexion real Requisicion->SolicitudCompra ya existe
+  // (autorizar crea la Solicitud sola), sin el menu nadie del equipo de
+  // Compras podia llegar a estas pantallas salvo escribiendo la URL a mano.
+  if (tieneAlgunPermiso(session, ["compras"])) {
     items.push({
       label: "Compras",
       href: "/compras/solicitudes",
