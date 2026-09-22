@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { alpha } from "@mui/material/styles";
 import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -24,11 +26,14 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
-import { FileSearch, Plus, Sparkles, Trash2 } from "lucide-react";
+import { FileSearch, Plus, Scale, Sparkles, Trash2, X as CloseIcon } from "lucide-react";
 import ContraparteSelector from "@/components/ContraparteSelector";
 import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
@@ -72,11 +77,14 @@ const CAMPOS_CONFIRMABLES = [
 
 type LineaForm = { descripcion: string; cantidad: string; precio_unitario: string; importe: string };
 
+type CeldaComparacion = { cantidad: number; precioUnitario: number; importe: number } | null;
+
 /** Arma la matriz de comparación: una fila por descripción de material
  * (agrupada por texto normalizado para alinear la misma partida entre
- * proveedores), una columna por cotización activa (no descartada). Solo
- * informativa - no cambia el modelo ni pre-selecciona nada, ver memoria
- * "auditoria-compras-automatizacion-cotizaciones". */
+ * proveedores), una columna por cotización activa (no descartada), con
+ * cantidad/precio unitario/importe de cada una (22/Sep/2026, antes solo
+ * mostraba precio unitario). Solo informativa - no cambia el modelo ni
+ * pre-selecciona nada, ver memoria "auditoria-compras-automatizacion-cotizaciones". */
 function armarFilasComparacion(cotizaciones: Cotizacion[]) {
   const descripciones: string[] = [];
   const vistos = new Set<string>();
@@ -91,9 +99,11 @@ function armarFilasComparacion(cotizaciones: Cotizacion[]) {
   }
   return descripciones.map((descripcion) => ({
     descripcion,
-    porCotizacion: cotizaciones.map((c) => {
+    porCotizacion: cotizaciones.map((c): CeldaComparacion => {
       const linea = c.lineas.find((l) => l.descripcion.trim().toLowerCase() === descripcion.toLowerCase());
-      return linea ? Number(linea.precio_unitario) : null;
+      return linea
+        ? { cantidad: Number(linea.cantidad), precioUnitario: Number(linea.precio_unitario), importe: Number(linea.importe) }
+        : null;
     }),
   }));
 }
@@ -101,6 +111,10 @@ function armarFilasComparacion(cotizaciones: Cotizacion[]) {
 function menorValor(valores: Array<number | null>): number | null {
   const validos = valores.filter((v): v is number => v !== null && !Number.isNaN(v));
   return validos.length ? Math.min(...validos) : null;
+}
+
+function formatoMoneda(valor: number): string {
+  return valor.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
 
 // Extraido de compras/cotizaciones/page.tsx (21/Sep/2026, "que sean en una
@@ -134,6 +148,14 @@ export default function CotizacionesPanel({
   const [proveedorNombre, setProveedorNombre] = useState("");
   const [guardando, setGuardando] = useState(false);
 
+  // Comparar cotizaciones (22/Sep/2026) - ya no se agrupa/muestra sola por
+  // solicitud (antes con 2+ cotizaciones activas en la misma solicitud
+  // aparecia automatico); ahora es un boton manual que abre una ventana
+  // emergente donde el usuario elige cuales cotizaciones comparar, de
+  // cualquier solicitud.
+  const [compararOpen, setCompararOpen] = useState(false);
+  const [seleccionadasComparar, setSeleccionadasComparar] = useState<Set<string>>(new Set());
+
   const [motorCotizacion, setMotorCotizacion] = useState<Cotizacion | null>(null);
   const [lineasCotizacion, setLineasCotizacion] = useState<Record<string, LineaForm[]>>({});
 
@@ -143,6 +165,15 @@ export default function CotizacionesPanel({
 
   const puedeCrear = (session?.perm_keys.includes("compras.crear") ?? false) && !soloLectura;
   const puedeAprobar = (session?.perm_keys.includes("compras.aprobar") ?? false) && !soloLectura;
+  // Editar/agregar/quitar lineas y "Guardar lineas" ahora exigen
+  // puedeAprobar, no solo !soloLectura (22/Sep/2026, bug real: un usuario
+  // sin compras.aprobar - ej. Compliance Officer con acceso de solo
+  // consulta - llega a /compras/cotizaciones (soloLectura siempre false
+  // ahi, es la pantalla completa) y veia los botones de editar/borrar
+  // lineas aunque no tuviera permiso para usarlos). puedeAprobar y no
+  // puedeCrear porque "Guardar lineas" llama confirmar_extraccion, que en
+  // el backend exige compras.aprobar (CotizacionViewSet.get_permissions),
+  // el mismo endpoint que usa la confirmacion del Motor Documental.
 
   function recargar() {
     setLoading(true);
@@ -230,6 +261,25 @@ export default function CotizacionesPanel({
     }
   }
 
+  // Cotizaciones elegibles para comparar (activas) - de cualquier
+  // solicitud, el usuario elige cuales dentro de la ventana emergente.
+  const cotizacionesComparables = cotizaciones.filter((c) => c.estado !== "DESCARTADA");
+  const cotizacionesSeleccionadas = cotizacionesComparables.filter((c) => seleccionadasComparar.has(c.id_cotizacion));
+
+  function toggleSeleccionComparar(idCotizacion: string) {
+    setSeleccionadasComparar((prev) => {
+      const next = new Set(prev);
+      if (next.has(idCotizacion)) next.delete(idCotizacion);
+      else next.add(idCotizacion);
+      return next;
+    });
+  }
+
+  function cerrarComparar() {
+    setCompararOpen(false);
+    setSeleccionadasComparar(new Set());
+  }
+
   return (
     <Box>
       {mostrarEncabezado && (
@@ -255,7 +305,40 @@ export default function CotizacionesPanel({
       )}
 
       {!soloLectura && (
-        <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por proveedor...">
+        <FiltrosBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Buscar por proveedor..."
+          actions={
+            // wrap en tablet/angosto (22/Sep/2026) - con Nueva Cotizacion +
+            // Comparar cotizaciones juntos, la fila fija de FiltrosBar
+            // (flexShrink: 0) se salia del ancho en tablet; envueltos en su
+            // propio Stack con flexWrap se acomodan en 2 lineas antes de
+            // desbordar.
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+              {solicitudId && puedeCrear && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<Plus size={14} strokeWidth={2} />}
+                  onClick={() => setDialogOpen(true)}
+                >
+                  Nueva Cotización
+                </Button>
+              )}
+              {cotizacionesComparables.length >= 2 && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<Scale size={14} strokeWidth={2} />}
+                  onClick={() => setCompararOpen(true)}
+                >
+                  Comparar cotizaciones
+                </Button>
+              )}
+            </Stack>
+          }
+        >
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel id="filtro-estado-cotizacion-label">Filtrar por estado</InputLabel>
             <Select
@@ -283,26 +366,6 @@ export default function CotizacionesPanel({
         </Stack>
       ) : (
         <Stack spacing={2}>
-          {solicitudId && puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={() => setDialogOpen(true)}
-              sx={{ alignSelf: "flex-start" }}
-            >
-              Nueva Cotización
-            </Button>
-          )}
-
-          {solicitudId && cotizaciones.filter((c) => c.estado !== "DESCARTADA").length >= 2 && (
-            <ComparacionCotizaciones
-              cotizaciones={cotizaciones.filter((c) => c.estado !== "DESCARTADA")}
-              puedeAprobar={puedeAprobar}
-              onSeleccionar={handleGenerarOrden}
-            />
-          )}
-
           {cotizaciones.length === 0 && (
             <Paper variant="outlined" sx={{ p: 3, textAlign: "center" }}>
               <Typography variant="body2" color="text.secondary">
@@ -367,7 +430,7 @@ export default function CotizacionesPanel({
                               variant="standard"
                               value={linea.descripcion}
                               onChange={(e) => actualizarLinea(c.id_cotizacion, index, "descripcion", e.target.value)}
-                              disabled={soloLectura}
+                              disabled={!puedeAprobar}
                               fullWidth
                             />
                           </TableCell>
@@ -377,7 +440,7 @@ export default function CotizacionesPanel({
                               variant="standard"
                               value={linea.cantidad}
                               onChange={(e) => actualizarLinea(c.id_cotizacion, index, "cantidad", e.target.value)}
-                              disabled={soloLectura}
+                              disabled={!puedeAprobar}
                               sx={{ width: 80 }}
                             />
                           </TableCell>
@@ -389,7 +452,7 @@ export default function CotizacionesPanel({
                               onChange={(e) =>
                                 actualizarLinea(c.id_cotizacion, index, "precio_unitario", e.target.value)
                               }
-                              disabled={soloLectura}
+                              disabled={!puedeAprobar}
                               sx={{ width: 100 }}
                             />
                           </TableCell>
@@ -399,12 +462,12 @@ export default function CotizacionesPanel({
                               variant="standard"
                               value={linea.importe}
                               onChange={(e) => actualizarLinea(c.id_cotizacion, index, "importe", e.target.value)}
-                              disabled={soloLectura}
+                              disabled={!puedeAprobar}
                               sx={{ width: 100 }}
                             />
                           </TableCell>
                           <TableCell align="right">
-                            {!soloLectura && (
+                            {puedeAprobar && (
                               <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
                                 <Trash2 size={14} strokeWidth={2} />
                               </IconButton>
@@ -422,7 +485,7 @@ export default function CotizacionesPanel({
               <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" } }}>
                 {(lineasCotizacion[c.id_cotizacion] || []).map((linea, index) => (
                   <Paper key={index} variant="outlined" sx={{ p: 1.5 }}>
-                    {!soloLectura && (
+                    {puedeAprobar && (
                       <Stack direction="row" justifyContent="flex-end">
                         <IconButton size="small" onClick={() => quitarLinea(c.id_cotizacion, index)}>
                           <Trash2 size={14} strokeWidth={2} />
@@ -435,7 +498,7 @@ export default function CotizacionesPanel({
                         size="small"
                         value={linea.descripcion}
                         onChange={(e) => actualizarLinea(c.id_cotizacion, index, "descripcion", e.target.value)}
-                        disabled={soloLectura}
+                        disabled={!puedeAprobar}
                         fullWidth
                       />
                       <Stack direction="row" spacing={1}>
@@ -444,7 +507,7 @@ export default function CotizacionesPanel({
                           size="small"
                           value={linea.cantidad}
                           onChange={(e) => actualizarLinea(c.id_cotizacion, index, "cantidad", e.target.value)}
-                          disabled={soloLectura}
+                          disabled={!puedeAprobar}
                           fullWidth
                         />
                         <TextField
@@ -454,7 +517,7 @@ export default function CotizacionesPanel({
                           onChange={(e) =>
                             actualizarLinea(c.id_cotizacion, index, "precio_unitario", e.target.value)
                           }
-                          disabled={soloLectura}
+                          disabled={!puedeAprobar}
                           fullWidth
                         />
                       </Stack>
@@ -463,14 +526,14 @@ export default function CotizacionesPanel({
                         size="small"
                         value={linea.importe}
                         onChange={(e) => actualizarLinea(c.id_cotizacion, index, "importe", e.target.value)}
-                        disabled={soloLectura}
+                        disabled={!puedeAprobar}
                         fullWidth
                       />
                     </Stack>
                   </Paper>
                 ))}
               </Stack>
-              {!soloLectura && (
+              {puedeAprobar && (
                 <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
                   <Button size="small" onClick={() => agregarLinea(c.id_cotizacion)}>
                     + Línea
@@ -512,6 +575,91 @@ export default function CotizacionesPanel({
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={compararOpen}
+        onClose={(_, reason) => {
+          // Solo se cierra con el boton X (mismo criterio que
+          // PanelReferenciaCruzada - "las pantallas flotantes deben tener
+          // esto de solo cerrar con la x").
+          if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+          cerrarComparar();
+        }}
+        fullWidth
+        maxWidth="lg"
+        // Dialog mas ancho que el tope global de 900px del tema (22/Sep/2026,
+        // "haz la pestaña emergente mas grande") - con 3+ proveedores de 3
+        // columnas cada uno, 900px se quedaba corto y forzaba mucho scroll
+        // horizontal. Solo esta ventana lo necesita, no se toca el tema.
+        sx={{ "& .MuiDialog-paper": { maxWidth: "1400px" } }}
+      >
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <span>Comparar cotizaciones</span>
+            <IconButton size="small" aria-label="Cerrar" onClick={cerrarComparar}>
+              <CloseIcon size={18} strokeWidth={1.5} />
+            </IconButton>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Elige 2 o más cotizaciones (de cualquier solicitud) para compararlas lado a lado.
+          </Typography>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", sm: "repeat(auto-fit, minmax(220px, 1fr))" },
+              gap: 1.5,
+              mb: 3,
+            }}
+          >
+            {cotizacionesComparables.map((c) => {
+              const seleccionada = seleccionadasComparar.has(c.id_cotizacion);
+              return (
+                <Paper
+                  key={c.id_cotizacion}
+                  variant="outlined"
+                  onClick={() => toggleSeleccionComparar(c.id_cotizacion)}
+                  sx={{
+                    p: 1.5,
+                    cursor: "pointer",
+                    borderColor: seleccionada ? "success.main" : undefined,
+                    borderWidth: seleccionada ? 2 : 1,
+                    bgcolor: seleccionada ? "rgba(46, 125, 50, 0.08)" : undefined,
+                  }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="flex-start">
+                    <Checkbox size="small" checked={seleccionada} sx={{ p: 0, mt: 0.25 }} />
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2" noWrap>
+                        {c.proveedor_nombre || "(sin proveedor)"}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Solicitud {c.solicitud}
+                      </Typography>
+                      <Typography variant="subtitle2" sx={{ mt: 0.5 }}>
+                        {c.moneda || "MXN"} {c.total ? formatoMoneda(Number(c.total)).replace(/^\D+/, "") : "—"}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Paper>
+              );
+            })}
+          </Box>
+          {cotizacionesSeleccionadas.length >= 2 ? (
+            <ComparacionCotizaciones
+              cotizaciones={cotizacionesSeleccionadas}
+              puedeAprobar={puedeAprobar}
+              onSeleccionar={(idCotizacion) => {
+                cerrarComparar();
+                handleGenerarOrden(idCotizacion);
+              }}
+            />
+          ) : (
+            <Alert severity="info">Selecciona al menos 2 cotizaciones para ver la comparación.</Alert>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <MotorDocumentalDialog
         open={!!motorCotizacion}
         onClose={() => {
@@ -544,7 +692,7 @@ export default function CotizacionesPanel({
  * generar_desde_cotizacion, ahora disparada desde aquí en vez de tener que
  * abrir cada tarjeta por separado. */
 function ComparacionCotizaciones({
-  cotizaciones,
+  cotizaciones: cotizacionesOriginal,
   puedeAprobar,
   onSeleccionar,
 }: {
@@ -552,9 +700,60 @@ function ComparacionCotizaciones({
   puedeAprobar: boolean;
   onSeleccionar: (idCotizacion: string) => void;
 }) {
-  const filas = armarFilasComparacion(cotizaciones);
-  const totales = cotizaciones.map((c) => (c.total ? Number(c.total) : null));
-  const menorTotal = menorValor(totales);
+  const [pagina, setPagina] = useState(0);
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
+  const esTablet = useMediaQuery(theme.breakpoints.down("md"));
+  // Menos columnas de proveedor por pagina en pantallas angostas
+  // (22/Sep/2026, ventana emergente de Comparar cotizaciones tambien se
+  // abre en tablet) - con 4 columnas fijas la tabla se apretaba/forzaba
+  // scroll horizontal incomodo en tablet, y en movil directo se salia.
+  const proveedoresPorPagina = esMovil ? 1 : esTablet ? 2 : 4;
+
+  // Orden alfabetico por proveedor (21/Sep/2026, "que tal si se tienen mas"
+  // de 3) - antes dependia del orden de creacion de la cotizacion.
+  const cotizacionesOrdenadas = [...cotizacionesOriginal].sort((a, b) =>
+    (a.proveedor_nombre || "").localeCompare(b.proveedor_nombre || "", "es"),
+  );
+
+  // El "menor" (por fila y total) y la sugerencia de ganador se calculan
+  // sobre TODAS las cotizaciones, no solo la pagina visible - paginar las
+  // columnas no debe cambiar cual es la mas barata.
+  const filasGlobal = armarFilasComparacion(cotizacionesOrdenadas);
+  const totalesGlobal = cotizacionesOrdenadas.map((c) => (c.total ? Number(c.total) : null));
+  const menorTotalGlobal = menorValor(totalesGlobal);
+  // Sugerencia de ganador (21/Sep/2026, "hay que hacer la parte donde
+  // sugiere ganador, esto no significa que lo decida") - solo resalta la
+  // cotizacion de menor total como sugerida; generar_desde_cotizacion
+  // sigue exigiendo el clic humano en "Usar esta", nunca se preselecciona
+  // ni se marca GANADORA sola. Si dos cotizaciones empatan en el menor
+  // total, no se sugiere ninguna (ambigua a proposito).
+  const indicesConMenorTotalGlobal = totalesGlobal
+    .map((t, i) => (t !== null && t === menorTotalGlobal ? i : -1))
+    .filter((i) => i >= 0);
+  const indiceSugeridoGlobal = indicesConMenorTotalGlobal.length === 1 ? indicesConMenorTotalGlobal[0] : -1;
+
+  const inicio = pagina * proveedoresPorPagina;
+  const cotizaciones = cotizacionesOrdenadas.slice(inicio, inicio + proveedoresPorPagina);
+  const filas = filasGlobal.map((fila) => ({
+    descripcion: fila.descripcion,
+    menorPrecio: menorValor(fila.porCotizacion.map((c) => c?.precioUnitario ?? null)),
+    porCotizacion: fila.porCotizacion.slice(inicio, inicio + proveedoresPorPagina),
+  }));
+  const totales = totalesGlobal.slice(inicio, inicio + proveedoresPorPagina);
+  const indiceSugerido = indiceSugeridoGlobal - inicio;
+
+  // Tarjeta por proveedor (22/Sep/2026, diseño acordado - Cantidad/Precio
+  // Unitario/Importe por columna, la de menor precio unitario por fila en
+  // pill verde, la sugerida con toda su columna resaltada y boton oscuro
+  // "USAR ESTA" + chip). Reemplaza la tabla plana anterior (solo precio
+  // unitario, una celda de texto verde).
+  const fondoSugerida = alpha(theme.palette.success.main, 0.08);
+  // Toda columna de proveedor lleva su propio borde a modo de tarjeta -
+  // gris para las normales, verde (mas grueso) para la sugerida - en vez
+  // de solo la sugerida, para que las 3 se lean como tarjetas separadas.
+  const bordeColor = (index: number) => (index === indiceSugerido ? "success.main" : "divider");
+  const bordeGrosor = (index: number) => (index === indiceSugerido ? 2 : 1);
 
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
@@ -562,67 +761,186 @@ function ComparacionCotizaciones({
         Comparación de cotizaciones
       </Typography>
       <TableContainer sx={{ overflowX: "auto" }}>
-        <Table size="small">
+        <Table size="small" sx={{ borderCollapse: "separate", borderSpacing: 0 }}>
           <TableHead>
             <TableRow>
-              <TableCell>Material</TableCell>
-              {cotizaciones.map((c) => (
-                <TableCell key={c.id_cotizacion} align="right">
-                  {c.proveedor_nombre || "(sin proveedor)"}
-                </TableCell>
+              <TableCell rowSpan={2} sx={{ verticalAlign: "bottom", border: "none" }}>
+                Material
+              </TableCell>
+              {cotizaciones.map((c, index) => (
+                <Fragment key={c.id_cotizacion}>
+                  <TableCell
+                    colSpan={3}
+                    align="center"
+                    sx={{
+                      fontWeight: 600,
+                      borderTop: bordeGrosor(index),
+                      borderLeft: bordeGrosor(index),
+                      borderRight: bordeGrosor(index),
+                      borderColor: bordeColor(index),
+                      bgcolor: index === indiceSugerido ? fondoSugerida : undefined,
+                    }}
+                  >
+                    <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
+                      <span>{c.proveedor_nombre || "(sin proveedor)"}</span>
+                      {index === indiceSugerido && (
+                        <Chip size="small" label="Sugerida" color="success" variant="outlined" />
+                      )}
+                    </Stack>
+                  </TableCell>
+                  {/* Separador entre proveedores (22/Sep/2026, "ponle
+                  margenes para diferenciar") - columna vacia sin borde, da
+                  el efecto de tarjetas separadas en vez de una sola tabla
+                  pegada. */}
+                  {index < cotizaciones.length - 1 && <TableCell sx={{ border: "none", width: 20, p: 0 }} />}
+                </Fragment>
+              ))}
+            </TableRow>
+            <TableRow>
+              {cotizaciones.map((c, index) => (
+                <Fragment key={c.id_cotizacion}>
+                  <TableCell
+                    align="right"
+                    sx={{ color: "text.secondary", borderLeft: bordeGrosor(index), borderColor: bordeColor(index), bgcolor: index === indiceSugerido ? fondoSugerida : undefined }}
+                  >
+                    Cantidad
+                  </TableCell>
+                  <TableCell align="right" sx={{ color: "text.secondary", bgcolor: index === indiceSugerido ? fondoSugerida : undefined }}>
+                    Unitario
+                  </TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{ color: "text.secondary", borderRight: bordeGrosor(index), borderColor: bordeColor(index), bgcolor: index === indiceSugerido ? fondoSugerida : undefined }}
+                  >
+                    Subtotal
+                  </TableCell>
+                  {index < cotizaciones.length - 1 && <TableCell sx={{ border: "none", width: 20, p: 0 }} />}
+                </Fragment>
               ))}
             </TableRow>
           </TableHead>
           <TableBody>
-            {filas.map((fila) => {
-              const menor = menorValor(fila.porCotizacion);
-              return (
-                <TableRow key={fila.descripcion}>
-                  <TableCell>{fila.descripcion}</TableCell>
-                  {fila.porCotizacion.map((precio, index) => (
+            {filas.map((fila) => (
+              <TableRow key={fila.descripcion}>
+                <TableCell>{fila.descripcion}</TableCell>
+                {fila.porCotizacion.map((celda, index) => (
+                  <Fragment key={cotizaciones[index].id_cotizacion}>
                     <TableCell
-                      key={cotizaciones[index].id_cotizacion}
                       align="right"
-                      sx={precio !== null && precio === menor ? { color: "success.main", fontWeight: 600 } : undefined}
+                      sx={{ color: "text.secondary", borderLeft: bordeGrosor(index), borderColor: bordeColor(index), bgcolor: index === indiceSugerido ? fondoSugerida : undefined }}
                     >
-                      {precio !== null ? precio.toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}
+                      {celda ? celda.cantidad.toLocaleString("es-MX") : "—"}
                     </TableCell>
-                  ))}
-                </TableRow>
-              );
-            })}
+                    <TableCell align="right" sx={{ bgcolor: index === indiceSugerido ? fondoSugerida : undefined }}>
+                      {celda ? (
+                        <Box
+                          component="span"
+                          sx={
+                            celda.precioUnitario === fila.menorPrecio
+                              ? {
+                                  bgcolor: "success.light",
+                                  color: "success.dark",
+                                  fontWeight: 600,
+                                  borderRadius: 4,
+                                  px: 1,
+                                  py: 0.25,
+                                }
+                              : undefined
+                          }
+                        >
+                          {formatoMoneda(celda.precioUnitario)}
+                        </Box>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell
+                      align="right"
+                      sx={{ borderRight: bordeGrosor(index), borderColor: bordeColor(index), bgcolor: index === indiceSugerido ? fondoSugerida : undefined }}
+                    >
+                      {celda ? formatoMoneda(celda.importe) : "—"}
+                    </TableCell>
+                    {index < cotizaciones.length - 1 && <TableCell sx={{ border: "none", width: 20, p: 0 }} />}
+                  </Fragment>
+                ))}
+              </TableRow>
+            ))}
             <TableRow>
-              <TableCell sx={{ fontWeight: 600 }}>Total</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Total general</TableCell>
               {totales.map((total, index) => (
-                <TableCell
-                  key={cotizaciones[index].id_cotizacion}
-                  align="right"
-                  sx={{ fontWeight: 600, ...(total !== null && total === menorTotal ? { color: "success.main" } : {}) }}
-                >
-                  {total !== null ? total.toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}
-                </TableCell>
+                <Fragment key={cotizaciones[index].id_cotizacion}>
+                  <TableCell
+                    colSpan={3}
+                    align="right"
+                    sx={{
+                      fontWeight: 600,
+                      borderLeft: bordeGrosor(index),
+                      borderRight: bordeGrosor(index),
+                      borderColor: bordeColor(index),
+                      bgcolor: index === indiceSugerido ? fondoSugerida : undefined,
+                      ...(!puedeAprobar ? { borderBottom: bordeGrosor(index), borderRadius: "0 0 8px 8px" } : {}),
+                    }}
+                  >
+                    {total !== null ? formatoMoneda(total) : "—"}
+                  </TableCell>
+                  {index < cotizaciones.length - 1 && <TableCell sx={{ border: "none", width: 20, p: 0 }} />}
+                </Fragment>
               ))}
             </TableRow>
             {puedeAprobar && (
               <TableRow>
-                <TableCell />
-                {cotizaciones.map((c) => (
-                  <TableCell key={c.id_cotizacion} align="right">
+                <TableCell sx={{ border: "none" }} />
+                {cotizaciones.map((c, index) => (
+                  <Fragment key={c.id_cotizacion}>
+                    <TableCell
+                      colSpan={3}
+                      align="center"
+                      sx={{
+                        pb: 2,
+                        borderLeft: bordeGrosor(index),
+                        borderRight: bordeGrosor(index),
+                        borderBottom: bordeGrosor(index),
+                        borderColor: bordeColor(index),
+                        borderRadius: "0 0 8px 8px",
+                        bgcolor: index === indiceSugerido ? fondoSugerida : undefined,
+                      }}
+                    >
                     <Button
                       size="small"
-                      variant={c.estado === "GANADORA" ? "contained" : "outlined"}
+                      variant="contained"
                       disabled={c.estado === "GANADORA"}
                       onClick={() => onSeleccionar(c.id_cotizacion)}
+                      sx={{
+                        borderRadius: 20,
+                        bgcolor: c.estado === "GANADORA" ? undefined : "text.primary",
+                        "&:hover": { bgcolor: c.estado === "GANADORA" ? undefined : "text.secondary" },
+                      }}
                     >
-                      {c.estado === "GANADORA" ? "Seleccionada" : "Usar esta"}
+                      {c.estado === "GANADORA"
+                        ? "Seleccionada"
+                        : `Usar ${c.proveedor_nombre || "esta"}${index === indiceSugerido ? " (Sugerida)" : ""}`}
                     </Button>
                   </TableCell>
+                  {index < cotizaciones.length - 1 && <TableCell sx={{ border: "none", width: 20, p: 0 }} />}
+                  </Fragment>
                 ))}
               </TableRow>
             )}
           </TableBody>
         </Table>
       </TableContainer>
+      {cotizacionesOrdenadas.length > proveedoresPorPagina && (
+        <TablePagination
+          component="div"
+          count={cotizacionesOrdenadas.length}
+          page={pagina}
+          onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+          rowsPerPage={proveedoresPorPagina}
+          rowsPerPageOptions={[proveedoresPorPagina]}
+          labelRowsPerPage="Proveedores por página"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
+      )}
     </Paper>
   );
 }

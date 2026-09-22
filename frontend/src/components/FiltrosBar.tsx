@@ -61,7 +61,11 @@ export default function FiltrosBar({
       extremo derecho; con dos grupos (izquierda: buscador, derecha:
       acciones) el espacio libre siempre lo absorbe el hueco entre ambos. */}
       <Stack
-        direction={{ xs: "column", md: "row" }}
+        // sm(600px) en vez de md(900px) (22/Sep/2026, "porque en tablet se
+        // ve apilado" en Cotizaciones) - una tablet vertical (768px) caia
+        // debajo de md y se apilaba buscador/acciones en TODAS las
+        // pantallas con FiltrosBar; con sm ya queda en fila desde tablet.
+        direction={{ xs: "column", sm: "row" }}
         spacing={2}
         alignItems="center"
         justifyContent="space-between"
@@ -74,7 +78,7 @@ export default function FiltrosBar({
               placeholder={searchPlaceholder}
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
-              sx={{ flex: 1, maxWidth: 320 }}
+              sx={{ flex: 1, maxWidth: 720 }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
