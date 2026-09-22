@@ -459,3 +459,144 @@ async function accionRequisicion(
 export const validarRequisicion = (id: string) => accionRequisicion(id, "validar");
 export const autorizarRequisicion = (id: string) => accionRequisicion(id, "autorizar");
 export const rechazarRequisicion = (id: string) => accionRequisicion(id, "rechazar");
+
+// Contrato de Suministro (22/Sep/2026) - documento con un proveedor donde
+// viene detallado que va a surtir y a que precio, distinto de
+// TesoreriaContrato (contrato de flujo de pago). Guardar una linea de un
+// contrato ACTIVO sincroniza de inmediato el precio_unitario/proveedor del
+// MaterialCatalogo correspondiente (ver backend).
+export type ContratoSuministroEstado = "ACTIVO" | "VENCIDO" | "CANCELADO";
+
+export interface ContratoSuministroLinea {
+  id_linea: string;
+  contrato: string;
+  material: string;
+  material_nombre: string;
+  precio_unitario: string;
+  comentarios: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface ContratoSuministroProyecto {
+  id_contrato_suministro_proyecto: string;
+  contrato: string;
+  proyecto: string;
+}
+
+export interface ContratoSuministro {
+  id_contrato_suministro: string;
+  proveedor: string;
+  proveedor_nombre: string | null;
+  fecha_inicio: string;
+  fecha_fin: string | null;
+  estado: ContratoSuministroEstado;
+  estado_label: string;
+  link_documento: string | null;
+  comentarios: string | null;
+  // Asignación opcional a Proyectos (22/Sep/2026, "no está atado a un
+  // proyecto pero se puede asignar a varios") - vacío = aplica en general.
+  proyectos_asignados: ContratoSuministroProyecto[];
+  lineas: ContratoSuministroLinea[];
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listContratosSuministro(search?: string): Promise<ContratoSuministro[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/contratos-suministro/?${params.toString()}`
+  );
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+export async function createContratoSuministro(params: {
+  proveedor: string;
+  proveedorNombre?: string | null;
+  fechaInicio: string;
+  fechaFin?: string | null;
+  linkDocumento?: string | null;
+  comentarios?: string | null;
+  proyectos?: string[];
+}): Promise<ContratoSuministro> {
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/contratos-suministro/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      proveedor: params.proveedor,
+      proveedor_nombre: params.proveedorNombre || null,
+      fecha_inicio: params.fechaInicio,
+      fecha_fin: params.fechaFin || null,
+      link_documento: params.linkDocumento || null,
+      comentarios: params.comentarios || null,
+      proyectos: params.proyectos || [],
+    }),
+  });
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+export async function updateContratoSuministro(
+  idContrato: string,
+  params: Partial<{
+    proveedor: string;
+    proveedor_nombre: string | null;
+    fecha_inicio: string;
+    fecha_fin: string | null;
+    estado: ContratoSuministroEstado;
+    link_documento: string | null;
+    comentarios: string | null;
+    proyectos: string[];
+  }>
+): Promise<ContratoSuministro> {
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/contratos-suministro/${idContrato}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+export async function deleteContratoSuministro(idContrato: string): Promise<void> {
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/contratos-suministro/${idContrato}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+}
+
+export async function createContratoSuministroLinea(params: {
+  contrato: string;
+  material: string;
+  precioUnitario: string;
+  comentarios?: string | null;
+}): Promise<ContratoSuministroLinea> {
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/contrato-suministro-lineas/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contrato: params.contrato,
+      material: params.material,
+      precio_unitario: params.precioUnitario,
+      comentarios: params.comentarios || null,
+    }),
+  });
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+export async function deleteContratoSuministroLinea(idLinea: string): Promise<void> {
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/contrato-suministro-lineas/${idLinea}/`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+}

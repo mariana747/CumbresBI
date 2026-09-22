@@ -391,6 +391,102 @@ class RequisicionObra(models.Model):
         return f"{self.requisicion_id}-{self.obra}"
 
 
+class ContratoSuministro(models.Model):
+    """Contrato de suministro con un proveedor: documento donde viene
+    detallado que va a surtir y a que precio (22/Sep/2026, distinto de
+    TesoreriaContrato en tesoreria-service, que es un contrato de FLUJO DE
+    PAGO -sociedad+contraparte+monto- sin renglones de materiales, ver
+    materiales-pendientes-por-submodulo en memoria del proyecto).
+    `proveedor` referencia laxa a tesoreria_contrapartes.id_contraparte,
+    mismo criterio sin FK real que MaterialCatalogo.proveedor.
+
+    Al guardar una linea (ContratoSuministroLinea) mientras el contrato
+    esta ACTIVO, su precio_unitario/proveedor se escriben de inmediato a
+    MaterialCatalogo (ver ContratoSuministroLineaViewSet) - el Contrato de
+    Suministro ALIMENTA el Catalogo, la Requisicion sigue leyendo solo del
+    Catalogo (RequisicionViewSet.perform_create), sin tocarla."""
+
+    ESTADO_ACTIVO = "ACTIVO"
+    ESTADO_VENCIDO = "VENCIDO"
+    ESTADO_CANCELADO = "CANCELADO"
+    ESTADO_CHOICES = [
+        (ESTADO_ACTIVO, "Activo"),
+        (ESTADO_VENCIDO, "Vencido"),
+        (ESTADO_CANCELADO, "Cancelado"),
+    ]
+
+    id_contrato_suministro = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    proveedor = models.CharField(max_length=8)
+    proveedor_nombre = models.CharField(max_length=200, blank=True, null=True)
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField(blank=True, null=True)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_ACTIVO)
+    link_documento = models.CharField(max_length=2083, blank=True, null=True)
+    comentarios = models.CharField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8)
+
+    class Meta:
+        db_table = "materiales_contratos_suministro"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.proveedor_nombre or self.proveedor} ({self.id_contrato_suministro})"
+
+
+class ContratoSuministroProyecto(models.Model):
+    """Asignacion opcional del Contrato de Suministro a un Proyecto
+    especifico (22/Sep/2026, confirmado con Mariana: "no esta atado a un
+    proyecto pero se puede asignar a varios"). Un Contrato sin ninguna fila
+    aqui aplica en general, a cualquier proyecto. `proyecto` referencia
+    laxa a vivienda_proyectos.id_proyecto, mismo criterio que
+    RequisicionObra.obra."""
+
+    id_contrato_suministro_proyecto = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    contrato = models.ForeignKey(
+        ContratoSuministro, db_column="id_contrato_suministro", on_delete=models.CASCADE, related_name="proyectos"
+    )
+    proyecto = models.CharField(max_length=8)
+
+    class Meta:
+        db_table = "materiales_contrato_suministro_proyectos"
+        unique_together = [("contrato", "proyecto")]
+
+    def __str__(self):
+        return f"{self.contrato_id}-{self.proyecto}"
+
+
+class ContratoSuministroLinea(models.Model):
+    """Un renglon del contrato: Material + precio pactado con el proveedor.
+    Ver docstring de ContratoSuministro - guardar/editar una linea de un
+    contrato ACTIVO sincroniza de inmediato MaterialCatalogo.precio_unitario/
+    proveedor (ContratoSuministroLineaViewSet), mismo criterio que
+    MaterialCatalogoViewSet.actualizar_precio_cotizado."""
+
+    id_linea = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    contrato = models.ForeignKey(
+        ContratoSuministro, db_column="id_contrato_suministro", on_delete=models.CASCADE, related_name="lineas"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, db_column="id_material", on_delete=models.PROTECT, related_name="lineas_contrato_suministro"
+    )
+    precio_unitario = models.DecimalField(max_digits=14, decimal_places=2)
+    comentarios = models.CharField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8)
+
+    class Meta:
+        db_table = "materiales_contrato_suministro_lineas"
+        unique_together = [("contrato", "material")]
+
+    def __str__(self):
+        return f"{self.contrato_id}-{self.material_id}"
+
+
 class RequisicionLinea(models.Model):
     """Una fila de la requisicion - Material agregado (suma de
     ConceptoPresupuesto.cantidad de esa etapa entre TODAS las Obras

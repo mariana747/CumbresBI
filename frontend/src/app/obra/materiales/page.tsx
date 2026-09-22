@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -28,24 +29,32 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Camera, Package, Pencil, Plus, Trash2, Truck, X as CloseIcon } from "lucide-react";
+import { Camera, FileText, Package, Pencil, Plus, Trash2, Truck, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
+  ContratoSuministro,
+  ContratoSuministroEstado,
   EvidenciaRecepcion,
   MaterialCatalogo,
   SolicitudMaterial,
   SolicitudMaterialEstado,
+  createContratoSuministro,
+  createContratoSuministroLinea,
   createEvidenciaRecepcion,
   createMaterial,
   createSolicitud,
+  deleteContratoSuministro,
+  deleteContratoSuministroLinea,
   deleteMaterial,
   entregarSolicitud,
+  listContratosSuministro,
   listEvidenciasRecepcion,
   listMateriales,
   listSolicitudes,
   rechazarSolicitud,
+  updateContratoSuministro,
   updateMaterial,
 } from "@/lib/materiales";
 
@@ -66,6 +75,28 @@ function fechaActual() {
   return new Date().toISOString().slice(0, 10);
 }
 const FORM_EVIDENCIA_VACIO = { linkDrive: "", fecha: fechaActual(), hora: horaActual(), comentarios: "" };
+
+const FORM_CONTRATO_VACIO = {
+  proveedor: "",
+  proveedorNombre: "",
+  fechaInicio: fechaActual(),
+  fechaFin: "",
+  linkDocumento: "",
+  comentarios: "",
+  proyectos: [] as string[],
+};
+const FORM_LINEA_CONTRATO_VACIO = { material: "", precioUnitario: "", comentarios: "" };
+
+const ESTADO_CONTRATO_LABELS: Record<ContratoSuministroEstado, string> = {
+  ACTIVO: "Activo",
+  VENCIDO: "Vencido",
+  CANCELADO: "Cancelado",
+};
+const ESTADO_CONTRATO_COLOR: Record<ContratoSuministroEstado, "success" | "default" | "error"> = {
+  ACTIVO: "success",
+  VENCIDO: "default",
+  CANCELADO: "error",
+};
 
 // Flujo de 3 estados, sin paso intermedio de aprobacion.
 const ESTADO_LABELS: Record<SolicitudMaterialEstado, string> = {
@@ -102,7 +133,7 @@ const ESTADO_COLOR: Record<SolicitudMaterialEstado, "default" | "success" | "err
 // El catalogo de mano de obra se saco de esta pantalla - el modelo
 // ManoObraCatalogo sigue en el backend (lo usa ConceptoPresupuesto), solo
 // falta decidir en que pantalla vive.
-type Seccion = "catalogo" | "disponibles" | "salida";
+type Seccion = "catalogo" | "disponibles" | "salida" | "contratos";
 
 export default function MaterialesPage() {
   // Pestañas (mismo patrón de Tabs que admin/reportes/page.tsx) en vez de
@@ -128,6 +159,14 @@ export default function MaterialesPage() {
   const [evidenciasLoading, setEvidenciasLoading] = useState(false);
   const [formEvidencia, setFormEvidencia] = useState(FORM_EVIDENCIA_VACIO);
 
+  const [contratos, setContratos] = useState<ContratoSuministro[]>([]);
+  const [contratoDialogOpen, setContratoDialogOpen] = useState(false);
+  const [editandoContrato, setEditandoContrato] = useState<ContratoSuministro | null>(null);
+  const [formContrato, setFormContrato] = useState(FORM_CONTRATO_VACIO);
+
+  const [lineasContrato, setLineasContrato] = useState<ContratoSuministro | null>(null);
+  const [formLineaContrato, setFormLineaContrato] = useState(FORM_LINEA_CONTRATO_VACIO);
+
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [accionando, setAccionando] = useState<string | null>(null);
@@ -141,11 +180,12 @@ export default function MaterialesPage() {
 
   function refresh() {
     setLoading(true);
-    Promise.all([listMateriales(), listSolicitudes(), listProyectos()])
-      .then(([m, s, p]) => {
+    Promise.all([listMateriales(), listSolicitudes(), listProyectos(), listContratosSuministro()])
+      .then(([m, s, p, c]) => {
         setMateriales(m);
         setSolicitudes(s);
         setProyectos(p);
+        setContratos(c);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
@@ -307,6 +347,128 @@ export default function MaterialesPage() {
     }
   }
 
+  function abrirAltaContrato() {
+    setEditandoContrato(null);
+    setFormContrato(FORM_CONTRATO_VACIO);
+    setFormError(null);
+    setContratoDialogOpen(true);
+  }
+
+  function abrirEdicionContrato(c: ContratoSuministro) {
+    setEditandoContrato(c);
+    setFormContrato({
+      proveedor: c.proveedor,
+      proveedorNombre: c.proveedor_nombre || "",
+      fechaInicio: c.fecha_inicio,
+      fechaFin: c.fecha_fin || "",
+      linkDocumento: c.link_documento || "",
+      comentarios: c.comentarios || "",
+      proyectos: c.proyectos_asignados.map((p) => p.proyecto),
+    });
+    setFormError(null);
+    setContratoDialogOpen(true);
+  }
+
+  async function handleGuardarContrato() {
+    if (!formContrato.proveedor.trim() || !formContrato.fechaInicio) {
+      setFormError("Proveedor y fecha de inicio son requeridos.");
+      return;
+    }
+    setSaving(true);
+    setFormError(null);
+    try {
+      if (editandoContrato) {
+        await updateContratoSuministro(editandoContrato.id_contrato_suministro, {
+          proveedor: formContrato.proveedor,
+          proveedor_nombre: formContrato.proveedorNombre || null,
+          fecha_inicio: formContrato.fechaInicio,
+          fecha_fin: formContrato.fechaFin || null,
+          link_documento: formContrato.linkDocumento || null,
+          comentarios: formContrato.comentarios || null,
+          proyectos: formContrato.proyectos,
+        });
+      } else {
+        await createContratoSuministro({
+          proveedor: formContrato.proveedor,
+          proveedorNombre: formContrato.proveedorNombre || null,
+          fechaInicio: formContrato.fechaInicio,
+          fechaFin: formContrato.fechaFin || null,
+          linkDocumento: formContrato.linkDocumento || null,
+          comentarios: formContrato.comentarios || null,
+          proyectos: formContrato.proyectos,
+        });
+      }
+      setContratoDialogOpen(false);
+      refresh();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCambiarEstadoContrato(c: ContratoSuministro, estado: ContratoSuministroEstado) {
+    try {
+      await updateContratoSuministro(c.id_contrato_suministro, { estado });
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
+  async function handleBorrarContrato(c: ContratoSuministro) {
+    if (!window.confirm(`¿Borrar el contrato de suministro con "${c.proveedor_nombre || c.proveedor}"?`)) {
+      return;
+    }
+    try {
+      await deleteContratoSuministro(c.id_contrato_suministro);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
+  function abrirLineasContrato(c: ContratoSuministro) {
+    setLineasContrato(c);
+    setFormLineaContrato({ ...FORM_LINEA_CONTRATO_VACIO, material: materiales[0]?.id_material ?? "" });
+    setFormError(null);
+  }
+
+  async function handleAgregarLineaContrato() {
+    if (!lineasContrato) return;
+    if (!formLineaContrato.material || !formLineaContrato.precioUnitario) {
+      setFormError("Material y precio unitario son requeridos.");
+      return;
+    }
+    setSaving(true);
+    setFormError(null);
+    try {
+      const nueva = await createContratoSuministroLinea({
+        contrato: lineasContrato.id_contrato_suministro,
+        material: formLineaContrato.material,
+        precioUnitario: formLineaContrato.precioUnitario,
+        comentarios: formLineaContrato.comentarios || null,
+      });
+      setLineasContrato({ ...lineasContrato, lineas: [...lineasContrato.lineas, nueva] });
+      setFormLineaContrato({ ...FORM_LINEA_CONTRATO_VACIO, material: materiales[0]?.id_material ?? "" });
+      refresh();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleBorrarLineaContrato(idLinea: string) {
+    if (!lineasContrato) return;
+    try {
+      await deleteContratoSuministroLinea(idLinea);
+      setLineasContrato({ ...lineasContrato, lineas: lineasContrato.lineas.filter((l) => l.id_linea !== idLinea) });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
@@ -348,6 +510,7 @@ export default function MaterialesPage() {
             <Tab label="Catálogo de Materiales" value="catalogo" />
             <Tab label="Catálogo de Materiales Disponibles" value="disponibles" />
             <Tab icon={<Truck size={16} strokeWidth={1.5} />} iconPosition="start" label="Salida de Almacén" value="salida" />
+            <Tab icon={<FileText size={16} strokeWidth={1.5} />} iconPosition="start" label="Contratos de Suministro" value="contratos" />
           </Tabs>
 
           {seccion === "catalogo" && (
@@ -625,6 +788,94 @@ export default function MaterialesPage() {
               </Stack>
             </Paper>
           )}
+
+          {seccion === "contratos" && (
+            <Paper variant="outlined">
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
+                <Typography variant="subtitle1">Contratos de Suministro</Typography>
+                {puedeCrear && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    startIcon={<Plus size={14} strokeWidth={2} />}
+                    onClick={abrirAltaContrato}
+                    sx={{ ml: "auto" }}
+                  >
+                    Nuevo Contrato
+                  </Button>
+                )}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ px: 2, display: "block", pb: 1 }}>
+                Documento con un proveedor donde viene detallado qué va a surtir y a qué precio. Distinto del contrato
+                de pago de Tesorería. Guardar un renglón de un contrato Activo actualiza de inmediato el precio del
+                Catálogo de Materiales.
+              </Typography>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Proveedor</TableCell>
+                      <TableCell>Vigencia</TableCell>
+                      <TableCell>Estado</TableCell>
+                      <TableCell align="right">Renglones</TableCell>
+                      <TableCell align="right">Acciones</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {contratos.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Sin contratos de suministro registrados.
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      contratos.map((c) => (
+                        <TableRow key={c.id_contrato_suministro} hover>
+                          <TableCell>{c.proveedor_nombre || c.proveedor}</TableCell>
+                          <TableCell>
+                            {c.fecha_inicio} — {c.fecha_fin || "indefinida"}
+                          </TableCell>
+                          <TableCell>
+                            <Chip size="small" label={ESTADO_CONTRATO_LABELS[c.estado]} color={ESTADO_CONTRATO_COLOR[c.estado]} />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Button size="small" onClick={() => abrirLineasContrato(c)}>
+                              {c.lineas.length} renglón{c.lineas.length === 1 ? "" : "es"}
+                            </Button>
+                          </TableCell>
+                          <TableCell align="right">
+                            {puedeEditar && c.estado === "ACTIVO" && (
+                              <Button size="small" onClick={() => handleCambiarEstadoContrato(c, "CANCELADO")}>
+                                Cancelar
+                              </Button>
+                            )}
+                            <IconButton
+                              size="small"
+                              aria-label="Editar"
+                              onClick={() => abrirEdicionContrato(c)}
+                              disabled={!puedeEditar}
+                            >
+                              <Pencil size={14} strokeWidth={1.5} />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              aria-label="Borrar"
+                              onClick={() => handleBorrarContrato(c)}
+                              disabled={!puedeEditar}
+                            >
+                              <Trash2 size={14} strokeWidth={1.5} />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          )}
         </>
       )}
 
@@ -867,6 +1118,178 @@ export default function MaterialesPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setBitacoraSolicitud(null)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={contratoDialogOpen} onClose={() => setContratoDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {editandoContrato ? `Editar contrato — ${editandoContrato.proveedor_nombre || editandoContrato.proveedor}` : "Nuevo Contrato de Suministro"}
+          <IconButton onClick={() => setContratoDialogOpen(false)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {formError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {formError}
+            </Alert>
+          )}
+          <Stack spacing={2}>
+            <TextField
+              size="small"
+              label="Proveedor (id_contraparte)"
+              value={formContrato.proveedor}
+              onChange={(e) => setFormContrato({ ...formContrato, proveedor: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              size="small"
+              label="Nombre del proveedor"
+              value={formContrato.proveedorNombre}
+              onChange={(e) => setFormContrato({ ...formContrato, proveedorNombre: e.target.value })}
+              fullWidth
+            />
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="Fecha de inicio"
+                type="date"
+                value={formContrato.fechaInicio}
+                onChange={(e) => setFormContrato({ ...formContrato, fechaInicio: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Fecha fin (vacío = indefinida)"
+                type="date"
+                value={formContrato.fechaFin}
+                onChange={(e) => setFormContrato({ ...formContrato, fechaFin: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+            </Stack>
+            <Autocomplete
+              multiple
+              size="small"
+              options={proyectos}
+              getOptionLabel={(p) => p.alias_proyecto || p.denominacion || p.id_proyecto}
+              value={proyectos.filter((p) => formContrato.proyectos.includes(p.id_proyecto))}
+              onChange={(_, value) => setFormContrato({ ...formContrato, proyectos: value.map((p) => p.id_proyecto) })}
+              renderInput={(inputParams) => (
+                <TextField
+                  {...inputParams}
+                  label="Proyectos (vacío = aplica en general)"
+                  helperText="Opcional — el contrato no tiene que estar atado a un proyecto."
+                />
+              )}
+            />
+            <TextField
+              size="small"
+              label="Link del documento (Drive u otro)"
+              value={formContrato.linkDocumento}
+              onChange={(e) => setFormContrato({ ...formContrato, linkDocumento: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              size="small"
+              label="Comentarios"
+              value={formContrato.comentarios}
+              onChange={(e) => setFormContrato({ ...formContrato, comentarios: e.target.value })}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setContratoDialogOpen(false)}>Cancelar</Button>
+          <Button variant="contained" onClick={handleGuardarContrato} disabled={saving}>
+            {saving ? <CircularProgress size={16} /> : "Guardar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!lineasContrato} onClose={() => setLineasContrato(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Renglones — {lineasContrato?.proveedor_nombre || lineasContrato?.proveedor}
+          <IconButton onClick={() => setLineasContrato(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {lineasContrato?.estado !== "ACTIVO" && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              Este contrato no está Activo — sus renglones ya no sincronizan el precio del Catálogo.
+            </Alert>
+          )}
+          {formError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {formError}
+            </Alert>
+          )}
+          {puedeCrear && (
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
+              <TextField
+                size="small"
+                select
+                label="Material"
+                value={formLineaContrato.material}
+                onChange={(e) => setFormLineaContrato({ ...formLineaContrato, material: e.target.value })}
+                fullWidth
+                SelectProps={{ native: true }}
+              >
+                {materiales.map((m) => (
+                  <option key={m.id_material} value={m.id_material}>
+                    {m.material}
+                  </option>
+                ))}
+              </TextField>
+              <TextField
+                size="small"
+                label="Precio unitario"
+                type="number"
+                value={formLineaContrato.precioUnitario}
+                onChange={(e) => setFormLineaContrato({ ...formLineaContrato, precioUnitario: e.target.value })}
+                fullWidth
+              />
+              <Button
+                variant="contained"
+                onClick={handleAgregarLineaContrato}
+                disabled={saving || materiales.length === 0}
+                sx={{ flexShrink: 0 }}
+              >
+                {saving ? <CircularProgress size={16} /> : "Agregar"}
+              </Button>
+            </Stack>
+          )}
+          {lineasContrato && lineasContrato.lineas.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              Sin renglones todavía.
+            </Typography>
+          ) : (
+            <List dense disablePadding>
+              {lineasContrato?.lineas.map((l) => (
+                <ListItem
+                  key={l.id_linea}
+                  disableGutters
+                  divider
+                  secondaryAction={
+                    puedeEditar && (
+                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarLineaContrato(l.id_linea)}>
+                        <Trash2 size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    )
+                  }
+                >
+                  <ListItemText primary={l.material_nombre} secondary={`$${l.precio_unitario}`} />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLineasContrato(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
     </AppShell>

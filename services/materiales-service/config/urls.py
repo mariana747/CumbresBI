@@ -4,6 +4,8 @@ from rest_framework.routers import DefaultRouter
 
 from materiales.views import (
     ConceptoPresupuestoViewSet,
+    ContratoSuministroLineaViewSet,
+    ContratoSuministroViewSet,
     EvidenciaRecepcionViewSet,
     ManoObraCatalogoViewSet,
     MaterialCatalogoViewSet,
@@ -22,6 +24,8 @@ router.register("presupuesto-firmas", PresupuestoFirmaViewSet, basename="presupu
 router.register("solicitudes", SolicitudMaterialViewSet, basename="solicitudmaterial")
 router.register("evidencias-recepcion", EvidenciaRecepcionViewSet, basename="evidenciarecepcion")
 router.register("requisiciones", RequisicionViewSet, basename="requisicion")
+router.register("contratos-suministro", ContratoSuministroViewSet, basename="contratosuministro")
+router.register("contrato-suministro-lineas", ContratoSuministroLineaViewSet, basename="contratosuministrolinea")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
