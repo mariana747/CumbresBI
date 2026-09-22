@@ -5,6 +5,7 @@ from .models import (
     EvidenciaRecepcion,
     ManoObraCatalogo,
     MaterialCatalogo,
+    MaterialesNotificacion,
     Presupuesto,
     PresupuestoFirma,
     Requisicion,
@@ -279,3 +280,10 @@ class EvidenciaRecepcionSerializer(serializers.ModelSerializer):
             "updated_by",
         ]
         read_only_fields = ["id_evidencia", "created_at", "updated_at"]
+
+
+class MaterialesNotificacionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialesNotificacion
+        fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "leida", "created_at"]
+        read_only_fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "created_at"]

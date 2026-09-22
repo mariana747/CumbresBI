@@ -3,8 +3,18 @@
 // materiales-service/materiales/views.py).
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
+import { ExportarSheetsResultado } from "./tesoreria";
 
 const MATERIALES_API_BASE_URL = `${GATEWAY_URL}/materiales`;
+
+// Paginacion real (22/Sep/2026) - mismo patron que TesoreriaPaginado en
+// lib/tesoreria.ts (ver ListadoGrandePagination en el backend).
+export interface MaterialesPaginado<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
 
 export interface MaterialCatalogo {
   id_material: string;
@@ -21,10 +31,18 @@ export interface MaterialCatalogo {
   updated_by: string | null;
 }
 
-export async function listMateriales(search?: string): Promise<MaterialCatalogo[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/materiales/?${params.toString()}`);
+export async function listMateriales(params?: {
+  search?: string;
+  soloDisponibles?: boolean;
+  page?: number;
+  pageSize?: number;
+}): Promise<MaterialesPaginado<MaterialCatalogo>> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.soloDisponibles) query.set("solo_disponibles", "true");
+  query.set("page", String(params?.page ?? 1));
+  query.set("page_size", String(params?.pageSize ?? 50));
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/materiales/?${query.toString()}`);
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
   return response.json();
 }
@@ -174,10 +192,20 @@ export interface SolicitudMaterial {
   updated_by: string | null;
 }
 
-export async function listSolicitudes(search?: string): Promise<SolicitudMaterial[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/solicitudes/?${params.toString()}`);
+export async function listSolicitudes(params?: {
+  search?: string;
+  estado?: SolicitudMaterialEstado;
+  proyecto?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<MaterialesPaginado<SolicitudMaterial>> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.estado) query.set("estado", params.estado);
+  if (params?.proyecto) query.set("proyecto", params.proyecto);
+  query.set("page", String(params?.page ?? 1));
+  query.set("page_size", String(params?.pageSize ?? 50));
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/solicitudes/?${query.toString()}`);
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
   return response.json();
 }
@@ -272,6 +300,20 @@ export async function createEvidenciaRecepcion(params: {
       comentarios: params.comentarios || null,
     }),
   });
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+// Evidencia fotografica real (22/Sep/2026) - sube a Drive via
+// drive-service, mismo patron que subirEvidenciaRecepcion en lib/compras.ts.
+export async function subirEvidenciaFotoRecepcion(idEvidencia: string, archivo: File): Promise<EvidenciaRecepcion> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/evidencias-recepcion/${idEvidencia}/subir_evidencia/`,
+    { method: "POST", body: formData }
+  );
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
   return response.json();
 }
@@ -459,3 +501,57 @@ async function accionRequisicion(
 export const validarRequisicion = (id: string) => accionRequisicion(id, "validar");
 export const autorizarRequisicion = (id: string) => accionRequisicion(id, "autorizar");
 export const rechazarRequisicion = (id: string) => accionRequisicion(id, "rechazar");
+
+// Exportar a Google Sheets (22/Sep/2026, "ya no se descargara un xlsx
+// sino se mandara al drive") - mismo patron que exportarFlujosSheets en
+// lib/tesoreria.ts.
+export async function exportarRequisicionSheets(
+  idRequisicion: string,
+  carpetaId?: string
+): Promise<ExportarSheetsResultado> {
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/requisiciones/${idRequisicion}/exportar_sheets/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carpeta_id: carpetaId }),
+    }
+  );
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("MATERIALES", response);
+  }
+  return response.json();
+}
+
+// Campana de materiales-service (22/Sep/2026, "recordatorios de pedido de
+// material" - terreno preparado, ver docstring de MaterialesNotificacion
+// en el backend). Hoy no la genera nadie (la tarea programada es un
+// no-op sin los estandares del arquitecto) - el cliente ya queda listo.
+export interface MaterialesNotificacion {
+  id_notificacion: string;
+  destinatario: string;
+  tipo: string;
+  mensaje: string;
+  link_url: string | null;
+  leida: boolean;
+  created_at: string;
+}
+
+export async function listNotificacionesMateriales(soloNoLeidas = true): Promise<MaterialesNotificacion[]> {
+  const params = new URLSearchParams();
+  if (soloNoLeidas) params.set("solo_no_leidas", "true");
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/notificaciones/?${params.toString()}`);
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+export async function marcarNotificacionMaterialesLeida(idNotificacion: string): Promise<MaterialesNotificacion> {
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/notificaciones/${idNotificacion}/marcar_leida/`,
+    { method: "POST" }
+  );
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}

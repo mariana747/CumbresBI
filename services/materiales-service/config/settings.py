@@ -142,3 +142,22 @@ OBRA_SERVICE_URL = env("OBRA_SERVICE_URL", default="http://obra-service:8080")
 # SECRET arriba, solo que este lo valida compras-tesoreria-service.
 COMPRAS_TESORERIA_SERVICE_URL = env("COMPRAS_TESORERIA_SERVICE_URL", default="http://compras-tesoreria-service:8080")
 COMPRAS_INTERNAL_SECRET = env("COMPRAS_INTERNAL_SECRET", default="")
+
+# Evidencia fotografica real (22/Sep/2026) - sube a la Unidad compartida
+# corporativa via drive-service, mismo patron que RecepcionViewSet.
+# subir_evidencia en compras-tesoreria-service.
+DRIVE_SERVICE_URL = env("DRIVE_SERVICE_URL", default="http://drive-service:8080")
+
+# Exportar Requisicion a Google Sheets (22/Sep/2026, "ya no se descargara
+# un xlsx sino se mandara al drive") - mismo patron que tesoreria-service
+# (google_sheets_utils.py), el access_token personal de cada usuario vive
+# en iam-service.
+IAM_SERVICE_URL = env("IAM_SERVICE_URL", default="http://iam-service:8080")
+
+# Tarea programada de recordatorios (22/Sep/2026, "recordatorios de pedido
+# de material" - terreno preparado, ver MaterialesNotificacion y
+# TareasProgramadasViewSet.recordatorios_pedido en views.py) - Cloud
+# Scheduler llama este endpoint a diario con este secreto, mismo criterio
+# que MATERIALES_INTERNAL_SECRET (vacio en dev = el endpoint rechaza
+# cualquier llamada, no hay bypass accidental).
+TAREAS_PROGRAMADAS_SECRET = env("TAREAS_PROGRAMADAS_SECRET", default="")

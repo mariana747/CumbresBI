@@ -7,10 +7,12 @@ from materiales.views import (
     EvidenciaRecepcionViewSet,
     ManoObraCatalogoViewSet,
     MaterialCatalogoViewSet,
+    MaterialesNotificacionViewSet,
     PresupuestoFirmaViewSet,
     PresupuestoViewSet,
     RequisicionViewSet,
     SolicitudMaterialViewSet,
+    TareaRecordatoriosView,
 )
 
 router = DefaultRouter()
@@ -22,8 +24,10 @@ router.register("presupuesto-firmas", PresupuestoFirmaViewSet, basename="presupu
 router.register("solicitudes", SolicitudMaterialViewSet, basename="solicitudmaterial")
 router.register("evidencias-recepcion", EvidenciaRecepcionViewSet, basename="evidenciarecepcion")
 router.register("requisiciones", RequisicionViewSet, basename="requisicion")
+router.register("notificaciones", MaterialesNotificacionViewSet, basename="materialesnotificacion")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include(router.urls)),
+    path("api/tareas/recordatorios-pedido/", TareaRecordatoriosView.as_view(), name="tarea-recordatorios-pedido"),
 ]

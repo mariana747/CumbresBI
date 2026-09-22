@@ -11,11 +11,15 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
   IconButton,
+  InputLabel,
   List,
   ListItem,
   ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Tab,
   Table,
@@ -24,12 +28,15 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   Tabs,
   TextField,
   Typography,
 } from "@mui/material";
 import { Camera, Package, Pencil, Plus, Trash2, Truck, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import EscanerDocumento from "@/components/EscanerDocumento";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
@@ -46,6 +53,7 @@ import {
   listMateriales,
   listSolicitudes,
   rechazarSolicitud,
+  subirEvidenciaFotoRecepcion,
   updateMaterial,
 } from "@/lib/materiales";
 
@@ -65,7 +73,7 @@ function horaActual() {
 function fechaActual() {
   return new Date().toISOString().slice(0, 10);
 }
-const FORM_EVIDENCIA_VACIO = { linkDrive: "", fecha: fechaActual(), hora: horaActual(), comentarios: "" };
+const FORM_EVIDENCIA_VACIO = { fecha: fechaActual(), hora: horaActual(), comentarios: "" };
 
 // Flujo de 3 estados, sin paso intermedio de aprobacion.
 const ESTADO_LABELS: Record<SolicitudMaterialEstado, string> = {
@@ -110,11 +118,34 @@ export default function MaterialesPage() {
   // mismo scroll vertical.
   const [seccion, setSeccion] = useState<Seccion>("catalogo");
   const [session, setSession] = useState<SessionUser | null>(null);
-  const [materiales, setMateriales] = useState<MaterialCatalogo[]>([]);
-  const [solicitudes, setSolicitudes] = useState<SolicitudMaterial[]>([]);
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Paginacion + filtros server-side (22/Sep/2026, mismo patron que
+  // tesoreria/flujos/page.tsx, ver ListadoGrandePagination en el backend)
+  // - cada seccion tiene su propio buscador/pagina, porque son consultas
+  // distintas (Disponibles filtra solo_disponibles=true, Salida filtra por
+  // estado/proyecto).
+  const [materiales, setMateriales] = useState<MaterialCatalogo[]>([]);
+  const [searchCatalogo, setSearchCatalogo] = useState("");
+  const [paginaCatalogo, setPaginaCatalogo] = useState(0);
+  const [filasPorPaginaCatalogo, setFilasPorPaginaCatalogo] = useState(20);
+  const [totalCatalogo, setTotalCatalogo] = useState(0);
+
+  const [disponibles, setDisponibles] = useState<MaterialCatalogo[]>([]);
+  const [searchDisponibles, setSearchDisponibles] = useState("");
+  const [paginaDisponibles, setPaginaDisponibles] = useState(0);
+  const [filasPorPaginaDisponibles, setFilasPorPaginaDisponibles] = useState(20);
+  const [totalDisponibles, setTotalDisponibles] = useState(0);
+
+  const [solicitudes, setSolicitudes] = useState<SolicitudMaterial[]>([]);
+  const [searchSalida, setSearchSalida] = useState("");
+  const [filtroEstadoSalida, setFiltroEstadoSalida] = useState<SolicitudMaterialEstado | "">("");
+  const [filtroProyectoSalida, setFiltroProyectoSalida] = useState("");
+  const [paginaSalida, setPaginaSalida] = useState(0);
+  const [filasPorPaginaSalida, setFilasPorPaginaSalida] = useState(20);
+  const [totalSalida, setTotalSalida] = useState(0);
 
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
   const [editandoMaterial, setEditandoMaterial] = useState<MaterialCatalogo | null>(null);
@@ -127,6 +158,8 @@ export default function MaterialesPage() {
   const [evidencias, setEvidencias] = useState<EvidenciaRecepcion[]>([]);
   const [evidenciasLoading, setEvidenciasLoading] = useState(false);
   const [formEvidencia, setFormEvidencia] = useState(FORM_EVIDENCIA_VACIO);
+  const [fotoParaEscanear, setFotoParaEscanear] = useState<File | null>(null);
+  const [archivoEvidencia, setArchivoEvidencia] = useState<File | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -139,19 +172,95 @@ export default function MaterialesPage() {
   const puedeCrear = session?.perm_keys.includes("materiales.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("materiales.editar") ?? false;
 
-  function refresh() {
+  useEffect(() => {
     setLoading(true);
-    Promise.all([listMateriales(), listSolicitudes(), listProyectos()])
-      .then(([m, s, p]) => {
-        setMateriales(m);
-        setSolicitudes(s);
-        setProyectos(p);
-      })
+    listProyectos()
+      .then(setProyectos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
+  }, []);
+
+  function refreshCatalogo() {
+    listMateriales({ search: searchCatalogo || undefined, page: paginaCatalogo + 1, pageSize: filasPorPaginaCatalogo })
+      .then((res) => {
+        setMateriales(res.results);
+        setTotalCatalogo(res.count);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"));
   }
 
-  useEffect(refresh, []);
+  useEffect(() => {
+    const timeout = setTimeout(refreshCatalogo, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchCatalogo, paginaCatalogo, filasPorPaginaCatalogo]);
+
+  useEffect(() => {
+    setPaginaCatalogo(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchCatalogo]);
+
+  function refreshDisponibles() {
+    listMateriales({
+      search: searchDisponibles || undefined,
+      soloDisponibles: true,
+      page: paginaDisponibles + 1,
+      pageSize: filasPorPaginaDisponibles,
+    })
+      .then((res) => {
+        setDisponibles(res.results);
+        setTotalDisponibles(res.count);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"));
+  }
+
+  useEffect(() => {
+    if (seccion !== "disponibles") return;
+    const timeout = setTimeout(refreshDisponibles, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seccion, searchDisponibles, paginaDisponibles, filasPorPaginaDisponibles]);
+
+  useEffect(() => {
+    setPaginaDisponibles(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchDisponibles]);
+
+  function refreshSalida() {
+    listSolicitudes({
+      search: searchSalida || undefined,
+      estado: filtroEstadoSalida || undefined,
+      proyecto: filtroProyectoSalida || undefined,
+      page: paginaSalida + 1,
+      pageSize: filasPorPaginaSalida,
+    })
+      .then((res) => {
+        setSolicitudes(res.results);
+        setTotalSalida(res.count);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"));
+  }
+
+  useEffect(() => {
+    if (seccion !== "salida") return;
+    const timeout = setTimeout(refreshSalida, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seccion, searchSalida, filtroEstadoSalida, filtroProyectoSalida, paginaSalida, filasPorPaginaSalida]);
+
+  useEffect(() => {
+    setPaginaSalida(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchSalida, filtroEstadoSalida, filtroProyectoSalida]);
+
+  // Refresco compartido tras crear/editar/borrar (dialogos) - siempre
+  // recarga el Catalogo (fuente de materiales para el select de "Nueva
+  // Salida") y ademas la seccion activa si es otra.
+  function refresh() {
+    refreshCatalogo();
+    if (seccion === "disponibles") refreshDisponibles();
+    if (seccion === "salida") refreshSalida();
+  }
 
   function abrirAltaMaterial() {
     setEditandoMaterial(null);
@@ -273,6 +382,7 @@ export default function MaterialesPage() {
   function abrirBitacora(s: SolicitudMaterial) {
     setBitacoraSolicitud(s);
     setFormEvidencia(FORM_EVIDENCIA_VACIO);
+    setArchivoEvidencia(null);
     setFormError(null);
     setEvidenciasLoading(true);
     listEvidenciasRecepcion(s.id_solicitud)
@@ -287,19 +397,26 @@ export default function MaterialesPage() {
       setFormError("Fecha y hora son requeridas.");
       return;
     }
+    if (!archivoEvidencia) {
+      setFormError("Toma o sube una foto antes de agregar a la bitácora.");
+      return;
+    }
     setSaving(true);
     setFormError(null);
     try {
       const nueva = await createEvidenciaRecepcion({
         solicitud: bitacoraSolicitud.id_solicitud,
-        linkDrive: formEvidencia.linkDrive || null,
         fecha: formEvidencia.fecha,
         hora: formEvidencia.hora,
         registradoPor: session.user_id,
         comentarios: formEvidencia.comentarios || null,
       });
-      setEvidencias((prev) => [nueva, ...prev]);
+      // Se sube DESPUES de crear el registro (necesita su id_evidencia) -
+      // mismo patron que Compras > Recepciones.
+      const conFoto = await subirEvidenciaFotoRecepcion(nueva.id_evidencia, archivoEvidencia);
+      setEvidencias((prev) => [conFoto, ...prev]);
       setFormEvidencia(FORM_EVIDENCIA_VACIO);
+      setArchivoEvidencia(null);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
@@ -351,21 +468,25 @@ export default function MaterialesPage() {
           </Tabs>
 
           {seccion === "catalogo" && (
-            <Paper variant="outlined">
-              <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-                <Typography variant="subtitle1">Catálogo de Materiales</Typography>
-                {puedeCrear && (
-                  <Button
-                    size="small"
-                    variant="contained"
-                    startIcon={<Plus size={14} strokeWidth={2} />}
-                    onClick={abrirAltaMaterial}
-                    sx={{ ml: "auto" }}
-                  >
-                    Nuevo Material
-                  </Button>
-                )}
-              </Stack>
+            <>
+              <FiltrosBar
+                search={searchCatalogo}
+                onSearchChange={setSearchCatalogo}
+                searchPlaceholder="Buscar por material o unidad..."
+                actions={
+                  puedeCrear ? (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={<Plus size={14} strokeWidth={2} />}
+                      onClick={abrirAltaMaterial}
+                    >
+                      Nuevo Material
+                    </Button>
+                  ) : undefined
+                }
+              />
+              <Paper variant="outlined">
               <TableContainer>
                 <Table size="small">
                   <TableHead>
@@ -419,14 +540,32 @@ export default function MaterialesPage() {
                   </TableBody>
                 </Table>
               </TableContainer>
-            </Paper>
+              <TablePagination
+                component="div"
+                count={totalCatalogo}
+                page={paginaCatalogo}
+                onPageChange={(_, nuevaPagina) => setPaginaCatalogo(nuevaPagina)}
+                rowsPerPage={filasPorPaginaCatalogo}
+                onRowsPerPageChange={(e) => {
+                  setFilasPorPaginaCatalogo(parseInt(e.target.value, 10));
+                  setPaginaCatalogo(0);
+                }}
+                rowsPerPageOptions={[20, 50, 100]}
+                labelRowsPerPage="Filas por página"
+                labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+              />
+              </Paper>
+            </>
           )}
 
           {seccion === "disponibles" && (
-            <Paper variant="outlined">
-              <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-                <Typography variant="subtitle1">Catálogo de Materiales Disponibles</Typography>
-              </Stack>
+            <>
+              <FiltrosBar
+                search={searchDisponibles}
+                onSearchChange={setSearchDisponibles}
+                searchPlaceholder="Buscar por material o unidad..."
+              />
+              <Paper variant="outlined">
               <TableContainer>
                 <Table size="small">
                   <TableHead>
@@ -438,7 +577,7 @@ export default function MaterialesPage() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {materiales.filter((m) => Number(m.cantidad_disponible) > 0).length === 0 ? (
+                    {disponibles.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
                           <Typography variant="body2" color="text.secondary">
@@ -447,40 +586,94 @@ export default function MaterialesPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      materiales
-                        .filter((m) => Number(m.cantidad_disponible) > 0)
-                        .map((m) => (
-                          <TableRow key={m.id_material} hover>
-                            <TableCell>{m.material}</TableCell>
-                            <TableCell>{m.unidad_medida}</TableCell>
-                            <TableCell align="right">{m.cantidad_disponible}</TableCell>
-                            <TableCell align="right">${m.precio_unitario}</TableCell>
-                          </TableRow>
-                        ))
+                      disponibles.map((m) => (
+                        <TableRow key={m.id_material} hover>
+                          <TableCell>{m.material}</TableCell>
+                          <TableCell>{m.unidad_medida}</TableCell>
+                          <TableCell align="right">{m.cantidad_disponible}</TableCell>
+                          <TableCell align="right">${m.precio_unitario}</TableCell>
+                        </TableRow>
+                      ))
                     )}
                   </TableBody>
                 </Table>
               </TableContainer>
-            </Paper>
+              <TablePagination
+                component="div"
+                count={totalDisponibles}
+                page={paginaDisponibles}
+                onPageChange={(_, nuevaPagina) => setPaginaDisponibles(nuevaPagina)}
+                rowsPerPage={filasPorPaginaDisponibles}
+                onRowsPerPageChange={(e) => {
+                  setFilasPorPaginaDisponibles(parseInt(e.target.value, 10));
+                  setPaginaDisponibles(0);
+                }}
+                rowsPerPageOptions={[20, 50, 100]}
+                labelRowsPerPage="Filas por página"
+                labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+              />
+              </Paper>
+            </>
           )}
 
           {seccion === "salida" && (
-            <Paper variant="outlined">
-              <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 2 }}>
-                <Typography variant="subtitle1">Salida de Almacén</Typography>
-                {puedeCrear && (
-                  <Button
-                    size="small"
-                    variant="contained"
-                    startIcon={<Plus size={14} strokeWidth={2} />}
-                    onClick={abrirAltaSolicitud}
-                    disabled={materiales.length === 0}
-                    sx={{ ml: "auto" }}
+            <>
+              <FiltrosBar
+                search={searchSalida}
+                onSearchChange={setSearchSalida}
+                searchPlaceholder="Buscar por proyecto o material..."
+                actions={
+                  puedeCrear ? (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={<Plus size={14} strokeWidth={2} />}
+                      onClick={abrirAltaSolicitud}
+                      disabled={materiales.length === 0}
+                    >
+                      Nueva Salida
+                    </Button>
+                  ) : undefined
+                }
+              >
+                <FormControl size="small" sx={{ minWidth: 160 }}>
+                  <InputLabel id="filtro-estado-salida-label">Estado</InputLabel>
+                  <Select
+                    labelId="filtro-estado-salida-label"
+                    label="Estado"
+                    value={filtroEstadoSalida}
+                    onChange={(e) => setFiltroEstadoSalida(e.target.value as SolicitudMaterialEstado | "")}
                   >
-                    Nueva Salida
-                  </Button>
-                )}
-              </Stack>
+                    <MenuItem value="">
+                      <em>Todos</em>
+                    </MenuItem>
+                    {(Object.keys(ESTADO_LABELS) as SolicitudMaterialEstado[]).map((estado) => (
+                      <MenuItem key={estado} value={estado}>
+                        {ESTADO_LABELS[estado]}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 160 }}>
+                  <InputLabel id="filtro-proyecto-salida-label">Proyecto</InputLabel>
+                  <Select
+                    labelId="filtro-proyecto-salida-label"
+                    label="Proyecto"
+                    value={filtroProyectoSalida}
+                    onChange={(e) => setFiltroProyectoSalida(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>Todos</em>
+                    </MenuItem>
+                    {proyectos.map((p) => (
+                      <MenuItem key={p.id_proyecto} value={p.id_proyecto}>
+                        {p.alias_proyecto || p.denominacion || p.id_proyecto}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </FiltrosBar>
+              <Paper variant="outlined">
               {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza
               por tarjetas apiladas (ver abajo) - 6 columnas no caben comodas
               en un telefono, mismo patron que tesoreria/flujos/page.tsx. */}
@@ -623,7 +816,22 @@ export default function MaterialesPage() {
                   ))
                 )}
               </Stack>
-            </Paper>
+              <TablePagination
+                component="div"
+                count={totalSalida}
+                page={paginaSalida}
+                onPageChange={(_, nuevaPagina) => setPaginaSalida(nuevaPagina)}
+                rowsPerPage={filasPorPaginaSalida}
+                onRowsPerPageChange={(e) => {
+                  setFilasPorPaginaSalida(parseInt(e.target.value, 10));
+                  setPaginaSalida(0);
+                }}
+                rowsPerPageOptions={[20, 50, 100]}
+                labelRowsPerPage="Filas por página"
+                labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+              />
+              </Paper>
+            </>
           )}
         </>
       )}
@@ -791,22 +999,46 @@ export default function MaterialesPage() {
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          <Typography variant="caption" color="text.secondary">
-            Mientras no exista la carpeta de Drive para Obra, la foto se registra como un link pegado a mano.
-          </Typography>
           {formError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
+            <Alert severity="error" sx={{ mb: 2 }}>
               {formError}
             </Alert>
           )}
-          <Stack spacing={2} sx={{ mt: 2 }}>
-            <TextField
-              size="small"
-              label="Link de la foto (Drive u otro)"
-              value={formEvidencia.linkDrive}
-              onChange={(e) => setFormEvidencia({ ...formEvidencia, linkDrive: e.target.value })}
-              fullWidth
-            />
+          <Stack spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <Button component="label" variant="outlined" startIcon={<Camera size={16} strokeWidth={1.5} />}>
+                Tomar foto
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFotoParaEscanear(f);
+                    e.target.value = "";
+                  }}
+                />
+              </Button>
+              <Button component="label" variant="outlined">
+                Subir archivo
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFotoParaEscanear(f);
+                    e.target.value = "";
+                  }}
+                />
+              </Button>
+            </Stack>
+            {archivoEvidencia && (
+              <Typography variant="caption" color="text.secondary">
+                Foto lista: {archivoEvidencia.name}
+              </Typography>
+            )}
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
@@ -836,7 +1068,12 @@ export default function MaterialesPage() {
               minRows={2}
               fullWidth
             />
-            <Button variant="contained" onClick={handleAgregarEvidencia} disabled={saving} sx={{ alignSelf: "flex-start" }}>
+            <Button
+              variant="contained"
+              onClick={handleAgregarEvidencia}
+              disabled={saving || !archivoEvidencia}
+              sx={{ alignSelf: "flex-start" }}
+            >
               {saving ? <CircularProgress size={16} /> : "Agregar a la bitácora"}
             </Button>
           </Stack>
@@ -869,6 +1106,16 @@ export default function MaterialesPage() {
           <Button onClick={() => setBitacoraSolicitud(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
+
+      <EscanerDocumento
+        open={!!fotoParaEscanear}
+        archivo={fotoParaEscanear}
+        onCancelar={() => setFotoParaEscanear(null)}
+        onConfirmar={(archivo) => {
+          setArchivoEvidencia(archivo);
+          setFotoParaEscanear(null);
+        }}
+      />
     </AppShell>
   );
 }
