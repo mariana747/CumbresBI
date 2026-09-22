@@ -3,6 +3,7 @@
 // materiales-service/materiales/views.py).
 import { apiFetch, friendlyApiError } from "./apiError";
 import { GATEWAY_URL } from "./gatewayUrl";
+import { ExportarSheetsResultado } from "./tesoreria";
 
 const MATERIALES_API_BASE_URL = `${GATEWAY_URL}/materiales`;
 
@@ -276,6 +277,20 @@ export async function createEvidenciaRecepcion(params: {
   return response.json();
 }
 
+// Evidencia fotografica real (22/Sep/2026) - sube a Drive via
+// drive-service, mismo patron que subirEvidenciaRecepcion en lib/compras.ts.
+export async function subirEvidenciaFotoRecepcion(idEvidencia: string, archivo: File): Promise<EvidenciaRecepcion> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/evidencias-recepcion/${idEvidencia}/subir_evidencia/`,
+    { method: "POST", body: formData }
+  );
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
 // Presupuesto/ConceptoPresupuesto - CRUD ya existia en el backend
 // (Fase 3), pero sin cliente en el frontend hasta que Requisicion los
 // necesito (21/Ago/2026) para armar el documento por proyecto+etapa.
@@ -459,6 +474,28 @@ async function accionRequisicion(
 export const validarRequisicion = (id: string) => accionRequisicion(id, "validar");
 export const autorizarRequisicion = (id: string) => accionRequisicion(id, "autorizar");
 export const rechazarRequisicion = (id: string) => accionRequisicion(id, "rechazar");
+
+// Exportar a Google Sheets (22/Sep/2026, "ya no se descargara un xlsx
+// sino se mandara al drive") - mismo patron que exportarFlujosSheets en
+// lib/tesoreria.ts.
+export async function exportarRequisicionSheets(
+  idRequisicion: string,
+  carpetaId?: string
+): Promise<ExportarSheetsResultado> {
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/requisiciones/${idRequisicion}/exportar_sheets/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carpeta_id: carpetaId }),
+    }
+  );
+  if (!response.ok && response.status !== 409) {
+    throw await friendlyApiError("MATERIALES", response);
+  }
+  return response.json();
+}
 
 // Contrato de Suministro (22/Sep/2026) - documento con un proveedor donde
 // viene detallado que va a surtir y a que precio, distinto de

@@ -31,6 +31,7 @@ import {
 } from "@mui/material";
 import { Camera, FileText, Package, Pencil, Plus, Trash2, Truck, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import EscanerDocumento from "@/components/EscanerDocumento";
 import { SessionUser, getSession } from "@/lib/auth";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
@@ -54,6 +55,7 @@ import {
   listMateriales,
   listSolicitudes,
   rechazarSolicitud,
+  subirEvidenciaFotoRecepcion,
   updateContratoSuministro,
   updateMaterial,
 } from "@/lib/materiales";
@@ -74,7 +76,7 @@ function horaActual() {
 function fechaActual() {
   return new Date().toISOString().slice(0, 10);
 }
-const FORM_EVIDENCIA_VACIO = { linkDrive: "", fecha: fechaActual(), hora: horaActual(), comentarios: "" };
+const FORM_EVIDENCIA_VACIO = { fecha: fechaActual(), hora: horaActual(), comentarios: "" };
 
 const FORM_CONTRATO_VACIO = {
   proveedor: "",
@@ -158,6 +160,8 @@ export default function MaterialesPage() {
   const [evidencias, setEvidencias] = useState<EvidenciaRecepcion[]>([]);
   const [evidenciasLoading, setEvidenciasLoading] = useState(false);
   const [formEvidencia, setFormEvidencia] = useState(FORM_EVIDENCIA_VACIO);
+  const [fotoParaEscanear, setFotoParaEscanear] = useState<File | null>(null);
+  const [archivoEvidencia, setArchivoEvidencia] = useState<File | null>(null);
 
   const [contratos, setContratos] = useState<ContratoSuministro[]>([]);
   const [contratoDialogOpen, setContratoDialogOpen] = useState(false);
@@ -313,6 +317,7 @@ export default function MaterialesPage() {
   function abrirBitacora(s: SolicitudMaterial) {
     setBitacoraSolicitud(s);
     setFormEvidencia(FORM_EVIDENCIA_VACIO);
+    setArchivoEvidencia(null);
     setFormError(null);
     setEvidenciasLoading(true);
     listEvidenciasRecepcion(s.id_solicitud)
@@ -327,19 +332,26 @@ export default function MaterialesPage() {
       setFormError("Fecha y hora son requeridas.");
       return;
     }
+    if (!archivoEvidencia) {
+      setFormError("Toma o sube una foto antes de agregar a la bitácora.");
+      return;
+    }
     setSaving(true);
     setFormError(null);
     try {
       const nueva = await createEvidenciaRecepcion({
         solicitud: bitacoraSolicitud.id_solicitud,
-        linkDrive: formEvidencia.linkDrive || null,
         fecha: formEvidencia.fecha,
         hora: formEvidencia.hora,
         registradoPor: session.user_id,
         comentarios: formEvidencia.comentarios || null,
       });
-      setEvidencias((prev) => [nueva, ...prev]);
+      // Se sube DESPUES de crear el registro (necesita su id_evidencia) -
+      // mismo patron que Compras > Recepciones.
+      const conFoto = await subirEvidenciaFotoRecepcion(nueva.id_evidencia, archivoEvidencia);
+      setEvidencias((prev) => [conFoto, ...prev]);
       setFormEvidencia(FORM_EVIDENCIA_VACIO);
+      setArchivoEvidencia(null);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
@@ -1042,22 +1054,46 @@ export default function MaterialesPage() {
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          <Typography variant="caption" color="text.secondary">
-            Mientras no exista la carpeta de Drive para Obra, la foto se registra como un link pegado a mano.
-          </Typography>
           {formError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
+            <Alert severity="error" sx={{ mb: 2 }}>
               {formError}
             </Alert>
           )}
-          <Stack spacing={2} sx={{ mt: 2 }}>
-            <TextField
-              size="small"
-              label="Link de la foto (Drive u otro)"
-              value={formEvidencia.linkDrive}
-              onChange={(e) => setFormEvidencia({ ...formEvidencia, linkDrive: e.target.value })}
-              fullWidth
-            />
+          <Stack spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <Button component="label" variant="outlined" startIcon={<Camera size={16} strokeWidth={1.5} />}>
+                Tomar foto
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFotoParaEscanear(f);
+                    e.target.value = "";
+                  }}
+                />
+              </Button>
+              <Button component="label" variant="outlined">
+                Subir archivo
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFotoParaEscanear(f);
+                    e.target.value = "";
+                  }}
+                />
+              </Button>
+            </Stack>
+            {archivoEvidencia && (
+              <Typography variant="caption" color="text.secondary">
+                Foto lista: {archivoEvidencia.name}
+              </Typography>
+            )}
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 size="small"
@@ -1087,7 +1123,12 @@ export default function MaterialesPage() {
               minRows={2}
               fullWidth
             />
-            <Button variant="contained" onClick={handleAgregarEvidencia} disabled={saving} sx={{ alignSelf: "flex-start" }}>
+            <Button
+              variant="contained"
+              onClick={handleAgregarEvidencia}
+              disabled={saving || !archivoEvidencia}
+              sx={{ alignSelf: "flex-start" }}
+            >
               {saving ? <CircularProgress size={16} /> : "Agregar a la bitácora"}
             </Button>
           </Stack>
@@ -1120,6 +1161,16 @@ export default function MaterialesPage() {
           <Button onClick={() => setBitacoraSolicitud(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
+
+      <EscanerDocumento
+        open={!!fotoParaEscanear}
+        archivo={fotoParaEscanear}
+        onCancelar={() => setFotoParaEscanear(null)}
+        onConfirmar={(archivo) => {
+          setArchivoEvidencia(archivo);
+          setFotoParaEscanear(null);
+        }}
+      />
 
       <Dialog open={contratoDialogOpen} onClose={() => setContratoDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

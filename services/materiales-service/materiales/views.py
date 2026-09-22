@@ -16,6 +16,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from . import google_sheets_utils
 from .models import (
     ConceptoPresupuesto,
     ContratoSuministro,
@@ -582,6 +583,39 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         requisicion.save(update_fields=["estado", "updated_at"])
         return Response(RequisicionSerializer(requisicion).data)
 
+    @action(detail=True, methods=["post"])
+    def exportar_sheets(self, request, pk=None):
+        """Exporta la Requisicion a Google Sheets, al Drive personal del
+        usuario (22/Sep/2026, "ya no se descargara un xlsx sino se
+        mandara al drive", mismo patron que TesoreriaFlujoViewSet.
+        exportar_sheets). Si el usuario no ha conectado su cuenta de
+        Google, regresa 409 con la url de autorizacion para que el
+        frontend redirija."""
+        requisicion = self.get_object()
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        encabezados = ["Material", "Cantidad", "Precio unitario", "Importe", "Cotización"]
+        filas = [
+            [l.material_nombre, str(l.cantidad_total), str(l.precio_unitario), str(l.importe), l.proveedor_cotizacion or ""]
+            for l in requisicion.lineas.all()
+        ]
+        titulo = f"Requisición {requisicion.folio}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
+
     def get_permissions(self):
         if self.action in ("validar", "autorizar", "rechazar"):
             return [require_permission("materiales.editar")()]
@@ -607,6 +641,46 @@ class EvidenciaRecepcionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         if solicitud_id:
             queryset = queryset.filter(solicitud_id=solicitud_id)
         return queryset
+
+    @action(detail=True, methods=["post"])
+    def subir_evidencia(self, request, pk=None):
+        """Evidencia fotografica real (22/Sep/2026, mismo patron que
+        RecepcionViewSet.subir_evidencia en compras-tesoreria-service):
+        sube a Drive via drive-service y guarda el link. Quien sube es el
+        propio usuario autenticado (forward_auth_headers reenvia su
+        sesion), no una llamada servicio-a-servicio."""
+        evidencia = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Materiales/Evidencias/{evidencia.id_evidencia}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "materiales.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir evidencia de %s", evidencia.id_evidencia, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        evidencia.link_drive = resultado["web_view_link"]
+        evidencia.updated_by = getattr(request.effective_scope, "identity_user_id", None) or "sistema"
+        evidencia.save(update_fields=["link_drive", "updated_by", "updated_at"])
+        return Response(self.get_serializer(evidencia).data)
 
 
 class ContratoSuministroViewSet(_PermisosMaterialesMixin, ModelViewSet):
