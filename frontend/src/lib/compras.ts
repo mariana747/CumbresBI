@@ -71,7 +71,7 @@ export interface OrdenCompra {
   proveedor_nombre: string | null;
   fecha_orden: string;
   monto_total: string;
-  estado: "BORRADOR" | "ENVIADA" | "RECIBIDA_PARCIAL" | "RECIBIDA_TOTAL" | "CANCELADA";
+  estado: "BORRADOR" | "ENVIADA" | "RECIBIDA_PARCIAL" | "RECIBIDA_TOTAL" | "CANCELADA" | "CERRADA_CON_FALTANTE";
   estado_label: string;
   autorizado_por: string | null;
   comentarios: string | null;
@@ -100,11 +100,31 @@ export interface Recepcion {
 
 // --- Solicitudes de compra ---
 
-export async function listSolicitudesCompra(params?: { proyecto?: string; search?: string }): Promise<SolicitudCompra[]> {
+export async function listSolicitudesCompra(params?: {
+  proyecto?: string;
+  search?: string;
+  estado?: SolicitudCompra["estado"];
+}): Promise<SolicitudCompra[]> {
   const qs = new URLSearchParams();
   if (params?.proyecto) qs.set("proyecto", params.proyecto);
   if (params?.search) qs.set("search", params.search);
+  if (params?.estado) qs.set("estado", params.estado);
   const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/solicitudes/?${qs.toString()}`);
+  if (!response.ok) throw await friendlyApiError("COMPRAS", response);
+  return response.json();
+}
+
+// Evidencia fotografica real de una Recepcion (21/Sep/2026, "falta el
+// componente de tomar fotos") - sube a Drive via drive-service, mismo
+// patron que subirComprobanteFlujo en lib/tesoreria.ts.
+export async function subirEvidenciaRecepcion(idRecepcion: string, archivo: File): Promise<Recepcion> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch(
+    "COMPRAS",
+    `${COMPRAS_API_BASE_URL}/api/recepciones/${idRecepcion}/subir_evidencia/`,
+    { method: "POST", body: formData }
+  );
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();
 }
@@ -126,9 +146,15 @@ export async function createSolicitudCompra(params: {
 
 // --- Cotizaciones ---
 
-export async function listCotizaciones(solicitud?: string): Promise<Cotizacion[]> {
+export async function listCotizaciones(params?: {
+  solicitud?: string;
+  search?: string;
+  estado?: Cotizacion["estado"];
+}): Promise<Cotizacion[]> {
   const qs = new URLSearchParams();
-  if (solicitud) qs.set("solicitud", solicitud);
+  if (params?.solicitud) qs.set("solicitud", params.solicitud);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.estado) qs.set("estado", params.estado);
   const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/cotizaciones/?${qs.toString()}`);
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();
@@ -178,9 +204,15 @@ export async function confirmarExtraccionCotizacion(
 
 // --- Órdenes de compra ---
 
-export async function listOrdenesCompra(proyecto?: string): Promise<OrdenCompra[]> {
+export async function listOrdenesCompra(params?: {
+  proyecto?: string;
+  search?: string;
+  estado?: OrdenCompra["estado"];
+}): Promise<OrdenCompra[]> {
   const qs = new URLSearchParams();
-  if (proyecto) qs.set("proyecto", proyecto);
+  if (params?.proyecto) qs.set("proyecto", params.proyecto);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.estado) qs.set("estado", params.estado);
   const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/ordenes/?${qs.toString()}`);
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();
@@ -191,6 +223,17 @@ export async function generarOrdenDesdeCotizacion(idCotizacion: string): Promise
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cotizacion: idCotizacion }),
+  });
+  if (!response.ok) throw await friendlyApiError("COMPRAS", response);
+  return response.json();
+}
+
+// Cierra una orden "Recibida parcial" cuando el faltante es definitivo
+// (21/Sep/2026, "y que pasa si llega menos de lo esperado") - requiere
+// compras.aprobar.
+export async function cerrarOrdenConFaltante(idOrden: string): Promise<OrdenCompra> {
+  const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/ordenes/${idOrden}/cerrar_con_faltante/`, {
+    method: "POST",
   });
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();

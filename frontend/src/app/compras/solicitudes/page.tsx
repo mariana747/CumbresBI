@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Alert,
   Box,
@@ -12,7 +11,14 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
+  Drawer,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -23,8 +29,10 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { ClipboardList, Plus } from "lucide-react";
+import { ClipboardList, Plus, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import CotizacionesPanel from "@/components/CotizacionesPanel";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import { SolicitudCompra, createSolicitudCompra, listSolicitudesCompra } from "@/lib/compras";
 
@@ -48,7 +56,6 @@ const ESTADO_COLOR: Record<SolicitudCompra["estado"], "default" | "warning" | "i
 // (campo libre `requisicion`, referencia laxa - ver
 // services/compras-tesoreria-service/compras_tesoreria/models.py).
 export default function SolicitudesCompraPage() {
-  const router = useRouter();
   const [session, setSession] = useState<SessionUser | null>(null);
   const [solicitudes, setSolicitudes] = useState<SolicitudCompra[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +66,12 @@ export default function SolicitudesCompraPage() {
   const [requisicion, setRequisicion] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<SolicitudCompra["estado"] | "">("");
+  // Ver cotizaciones en panel lateral (21/Sep/2026, "que sean en una pagina
+  // lateral") - antes navegaba a /compras/cotizaciones, ahora abre un
+  // Drawer con CotizacionesPanel sin salir de esta pantalla.
+  const [solicitudSeleccionada, setSolicitudSeleccionada] = useState<SolicitudCompra | null>(null);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -68,13 +81,13 @@ export default function SolicitudesCompraPage() {
 
   function recargar() {
     setLoading(true);
-    listSolicitudesCompra()
+    listSolicitudesCompra({ search: search || undefined, estado: filtroEstado || undefined })
       .then(setSolicitudes)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
 
-  useEffect(recargar, []);
+  useEffect(recargar, [search, filtroEstado]);
 
   async function handleCrear() {
     setGuardando(true);
@@ -113,6 +126,27 @@ export default function SolicitudesCompraPage() {
           {error}
         </Alert>
       )}
+
+      <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por proyecto, descripción o requisición...">
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="filtro-estado-solicitud-label">Filtrar por estado</InputLabel>
+          <Select
+            labelId="filtro-estado-solicitud-label"
+            label="Filtrar por estado"
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value as SolicitudCompra["estado"] | "")}
+          >
+            <MenuItem value="">
+              <em>Todos los estados</em>
+            </MenuItem>
+            {Object.entries(ESTADO_LABELS).map(([valor, label]) => (
+              <MenuItem key={valor} value={valor}>
+                {label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </FiltrosBar>
 
       {loading ? (
         <Stack alignItems="center" sx={{ py: 4 }}>
@@ -164,7 +198,7 @@ export default function SolicitudesCompraPage() {
                       <TableRow
                         key={s.id_solicitud}
                         hover
-                        onClick={() => router.push(`/compras/cotizaciones?solicitud=${s.id_solicitud}`)}
+                        onClick={() => setSolicitudSeleccionada(s)}
                         sx={{ cursor: "pointer" }}
                       >
                         <TableCell>{s.proyecto}</TableCell>
@@ -197,7 +231,7 @@ export default function SolicitudesCompraPage() {
                   key={s.id_solicitud}
                   variant="outlined"
                   sx={{ p: 2, cursor: "pointer" }}
-                  onClick={() => router.push(`/compras/cotizaciones?solicitud=${s.id_solicitud}`)}
+                  onClick={() => setSolicitudSeleccionada(s)}
                 >
                   <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                     <Stack spacing={0.25} sx={{ minWidth: 0 }}>
@@ -262,6 +296,45 @@ export default function SolicitudesCompraPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Drawer
+        anchor="right"
+        open={!!solicitudSeleccionada}
+        onClose={(_, reason) => {
+          // Solo se cierra con el boton X (mismo criterio que
+          // PanelReferenciaCruzada - "las pantallas flotantes deben tener
+          // esto de solo cerrar con la x").
+          if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+          setSolicitudSeleccionada(null);
+          recargar();
+        }}
+        // drawer+2 (no modal+1 como PanelReferenciaCruzada): el panel tiene
+        // Dialogs propios anidados (Nueva Cotizacion, Motor Documental) con
+        // el zIndex default de MUI (modal=1300) - si el Drawer fuera mas
+        // alto que eso, esos Dialogs quedarian tapados detras. Con drawer+2
+        // ya queda por encima del AppBar de AppShell (drawer+1) sin chocar.
+        sx={{ zIndex: (theme) => theme.zIndex.drawer + 2 }}
+      >
+        <Box sx={{ width: { xs: "100vw", sm: 640 }, p: 3 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+            <Typography variant="h6">Cotizaciones — {solicitudSeleccionada?.id_solicitud}</Typography>
+            <IconButton
+              size="small"
+              aria-label="Cerrar"
+              onClick={() => {
+                setSolicitudSeleccionada(null);
+                recargar();
+              }}
+            >
+              <CloseIcon size={18} strokeWidth={1.5} />
+            </IconButton>
+          </Stack>
+          <Divider sx={{ mb: 2 }} />
+          {solicitudSeleccionada && (
+            <CotizacionesPanel solicitudId={solicitudSeleccionada.id_solicitud} soloLectura />
+          )}
+        </Box>
+      </Drawer>
     </AppShell>
   );
 }

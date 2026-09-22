@@ -6,10 +6,11 @@ from unittest.mock import Mock, patch
 
 from cumbresbi_scope.scope import EffectiveScope
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from .models import Cotizacion, OrdenCompra, OrdenCompraLinea, SolicitudCompra
+from .models import Cotizacion, OrdenCompra, OrdenCompraLinea, Recepcion, SolicitudCompra
 from .views import CotizacionViewSet, OrdenCompraViewSet, RecepcionViewSet, SolicitudCompraViewSet
 
 PROYECTO_A = "PRYA"
@@ -354,3 +355,168 @@ class ConfirmarExtraccionSincronizaCatalogoTests(TestCase):
         self.cotizacion.refresh_from_db()
         self.assertEqual(self.cotizacion.estado, Cotizacion.ESTADO_CONFIRMADA)
         self.assertEqual(self.cotizacion.lineas.count(), 1)
+
+
+class CrearDesdeRequisicionTests(TestCase):
+    """Verifica el endpoint que materiales-service llama al autorizar una
+    Requisicion (21/Sep/2026) - solo el secreto interno debe poder crearla
+    sin compras.crear, y debe ser idempotente por `requisicion`."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def _llamar(self, payload, secreto=None):
+        request = self.factory.post("/api/solicitudes/crear_desde_requisicion/", payload, format="json")
+        if secreto is not None:
+            request.META["HTTP_X_INTERNAL_SECRET"] = secreto
+        view = SolicitudCompraViewSet.as_view({"post": "crear_desde_requisicion"})
+        return view(request)
+
+    def test_sin_secreto_ni_permiso_da_403(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar({"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Cemento"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_con_secreto_correcto_crea_la_solicitud(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Requisición X — Cimentación", "solicitado_por": "u001"},
+                secreto="dev-secreto",
+            )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["requisicion"], "REQ00001")
+        self.assertEqual(response.data["solicitado_por"], "u001")
+        self.assertEqual(SolicitudCompra.objects.count(), 1)
+
+    def test_secreto_incorrecto_da_403(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Cemento"}, secreto="otro-secreto"
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_es_idempotente_por_requisicion(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            primera = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Requisición X"}, secreto="dev-secreto"
+            )
+            segunda = self._llamar(
+                {"requisicion": "REQ00001", "proyecto": "PRYA", "descripcion": "Requisición X (reintento)"},
+                secreto="dev-secreto",
+            )
+        self.assertEqual(primera.status_code, 201)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertEqual(primera.data["id_solicitud"], segunda.data["id_solicitud"])
+        self.assertEqual(SolicitudCompra.objects.count(), 1)
+
+    def test_campos_faltantes_da_400(self):
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"):
+            response = self._llamar({"requisicion": "REQ00001"}, secreto="dev-secreto")
+        self.assertEqual(response.status_code, 400)
+
+
+class SubirEvidenciaRecepcionTests(TestCase):
+    """Evidencia fotografica real de una Recepcion (21/Sep/2026, "falta el
+    componente de tomar fotos") - sube a Drive via drive-service, mismo
+    patron que TesoreriaFlujoViewSet.subir_comprobante."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.scope = EffectiveScope(is_global=True, perm_keys=("compras.crear",), identity_user_id="u001")
+        solicitud = SolicitudCompra.objects.create(
+            proyecto="PRYA", descripcion="Cemento", created_by="u001", updated_by="u001"
+        )
+        cotizacion = Cotizacion.objects.create(
+            solicitud=solicitud, proveedor="CP0001", proveedor_nombre="Materiales del Norte",
+            created_by="u001", updated_by="u001",
+        )
+        orden = OrdenCompra.objects.create(
+            folio="OC-TEST-0002", proyecto="PRYA", solicitud=solicitud, cotizacion=cotizacion,
+            proveedor="CP0001", proveedor_nombre="Materiales del Norte", created_by="u001", updated_by="u001",
+        )
+        self.recepcion = Recepcion.objects.create(
+            orden=orden, fecha="2026-09-21", hora="10:00:00", created_by="u001", updated_by="u001"
+        )
+
+    def _subir(self, archivo=None):
+        request = self.factory.post(
+            f"/api/recepciones/{self.recepcion.id_recepcion}/subir_evidencia/",
+            {"file": archivo} if archivo else {},
+            format="multipart",
+        )
+        request.effective_scope = self.scope
+        view = RecepcionViewSet.as_view({"post": "subir_evidencia"})
+        return view(request, pk=self.recepcion.id_recepcion)
+
+    def test_sin_archivo_da_400(self):
+        response = self._subir()
+        self.assertEqual(response.status_code, 400)
+
+    def test_con_archivo_sube_a_drive_y_guarda_el_link(self):
+        mock_response = Mock(status_code=201)
+        mock_response.json.return_value = {"web_view_link": "https://drive.google.com/file/x", "file_id": "abc123"}
+        archivo = SimpleUploadedFile("foto.jpg", b"contenido", content_type="image/jpeg")
+        with patch("compras_tesoreria.views.requests.post", return_value=mock_response) as mock_post:
+            response = self._subir(archivo)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["link_drive"], "https://drive.google.com/file/x")
+        self.recepcion.refresh_from_db()
+        self.assertEqual(self.recepcion.link_drive, "https://drive.google.com/file/x")
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["params"]["perm"], "compras.editar")
+        self.assertIn(self.recepcion.id_recepcion, kwargs["data"]["carpeta"])
+
+    def test_fallo_de_red_no_tumba_nada(self):
+        import requests
+
+        archivo = SimpleUploadedFile("foto.jpg", b"contenido", content_type="image/jpeg")
+        with patch("compras_tesoreria.views.requests.post", side_effect=requests.RequestException("caido")):
+            response = self._subir(archivo)
+        self.assertEqual(response.status_code, 502)
+        self.recepcion.refresh_from_db()
+        self.assertIsNone(self.recepcion.link_drive)
+
+
+class CerrarConFaltanteTests(TestCase):
+    """Cerrar una orden con faltante definitivo (21/Sep/2026, "y que pasa
+    si llega menos de lo esperado") - solo aplica si ya esta
+    RECIBIDA_PARCIAL, requiere compras.aprobar."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        solicitud = SolicitudCompra.objects.create(
+            proyecto="PRYA", descripcion="Cemento", created_by="u001", updated_by="u001"
+        )
+        cotizacion = Cotizacion.objects.create(
+            solicitud=solicitud, proveedor="CP0001", proveedor_nombre="Materiales del Norte",
+            created_by="u001", updated_by="u001",
+        )
+        self.orden = OrdenCompra.objects.create(
+            folio="OC-TEST-0003", proyecto="PRYA", solicitud=solicitud, cotizacion=cotizacion,
+            proveedor="CP0001", proveedor_nombre="Materiales del Norte", created_by="u001", updated_by="u001",
+        )
+
+    def _cerrar(self, perm_keys=("compras.aprobar",)):
+        request = self.factory.post(f"/api/ordenes/{self.orden.id_orden}/cerrar_con_faltante/", {}, format="json")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=perm_keys, identity_user_id="u001")
+        view = OrdenCompraViewSet.as_view({"post": "cerrar_con_faltante"})
+        return view(request, pk=self.orden.id_orden)
+
+    def test_sin_permiso_da_403(self):
+        response = self._cerrar(perm_keys=("compras.crear",))
+        self.assertEqual(response.status_code, 403)
+
+    def test_no_se_puede_cerrar_si_no_esta_recibida_parcial(self):
+        self.orden.estado = OrdenCompra.ESTADO_ENVIADA
+        self.orden.save(update_fields=["estado"])
+        response = self._cerrar()
+        self.assertEqual(response.status_code, 400)
+
+    def test_cierra_una_orden_recibida_parcial(self):
+        self.orden.estado = OrdenCompra.ESTADO_RECIBIDA_PARCIAL
+        self.orden.save(update_fields=["estado"])
+        response = self._cerrar()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "CERRADA_CON_FALTANTE")
+        self.orden.refresh_from_db()
+        self.assertEqual(self.orden.estado, OrdenCompra.ESTADO_CERRADA_CON_FALTANTE)

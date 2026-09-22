@@ -473,6 +473,15 @@ export default function RequisicionDetallePage() {
                   )}
                 </>
               )}
+              {requisicion.id_solicitud_compra && (
+                <Button
+                  size="small"
+                  onClick={() => router.push(`/compras/cotizaciones?solicitud=${requisicion.id_solicitud_compra}`)}
+                  sx={{ textTransform: "none" }}
+                >
+                  Ver Solicitud de Compra
+                </Button>
+              )}
               <Button size="small" disabled sx={{ color: DOC.textFaint, textTransform: "none" }} title="Pendiente de construir">
                 Vista previa
               </Button>

@@ -134,3 +134,11 @@ MATERIALES_INTERNAL_SECRET = env("MATERIALES_INTERNAL_SECRET", default="")
 # pld-service contra tesoreria-service (las lecturas cruzadas no exigen
 # X-Internal-Secret, solo las escrituras).
 OBRA_SERVICE_URL = env("OBRA_SERVICE_URL", default="http://obra-service:8080")
+
+# Conexion servicio-a-servicio con compras-tesoreria-service (21/Sep/2026):
+# al autorizar una Requisicion se crea sola la SolicitudCompra
+# correspondiente (RequisicionViewSet.autorizar -> _crear_solicitud_
+# compra). Mismo patron de secreto compartido que MATERIALES_INTERNAL_
+# SECRET arriba, solo que este lo valida compras-tesoreria-service.
+COMPRAS_TESORERIA_SERVICE_URL = env("COMPRAS_TESORERIA_SERVICE_URL", default="http://compras-tesoreria-service:8080")
+COMPRAS_INTERNAL_SECRET = env("COMPRAS_INTERNAL_SECRET", default="")
