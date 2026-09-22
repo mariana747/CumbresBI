@@ -60,6 +60,16 @@ const ESTADO_COLOR: Record<Cotizacion["estado"], "default" | "warning" | "succes
   DESCARTADA: "error",
 };
 
+// "las cotizaciones duran una semana" (22/Sep/2026) - espejo del bloqueo
+// real en OrdenCompraViewSet.generar_desde_cotizacion (backend); esto solo
+// evita el clic inútil, el backend es quien de verdad lo impide.
+function estaVencida(c: Cotizacion): boolean {
+  if (!c.fecha_cotizacion || !c.vigencia_dias) return false;
+  const vence = new Date(c.fecha_cotizacion);
+  vence.setDate(vence.getDate() + c.vigencia_dias);
+  return new Date() > vence;
+}
+
 // Whitelist de campos que confirmar_extraccion acepta - espejo de
 // CotizacionViewSet.CAMPOS_CONFIRMABLES en views.py.
 const CAMPOS_CONFIRMABLES = [
@@ -384,6 +394,9 @@ export default function CotizacionesPanel({
               >
                 <Typography variant="subtitle1">{c.proveedor_nombre || "(sin proveedor)"}</Typography>
                 <Chip size="small" label={ESTADO_LABELS[c.estado]} color={ESTADO_COLOR[c.estado]} sx={{ alignSelf: "flex-start" }} />
+                {estaVencida(c) && c.estado !== "GANADORA" && c.estado !== "DESCARTADA" && (
+                  <Chip size="small" label="Vencida" color="error" variant="outlined" sx={{ alignSelf: "flex-start" }} />
+                )}
                 <Typography variant="body2" color="text.secondary">
                   {c.moneda || "MXN"} {c.total || "—"}
                 </Typography>
@@ -398,7 +411,13 @@ export default function CotizacionesPanel({
                     </Button>
                   )}
                   {puedeAprobar && c.estado !== "GANADORA" && c.estado !== "DESCARTADA" && (
-                    <Button size="small" variant="contained" onClick={() => handleGenerarOrden(c.id_cotizacion)}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={estaVencida(c)}
+                      title={estaVencida(c) ? "Esta cotización ya venció" : undefined}
+                      onClick={() => handleGenerarOrden(c.id_cotizacion)}
+                    >
                       Generar orden
                     </Button>
                   )}
@@ -908,7 +927,8 @@ function ComparacionCotizaciones({
                     <Button
                       size="small"
                       variant="contained"
-                      disabled={c.estado === "GANADORA"}
+                      disabled={c.estado === "GANADORA" || estaVencida(c)}
+                      title={estaVencida(c) ? "Esta cotización ya venció" : undefined}
                       onClick={() => onSeleccionar(c.id_cotizacion)}
                       sx={{
                         borderRadius: 20,

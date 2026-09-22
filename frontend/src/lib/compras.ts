@@ -70,6 +70,8 @@ export interface OrdenCompra {
   proveedor: string | null;
   proveedor_nombre: string | null;
   fecha_orden: string;
+  subtotal: string | null;
+  iva: string | null;
   monto_total: string;
   estado: "BORRADOR" | "ENVIADA" | "RECIBIDA_PARCIAL" | "RECIBIDA_TOTAL" | "CANCELADA" | "CERRADA_CON_FALTANTE";
   estado_label: string;
