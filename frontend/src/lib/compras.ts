@@ -230,6 +230,18 @@ export async function generarOrdenDesdeCotizacion(idCotizacion: string): Promise
   return response.json();
 }
 
+// Reagendar una cotizacion vencida (22/Sep/2026, "no se bloquea, se debe
+// reagendar, se debe volver a pedir") - crea una Cotizacion nueva para la
+// misma Solicitud/proveedor, sin lineas/precio (el analista sube un
+// documento de cotizacion nuevo). La vencida queda DESCARTADA.
+export async function reagendarCotizacion(idCotizacion: string): Promise<Cotizacion> {
+  const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/cotizaciones/${idCotizacion}/reagendar/`, {
+    method: "POST",
+  });
+  if (!response.ok) throw await friendlyApiError("COMPRAS", response);
+  return response.json();
+}
+
 // Cierra una orden "Recibida parcial" cuando el faltante es definitivo
 // (21/Sep/2026, "y que pasa si llega menos de lo esperado") - requiere
 // compras.aprobar.

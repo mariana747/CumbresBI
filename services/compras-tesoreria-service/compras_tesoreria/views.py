@@ -194,11 +194,6 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
     def perform_update(self, serializer):
         serializer.save(updated_by=_actor(self.request))
 
-    def get_permissions(self):
-        if self.action == "confirmar_extraccion":
-            return [require_permission("compras.aprobar")()]
-        return super().get_permissions()
-
     @action(detail=True, methods=["post"])
     def confirmar_extraccion(self, request, pk=None):
         """Body:
@@ -250,6 +245,35 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
 
         cotizacion.refresh_from_db()
         return Response(self.get_serializer(cotizacion).data)
+
+    def get_permissions(self):
+        if self.action in ("confirmar_extraccion", "reagendar"):
+            return [require_permission("compras.aprobar")()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["post"])
+    def reagendar(self, request, pk=None):
+        """Cuando una cotizacion ya vencio (22/Sep/2026, "no se bloquea,
+        se debe reagendar, se debe volver a pedir") - crea una Cotizacion
+        NUEVA para la misma SolicitudCompra, con el mismo proveedor pero
+        SIN lineas/precios/vigencia (el analista sube un documento de
+        cotizacion nuevo, no se copia el precio viejo que ya vencio). La
+        vencida queda DESCARTADA, como registro historico."""
+        vencida = self.get_object()
+
+        with transaction.atomic():
+            vencida.estado = Cotizacion.ESTADO_DESCARTADA
+            vencida.updated_by = _actor(request)
+            vencida.save(update_fields=["estado", "updated_by", "updated_at"])
+            nueva = Cotizacion.objects.create(
+                solicitud=vencida.solicitud,
+                proveedor=vencida.proveedor,
+                proveedor_nombre=vencida.proveedor_nombre,
+                proveedor_rfc=vencida.proveedor_rfc,
+                created_by=_actor(request),
+                updated_by=_actor(request),
+            )
+        return Response(self.get_serializer(nueva).data, status=201)
 
 
 class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):

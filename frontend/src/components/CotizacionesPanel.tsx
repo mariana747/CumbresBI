@@ -45,6 +45,7 @@ import {
   createCotizacion,
   generarOrdenDesdeCotizacion,
   listCotizaciones,
+  reagendarCotizacion,
 } from "@/lib/compras";
 
 const ESTADO_LABELS: Record<Cotizacion["estado"], string> = {
@@ -271,6 +272,20 @@ export default function CotizacionesPanel({
     }
   }
 
+  // Reagendar (22/Sep/2026, "no se bloquea, se debe reagendar, se debe
+  // volver a pedir") - la vencida queda DESCARTADA en el backend, la
+  // nueva nace vacia (sin lineas/precio) y se abre de una vez el Motor
+  // Documental para subir el documento de cotizacion nuevo.
+  async function handleReagendar(idCotizacion: string) {
+    try {
+      const nueva = await reagendarCotizacion(idCotizacion);
+      recargar();
+      setMotorCotizacion(nueva);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
   // Cotizaciones elegibles para comparar (activas) - de cualquier
   // solicitud, el usuario elige cuales dentro de la ventana emergente.
   const cotizacionesComparables = cotizaciones.filter((c) => c.estado !== "DESCARTADA");
@@ -419,6 +434,11 @@ export default function CotizacionesPanel({
                       onClick={() => handleGenerarOrden(c.id_cotizacion)}
                     >
                       Generar orden
+                    </Button>
+                  )}
+                  {puedeAprobar && estaVencida(c) && c.estado !== "GANADORA" && c.estado !== "DESCARTADA" && (
+                    <Button size="small" variant="outlined" color="warning" onClick={() => handleReagendar(c.id_cotizacion)}>
+                      Reagendar
                     </Button>
                   )}
                 </Stack>
