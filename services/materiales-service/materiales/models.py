@@ -518,3 +518,36 @@ class RequisicionLinea(models.Model):
 
     def __str__(self):
         return f"{self.requisicion_id}-{self.material_nombre}"
+
+
+class MaterialesNotificacion(models.Model):
+    """Campana generica de materiales-service (22/Sep/2026, "recordatorios
+    de pedido de material" - ver reporte-materiales-recordatorios-pedido en
+    memoria del proyecto). Terreno preparado para cuando existan los
+    estandares del arquitecto (cantidad/fecha de inicio/dias de
+    anticipacion por material, hoy sin capturar en ningun lado) - la tarea
+    programada (ver TareasProgramadasViewSet.recordatorios_pedido en
+    views.py) hoy no genera ninguna fila porque no hay ese dato para
+    calcular la fecha de aviso; el modelo/API/campana ya quedan listos, solo
+    falta la consulta real el dia que llegue el dato.
+
+    Generico a proposito (no solo "recordatorio de pedido") - cualquier
+    aviso futuro de materiales-service puede usar esta misma tabla, mismo
+    criterio que se documento para el scheduler en
+    patron-aviso-automatico-antes-de-vencer (Cloud Scheduler + campana +
+    correo, reusable entre modulos)."""
+
+    id_notificacion = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    destinatario = models.CharField(max_length=8)
+    tipo = models.CharField(max_length=50)
+    mensaje = models.CharField(max_length=500)
+    link_url = models.CharField(max_length=500, blank=True, null=True)
+    leida = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "materiales_notificaciones"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.destinatario}-{self.tipo}"

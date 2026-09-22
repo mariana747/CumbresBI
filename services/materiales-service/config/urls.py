@@ -9,10 +9,12 @@ from materiales.views import (
     EvidenciaRecepcionViewSet,
     ManoObraCatalogoViewSet,
     MaterialCatalogoViewSet,
+    MaterialesNotificacionViewSet,
     PresupuestoFirmaViewSet,
     PresupuestoViewSet,
     RequisicionViewSet,
     SolicitudMaterialViewSet,
+    TareaRecordatoriosView,
 )
 
 router = DefaultRouter()
@@ -26,8 +28,10 @@ router.register("evidencias-recepcion", EvidenciaRecepcionViewSet, basename="evi
 router.register("requisiciones", RequisicionViewSet, basename="requisicion")
 router.register("contratos-suministro", ContratoSuministroViewSet, basename="contratosuministro")
 router.register("contrato-suministro-lineas", ContratoSuministroLineaViewSet, basename="contratosuministrolinea")
+router.register("notificaciones", MaterialesNotificacionViewSet, basename="materialesnotificacion")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include(router.urls)),
+    path("api/tareas/recordatorios-pedido/", TareaRecordatoriosView.as_view(), name="tarea-recordatorios-pedido"),
 ]

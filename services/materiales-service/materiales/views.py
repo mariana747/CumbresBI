@@ -14,7 +14,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.views import APIView
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from . import google_sheets_utils
 from .models import (
@@ -25,6 +26,7 @@ from .models import (
     EvidenciaRecepcion,
     ManoObraCatalogo,
     MaterialCatalogo,
+    MaterialesNotificacion,
     Presupuesto,
     PresupuestoFirma,
     Requisicion,
@@ -39,6 +41,7 @@ from .serializers import (
     EvidenciaRecepcionSerializer,
     ManoObraCatalogoSerializer,
     MaterialCatalogoSerializer,
+    MaterialesNotificacionSerializer,
     PresupuestoFirmaSerializer,
     PresupuestoSerializer,
     RequisicionSerializer,
@@ -753,3 +756,58 @@ class ContratoSuministroLineaViewSet(_PermisosMaterialesMixin, ModelViewSet):
         with transaction.atomic():
             linea = serializer.save(updated_by=actor)
             self._sincronizar_catalogo(linea, actor)
+
+
+class MaterialesNotificacionViewSet(ReadOnlyModelViewSet):
+    """Campana de materiales-service (22/Sep/2026, ver docstring del
+    modelo). Solo lectura de las propias - no hay alta manual, las crea la
+    tarea programada (ver TareaRecordatoriosView abajo)."""
+
+    serializer_class = MaterialesNotificacionSerializer
+
+    def get_queryset(self):
+        destinatario = getattr(self.request.effective_scope, "identity_user_id", None)
+        queryset = MaterialesNotificacion.objects.filter(destinatario=destinatario)
+        if self.request.query_params.get("solo_no_leidas") == "true":
+            queryset = queryset.filter(leida=False)
+        return queryset
+
+    @action(detail=True, methods=["post"])
+    def marcar_leida(self, request, pk=None):
+        notificacion = self.get_object()
+        notificacion.leida = True
+        notificacion.save(update_fields=["leida"])
+        return Response(self.get_serializer(notificacion).data)
+
+
+class _PermiteSecretoTareasProgramadas(BasePermission):
+    """Gate del endpoint que llama Cloud Scheduler (22/Sep/2026) - mismo
+    criterio que _PermiteSecretoInternoOMaterialesEditar, pero sin permiso
+    normal alternativo: nadie mas que la tarea programada debe disparar
+    esto, no hay un usuario real detras via JWT."""
+
+    message = "Requiere el secreto de tareas programadas."
+
+    def has_permission(self, request, view):
+        secreto_configurado = settings.TAREAS_PROGRAMADAS_SECRET
+        secreto_recibido = request.META.get("HTTP_X_INTERNAL_SECRET")
+        return bool(secreto_configurado) and secreto_recibido == secreto_configurado
+
+
+class TareaRecordatoriosView(APIView):
+    """POST /api/tareas/recordatorios-pedido/ - disparado a diario por
+    Cloud Scheduler (22/Sep/2026, "recordatorios de pedido de material",
+    ver docstring de MaterialesNotificacion). HOY es un no-op real: no
+    existe todavia ningun campo de cantidad/fecha de inicio/dias de
+    anticipacion por material (esos datos los va a dar el arquitecto,
+    extraidos por IA de su documento de estandares - sin construir
+    todavia). Cuando ese dato exista, aqui va la consulta real que
+    compare "fecha de inicio - anticipacion" contra hoy y cree
+    MaterialesNotificacion + mande el correo (mismo patron de
+    mail_utils.py que ya usa Tesoreria) - el modelo/API/campana ya estan
+    listos, no hace falta tocar nada mas del lado de infraestructura."""
+
+    permission_classes = [_PermiteSecretoTareasProgramadas]
+
+    def post(self, request):
+        return Response({"revisados": 0, "creados": 0, "detail": "Sin estándares de material capturados todavía."})

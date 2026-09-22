@@ -637,3 +637,35 @@ export async function deleteContratoSuministroLinea(idLinea: string): Promise<vo
   );
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
 }
+
+// Campana de materiales-service (22/Sep/2026, "recordatorios de pedido de
+// material" - terreno preparado, ver docstring de MaterialesNotificacion
+// en el backend). Hoy no la genera nadie (la tarea programada es un
+// no-op sin los estandares del arquitecto) - el cliente ya queda listo.
+export interface MaterialesNotificacion {
+  id_notificacion: string;
+  destinatario: string;
+  tipo: string;
+  mensaje: string;
+  link_url: string | null;
+  leida: boolean;
+  created_at: string;
+}
+
+export async function listNotificacionesMateriales(soloNoLeidas = true): Promise<MaterialesNotificacion[]> {
+  const params = new URLSearchParams();
+  if (soloNoLeidas) params.set("solo_no_leidas", "true");
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/notificaciones/?${params.toString()}`);
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
+
+export async function marcarNotificacionMaterialesLeida(idNotificacion: string): Promise<MaterialesNotificacion> {
+  const response = await apiFetch(
+    "MATERIALES",
+    `${MATERIALES_API_BASE_URL}/api/notificaciones/${idNotificacion}/marcar_leida/`,
+    { method: "POST" }
+  );
+  if (!response.ok) throw await friendlyApiError("MATERIALES", response);
+  return response.json();
+}
