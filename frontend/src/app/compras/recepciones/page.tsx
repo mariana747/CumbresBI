@@ -7,6 +7,11 @@ import {
   Box,
   Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
   Link,
   Paper,
   Stack,
@@ -21,10 +26,12 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { Camera, ImagePlus, Truck } from "lucide-react";
+import { Camera, ImagePlus, Truck, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import EscanerDocumento from "@/components/EscanerDocumento";
+import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive";
 import { SessionUser, getSession } from "@/lib/auth";
+import { MIME_TYPES_COMPROBANTE } from "@/lib/googleDriveFilePicker";
 import {
   OrdenCompra,
   Recepcion,
@@ -59,6 +66,10 @@ export default function RecepcionesPage() {
   // registrar la recepcion (necesita su id_recepcion).
   const [evidencia, setEvidencia] = useState<File | null>(null);
   const [fotoParaEscanear, setFotoParaEscanear] = useState<File | null>(null);
+  // Subir desde el equipo O desde Drive (22/Sep/2026, "usa el Dialog como
+  // en solicitudes de pago") - mismo Dialog + SelectorArchivoLocalODrive
+  // que /tesoreria/solicitudes-pago (subir comprobante).
+  const [dialogoEvidenciaAbierto, setDialogoEvidenciaAbierto] = useState(false);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -265,7 +276,7 @@ export default function RecepcionesPage() {
                   </Stack>
                   {puedeCrear && (
                     <>
-                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 2 }}>
+                      <Stack direction="row" flexWrap="wrap" spacing={1} sx={{ mt: 2 }}>
                         {esMovil && (
                           <Button component="label" variant="outlined" startIcon={<Camera size={16} strokeWidth={1.5} />}>
                             Tomar foto
@@ -282,18 +293,19 @@ export default function RecepcionesPage() {
                             />
                           </Button>
                         )}
-                        <Button component="label" variant="outlined" startIcon={<ImagePlus size={16} strokeWidth={1.5} />}>
+                        <Button
+                          variant="outlined"
+                          startIcon={<ImagePlus size={16} strokeWidth={1.5} />}
+                          onClick={() => setDialogoEvidenciaAbierto(true)}
+                        >
                           Evidencia (requerida)
-                          <input
-                            type="file"
-                            hidden
-                            accept="image/*"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0] ?? null;
-                              setFotoParaEscanear(f);
-                              e.target.value = "";
-                            }}
-                          />
+                        </Button>
+                        <Button
+                          variant="contained"
+                          disabled={guardando || !evidencia}
+                          onClick={handleRegistrar}
+                        >
+                          {guardando ? <CircularProgress size={20} /> : "Registrar recepción"}
                         </Button>
                       </Stack>
                       {evidencia && (
@@ -301,14 +313,6 @@ export default function RecepcionesPage() {
                           Evidencia lista: {evidencia.name}
                         </Typography>
                       )}
-                      <Button
-                        sx={{ mt: 2 }}
-                        variant="contained"
-                        disabled={guardando || !evidencia}
-                        onClick={handleRegistrar}
-                      >
-                        {guardando ? <CircularProgress size={20} /> : "Registrar recepción"}
-                      </Button>
                     </>
                   )}
                 </>
@@ -363,6 +367,29 @@ export default function RecepcionesPage() {
           setFotoParaEscanear(null);
         }}
       />
+
+      <Dialog open={dialogoEvidenciaAbierto} onClose={() => setDialogoEvidenciaAbierto(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          Evidencia de recepción
+          <IconButton size="small" onClick={() => setDialogoEvidenciaAbierto(false)} aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <SelectorArchivoLocalODrive
+            archivo={evidencia}
+            onChange={setEvidencia}
+            accept="image/*"
+            mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+            tituloDrive="Elige la evidencia de recepción"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" disabled={!evidencia} onClick={() => setDialogoEvidenciaAbierto(false)}>
+            Listo
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AppShell>
   );
 }
