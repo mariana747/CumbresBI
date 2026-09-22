@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('materiales', '0009_contratosuministroproyecto'),
+        ('materiales', '0007_requisicion_id_solicitud_compra'),
     ]
 
     operations = [

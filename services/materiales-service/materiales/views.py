@@ -20,9 +20,6 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from . import google_sheets_utils
 from .models import (
     ConceptoPresupuesto,
-    ContratoSuministro,
-    ContratoSuministroLinea,
-    ContratoSuministroProyecto,
     EvidenciaRecepcion,
     ManoObraCatalogo,
     MaterialCatalogo,
@@ -36,8 +33,6 @@ from .models import (
 )
 from .serializers import (
     ConceptoPresupuestoSerializer,
-    ContratoSuministroLineaSerializer,
-    ContratoSuministroSerializer,
     EvidenciaRecepcionSerializer,
     ManoObraCatalogoSerializer,
     MaterialCatalogoSerializer,
@@ -684,78 +679,6 @@ class EvidenciaRecepcionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         evidencia.updated_by = getattr(request.effective_scope, "identity_user_id", None) or "sistema"
         evidencia.save(update_fields=["link_drive", "updated_by", "updated_at"])
         return Response(self.get_serializer(evidencia).data)
-
-
-class ContratoSuministroViewSet(_PermisosMaterialesMixin, ModelViewSet):
-    """Contrato de suministro con un proveedor (22/Sep/2026, ver docstring
-    del modelo) - documento donde viene detallado que va a surtir y a que
-    precio, distinto de TesoreriaContrato (contrato de flujo de pago, sin
-    renglones de materiales)."""
-
-    queryset = ContratoSuministro.objects.all().prefetch_related("lineas__material", "proyectos")
-    serializer_class = ContratoSuministroSerializer
-    filter_backends = [SearchFilter]
-    search_fields = ["proveedor", "proveedor_nombre"]
-
-    def _reemplazar_proyectos(self, contrato, proyectos_ids):
-        if proyectos_ids is None:
-            return
-        contrato.proyectos.all().delete()
-        for proyecto_id in proyectos_ids:
-            ContratoSuministroProyecto.objects.create(contrato=contrato, proyecto=proyecto_id)
-
-    def perform_create(self, serializer):
-        actor = getattr(self.request.effective_scope, "identity_user_id", None) or "sistema"
-        proyectos_ids = serializer.validated_data.pop("proyectos", None)
-        contrato = serializer.save(created_by=actor, updated_by=actor)
-        self._reemplazar_proyectos(contrato, proyectos_ids)
-
-    def perform_update(self, serializer):
-        actor = getattr(self.request.effective_scope, "identity_user_id", None) or "sistema"
-        proyectos_ids = serializer.validated_data.pop("proyectos", None)
-        contrato = serializer.save(updated_by=actor)
-        self._reemplazar_proyectos(contrato, proyectos_ids)
-
-
-class ContratoSuministroLineaViewSet(_PermisosMaterialesMixin, ModelViewSet):
-    """Renglon de un Contrato de Suministro (Material + precio pactado).
-    Guardar/editar una linea de un contrato ACTIVO sincroniza de inmediato
-    MaterialCatalogo.precio_unitario/proveedor - el Contrato de Suministro
-    ALIMENTA el Catalogo, mismo criterio que
-    MaterialCatalogoViewSet.actualizar_precio_cotizado (ahi via HTTP desde
-    Compras, aqui directo por estar en el mismo servicio)."""
-
-    serializer_class = ContratoSuministroLineaSerializer
-    filter_backends = [SearchFilter]
-    search_fields = ["material__material"]
-
-    def get_queryset(self):
-        queryset = ContratoSuministroLinea.objects.select_related("contrato", "material").order_by("material__material")
-        contrato_id = self.request.query_params.get("contrato")
-        if contrato_id:
-            queryset = queryset.filter(contrato_id=contrato_id)
-        return queryset
-
-    def _sincronizar_catalogo(self, linea, actor):
-        if linea.contrato.estado != ContratoSuministro.ESTADO_ACTIVO:
-            return
-        material = linea.material
-        material.precio_unitario = linea.precio_unitario
-        material.proveedor = linea.contrato.proveedor
-        material.updated_by = actor
-        material.save(update_fields=["precio_unitario", "proveedor", "updated_by", "updated_at"])
-
-    def perform_create(self, serializer):
-        actor = getattr(self.request.effective_scope, "identity_user_id", None) or "sistema"
-        with transaction.atomic():
-            linea = serializer.save(created_by=actor, updated_by=actor)
-            self._sincronizar_catalogo(linea, actor)
-
-    def perform_update(self, serializer):
-        actor = getattr(self.request.effective_scope, "identity_user_id", None) or "sistema"
-        with transaction.atomic():
-            linea = serializer.save(updated_by=actor)
-            self._sincronizar_catalogo(linea, actor)
 
 
 class MaterialesNotificacionViewSet(ReadOnlyModelViewSet):

@@ -2,9 +2,6 @@ from rest_framework import serializers
 
 from .models import (
     ConceptoPresupuesto,
-    ContratoSuministro,
-    ContratoSuministroLinea,
-    ContratoSuministroProyecto,
     EvidenciaRecepcion,
     ManoObraCatalogo,
     MaterialCatalogo,
@@ -178,67 +175,6 @@ class SolicitudMaterialSerializer(serializers.ModelSerializer):
                 }
             )
         return attrs
-
-
-class ContratoSuministroLineaSerializer(serializers.ModelSerializer):
-    material_nombre = serializers.CharField(source="material.material", read_only=True)
-
-    class Meta:
-        model = ContratoSuministroLinea
-        fields = [
-            "id_linea",
-            "contrato",
-            "material",
-            "material_nombre",
-            "precio_unitario",
-            "comentarios",
-            "created_at",
-            "created_by",
-            "updated_at",
-            "updated_by",
-        ]
-        read_only_fields = ["id_linea", "created_at", "updated_at"]
-
-
-class ContratoSuministroProyectoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ContratoSuministroProyecto
-        fields = ["id_contrato_suministro_proyecto", "contrato", "proyecto"]
-        read_only_fields = fields
-
-
-class ContratoSuministroSerializer(serializers.ModelSerializer):
-    """`proyectos` (22/Sep/2026, confirmado con Mariana: "no esta atado a
-    un proyecto pero se puede asignar a varios") es write-only: lista de
-    id_proyecto a asignar, opcional - sin ninguno, el contrato aplica en
-    general. Mismo criterio write-only que RequisicionSerializer.obras."""
-
-    lineas = ContratoSuministroLineaSerializer(many=True, read_only=True)
-    proyectos_asignados = ContratoSuministroProyectoSerializer(many=True, read_only=True, source="proyectos")
-    proyectos = serializers.ListField(child=serializers.CharField(max_length=8), write_only=True, required=False)
-    estado_label = serializers.CharField(source="get_estado_display", read_only=True)
-
-    class Meta:
-        model = ContratoSuministro
-        fields = [
-            "id_contrato_suministro",
-            "proveedor",
-            "proveedor_nombre",
-            "fecha_inicio",
-            "fecha_fin",
-            "estado",
-            "estado_label",
-            "link_documento",
-            "comentarios",
-            "proyectos",
-            "proyectos_asignados",
-            "lineas",
-            "created_at",
-            "created_by",
-            "updated_at",
-            "updated_by",
-        ]
-        read_only_fields = ["id_contrato_suministro", "created_at", "updated_at"]
 
 
 class RequisicionLineaSerializer(serializers.ModelSerializer):
