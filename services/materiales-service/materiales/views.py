@@ -623,8 +623,8 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
 
         encabezados = ["Material", "Cantidad", "Precio unitario", "Importe", "Cotización"]
         filas = [
-            [l.material_nombre, str(l.cantidad_total), str(l.precio_unitario), str(l.importe), l.proveedor_cotizacion or ""]
-            for l in requisicion.lineas.all()
+            [linea.material_nombre, str(linea.cantidad_total), str(linea.precio_unitario), str(linea.importe), linea.proveedor_cotizacion or ""]
+            for linea in requisicion.lineas.all()
         ]
         titulo = f"Requisición {requisicion.folio}"
         carpeta_id = request.data.get("carpeta_id") or None
