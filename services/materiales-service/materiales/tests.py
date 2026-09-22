@@ -57,7 +57,7 @@ class MaterialCatalogoCrudTests(TestCase):
         view = MaterialCatalogoViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data["results"]), 1)
 
 
 class RecibirCompraTests(TestCase):
@@ -274,8 +274,8 @@ class MaterialesScopeTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=("BBB",))
         view = SolicitudMaterialViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["proyecto"], "BBB")
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["proyecto"], "BBB")
 
     def test_global_ve_ambos_proyectos(self):
         Presupuesto.objects.create(proyecto="AAA", monto_total=Decimal("1000"))

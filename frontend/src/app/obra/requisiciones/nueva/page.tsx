@@ -73,12 +73,12 @@ export default function NuevaRequisicionPage() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([listSociedades(), listProyectos(), listEtapas(), listMateriales()])
+    Promise.all([listSociedades(), listProyectos(), listEtapas(), listMateriales({ pageSize: 200 })])
       .then(([s, p, e, m]) => {
         setSociedades(s);
         setProyectos(p);
         setEtapas(e);
-        setMateriales(m);
+        setMateriales(m.results);
         if (e.length > 0) setEtapaSeleccionada(`${e[0].numero} ${e[0].nombre}`);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
