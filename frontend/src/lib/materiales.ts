@@ -7,6 +7,15 @@ import { ExportarSheetsResultado } from "./tesoreria";
 
 const MATERIALES_API_BASE_URL = `${GATEWAY_URL}/materiales`;
 
+// Paginacion real (22/Sep/2026) - mismo patron que TesoreriaPaginado en
+// lib/tesoreria.ts (ver ListadoGrandePagination en el backend).
+export interface MaterialesPaginado<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
 export interface MaterialCatalogo {
   id_material: string;
   material: string;
@@ -22,10 +31,18 @@ export interface MaterialCatalogo {
   updated_by: string | null;
 }
 
-export async function listMateriales(search?: string): Promise<MaterialCatalogo[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/materiales/?${params.toString()}`);
+export async function listMateriales(params?: {
+  search?: string;
+  soloDisponibles?: boolean;
+  page?: number;
+  pageSize?: number;
+}): Promise<MaterialesPaginado<MaterialCatalogo>> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.soloDisponibles) query.set("solo_disponibles", "true");
+  query.set("page", String(params?.page ?? 1));
+  query.set("page_size", String(params?.pageSize ?? 50));
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/materiales/?${query.toString()}`);
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
   return response.json();
 }
@@ -175,10 +192,20 @@ export interface SolicitudMaterial {
   updated_by: string | null;
 }
 
-export async function listSolicitudes(search?: string): Promise<SolicitudMaterial[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/solicitudes/?${params.toString()}`);
+export async function listSolicitudes(params?: {
+  search?: string;
+  estado?: SolicitudMaterialEstado;
+  proyecto?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<MaterialesPaginado<SolicitudMaterial>> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.estado) query.set("estado", params.estado);
+  if (params?.proyecto) query.set("proyecto", params.proyecto);
+  query.set("page", String(params?.page ?? 1));
+  query.set("page_size", String(params?.pageSize ?? 50));
+  const response = await apiFetch("MATERIALES", `${MATERIALES_API_BASE_URL}/api/solicitudes/?${query.toString()}`);
   if (!response.ok) throw await friendlyApiError("MATERIALES", response);
   return response.json();
 }

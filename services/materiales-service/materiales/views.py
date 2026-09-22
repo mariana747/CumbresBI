@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from . import google_sheets_utils
+from .pagination import ListadoGrandePagination
 from .models import (
     ConceptoPresupuesto,
     EvidenciaRecepcion,
@@ -119,10 +120,21 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     resto de este primer corte de materiales-service, ver models.py: sin
     columna de alcance declarada todavia)."""
 
-    queryset = MaterialCatalogo.objects.all().order_by("material")
     serializer_class = MaterialCatalogoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["material", "unidad_medida"]
+    pagination_class = ListadoGrandePagination
+
+    def get_queryset(self):
+        # `solo_disponibles` (22/Sep/2026, "Catálogo de Materiales
+        # Disponibles" en el frontend) - antes era un .filter() en el
+        # cliente sobre el arreglo completo; con paginacion real esa pagina
+        # ya no trae TODO el catalogo, asi que el filtro tiene que ser del
+        # lado del servidor.
+        queryset = MaterialCatalogo.objects.all().order_by("material")
+        if self.request.query_params.get("solo_disponibles") == "true":
+            queryset = queryset.filter(cantidad_disponible__gt=0)
+        return queryset
 
     def get_permissions(self):
         if self.action in ("recibir_compra", "actualizar_precio_cotizado"):
@@ -375,14 +387,22 @@ class SolicitudMaterialViewSet(_PermisosMaterialesMixin, ModelViewSet):
     serializer_class = SolicitudMaterialSerializer
     filter_backends = [SearchFilter]
     search_fields = ["proyecto", "material__material"]
+    pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
-        return (
+        queryset = (
             SolicitudMaterial.objects.for_scope(self.request.effective_scope)
             .select_related("material")
             .prefetch_related("evidencias")
             .order_by("-fecha_solicitud")
         )
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(proyecto=proyecto)
+        return queryset
 
     def _cambiar_estado(self, request, nuevo_estado, extra_fields=None):
         solicitud = self.get_object()
