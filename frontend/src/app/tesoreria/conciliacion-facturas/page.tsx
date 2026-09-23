@@ -25,6 +25,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -75,7 +76,17 @@ function numero(valor: string | null | undefined): string {
   return Number(valor).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
 
-const VACIO: ConciliacionCfdiResponse = { con_cfdi: [], sin_cfdi: [], no_requiere: [] };
+const VACIO: ConciliacionCfdiResponse = {
+  con_cfdi: { results: [], count: 0 },
+  sin_cfdi: { results: [], count: 0 },
+  no_requiere: { results: [], count: 0 },
+};
+
+const TAB_A_BUCKET: Record<TabPrincipal, keyof ConciliacionCfdiResponse> = {
+  ligado: "con_cfdi",
+  sin_cfdi: "sin_cfdi",
+  no_requiere: "no_requiere",
+};
 
 type TabPrincipal = "ligado" | "sin_cfdi" | "no_requiere";
 type TabDetalle = "detalles" | "vincular" | "recordatorio";
@@ -109,6 +120,11 @@ export default function ConciliacionFacturasPage() {
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroContrato, setFiltroContrato] = useState("");
   const [filtroTipoComprobante, setFiltroTipoComprobante] = useState<"" | "I" | "E">("");
+
+  // Paginacion server-side (23/Sep/2026, "no tiene paginacion") - mismo
+  // patron que Flujos (page-based, no cursor).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
 
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
   // hook reusable en lib/useExportarSheets.ts.
@@ -226,7 +242,14 @@ export default function ConciliacionFacturasPage() {
       sociedad: filtroEmpresa || undefined,
       contrato: filtroContrato || undefined,
       tipoComprobante: filtroTipoComprobante || undefined,
+      search: search || undefined,
+      tab: TAB_A_BUCKET[tab],
+      page: pagina + 1,
+      pageSize: filasPorPagina,
     })
+      // Los otros 2 buckets solo traen su `count` (para los badges de las
+      // pestañas) - sus `results` van vacios y nunca se renderizan, solo
+      // se muestra `results` del bucket de la pestaña activa.
       .then(setDatos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error al cargar la conciliación"))
       .finally(() => setLoading(false));
@@ -240,7 +263,17 @@ export default function ConciliacionFacturasPage() {
       .catch(() => setContratos([]));
   }, []);
 
-  useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Cambiar de pestaña es otro bucket (con su propia paginacion) - vuelve
+  // a la primera pagina, igual que cambiar cualquier otro filtro.
+  useEffect(() => {
+    setPagina(0);
+  }, [tab]);
+
+  useEffect(() => {
+    const timeout = setTimeout(refresh, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, tab, pagina, filasPorPagina]);
 
   function abrirDetalle(fila: ConciliacionCfdiFila, origenTab: TabPrincipal) {
     setDetalle(fila);
@@ -299,19 +332,10 @@ export default function ConciliacionFacturasPage() {
     }
   }
 
-  const filtro = (f: ConciliacionCfdiFila) =>
-    !search || f.id_flujo.toLowerCase().includes(search.toLowerCase()) || (f.concepto || "").toLowerCase().includes(search.toLowerCase());
-
-  const filasLigado = datos.con_cfdi.filter(filtro);
-  const filasSinCfdi = datos.sin_cfdi.filter(filtro);
-  const filasNoRequiere = datos.no_requiere.filter(filtro);
-
-  const filasPorTab: Record<TabPrincipal, ConciliacionCfdiFila[]> = {
-    ligado: filasLigado,
-    sin_cfdi: filasSinCfdi,
-    no_requiere: filasNoRequiere,
-  };
-  const filasVisibles = filasPorTab[tab];
+  // search ya se aplica del lado del servidor (SearchFilter sobre
+  // id_flujo/concepto, ver backend) - las 3 pestañas solo traen su
+  // `count`, el bucket activo trae `results` ya paginados.
+  const filasVisibles = datos[TAB_A_BUCKET[tab]].results;
   const colSpan = tab === "ligado" ? 9 : 7;
 
   return (
@@ -335,13 +359,17 @@ export default function ConciliacionFacturasPage() {
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Buscar por ID de flujo o concepto..."
-          onAplicarFiltros={refresh}
+          onAplicarFiltros={() => {
+            setPagina(0);
+            refresh();
+          }}
           onLimpiarFiltros={() => {
             setDesde(primerDiaDelMes());
             setHasta(ultimoDiaDelMes());
             setFiltroEmpresa("");
             setFiltroContrato("");
             setFiltroTipoComprobante("");
+            setPagina(0);
           }}
           actions={
             <Button
@@ -440,9 +468,9 @@ export default function ConciliacionFacturasPage() {
             sx={{ borderBottom: "1px solid", borderColor: "divider", pr: 2 }}
           >
             <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2 }}>
-              <Tab value="ligado" label={`Ligado a CFDI (${filasLigado.length})`} />
-              <Tab value="sin_cfdi" label={`Sin CFDI (${filasSinCfdi.length})`} />
-              <Tab value="no_requiere" label={`No requiere CFDI (${filasNoRequiere.length})`} />
+              <Tab value="ligado" label={`Ligado a CFDI (${datos.con_cfdi.count})`} />
+              <Tab value="sin_cfdi" label={`Sin CFDI (${datos.sin_cfdi.count})`} />
+              <Tab value="no_requiere" label={`No requiere CFDI (${datos.no_requiere.count})`} />
             </Tabs>
             {tab === "sin_cfdi" && puedeEditar && (
               <Button size="small" variant="outlined" onClick={abrirLote}>
@@ -522,6 +550,20 @@ export default function ConciliacionFacturasPage() {
               </TableBody>
             </Table>
           </TableContainer>
+          <TablePagination
+            component="div"
+            count={datos[TAB_A_BUCKET[tab]].count}
+            page={pagina}
+            onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+            rowsPerPage={filasPorPagina}
+            onRowsPerPageChange={(e) => {
+              setFilasPorPagina(parseInt(e.target.value, 10));
+              setPagina(0);
+            }}
+            rowsPerPageOptions={[20, 50, 100]}
+            labelRowsPerPage="Filas por página"
+            labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+          />
         </Paper>
 
         {/* Detalle del pago - un solo dialogo con tabs propios (10/Sep/2026,
