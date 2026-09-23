@@ -112,7 +112,11 @@ class Cotizacion(models.Model):
     # contra tesoreria_contrapartes.rfc mientras el analista no lo asigne.
     proveedor_rfc = models.CharField(max_length=13, blank=True, null=True)
     fecha_cotizacion = models.DateField(blank=True, null=True)
-    vigencia_dias = models.PositiveIntegerField(blank=True, null=True)
+    # default=7 (22/Sep/2026, "las cotizaciones duran una semana") - la IA
+    # puede sobreescribirlo si el PDF trae una vigencia distinta via
+    # confirmar_extraccion; ver OrdenCompraViewSet.generar_desde_cotizacion,
+    # que bloquea generar la orden si ya vencio.
+    vigencia_dias = models.PositiveIntegerField(default=7, blank=True, null=True)
     moneda = models.CharField(max_length=10, blank=True, null=True)
     subtotal = models.DecimalField(max_digits=16, decimal_places=2, blank=True, null=True)
     iva = models.DecimalField(max_digits=16, decimal_places=2, blank=True, null=True)
@@ -200,6 +204,12 @@ class OrdenCompra(models.Model):
     proveedor = models.CharField(max_length=8, blank=True, null=True)
     proveedor_nombre = models.CharField(max_length=200, blank=True, null=True)
     fecha_orden = models.DateField(auto_now_add=True)
+    # subtotal/iva (22/Sep/2026) - antes solo se copiaba cotizacion.total a
+    # monto_total al generar la orden, el desglose de la cabecera de la
+    # Cotizacion (subtotal/iva) se perdia. Mismo criterio de snapshot que
+    # el resto de campos de este modelo.
+    subtotal = models.DecimalField(max_digits=16, decimal_places=2, blank=True, null=True)
+    iva = models.DecimalField(max_digits=16, decimal_places=2, blank=True, null=True)
     monto_total = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR)
     autorizado_por = models.CharField(max_length=8, blank=True, null=True)

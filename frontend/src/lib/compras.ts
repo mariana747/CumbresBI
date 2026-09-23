@@ -70,6 +70,8 @@ export interface OrdenCompra {
   proveedor: string | null;
   proveedor_nombre: string | null;
   fecha_orden: string;
+  subtotal: string | null;
+  iva: string | null;
   monto_total: string;
   estado: "BORRADOR" | "ENVIADA" | "RECIBIDA_PARCIAL" | "RECIBIDA_TOTAL" | "CANCELADA" | "CERRADA_CON_FALTANTE";
   estado_label: string;
@@ -223,6 +225,18 @@ export async function generarOrdenDesdeCotizacion(idCotizacion: string): Promise
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cotizacion: idCotizacion }),
+  });
+  if (!response.ok) throw await friendlyApiError("COMPRAS", response);
+  return response.json();
+}
+
+// Reagendar una cotizacion vencida (22/Sep/2026, "no se bloquea, se debe
+// reagendar, se debe volver a pedir") - crea una Cotizacion nueva para la
+// misma Solicitud/proveedor, sin lineas/precio (el analista sube un
+// documento de cotizacion nuevo). La vencida queda DESCARTADA.
+export async function reagendarCotizacion(idCotizacion: string): Promise<Cotizacion> {
+  const response = await apiFetch("COMPRAS", `${COMPRAS_API_BASE_URL}/api/cotizaciones/${idCotizacion}/reagendar/`, {
+    method: "POST",
   });
   if (!response.ok) throw await friendlyApiError("COMPRAS", response);
   return response.json();
