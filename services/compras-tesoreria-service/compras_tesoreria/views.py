@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -193,11 +194,6 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
     def perform_update(self, serializer):
         serializer.save(updated_by=_actor(self.request))
 
-    def get_permissions(self):
-        if self.action == "confirmar_extraccion":
-            return [require_permission("compras.aprobar")()]
-        return super().get_permissions()
-
     @action(detail=True, methods=["post"])
     def confirmar_extraccion(self, request, pk=None):
         """Body:
@@ -249,6 +245,35 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
 
         cotizacion.refresh_from_db()
         return Response(self.get_serializer(cotizacion).data)
+
+    def get_permissions(self):
+        if self.action in ("confirmar_extraccion", "reagendar"):
+            return [require_permission("compras.aprobar")()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["post"])
+    def reagendar(self, request, pk=None):
+        """Cuando una cotizacion ya vencio (22/Sep/2026, "no se bloquea,
+        se debe reagendar, se debe volver a pedir") - crea una Cotizacion
+        NUEVA para la misma SolicitudCompra, con el mismo proveedor pero
+        SIN lineas/precios/vigencia (el analista sube un documento de
+        cotizacion nuevo, no se copia el precio viejo que ya vencio). La
+        vencida queda DESCARTADA, como registro historico."""
+        vencida = self.get_object()
+
+        with transaction.atomic():
+            vencida.estado = Cotizacion.ESTADO_DESCARTADA
+            vencida.updated_by = _actor(request)
+            vencida.save(update_fields=["estado", "updated_by", "updated_at"])
+            nueva = Cotizacion.objects.create(
+                solicitud=vencida.solicitud,
+                proveedor=vencida.proveedor,
+                proveedor_nombre=vencida.proveedor_nombre,
+                proveedor_rfc=vencida.proveedor_rfc,
+                created_by=_actor(request),
+                updated_by=_actor(request),
+            )
+        return Response(self.get_serializer(nueva).data, status=201)
 
 
 class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
@@ -303,6 +328,18 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
         if cotizacion.estado not in (Cotizacion.ESTADO_PENDIENTE_REVISION, Cotizacion.ESTADO_CONFIRMADA):
             return Response({"detail": "Esa cotización ya fue usada o descartada."}, status=400)
 
+        # Vigencia (22/Sep/2026, "las cotizaciones duran una semana") - solo
+        # se puede validar si la cotizacion trae fecha_cotizacion; sin ella
+        # no hay desde cuando contar y se deja pasar (mismo criterio laxo
+        # que el resto de campos opcionales extraidos por IA).
+        if cotizacion.fecha_cotizacion and cotizacion.vigencia_dias:
+            vence = cotizacion.fecha_cotizacion + timedelta(days=cotizacion.vigencia_dias)
+            if timezone.now().date() > vence:
+                return Response(
+                    {"detail": f"Esta cotización venció el {vence.isoformat()}, no se puede generar la Orden."},
+                    status=400,
+                )
+
         solicitud = cotizacion.solicitud
         actor = _actor(request)
 
@@ -322,6 +359,8 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
                 cotizacion=cotizacion,
                 proveedor=cotizacion.proveedor,
                 proveedor_nombre=cotizacion.proveedor_nombre,
+                subtotal=cotizacion.subtotal,
+                iva=cotizacion.iva,
                 monto_total=cotizacion.total or 0,
                 autorizado_por=actor,
                 created_by=actor,

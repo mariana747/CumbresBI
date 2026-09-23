@@ -92,3 +92,7 @@ services/document-intelligence-service/Maria/
 # Mariana, 12/Ago/2026), aunque viva dentro de docs/architecture/.
 docs/architecture/CumbresBI_Onboarding_Desarrollador.md
 docs/*.sql
+
+services/materiales-service/*.json
+/*.json
+/*.yaml

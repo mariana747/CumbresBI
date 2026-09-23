@@ -47,8 +47,50 @@ env:
   ENV_SUFFIX: ${{ (startsWith(github.ref, 'refs/tags/v') && 'staging') || 'dev' }}
 
 jobs:
+  # Deploy selectivo (23/Sep/2026, "no se puede hacer deploy solo de lo que
+  # se actualiza?") - antes cada push a main construia y desplegaba los 14
+  # servicios + frontend sin importar cuantos cambiaron. Compara contra el
+  # commit anterior (push a main) que carpetas de servicios/frontend
+  # cambiaron; cada job de build/deploy de abajo se salta si su carpeta no
+  # esta en esa lista. Un tag de staging o un deploy manual (workflow_dispatch)
+  # no tienen un "commit anterior" confiable que comparar - ahi se despliega
+  # todo, igual que antes.
+  detect-changes:
+    name: Detectar cambios por servicio
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.filter.outputs.changes }}
+      deploy_all: ${{ steps.modo.outputs.deploy_all }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: modo
+        run: echo "deploy_all=${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') }}" >> "$GITHUB_OUTPUT"
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: steps.modo.outputs.deploy_all == 'false'
+        with:
+          filters: |
+            iam-service: 'services/iam-service/**'
+            audit-service: 'services/audit-service/**'
+            pld-service: 'services/pld-service/**'
+            vivienda-service: 'services/vivienda-service/**'
+            compras-tesoreria-service: 'services/compras-tesoreria-service/**'
+            rrhh-service: 'services/rrhh-service/**'
+            tesoreria-service: 'services/tesoreria-service/**'
+            rentas-service: 'services/rentas-service/**'
+            document-intelligence-service: 'services/document-intelligence-service/**'
+            drive-service: 'services/drive-service/**'
+            mail-service: 'services/mail-service/**'
+            materiales-service: 'services/materiales-service/**'
+            obra-service: 'services/obra-service/**'
+            api-gateway: 'services/api-gateway/**'
+            frontend: 'frontend/**'
+
   build-and-push:
     name: Build y push (${{ matrix.service }})
+    needs: [detect-changes]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -69,11 +111,18 @@ jobs:
             obra-service,
             api-gateway,
           ]
+    # El contexto "matrix" no esta disponible en el "if" de job (solo en el de
+    # step, ver docs de "context availability") - por eso el filtro de cambios
+    # se repite en cada step con "if:", en vez de un solo "if:" a nivel de job.
+    env:
+      DEBE_CORRER: ${{ needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), matrix.service) }}
     steps:
       - uses: actions/checkout@v4
+        if: env.DEBE_CORRER == 'true'
 
       - id: auth
         name: Autenticar con GCP (Workload Identity Federation)
+        if: env.DEBE_CORRER == 'true'
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -81,9 +130,11 @@ jobs:
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
 
       - name: Configurar Docker para Artifact Registry
+        if: env.DEBE_CORRER == 'true'
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
       - name: Build y push
+        if: env.DEBE_CORRER == 'true'
         run: |
           IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ matrix.service }}:${{ github.sha }}"
           docker build -f services/${{ matrix.service }}/Dockerfile -t "$IMAGE" .
@@ -91,6 +142,8 @@ jobs:
 
   build-and-push-frontend:
     name: Build y push (frontend)
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), 'frontend')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,7 +175,12 @@ jobs:
   deploy:
     name: Deploy (${{ matrix.service }})
     runs-on: ubuntu-latest
-    needs: [build-and-push]
+    needs: [detect-changes, build-and-push]
+    # Mismo motivo que build-and-push: "matrix" no esta disponible en el "if"
+    # de job, solo en env/steps.if - el filtro va en env.DEBE_CORRER de abajo.
+    # build-and-push nunca queda en estado "skipped" (sus steps se saltan
+    # individualmente pero el job si corre), asi que aqui no hace falta
+    # always() ni checar needs.build-and-push.result.
     strategy:
       matrix:
         # api-gateway va al final (deploy-gateway job) porque el resto no
@@ -143,8 +201,11 @@ jobs:
             materiales-service,
             obra-service,
           ]
+    env:
+      DEBE_CORRER: ${{ needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), matrix.service) }}
     steps:
       - id: auth
+        if: env.DEBE_CORRER == 'true'
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -152,8 +213,10 @@ jobs:
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
 
       - uses: google-github-actions/setup-gcloud@v2
+        if: env.DEBE_CORRER == 'true'
 
       - name: Deploy a Cloud Run
+        if: env.DEBE_CORRER == 'true'
         run: |
           gcloud run deploy "${{ matrix.service }}-${{ env.ENV_SUFFIX }}" \
             --image "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ matrix.service }}:${{ github.sha }}" \
@@ -170,7 +233,12 @@ jobs:
   deploy-gateway:
     name: Deploy (api-gateway)
     runs-on: ubuntu-latest
-    needs: [build-and-push, deploy]
+    needs: [detect-changes, build-and-push, deploy]
+    if: |
+      always() &&
+      needs.build-and-push.result != 'failure' &&
+      needs.deploy.result != 'failure' &&
+      (needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), 'api-gateway'))
     steps:
       - id: auth
         uses: google-github-actions/auth@v2
@@ -192,7 +260,15 @@ jobs:
   deploy-frontend:
     name: Deploy (frontend)
     runs-on: ubuntu-latest
-    needs: [build-and-push-frontend, deploy-gateway]
+    needs: [detect-changes, build-and-push-frontend, deploy-gateway]
+    # deploy-gateway se salta seguido (api-gateway no siempre cambia) - eso
+    # no debe bloquear el deploy del frontend cuando SI cambio (ver always()
+    # arriba, mismo motivo que en deploy/deploy-gateway).
+    if: |
+      always() &&
+      needs.build-and-push-frontend.result != 'failure' &&
+      needs.deploy-gateway.result != 'failure' &&
+      (needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), 'frontend'))
     steps:
       - id: auth
         uses: google-github-actions/auth@v2

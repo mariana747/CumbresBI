@@ -1,7 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Autocomplete, Box, Button, Chip, CircularProgress, Collapse, Divider, Drawer, IconButton, Stack, TextField, Typography } from "@mui/material";
+import {
+  Autocomplete,
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Collapse,
+  Divider,
+  Drawer,
+  IconButton,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableRow,
+  TextField,
+  Typography,
+} from "@mui/material";
 import { ChevronDown, ChevronRight, Eye, Maximize2, Minimize2, X as CloseIcon } from "lucide-react";
 import {
   TesoreriaNomina,
@@ -156,30 +175,46 @@ export default function PanelReferenciaCruzada({
           <CircularProgress size={16} />
         ) : referencia?.tipo === "contrato" && datosContrato ? (
           <Stack spacing={1.5}>
-            <Typography variant="body2">
-              <strong>ID:</strong> {datosContrato.id_contrato}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Contraparte:</strong> {datosContrato.contraparte_nombre}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Sociedad:</strong> {datosContrato.sociedad}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Tipo:</strong> {datosContrato.tipo || "—"}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Categoría:</strong> {datosContrato.categoria || "—"}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Requiere factura:</strong> {datosContrato.requiere_factura ? "Sí" : "No"}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Estatus:</strong> {datosContrato.status || "—"}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Vigencia:</strong> {datosContrato.fecha_generacion || "—"} a {datosContrato.fecha_vencimiento || "—"}
-            </Typography>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableBody>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", width: "40%" }}>ID:</TableCell>
+                    <TableCell>{datosContrato.id_contrato}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Contraparte:</TableCell>
+                    <TableCell>{datosContrato.contraparte_nombre}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Sociedad:</TableCell>
+                    <TableCell>{datosContrato.sociedad}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Tipo:</TableCell>
+                    <TableCell>{datosContrato.tipo || "—"}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Categoría:</TableCell>
+                    <TableCell>{datosContrato.categoria || "—"}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Requiere factura:</TableCell>
+                    <TableCell>{datosContrato.requiere_factura ? "Sí" : "No"}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Estatus:</TableCell>
+                    <TableCell>{datosContrato.status || "—"}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Vigencia:</TableCell>
+                    <TableCell>
+                      {datosContrato.fecha_generacion || "—"} a {datosContrato.fecha_vencimiento || "—"}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
             {datosContrato.link_contrato && (
               <Button
                 size="small"
@@ -188,32 +223,43 @@ export default function PanelReferenciaCruzada({
                 href={datosContrato.link_contrato}
                 target="_blank"
                 rel="noopener noreferrer"
+                sx={{ alignSelf: "flex-start" }}
               >
                 Ver contrato firmado
               </Button>
             )}
           </Stack>
         ) : referencia?.tipo === "proveedor" && datosProveedor ? (
-          <Stack spacing={1.5}>
-            <Typography variant="body2">
-              <strong>ID:</strong> {datosProveedor.id_contraparte}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Razón social:</strong> {datosProveedor.razon_social}
-            </Typography>
-            <Typography variant="body2">
-              <strong>RFC:</strong> {datosProveedor.rfc || "—"}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Contacto:</strong> {datosProveedor.contacto || "—"}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Correo:</strong> {datosProveedor.email || "—"}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Teléfono:</strong> {datosProveedor.telefono_sms || "—"}
-            </Typography>
-          </Stack>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableBody>
+                <TableRow>
+                  <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", width: "40%" }}>ID:</TableCell>
+                  <TableCell>{datosProveedor.id_contraparte}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Razón social:</TableCell>
+                  <TableCell>{datosProveedor.razon_social}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>RFC:</TableCell>
+                  <TableCell>{datosProveedor.rfc || "—"}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Contacto:</TableCell>
+                  <TableCell>{datosProveedor.contacto || "—"}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Correo:</TableCell>
+                  <TableCell>{datosProveedor.email || "—"}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Teléfono:</TableCell>
+                  <TableCell>{datosProveedor.telefono_sms || "—"}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TableContainer>
         ) : referencia?.tipo === "nomina" && datosNomina ? (
           <Stack spacing={1.5}>
             <Typography variant="body2">

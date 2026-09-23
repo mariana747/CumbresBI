@@ -201,6 +201,11 @@ function OrdenesPageInner() {
                                   ))}
                                 </TableBody>
                               </Table>
+                              <Stack spacing={0.25} sx={{ p: 1.5, alignItems: "flex-end" }}>
+                                <Typography variant="body2">Subtotal: {o.subtotal ?? "—"}</Typography>
+                                <Typography variant="body2">IVA: {o.iva ?? "—"}</Typography>
+                                <Typography variant="subtitle2">Total: {o.monto_total}</Typography>
+                              </Stack>
                               {puedeAprobar && o.estado === "RECIBIDA_PARCIAL" && (
                                 <Box sx={{ p: 1 }}>
                                   <Button
@@ -251,6 +256,12 @@ function OrdenesPageInner() {
                   <Stack spacing={0.5} sx={{ mt: 1 }}>
                     <Typography variant="body2">
                       <strong>Proyecto:</strong> {o.proyecto}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Subtotal:</strong> {o.subtotal ?? "—"}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>IVA:</strong> {o.iva ?? "—"}
                     </Typography>
                     <Typography variant="body2">
                       <strong>Monto total:</strong> {o.monto_total}

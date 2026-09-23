@@ -48,7 +48,8 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
     reconocido (solo CON_CFDI): si la factura es PUE, su propio total; si
     es PPD (se salda con un REP aparte) o no hay factura pero si complemento/
     nomina, el total de ese complemento/recibo de nomina.
-    por_reconocer = reconocido - total_mxp del flujo.
+    por_reconocer = reconocido - abs(total_mxp) del flujo (total_mxp viene
+    negativo en egresos, hay que comparar magnitudes).
 
     Referencias cruzadas (10/Sep/2026, "hay que ver en que pantallas
     podemos hacer referencia a sus datos ligados...asi para todo") - cada
@@ -97,7 +98,9 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
             reconocido = flujo.complemento.total
         elif flujo.nomina_id:
             reconocido = flujo.nomina.total
-        por_reconocer = (reconocido - flujo.total_mxp) if reconocido is not None and flujo.total_mxp is not None else None
+        por_reconocer = (
+            (reconocido - abs(flujo.total_mxp)) if reconocido is not None and flujo.total_mxp is not None else None
+        )
         con_cfdi.append({**fila, "reconocido": reconocido, "por_reconocer": por_reconocer})
 
     return {"con_cfdi": con_cfdi, "sin_cfdi": sin_cfdi, "no_requiere": no_requiere}
@@ -119,7 +122,7 @@ def calcular_conciliacion_nomina(queryset) -> dict:
     reconocido/por_reconocer.
 
     - CON_RECIBO: el flujo ya tiene un recibo de nomina (CFDI) vinculado.
-      reconocido = recibo.total, por_reconocer = reconocido - total_mxp
+      reconocido = recibo.total, por_reconocer = reconocido - abs(total_mxp)
       del flujo.
     - SIN_RECIBO: el flujo de nomina todavia no tiene ningun recibo
       vinculado."""
@@ -141,7 +144,9 @@ def calcular_conciliacion_nomina(queryset) -> dict:
             sin_recibo.append(fila)
             continue
         reconocido = flujo.nomina.total
-        por_reconocer = (reconocido - flujo.total_mxp) if reconocido is not None and flujo.total_mxp is not None else None
+        por_reconocer = (
+            (reconocido - abs(flujo.total_mxp)) if reconocido is not None and flujo.total_mxp is not None else None
+        )
         con_recibo.append({**fila, "reconocido": reconocido, "por_reconocer": por_reconocer})
 
     return {"con_recibo": con_recibo, "sin_recibo": sin_recibo}
@@ -412,6 +417,7 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
             if diferencia <= tolerancia:
                 candidatos_factura.append(
                     {
+                        "id": f.id,
                         "timbre_uuid": f.timbre_uuid,
                         "folio": f.comprobante_folio,
                         "total": f.comprobante_total,
@@ -432,7 +438,7 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
             diferencia = abs(c.total - monto)
             if diferencia <= tolerancia:
                 candidatos_complemento.append(
-                    {"timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total, "diferencia": diferencia}
+                    {"id": c.id, "timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total, "diferencia": diferencia}
                 )
         candidatos_complemento.sort(key=lambda c: c["diferencia"])
 
@@ -441,39 +447,82 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
 
 def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> list[dict]:
     """Sugerencias para VARIOS flujos a la vez (10/Sep/2026, "aprobar en
-    lote, no uno por uno") - reusa sugerir_cfdi_para_flujo por cada flujo
-    sin CFDI del queryset, pero solo regresa el MEJOR candidato (el de
-    menor diferencia entre factura/complemento) y una `confianza` simple:
-    'alta' si el monto coincide exacto (diferencia = 0) y es el UNICO
-    candidato encontrado (nada ambiguo que decidir), 'media' en cualquier
-    otro caso con candidato. Flujos sin ningun candidato no aparecen en la
-    lista - "la IA propone, el humano aprueba" sigue aplicando: esto solo
-    ahorra abrir cada pago uno por uno, la aprobacion real sigue siendo
-    manual (ver TesoreriaFlujoViewSet.vincular_factura)."""
+    lote, no uno por uno") - regresa solo el MEJOR candidato por flujo (el
+    de menor diferencia entre factura/complemento) y una `confianza`
+    simple: 'alta' si el monto coincide exacto (diferencia = 0) y es el
+    UNICO candidato encontrado (nada ambiguo que decidir), 'media' en
+    cualquier otro caso con candidato. Flujos sin ningun candidato no
+    aparecen en la lista - "la IA propone, el humano aprueba" sigue
+    aplicando: esto solo ahorra abrir cada pago uno por uno, la aprobacion
+    real sigue siendo manual (ver TesoreriaFlujoViewSet.vincular_factura).
+
+    23/Sep/2026 - fix real: la version anterior llamaba
+    sugerir_cfdi_para_flujo() (2 queries por flujo) dentro de un for sobre
+    TODOS los flujos "Sin CFDI" del mes - con datos reales (decenas/cientos
+    de flujos) eso son cientos de queries y el request se cae con 502 en
+    Cloud Run ("el servicio no respondio"). Aqui se cargan facturas y
+    complementos SIN LIGAR una sola vez (agrupados por contraparte_id) y
+    se hace el match en Python, sin volver a tocar la BD por flujo."""
+    flujos = list(
+        queryset.select_related("contrato", "contrato__contraparte").exclude(factura__isnull=False).exclude(
+            complemento__isnull=False
+        )
+    )
+    contraparte_ids = {f.contrato.contraparte_id for f in flujos if f.contrato_id}
+    if not contraparte_ids:
+        return []
+
+    facturas_por_contraparte: dict[str, list[dict]] = {}
+    for f in TesoreriaFactura.objects.filter(
+        contraparte_id__in=contraparte_ids, comprobante_total__isnull=False
+    ).exclude(flujos__isnull=False):
+        facturas_por_contraparte.setdefault(f.contraparte_id, []).append(
+            {
+                "id": f.id,
+                "timbre_uuid": f.timbre_uuid,
+                "folio": f.comprobante_folio,
+                "total": f.comprobante_total,
+            }
+        )
+
+    complementos_por_contraparte: dict[str, list[dict]] = {}
+    for c in TesoreriaComplementoPago.objects.filter(
+        contraparte_id__in=contraparte_ids, total__isnull=False
+    ).exclude(flujos__isnull=False):
+        complementos_por_contraparte.setdefault(c.contraparte_id, []).append(
+            {"id": c.id, "timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total}
+        )
+
     sugerencias = []
-    for flujo in queryset.select_related("contrato", "contrato__contraparte"):
-        if flujo.factura_id or flujo.complemento_id:
+    for flujo in flujos:
+        if not flujo.contrato_id or flujo.total_mxp is None:
             continue
-        candidatos = sugerir_cfdi_para_flujo(flujo, tolerancia)
-        total_candidatos = len(candidatos["facturas"]) + len(candidatos["complementos"])
-        if total_candidatos == 0:
+        contraparte_id = flujo.contrato.contraparte_id
+        monto = flujo.total_mxp
+
+        candidatos = []
+        for f in facturas_por_contraparte.get(contraparte_id, []):
+            diferencia = abs(f["total"] - monto)
+            if diferencia <= tolerancia:
+                candidatos.append({**f, "tipo": "factura", "diferencia": diferencia})
+        for c in complementos_por_contraparte.get(contraparte_id, []):
+            diferencia = abs(c["total"] - monto)
+            if diferencia <= tolerancia:
+                candidatos.append({**c, "tipo": "complemento", "diferencia": diferencia})
+        if not candidatos:
             continue
-        # El mejor candidato entre ambas listas (ya vienen ordenadas por
-        # diferencia ascendente cada una).
-        mejor_factura = candidatos["facturas"][0] if candidatos["facturas"] else None
-        mejor_complemento = candidatos["complementos"][0] if candidatos["complementos"] else None
-        if mejor_factura and (not mejor_complemento or mejor_factura["diferencia"] <= mejor_complemento["diferencia"]):
-            tipo, mejor = "factura", mejor_factura
-        else:
-            tipo, mejor = "complemento", mejor_complemento
-        confianza = "alta" if total_candidatos == 1 and mejor["diferencia"] == Decimal("0") else "media"
+
+        candidatos.sort(key=lambda c: c["diferencia"])
+        mejor = candidatos[0]
+        confianza = "alta" if len(candidatos) == 1 and mejor["diferencia"] == Decimal("0") else "media"
         sugerencias.append(
             {
                 "id_flujo": flujo.id_flujo,
-                "contraparte_nombre": flujo.contrato.contraparte.razon_social if flujo.contrato_id else None,
+                "contraparte_nombre": flujo.contrato.contraparte.razon_social,
                 "concepto": flujo.concepto,
                 "total_mxp": flujo.total_mxp,
-                "tipo": tipo,
+                "tipo": mejor["tipo"],
+                "id": mejor["id"],
                 "timbre_uuid": mejor["timbre_uuid"],
                 "folio": mejor["folio"],
                 "confianza": confianza,

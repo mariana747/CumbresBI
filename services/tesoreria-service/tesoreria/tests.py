@@ -892,6 +892,10 @@ class TesoreriaConciliacionCfdiTests(TestCase):
         )
 
     def _conciliacion(self, **params):
+        # page_size grande (23/Sep/2026, ahora la respuesta pagina el
+        # bucket de `tab` - default "con_cfdi") para no truncar los casos
+        # de prueba que crean mas de 50 flujos.
+        params.setdefault("page_size", 200)
         request = self.factory.get("/api/flujos/conciliacion/", params)
         request.effective_scope = self.scope
         return TesoreriaFlujoViewSet.as_view({"get": "conciliacion"})(request)
@@ -908,9 +912,9 @@ class TesoreriaConciliacionCfdiTests(TestCase):
         )
         response = self._conciliacion()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data["no_requiere"]), 1)
-        self.assertEqual(len(response.data["con_cfdi"]), 0)
-        self.assertEqual(len(response.data["sin_cfdi"]), 0)
+        self.assertEqual(response.data["no_requiere"]["count"], 1)
+        self.assertEqual(response.data["con_cfdi"]["count"], 0)
+        self.assertEqual(response.data["sin_cfdi"]["count"], 0)
 
     def test_requiere_factura_sin_ligar(self):
         contrato = self._contrato(True, "002")
@@ -918,8 +922,8 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             id_flujo="FLJ-CONC-2", contrato=contrato, cuenta=self.cuenta, total_mxp="500.00", fecha_efectiva=self.hoy
         )
         response = self._conciliacion()
-        self.assertEqual(len(response.data["sin_cfdi"]), 1)
-        self.assertEqual(len(response.data["con_cfdi"]), 0)
+        self.assertEqual(response.data["sin_cfdi"]["count"], 1)
+        self.assertEqual(response.data["con_cfdi"]["count"], 0)
 
     def test_con_cfdi_pue_reconocido_es_total_de_factura(self):
         contrato = self._contrato(True, "003")
@@ -937,9 +941,32 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             factura=factura,
         )
         response = self._conciliacion()
-        self.assertEqual(len(response.data["con_cfdi"]), 1)
-        fila = response.data["con_cfdi"][0]
+        self.assertEqual(response.data["con_cfdi"]["count"], 1)
+        fila = response.data["con_cfdi"]["results"][0]
         self.assertEqual(fila["reconocido"], Decimal("1160.00"))
+        self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
+
+    def test_con_cfdi_egreso_con_total_mxp_negativo_reconocido_correcto(self):
+        # 23/Sep/2026 - bug real: total_mxp viene negativo en egresos,
+        # "reconocido - total_mxp" sumaba en vez de restar (daba el doble
+        # en vez de 0 cuando ya estaba totalmente reconocido).
+        contrato = self._contrato(True, "006")
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="44444444-4444-4444-4444-444444444444",
+            comprobante_metodo_pago="PUE",
+            comprobante_total=Decimal("1000.00"),
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-6",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="-1000.00",
+            fecha_efectiva=self.hoy,
+            factura=factura,
+        )
+        response = self._conciliacion()
+        fila = response.data["con_cfdi"]["results"][0]
+        self.assertEqual(fila["reconocido"], Decimal("1000.00"))
         self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
 
     def test_con_cfdi_trae_subtotal_iva_total_de_la_factura(self):
@@ -963,7 +990,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             factura=factura,
         )
         response = self._conciliacion()
-        fila = response.data["con_cfdi"][0]
+        fila = response.data["con_cfdi"]["results"][0]
         self.assertEqual(fila["factura_subtotal"], "1000.00")
         self.assertEqual(fila["factura_iva"], Decimal("160.00"))
         self.assertEqual(fila["factura_total"], Decimal("1160.00"))
@@ -988,7 +1015,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             complemento=complemento,
         )
         response = self._conciliacion()
-        fila = response.data["con_cfdi"][0]
+        fila = response.data["con_cfdi"]["results"][0]
         self.assertEqual(fila["reconocido"], Decimal("580.00"))
         self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
 
@@ -1002,7 +1029,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             fecha_efectiva=self.hoy.replace(year=self.hoy.year - 1),
         )
         response = self._conciliacion()
-        self.assertEqual(len(response.data["sin_cfdi"]), 0)
+        self.assertEqual(response.data["sin_cfdi"]["count"], 0)
 
     def test_filtro_requiere_factura(self):
         contrato_si = self._contrato(True, "006")
@@ -1013,10 +1040,10 @@ class TesoreriaConciliacionCfdiTests(TestCase):
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-CONC-7", contrato=contrato_no, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
         )
-        response = self._conciliacion(requiere_factura="true")
-        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]]
+        response = self._conciliacion(requiere_factura="true", tab="sin_cfdi")
+        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]["results"]]
         self.assertIn("FLJ-CONC-6", ids)
-        self.assertEqual(len(response.data["no_requiere"]), 0)
+        self.assertEqual(response.data["no_requiere"]["count"], 0)
 
     def test_filtro_por_una_sola_fecha(self):
         contrato = self._contrato(True, "008")
@@ -1030,8 +1057,8 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             total_mxp="100.00",
             fecha_efectiva=self.hoy - timedelta(days=1),
         )
-        response = self._conciliacion(desde=self.hoy.isoformat(), hasta=self.hoy.isoformat())
-        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]]
+        response = self._conciliacion(desde=self.hoy.isoformat(), hasta=self.hoy.isoformat(), tab="sin_cfdi")
+        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]["results"]]
         self.assertIn("FLJ-CONC-8", ids)
         self.assertNotIn("FLJ-CONC-9", ids)
 
@@ -1052,9 +1079,11 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             fecha_efectiva=self.hoy.replace(year=self.hoy.year - 1),
         )
         response = self._conciliacion(
-            desde=self.hoy.replace(month=1, day=1).isoformat(), hasta=self.hoy.replace(month=12, day=31).isoformat()
+            desde=self.hoy.replace(month=1, day=1).isoformat(),
+            hasta=self.hoy.replace(month=12, day=31).isoformat(),
+            tab="sin_cfdi",
         )
-        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]]
+        ids = [f["id_flujo"] for f in response.data["sin_cfdi"]["results"]]
         self.assertIn("FLJ-CONC-10", ids)
         self.assertNotIn("FLJ-CONC-11", ids)
 
@@ -4660,6 +4689,35 @@ class TesoreriaMovimientoBancarioImportarTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(TesoreriaMovimientoBancario.objects.count(), 0)
 
+    def test_importar_extracto_real_banco_actinver(self):
+        """Regresion (23/Sep/2026): extracto real de Banco Actinver - fecha
+        entre comillas simples sin separador ('22092026') y columnas
+        "Importe Cargo"/"Importe Abono" (no "Cargo"/"Abono" a secas)."""
+        contenido = (
+            b"Usuario: ,ROCIO AVINA ROSAS,23/09/2026\n"
+            b"Ultimo acceso: ,22/09/26 09:35:58,08:50\n"
+            b"Consulta de movimientos de cuentas de cheques\n"
+            b"Consultas > Movimientos > Chequeras\n"
+            b"Contrato: 080150261893 BANCO ACTINVER SA INSTITUCION DE BANCA M\n"
+            b"Cuenta: 65509560869,Total de cargos: 0 por $0.00\n"
+            b"Periodo de: 22/09/2026 al 22/09/2026,Total de abonos: 0 por $0.00\n"
+            b"Fecha,Hora,Sucursal,Descripcion,Importe Cargo,Importe Abono,Saldo,Referencia,Concepto,Descripcion Larga\n"
+            b"'22092026',10:50,'7465',ABONO TRANSFERENCIA SPEI,0,483.81,\"1,583,942.70\",000705604,luz m11,ABONO\n"
+            b"'22092026',12:28,'7465',ABONO TRANSFERENCIA SPEI,0,\"153,719.72\",\"1,737,662.42\",001059304,RENTA,ABONO\n"
+        )
+        archivo = SimpleUploadedFile("extracto.csv", contenido, content_type="text/csv")
+        drive_ok = ({"web_view_link": "https://drive.google.com/x", "file_id": "abc123", "mime_type": "text/csv"}, None)
+        with patch("tesoreria.views._subir_a_drive", return_value=drive_ok):
+            response = self._post_importar(archivo)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["importados"], 2)
+        self.assertEqual(response.data["errores"], [])
+        movimientos = TesoreriaMovimientoBancario.objects.order_by("abono")
+        self.assertEqual(str(movimientos[0].fecha), "2026-09-22")
+        self.assertEqual(movimientos[0].abono, Decimal("483.81"))
+        self.assertEqual(movimientos[1].abono, Decimal("153719.72"))
+        self.assertEqual(movimientos[1].saldo, Decimal("1737662.42"))
+
     def test_importar_formato_no_soportado(self):
         archivo = SimpleUploadedFile("extracto.pdf", b"no es un csv", content_type="application/pdf")
         response = self._post_importar(archivo)
@@ -4679,6 +4737,31 @@ class TesoreriaMovimientoBancarioImportarTests(TestCase):
         self.assertEqual(response.data["importados"], 1)
         self.assertEqual(len(response.data["errores"]), 1)
         self.assertIn("Fila 3", response.data["errores"][0])
+
+    def test_detectar_cuenta_encuentra_numero_de_cuenta_en_el_archivo(self):
+        self.cuenta.cuenta = "65509560869"
+        self.cuenta.save(update_fields=["cuenta"])
+        contenido = (
+            b"Contrato: 080150261893 BANCO ACTINVER\n"
+            b"Cuenta: 65509560869,Total de cargos: 0\n"
+            b"Fecha,Descripcion,Cargo\n01/09/2026,x,100\n"
+        )
+        archivo = SimpleUploadedFile("extracto.csv", contenido, content_type="text/csv")
+        request = self.factory.post("/api/movimientos-bancarios/detectar_cuenta/", {"file": archivo}, format="multipart")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "detectar_cuenta"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["cuenta"]["id_cuenta_bancaria"], self.cuenta.id_cuenta_bancaria)
+
+    def test_detectar_cuenta_sin_coincidencia_regresa_null(self):
+        archivo = SimpleUploadedFile("extracto.csv", b"Fecha,Cargo\n01/09/2026,100\n", content_type="text/csv")
+        request = self.factory.post("/api/movimientos-bancarios/detectar_cuenta/", {"file": archivo}, format="multipart")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",))
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "detectar_cuenta"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["cuenta"])
 
 
 class TesoreriaMovimientoBancarioConciliacionTests(TestCase):

@@ -45,6 +45,7 @@ import {
   createCotizacion,
   generarOrdenDesdeCotizacion,
   listCotizaciones,
+  reagendarCotizacion,
 } from "@/lib/compras";
 
 const ESTADO_LABELS: Record<Cotizacion["estado"], string> = {
@@ -59,6 +60,16 @@ const ESTADO_COLOR: Record<Cotizacion["estado"], "default" | "warning" | "succes
   GANADORA: "success",
   DESCARTADA: "error",
 };
+
+// "las cotizaciones duran una semana" (22/Sep/2026) - espejo del bloqueo
+// real en OrdenCompraViewSet.generar_desde_cotizacion (backend); esto solo
+// evita el clic inútil, el backend es quien de verdad lo impide.
+function estaVencida(c: Cotizacion): boolean {
+  if (!c.fecha_cotizacion || !c.vigencia_dias) return false;
+  const vence = new Date(c.fecha_cotizacion);
+  vence.setDate(vence.getDate() + c.vigencia_dias);
+  return new Date() > vence;
+}
 
 // Whitelist de campos que confirmar_extraccion acepta - espejo de
 // CotizacionViewSet.CAMPOS_CONFIRMABLES en views.py.
@@ -261,6 +272,20 @@ export default function CotizacionesPanel({
     }
   }
 
+  // Reagendar (22/Sep/2026, "no se bloquea, se debe reagendar, se debe
+  // volver a pedir") - la vencida queda DESCARTADA en el backend, la
+  // nueva nace vacia (sin lineas/precio) y se abre de una vez el Motor
+  // Documental para subir el documento de cotizacion nuevo.
+  async function handleReagendar(idCotizacion: string) {
+    try {
+      const nueva = await reagendarCotizacion(idCotizacion);
+      recargar();
+      setMotorCotizacion(nueva);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
   // Cotizaciones elegibles para comparar (activas) - de cualquier
   // solicitud, el usuario elige cuales dentro de la ventana emergente.
   const cotizacionesComparables = cotizaciones.filter((c) => c.estado !== "DESCARTADA");
@@ -384,6 +409,9 @@ export default function CotizacionesPanel({
               >
                 <Typography variant="subtitle1">{c.proveedor_nombre || "(sin proveedor)"}</Typography>
                 <Chip size="small" label={ESTADO_LABELS[c.estado]} color={ESTADO_COLOR[c.estado]} sx={{ alignSelf: "flex-start" }} />
+                {estaVencida(c) && c.estado !== "GANADORA" && c.estado !== "DESCARTADA" && (
+                  <Chip size="small" label="Vencida" color="error" variant="outlined" sx={{ alignSelf: "flex-start" }} />
+                )}
                 <Typography variant="body2" color="text.secondary">
                   {c.moneda || "MXN"} {c.total || "—"}
                 </Typography>
@@ -398,8 +426,19 @@ export default function CotizacionesPanel({
                     </Button>
                   )}
                   {puedeAprobar && c.estado !== "GANADORA" && c.estado !== "DESCARTADA" && (
-                    <Button size="small" variant="contained" onClick={() => handleGenerarOrden(c.id_cotizacion)}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={estaVencida(c)}
+                      title={estaVencida(c) ? "Esta cotización ya venció" : undefined}
+                      onClick={() => handleGenerarOrden(c.id_cotizacion)}
+                    >
                       Generar orden
+                    </Button>
+                  )}
+                  {puedeAprobar && estaVencida(c) && c.estado !== "GANADORA" && c.estado !== "DESCARTADA" && (
+                    <Button size="small" variant="outlined" color="warning" onClick={() => handleReagendar(c.id_cotizacion)}>
+                      Reagendar
                     </Button>
                   )}
                 </Stack>
@@ -908,7 +947,8 @@ function ComparacionCotizaciones({
                     <Button
                       size="small"
                       variant="contained"
-                      disabled={c.estado === "GANADORA"}
+                      disabled={c.estado === "GANADORA" || estaVencida(c)}
+                      title={estaVencida(c) ? "Esta cotización ya venció" : undefined}
                       onClick={() => onSeleccionar(c.id_cotizacion)}
                       sx={{
                         borderRadius: 20,
