@@ -946,6 +946,29 @@ class TesoreriaConciliacionCfdiTests(TestCase):
         self.assertEqual(fila["reconocido"], Decimal("1160.00"))
         self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
 
+    def test_con_cfdi_egreso_con_total_mxp_negativo_reconocido_correcto(self):
+        # 23/Sep/2026 - bug real: total_mxp viene negativo en egresos,
+        # "reconocido - total_mxp" sumaba en vez de restar (daba el doble
+        # en vez de 0 cuando ya estaba totalmente reconocido).
+        contrato = self._contrato(True, "006")
+        factura = TesoreriaFactura.objects.create(
+            timbre_uuid="44444444-4444-4444-4444-444444444444",
+            comprobante_metodo_pago="PUE",
+            comprobante_total=Decimal("1000.00"),
+        )
+        TesoreriaFlujo.objects.create(
+            id_flujo="FLJ-CONC-6",
+            contrato=contrato,
+            cuenta=self.cuenta,
+            total_mxp="-1000.00",
+            fecha_efectiva=self.hoy,
+            factura=factura,
+        )
+        response = self._conciliacion()
+        fila = response.data["con_cfdi"]["results"][0]
+        self.assertEqual(fila["reconocido"], Decimal("1000.00"))
+        self.assertEqual(fila["por_reconocer"], Decimal("0.00"))
+
     def test_con_cfdi_trae_subtotal_iva_total_de_la_factura(self):
         # 11/Sep/2026, "columnas separadas importe/IVA/total en
         # conciliacion, para Cat" - solo hay dato cuando el flujo tiene

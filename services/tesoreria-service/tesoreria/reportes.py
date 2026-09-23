@@ -48,7 +48,8 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
     reconocido (solo CON_CFDI): si la factura es PUE, su propio total; si
     es PPD (se salda con un REP aparte) o no hay factura pero si complemento/
     nomina, el total de ese complemento/recibo de nomina.
-    por_reconocer = reconocido - total_mxp del flujo.
+    por_reconocer = reconocido - abs(total_mxp) del flujo (total_mxp viene
+    negativo en egresos, hay que comparar magnitudes).
 
     Referencias cruzadas (10/Sep/2026, "hay que ver en que pantallas
     podemos hacer referencia a sus datos ligados...asi para todo") - cada
@@ -97,7 +98,9 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
             reconocido = flujo.complemento.total
         elif flujo.nomina_id:
             reconocido = flujo.nomina.total
-        por_reconocer = (reconocido - flujo.total_mxp) if reconocido is not None and flujo.total_mxp is not None else None
+        por_reconocer = (
+            (reconocido - abs(flujo.total_mxp)) if reconocido is not None and flujo.total_mxp is not None else None
+        )
         con_cfdi.append({**fila, "reconocido": reconocido, "por_reconocer": por_reconocer})
 
     return {"con_cfdi": con_cfdi, "sin_cfdi": sin_cfdi, "no_requiere": no_requiere}
@@ -119,7 +122,7 @@ def calcular_conciliacion_nomina(queryset) -> dict:
     reconocido/por_reconocer.
 
     - CON_RECIBO: el flujo ya tiene un recibo de nomina (CFDI) vinculado.
-      reconocido = recibo.total, por_reconocer = reconocido - total_mxp
+      reconocido = recibo.total, por_reconocer = reconocido - abs(total_mxp)
       del flujo.
     - SIN_RECIBO: el flujo de nomina todavia no tiene ningun recibo
       vinculado."""
@@ -141,7 +144,9 @@ def calcular_conciliacion_nomina(queryset) -> dict:
             sin_recibo.append(fila)
             continue
         reconocido = flujo.nomina.total
-        por_reconocer = (reconocido - flujo.total_mxp) if reconocido is not None and flujo.total_mxp is not None else None
+        por_reconocer = (
+            (reconocido - abs(flujo.total_mxp)) if reconocido is not None and flujo.total_mxp is not None else None
+        )
         con_recibo.append({**fila, "reconocido": reconocido, "por_reconocer": por_reconocer})
 
     return {"con_recibo": con_recibo, "sin_recibo": sin_recibo}
