@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -46,12 +47,24 @@ import {
 
 const FORM_VACIO = {
   id: "",
-  fecha: new Date().toISOString().slice(0, 10),
+  fecha: "",
   cuenta: "",
   saldo: "",
   cambioDinero: "",
   cambioPorcentual: "",
 };
+
+// Fecha de "hoy" en hora local, no UTC (23/Sep/2026, bug real: guardando en
+// la tarde/noche en México - UTC-6 - el saldo quedaba con la fecha del día
+// siguiente en UTC; y como FORM_VACIO.fecha antes se calculaba una sola vez
+// al cargar el módulo, una pestaña abierta de un día para otro seguía
+// prellenando la fecha vieja). Se llama de nuevo cada vez que se abre el
+// diálogo de alta, nunca se cachea.
+function hoyLocal(): string {
+  const ahora = new Date();
+  const sinOffset = new Date(ahora.getTime() - ahora.getTimezoneOffset() * 60000);
+  return sinOffset.toISOString().slice(0, 10);
+}
 
 // Genera un id corto tipo "cd7d429b" (25/Ago/2026) - igual formato que ya
 // se ve en los saldos capturados desde el AppSheet original (uuid
@@ -160,6 +173,16 @@ export default function TesoreriaSaldosPage() {
     return etiqueta || c.alias || c.clabe || idCuentaBancaria;
   }
 
+  // Etiqueta corta para el buscador de cuenta del alta de saldo (23/Sep/2026,
+  // pedido explícito: "nombre de la cuenta con su número de cuenta") -
+  // separado de aliasCuenta() porque ahí se busca reconocer una cuenta ya
+  // elegida (con sociedad/banco), aquí se busca escribiendo nombre o número.
+  function opcionCuenta(c: TesoreriaCuenta): string {
+    const numero = c.cuenta || c.clabe;
+    const nombre = c.alias || c.id_cuenta_bancaria;
+    return numero ? `${nombre} — ${numero}` : nombre;
+  }
+
   // Agrupados por fecha (mas reciente primero, ya viene ordenado -fecha
   // desde el backend) - mismo agrupamiento que el panel real de AppSheet.
   // El rango de fecha ya se filtro en el servidor (ver refresh(), 21/Sep/2026)
@@ -188,7 +211,7 @@ export default function TesoreriaSaldosPage() {
   function abrirAlta() {
     setDetalle(null);
     setEditing(null);
-    setForm({ ...FORM_VACIO, id: generarIdSaldo() });
+    setForm({ ...FORM_VACIO, id: generarIdSaldo(), fecha: hoyLocal() });
     setFormError(null);
     setDialogOpen(true);
   }
@@ -213,7 +236,7 @@ export default function TesoreriaSaldosPage() {
     setEditing(null);
     setForm({
       id: generarIdSaldo(),
-      fecha: new Date().toISOString().slice(0, 10),
+      fecha: hoyLocal(),
       cuenta: s.cuenta,
       saldo: s.saldo,
       cambioDinero: "",
@@ -317,24 +340,26 @@ export default function TesoreriaSaldosPage() {
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 220 }}>
-          <InputLabel id="filtro-cuenta-label">Filtrar por cuenta</InputLabel>
-          <Select
-            labelId="filtro-cuenta-label"
-            label="Filtrar por cuenta"
-            value={filtroCuenta}
-            onChange={(e) => setFiltroCuenta(e.target.value)}
-          >
-            <MenuItem value="">
-              <em>Todas las cuentas</em>
-            </MenuItem>
-            {cuentasDeEmpresa.map((c) => (
-              <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                {c.alias || c.clabe || c.id_cuenta_bancaria}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <Autocomplete
+          size="small"
+          openOnFocus
+          sx={{ minWidth: 220 }}
+          options={cuentasDeEmpresa}
+          value={cuentasDeEmpresa.find((c) => c.id_cuenta_bancaria === filtroCuenta) || null}
+          onChange={(_, value) => setFiltroCuenta(value?.id_cuenta_bancaria || "")}
+          getOptionLabel={opcionCuenta}
+          isOptionEqualToValue={(option, value) => option.id_cuenta_bancaria === value.id_cuenta_bancaria}
+          filterOptions={(options, { inputValue }) => {
+            const busqueda = inputValue.trim().toLowerCase();
+            if (!busqueda) return options;
+            return options.filter((c) => {
+              const nombre = (c.alias || "").toLowerCase();
+              const numero = (c.cuenta || c.clabe || "").toLowerCase();
+              return nombre.includes(busqueda) || numero.includes(busqueda);
+            });
+          }}
+          renderInput={(params) => <TextField {...params} label="Filtrar por cuenta" />}
+        />
         <TextField
           size="small"
           type="date"
@@ -651,21 +676,27 @@ export default function TesoreriaSaldosPage() {
               disabled={!!editing}
               fullWidth
             />
-            <FormControl size="small" fullWidth disabled={!!editing}>
-              <InputLabel id="cuenta-label">Cuenta</InputLabel>
-              <Select
-                labelId="cuenta-label"
-                label="Cuenta"
-                value={form.cuenta}
-                onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
-              >
-                {cuentas.map((c) => (
-                  <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                    {c.alias || c.clabe || c.id_cuenta_bancaria}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Autocomplete
+              size="small"
+              fullWidth
+              openOnFocus
+              disabled={!!editing}
+              options={cuentas}
+              value={cuentas.find((c) => c.id_cuenta_bancaria === form.cuenta) || null}
+              onChange={(_, value) => setForm({ ...form, cuenta: value?.id_cuenta_bancaria || "" })}
+              getOptionLabel={opcionCuenta}
+              isOptionEqualToValue={(option, value) => option.id_cuenta_bancaria === value.id_cuenta_bancaria}
+              filterOptions={(options, { inputValue }) => {
+                const busqueda = inputValue.trim().toLowerCase();
+                if (!busqueda) return options;
+                return options.filter((c) => {
+                  const nombre = (c.alias || "").toLowerCase();
+                  const numero = (c.cuenta || c.clabe || "").toLowerCase();
+                  return nombre.includes(busqueda) || numero.includes(busqueda);
+                });
+              }}
+              renderInput={(params) => <TextField {...params} label="Cuenta" />}
+            />
             <TextField
               size="small"
               label="Saldo"
