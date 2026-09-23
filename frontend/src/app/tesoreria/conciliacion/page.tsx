@@ -45,6 +45,7 @@ import {
   TesoreriaMovimientoBancario,
   conciliarAutomatico,
   crearFlujoDesdeMovimiento,
+  detectarCuentaExtracto,
   exportarReporteConciliacionSheets,
   importarExtractoBancario,
   listContratos,
@@ -90,6 +91,12 @@ export default function TesoreriaConciliacionPage() {
   // Equipo o Drive (14/Sep/2026, "hay que dar la opción actual y una para
   // drive") - ver componente SelectorArchivoLocalODrive.
   const [archivo, setArchivo] = useState<File | null>(null);
+  // Deteccion automatica de cuenta (23/Sep/2026, "que la IA identifique a
+  // que cuenta pertenece...pero que se tenga esas dos opciones") - sigue
+  // pudiendose elegir a mano en el Autocomplete de arriba, esto solo
+  // sugiere.
+  const [cuentaDetectada, setCuentaDetectada] = useState<TesoreriaCuenta | null>(null);
+  const [detectandoCuenta, setDetectandoCuenta] = useState(false);
   const [importando, setImportando] = useState(false);
   const [importResultado, setImportResultado] = useState<{ importados: number; errores: string[] } | null>(
     null
@@ -170,6 +177,26 @@ export default function TesoreriaConciliacionPage() {
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cuenta, filtroCorteImportado, search]);
+
+  // Deteccion automatica de cuenta al elegir el archivo (23/Sep/2026, "no
+  // sea necesario seleccionarlo") - se aplica sola en cuanto se detecta,
+  // ya no hace falta elegirla a mano antes de importar. Si no detecta
+  // nada (o detecta otra distinta a la ya elegida), el Autocomplete
+  // "Cuenta bancaria" de arriba sigue disponible para elegirla/corregirla.
+  useEffect(() => {
+    if (!archivo) {
+      setCuentaDetectada(null);
+      return;
+    }
+    setDetectandoCuenta(true);
+    detectarCuentaExtracto(archivo)
+      .then((detectada) => {
+        setCuentaDetectada(detectada);
+        if (detectada) setCuenta(detectada);
+      })
+      .catch(() => setCuentaDetectada(null))
+      .finally(() => setDetectandoCuenta(false));
+  }, [archivo]);
 
   function refreshMovimientos() {
     if (!cuenta) return;
@@ -380,7 +407,7 @@ export default function TesoreriaConciliacionPage() {
                   value={cuenta}
                   onChange={(_, v) => setCuenta(v)}
                   getOptionLabel={(c) => c.alias || c.id_cuenta_bancaria}
-                  isOptionEqualToValue={(a, b) => a.id_cuenta_bancaria === b.id_cuenta_bancaria}
+                  isOptionEqualToValue={(a, b) => a?.id_cuenta_bancaria === b?.id_cuenta_bancaria}
                   renderInput={(params) => <TextField {...params} label="Cuenta bancaria" />}
                 />
                 {filtroCorteImportado && (
@@ -525,7 +552,7 @@ export default function TesoreriaConciliacionPage() {
                   value={cuenta}
                   onChange={(_, v) => setCuenta(v)}
                   getOptionLabel={(c) => c.alias || c.id_cuenta_bancaria}
-                  isOptionEqualToValue={(a, b) => a.id_cuenta_bancaria === b.id_cuenta_bancaria}
+                  isOptionEqualToValue={(a, b) => a?.id_cuenta_bancaria === b?.id_cuenta_bancaria}
                   renderInput={(params) => <TextField {...params} label="Cuenta bancaria" />}
                 />
                 <TextField
@@ -741,16 +768,32 @@ export default function TesoreriaConciliacionPage() {
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Sube el estado de cuenta en CSV o Excel (.xlsx). Se acepta cualquier alias razonable de
+            Sube el estado de cuenta en CSV, Excel (.xls/.xlsx) o XML. Se acepta cualquier alias razonable de
             columna (Fecha/Date, Cargo/Débito/Retiro, Abono/Crédito/Depósito, Saldo/Balance).
           </Typography>
           <SelectorArchivoLocalODrive
             archivo={archivo}
             onChange={setArchivo}
-            accept=".csv,.xlsx,.xlsm"
+            accept=".csv,.xls,.xlsx,.xlsm,.xml"
             mimeTypesDrive={MIME_TYPES_EXTRACTO}
             tituloDrive="Elige el extracto bancario"
           />
+          {detectandoCuenta && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Detectando a qué cuenta pertenece…
+            </Alert>
+          )}
+          {!detectandoCuenta && cuentaDetectada && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              Detectamos que este extracto es de: {cuentaDetectada.alias || cuentaDetectada.id_cuenta_bancaria}.
+            </Alert>
+          )}
+          {!detectandoCuenta && archivo && !cuentaDetectada && !cuenta && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              No pudimos detectar la cuenta automáticamente. Elige una cuenta bancaria (arriba, se puede buscar) para
+              poder importar.
+            </Alert>
+          )}
           {importResultado && (
             <Alert severity={importResultado.errores.length > 0 ? "warning" : "success"} sx={{ mt: 2 }}>
               {importResultado.importados} movimiento(s) importado(s).
@@ -785,7 +828,7 @@ export default function TesoreriaConciliacionPage() {
               Ver lo importado
             </Button>
           ) : (
-            <Button variant="contained" disabled={!archivo || importando} onClick={handleImportar}>
+            <Button variant="contained" disabled={!archivo || !cuenta || importando} onClick={handleImportar}>
               {importando ? <CircularProgress size={16} /> : "Importar"}
             </Button>
           )}
@@ -845,7 +888,7 @@ export default function TesoreriaConciliacionPage() {
                   value={contratoNuevoFlujo}
                   onChange={(_, valor) => setContratoNuevoFlujo(valor)}
                   getOptionLabel={(c) => `${c.id_contrato}${c.contraparte_nombre ? ` — ${c.contraparte_nombre}` : ""}`}
-                  isOptionEqualToValue={(a, b) => a.id_contrato === b.id_contrato}
+                  isOptionEqualToValue={(a, b) => a?.id_contrato === b?.id_contrato}
                   renderInput={(params) => <TextField {...params} label="Contrato" />}
                 />
                 <Button

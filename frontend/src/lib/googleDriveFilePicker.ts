@@ -14,7 +14,7 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 const GOOGLE_PICKER_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_PICKER_API_KEY ?? "";
 
 export const MIME_TYPES_EXTRACTO =
-  "text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  "text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/xml,application/xml";
 
 // Comprobantes/recibos (14/Sep/2026, "igual para subir el comprobante,
 // subir desde la pc o desde el drive, esto ya lo habíamos hecho antes") -

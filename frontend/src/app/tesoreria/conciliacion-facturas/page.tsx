@@ -25,6 +25,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -50,6 +51,7 @@ import {
   SugerenciasCfdiResponse,
   TesoreriaContrato,
   exportarConciliacionCfdiSheets,
+  urlVerComplementoPagoPdf,
   urlVerFacturaPdf,
   vincularFactura,
 } from "@/lib/tesoreria";
@@ -74,7 +76,17 @@ function numero(valor: string | null | undefined): string {
   return Number(valor).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
 
-const VACIO: ConciliacionCfdiResponse = { con_cfdi: [], sin_cfdi: [], no_requiere: [] };
+const VACIO: ConciliacionCfdiResponse = {
+  con_cfdi: { results: [], count: 0 },
+  sin_cfdi: { results: [], count: 0 },
+  no_requiere: { results: [], count: 0 },
+};
+
+const TAB_A_BUCKET: Record<TabPrincipal, keyof ConciliacionCfdiResponse> = {
+  ligado: "con_cfdi",
+  sin_cfdi: "sin_cfdi",
+  no_requiere: "no_requiere",
+};
 
 type TabPrincipal = "ligado" | "sin_cfdi" | "no_requiere";
 type TabDetalle = "detalles" | "vincular" | "recordatorio";
@@ -108,6 +120,11 @@ export default function ConciliacionFacturasPage() {
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroContrato, setFiltroContrato] = useState("");
   const [filtroTipoComprobante, setFiltroTipoComprobante] = useState<"" | "I" | "E">("");
+
+  // Paginacion server-side (23/Sep/2026, "no tiene paginacion") - mismo
+  // patron que Flujos (page-based, no cursor).
+  const [pagina, setPagina] = useState(0);
+  const [filasPorPagina, setFilasPorPagina] = useState(50);
 
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
   // hook reusable en lib/useExportarSheets.ts.
@@ -225,7 +242,14 @@ export default function ConciliacionFacturasPage() {
       sociedad: filtroEmpresa || undefined,
       contrato: filtroContrato || undefined,
       tipoComprobante: filtroTipoComprobante || undefined,
+      search: search || undefined,
+      tab: TAB_A_BUCKET[tab],
+      page: pagina + 1,
+      pageSize: filasPorPagina,
     })
+      // Los otros 2 buckets solo traen su `count` (para los badges de las
+      // pestañas) - sus `results` van vacios y nunca se renderizan, solo
+      // se muestra `results` del bucket de la pestaña activa.
       .then(setDatos)
       .catch((err) => setError(err instanceof Error ? err.message : "Error al cargar la conciliación"))
       .finally(() => setLoading(false));
@@ -239,7 +263,17 @@ export default function ConciliacionFacturasPage() {
       .catch(() => setContratos([]));
   }, []);
 
-  useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Cambiar de pestaña es otro bucket (con su propia paginacion) - vuelve
+  // a la primera pagina, igual que cambiar cualquier otro filtro.
+  useEffect(() => {
+    setPagina(0);
+  }, [tab]);
+
+  useEffect(() => {
+    const timeout = setTimeout(refresh, 300);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, tab, pagina, filasPorPagina]);
 
   function abrirDetalle(fila: ConciliacionCfdiFila, origenTab: TabPrincipal) {
     setDetalle(fila);
@@ -298,19 +332,10 @@ export default function ConciliacionFacturasPage() {
     }
   }
 
-  const filtro = (f: ConciliacionCfdiFila) =>
-    !search || f.id_flujo.toLowerCase().includes(search.toLowerCase()) || (f.concepto || "").toLowerCase().includes(search.toLowerCase());
-
-  const filasLigado = datos.con_cfdi.filter(filtro);
-  const filasSinCfdi = datos.sin_cfdi.filter(filtro);
-  const filasNoRequiere = datos.no_requiere.filter(filtro);
-
-  const filasPorTab: Record<TabPrincipal, ConciliacionCfdiFila[]> = {
-    ligado: filasLigado,
-    sin_cfdi: filasSinCfdi,
-    no_requiere: filasNoRequiere,
-  };
-  const filasVisibles = filasPorTab[tab];
+  // search ya se aplica del lado del servidor (SearchFilter sobre
+  // id_flujo/concepto, ver backend) - las 3 pestañas solo traen su
+  // `count`, el bucket activo trae `results` ya paginados.
+  const filasVisibles = datos[TAB_A_BUCKET[tab]].results;
   const colSpan = tab === "ligado" ? 9 : 7;
 
   return (
@@ -334,13 +359,17 @@ export default function ConciliacionFacturasPage() {
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Buscar por ID de flujo o concepto..."
-          onAplicarFiltros={refresh}
+          onAplicarFiltros={() => {
+            setPagina(0);
+            refresh();
+          }}
           onLimpiarFiltros={() => {
             setDesde(primerDiaDelMes());
             setHasta(ultimoDiaDelMes());
             setFiltroEmpresa("");
             setFiltroContrato("");
             setFiltroTipoComprobante("");
+            setPagina(0);
           }}
           actions={
             <Button
@@ -439,9 +468,9 @@ export default function ConciliacionFacturasPage() {
             sx={{ borderBottom: "1px solid", borderColor: "divider", pr: 2 }}
           >
             <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2 }}>
-              <Tab value="ligado" label={`Ligado a CFDI (${filasLigado.length})`} />
-              <Tab value="sin_cfdi" label={`Sin CFDI (${filasSinCfdi.length})`} />
-              <Tab value="no_requiere" label={`No requiere CFDI (${filasNoRequiere.length})`} />
+              <Tab value="ligado" label={`Ligado a CFDI (${datos.con_cfdi.count})`} />
+              <Tab value="sin_cfdi" label={`Sin CFDI (${datos.sin_cfdi.count})`} />
+              <Tab value="no_requiere" label={`No requiere CFDI (${datos.no_requiere.count})`} />
             </Tabs>
             {tab === "sin_cfdi" && puedeEditar && (
               <Button size="small" variant="outlined" onClick={abrirLote}>
@@ -521,6 +550,20 @@ export default function ConciliacionFacturasPage() {
               </TableBody>
             </Table>
           </TableContainer>
+          <TablePagination
+            component="div"
+            count={datos[TAB_A_BUCKET[tab]].count}
+            page={pagina}
+            onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+            rowsPerPage={filasPorPagina}
+            onRowsPerPageChange={(e) => {
+              setFilasPorPagina(parseInt(e.target.value, 10));
+              setPagina(0);
+            }}
+            rowsPerPageOptions={[20, 50, 100]}
+            labelRowsPerPage="Filas por página"
+            labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+          />
         </Paper>
 
         {/* Detalle del pago - un solo dialogo con tabs propios (10/Sep/2026,
@@ -547,33 +590,60 @@ export default function ConciliacionFacturasPage() {
           <Tabs value={detalleTab} onChange={(_, v) => setDetalleTab(v)} sx={{ borderBottom: "1px solid", borderColor: "divider", px: 2 }}>
             <Tab value="detalles" label="Detalles" />
             {!detalleEsNoRequiere && <Tab value="vincular" label="Vincular CFDI" />}
-            {!detalleEsNoRequiere && <Tab value="recordatorio" label="Recordatorio" />}
+            {/* Recordatorio solo tiene sentido mientras falta el CFDI - una
+            vez vinculado se quita (23/Sep/2026, "si ya esta vinculada... el
+            recordatorio se quita"). */}
+            {!detalleEsNoRequiere && !detalle?.factura && !detalle?.complemento && (
+              <Tab value="recordatorio" label="Recordatorio" />
+            )}
           </Tabs>
           <DialogContent dividers sx={{ py: 3, minHeight: 260 }}>
             {detalle && detalleTab === "detalles" && (
-              <Stack spacing={1.5}>
-                <Typography variant="body2">
-                  <strong>Concepto:</strong> {detalle.concepto || "—"}
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Fecha efectiva:</strong> {detalle.fecha_efectiva || "—"}
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Total del pago:</strong> {numero(detalle.total_mxp)}
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Necesita factura:</strong> {detalle.requiere_factura ? "Sí" : detalle.requiere_factura === false ? "No" : "Sin definir"}
-                </Typography>
-                {(detalle.factura || detalle.complemento) && (
-                  <>
-                    <Typography variant="body2">
-                      <strong>Reconocido:</strong> {numero(detalle.reconocido)}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Por reconocer:</strong> {numero(detalle.por_reconocer)}
-                    </Typography>
-                  </>
-                )}
+              <Stack spacing={2}>
+                {/* Datos propios del pago - celdas tipo ficha, 2 columnas
+                (23/Sep/2026, "estos datos deben verse como tabla"). */}
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableBody>
+                      <TableRow>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", width: "30%" }}>Concepto:</TableCell>
+                        <TableCell colSpan={3}>{detalle.concepto || "—"}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Fecha efectiva:</TableCell>
+                        <TableCell>{detalle.fecha_efectiva || "—"}</TableCell>
+                        {detalle.factura || detalle.complemento ? (
+                          <>
+                            <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Reconocido:</TableCell>
+                            <TableCell>{numero(detalle.reconocido)}</TableCell>
+                          </>
+                        ) : (
+                          <TableCell colSpan={2} />
+                        )}
+                      </TableRow>
+                      <TableRow>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Total del pago:</TableCell>
+                        <TableCell sx={{ color: Number(detalle.total_mxp) < 0 ? "error.main" : undefined }}>
+                          {numero(detalle.total_mxp)}
+                        </TableCell>
+                        {detalle.factura || detalle.complemento ? (
+                          <>
+                            <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Por reconocer:</TableCell>
+                            <TableCell>{numero(detalle.por_reconocer)}</TableCell>
+                          </>
+                        ) : (
+                          <TableCell colSpan={2} />
+                        )}
+                      </TableRow>
+                      <TableRow>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Necesita factura:</TableCell>
+                        <TableCell colSpan={3}>
+                          {detalle.requiere_factura ? "Sí" : detalle.requiere_factura === false ? "No" : "Sin definir"}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
 
                 {/* Fusionado desde la antigua pestaña "Referencias"
                 (10/Sep/2026, "quitar el tab de referencias porque ya esta
@@ -583,79 +653,98 @@ export default function ConciliacionFacturasPage() {
                     Este pago todavía no tiene ningún CFDI ligado.
                   </Typography>
                 )}
-                {detalle.factura && (
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Typography variant="body2" sx={{ flex: 1 }}>
-                      <strong>Factura:</strong> {detalle.factura_folio || `#${detalle.factura}`}
-                    </Typography>
-                    <Button
-                      size="small"
-                      startIcon={<Eye size={14} strokeWidth={1.5} />}
-                      onClick={() =>
-                        setPreviewDoc({
-                          url: urlVerFacturaPdf(detalle.factura as number),
-                          titulo: `Factura ${detalle.factura_folio || detalle.factura}`,
-                        })
-                      }
-                    >
-                      Ver PDF
-                    </Button>
-                  </Stack>
-                )}
-                {detalle.factura && (
-                  <Stack direction="row" spacing={2}>
-                    <Typography variant="body2">
-                      <strong>Importe:</strong> {numero(detalle.factura_subtotal)}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>IVA:</strong> {numero(detalle.factura_iva)}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Total:</strong> {numero(detalle.factura_total)}
-                    </Typography>
-                  </Stack>
-                )}
-                {detalle.complemento && (
-                  <Typography variant="body2">
-                    <strong>Complemento de pago (REP):</strong> {detalle.complemento_folio || `#${detalle.complemento}`}
-                  </Typography>
-                )}
-                {detalle.nomina && (
-                  <Typography variant="body2">
-                    <strong>Recibo de nómina:</strong> #{detalle.nomina}
-                  </Typography>
-                )}
-
-                {/* Margen superior (10/Sep/2026) - separa lo propio del
-                pago de sus referencias a contrato/proveedor. */}
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    <strong>Contrato:</strong> {detalle.contrato || "—"}
-                  </Typography>
-                  {detalle.contrato && (
-                    <Button
-                      size="small"
-                      startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
-                      onClick={() => setPanelReferencia({ tipo: "contrato", id: detalle.contrato as string })}
-                    >
-                      Ver contrato
-                    </Button>
-                  )}
-                </Stack>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    <strong>Proveedor:</strong> {detalle.contraparte_nombre || "—"}
-                  </Typography>
-                  {detalle.contraparte && (
-                    <Button
-                      size="small"
-                      startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
-                      onClick={() => setPanelReferencia({ tipo: "proveedor", id: detalle.contraparte as string })}
-                    >
-                      Ver proveedor
-                    </Button>
-                  )}
-                </Stack>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Concepto</TableCell>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Detalles</TableCell>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }} align="right">
+                          Acciones
+                        </TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {detalle.factura && (
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: "bold" }}>Factura</TableCell>
+                          <TableCell>Folio: {detalle.factura_folio || `#${detalle.factura}`}</TableCell>
+                          <TableCell align="right">
+                            <Button
+                              size="small"
+                              startIcon={<Eye size={14} strokeWidth={1.5} />}
+                              onClick={() =>
+                                setPreviewDoc({
+                                  url: urlVerFacturaPdf(detalle.factura as number),
+                                  titulo: `Factura ${detalle.factura_folio || detalle.factura}`,
+                                })
+                              }
+                              sx={{ ml: 1 }}
+                            >
+                              Ver PDF
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {detalle.factura && (
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: "bold" }}>Importe Factura</TableCell>
+                          <TableCell>
+                            Importe: {numero(detalle.factura_subtotal)} | IVA: {numero(detalle.factura_iva)} | Total:{" "}
+                            {numero(detalle.factura_total)}
+                          </TableCell>
+                          <TableCell />
+                        </TableRow>
+                      )}
+                      {detalle.complemento && (
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: "bold" }}>Complemento de pago (REP)</TableCell>
+                          <TableCell>REP #: {detalle.complemento_folio || `#${detalle.complemento}`}</TableCell>
+                          <TableCell />
+                        </TableRow>
+                      )}
+                      {detalle.nomina && (
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: "bold" }}>Recibo de nómina</TableCell>
+                          <TableCell>#{detalle.nomina}</TableCell>
+                          <TableCell />
+                        </TableRow>
+                      )}
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: "bold" }}>Contrato</TableCell>
+                        <TableCell>ID: {detalle.contrato || "—"}</TableCell>
+                        <TableCell align="right">
+                          {detalle.contrato && (
+                            <Button
+                              size="small"
+                              startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                              onClick={() => setPanelReferencia({ tipo: "contrato", id: detalle.contrato as string })}
+                              sx={{ ml: 1 }}
+                            >
+                              Ver contrato
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: "bold" }}>Proveedor</TableCell>
+                        <TableCell>Nombre: {detalle.contraparte_nombre || "—"}</TableCell>
+                        <TableCell align="right">
+                          {detalle.contraparte && (
+                            <Button
+                              size="small"
+                              startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                              onClick={() => setPanelReferencia({ tipo: "proveedor", id: detalle.contraparte as string })}
+                              sx={{ ml: 1 }}
+                            >
+                              Ver proveedor
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               </Stack>
             )}
 
@@ -667,12 +756,43 @@ export default function ConciliacionFacturasPage() {
                   </Alert>
                 )}
                 {detalle.factura || detalle.complemento ? (
-                  <Alert severity="success">
-                    Este pago ya está ligado a {detalle.factura ? `la factura ${detalle.factura_folio || `#${detalle.factura}`}` : ""}
-                    {detalle.factura && detalle.complemento ? " y " : ""}
-                    {detalle.complemento ? `al complemento ${detalle.complemento_folio || `#${detalle.complemento}`}` : ""}. Ver la pestaña
-                    "Detalles" para más información.
-                  </Alert>
+                  <Stack spacing={1.5}>
+                    <Alert severity="success">
+                      Este pago ya está ligado a {detalle.factura ? `la factura ${detalle.factura_folio || `#${detalle.factura}`}` : ""}
+                      {detalle.factura && detalle.complemento ? " y " : ""}
+                      {detalle.complemento ? `al complemento ${detalle.complemento_folio || `#${detalle.complemento}`}` : ""}.
+                    </Alert>
+                    {detalle.factura && (
+                      <Button
+                        size="small"
+                        startIcon={<Eye size={14} strokeWidth={1.5} />}
+                        onClick={() =>
+                          setPreviewDoc({
+                            url: urlVerFacturaPdf(detalle.factura as number),
+                            titulo: `Factura ${detalle.factura_folio || detalle.factura}`,
+                          })
+                        }
+                        sx={{ alignSelf: "flex-end", mt: 1 }}
+                      >
+                        Ver factura
+                      </Button>
+                    )}
+                    {detalle.complemento && (
+                      <Button
+                        size="small"
+                        startIcon={<Eye size={14} strokeWidth={1.5} />}
+                        onClick={() =>
+                          setPreviewDoc({
+                            url: urlVerComplementoPagoPdf(detalle.complemento as number),
+                            titulo: `Complemento ${detalle.complemento_folio || detalle.complemento}`,
+                          })
+                        }
+                        sx={{ alignSelf: "flex-end", mt: 1 }}
+                      >
+                        Ver complemento
+                      </Button>
+                    )}
+                  </Stack>
                 ) : (
                   <>
                     <Typography variant="body2" sx={{ mb: 1.5 }}>
@@ -876,6 +996,19 @@ export default function ConciliacionFacturasPage() {
                       color={s.confianza === "alta" ? "success" : "warning"}
                       variant="outlined"
                     />
+                    <IconButton
+                      size="small"
+                      aria-label={s.tipo === "factura" ? "Ver factura" : "Ver complemento"}
+                      title={s.tipo === "factura" ? "Ver factura" : "Ver complemento"}
+                      onClick={() =>
+                        setPreviewDoc({
+                          url: s.tipo === "factura" ? urlVerFacturaPdf(s.id) : urlVerComplementoPagoPdf(s.id),
+                          titulo: `${s.tipo === "factura" ? "Factura" : "Complemento"} ${s.folio || s.timbre_uuid.slice(0, 8)}`,
+                        })
+                      }
+                    >
+                      <Eye size={16} strokeWidth={1.5} />
+                    </IconButton>
                   </Stack>
                 ))}
               </Stack>

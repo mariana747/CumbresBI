@@ -3,11 +3,14 @@ import datetime
 import io
 import json
 import logging
+import re
 import uuid
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
 import requests
+import xlrd
 from openpyxl import load_workbook
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
@@ -1004,6 +1007,12 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         fecha_hasta = self.request.query_params.get("fecha_hasta")
         if fecha_hasta:
             queryset = queryset.filter(fecha_efectiva__lte=fecha_hasta)
+        # ?validacion_estado= (23/Sep/2026, "agrega filtro para el estado")
+        # - mismos valores que la columna Estado de la tabla (PENDIENTE/
+        # APROBADA/RECHAZADA, ver TesoreriaValidacionEstado en el frontend).
+        validacion_estado = self.request.query_params.get("validacion_estado")
+        if validacion_estado:
+            queryset = queryset.filter(validacion_estado=validacion_estado)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -1084,7 +1093,17 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         """Conciliacion de Facturas: base de las 3 pantallas (Ligado a
         CFDI / Sin CFDI / No requiere CFDI). Filtros propios:
         ?desde=/?hasta= (default mes corriente), ?requiere_factura= y
-        ?tipo_comprobante= (I/E del catalogo SAT)."""
+        ?tipo_comprobante= (I/E del catalogo SAT). ?search= ya lo aplica
+        SearchFilter via filter_queryset (id_flujo/concepto).
+
+        23/Sep/2026, "no tiene paginacion" - la clasificacion (con_cfdi/
+        sin_cfdi/no_requiere) sigue calculandose sobre el queryset
+        completo del rango de fechas (no hay forma de paginar ANTES de
+        clasificar cada Flujo), pero la respuesta ya no manda las 3 listas
+        completas: ?tab= (con_cfdi/sin_cfdi/no_requiere, default con_cfdi)
+        + ?page=/?page_size= acotan que bucket trae `results` paginados;
+        los otros 2 solo mandan su `count` (para los badges de las
+        pestañas), igual que el resto de listados del servicio."""
         queryset = _aplicar_filtro_fecha_conciliacion(request, self.filter_queryset(self.get_queryset()))
 
         requiere_factura = request.query_params.get("requiere_factura")
@@ -1098,7 +1117,28 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 | Q(complemento__tipo_de_comprobante=tipo_comprobante)
             )
 
-        return Response(calcular_conciliacion_cfdi(queryset))
+        resultado = calcular_conciliacion_cfdi(queryset)
+
+        tab = request.query_params.get("tab") or "con_cfdi"
+        if tab not in resultado:
+            tab = "con_cfdi"
+        try:
+            page = max(int(request.query_params.get("page", 1)), 1)
+        except ValueError:
+            page = 1
+        try:
+            page_size = min(max(int(request.query_params.get("page_size", 50)), 1), 200)
+        except ValueError:
+            page_size = 50
+        inicio = (page - 1) * page_size
+
+        salida = {}
+        for clave, filas in resultado.items():
+            if clave == tab:
+                salida[clave] = {"results": filas[inicio : inicio + page_size], "count": len(filas)}
+            else:
+                salida[clave] = {"results": [], "count": len(filas)}
+        return Response(salida)
 
     @action(detail=False, methods=["get"])
     def conciliacion_nomina(self, request):
@@ -1388,6 +1428,68 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             valores_nuevos={"nombre_archivo": archivo.name},
         )
         return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_referencia(self, request, pk=None):
+        """Documento de referencia del flujo (23/Sep/2026, "en flujos,
+        referencia no deben ser los flujos asociados, sino subir un pdf
+        llamado referencia") - mismo patron que subir_comprobante arriba,
+        carpeta y campos propios (link_referencia/drive_file_id_referencia)
+        para no mezclarse con el comprobante bancario."""
+        flujo = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Tesoreria/Flujos/{flujo.id_flujo}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "tesoreria.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir referencia de %s", flujo.id_flujo, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        flujo.link_referencia = resultado["web_view_link"]
+        flujo.drive_file_id_referencia = resultado["file_id"]
+        flujo.save(update_fields=["link_referencia", "drive_file_id_referencia"])
+
+        emitir_evento_auditoria(
+            "tesoreria_flujos.subir_referencia",
+            "tesoreria_flujos",
+            flujo.id_flujo,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_referencia(self, request, pk=None):
+        """Preview embebido del PDF de referencia - mismo patron que
+        ver_comprobante abajo."""
+        flujo = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=flujo.drive_file_id_referencia,
+            mime_type=None,
+            nombre_archivo=f"referencia-{flujo.id_flujo}",
+            carpeta=f"Tesoreria/Flujos/{flujo.id_flujo}",
+        )
 
     @action(detail=True, methods=["get"])
     @xframe_options_exempt
@@ -3492,8 +3594,11 @@ _ENCABEZADOS_MOVIMIENTO = {
     "fecha": ("fecha", "date", "fecha operacion", "fecha operación"),
     "descripcion": ("descripcion", "concepto", "description"),
     "referencia": ("referencia", "ref", "reference", "referencia ampliada"),
-    "cargo": ("cargo", "debito", "retiro", "debit"),
-    "abono": ("abono", "credito", "deposito", "credit"),
+    # "importe cargo"/"importe abono" (23/Sep/2026, extracto real de Banco
+    # Actinver - "Consulta de movimientos de cuentas de cheques") - el
+    # nombre completo de columna no coincidia con ningun alias existente.
+    "cargo": ("cargo", "debito", "retiro", "debit", "importe cargo"),
+    "abono": ("abono", "credito", "deposito", "credit", "importe abono"),
     "saldo": ("saldo", "balance"),
 }
 
@@ -3513,8 +3618,11 @@ def _parsear_fecha_movimiento(valor):
         return valor.date()
     if isinstance(valor, datetime.date):
         return valor
-    texto = str(valor).strip()
-    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"):
+    # Comillas simples envolviendo el valor (23/Sep/2026, extracto real de
+    # Banco Actinver: '22092026') - el modulo csv solo desescapa comillas
+    # dobles, las simples quedan como parte literal del texto.
+    texto = str(valor).strip().strip("'\"")
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%d%m%Y"):
         try:
             return datetime.datetime.strptime(texto, formato).date()
         except ValueError:
@@ -3553,20 +3661,83 @@ def _indice_fila_encabezado(filas_crudas: list[list]) -> int:
     return 0
 
 
+_NS_SPREADSHEETML = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
+
+
+def _parsear_xml_spreadsheet(contenido: bytes) -> list[list]:
+    """Excel XML Spreadsheet 2003 (SpreadsheetML) - el formato real que
+    exportan varios bancos mexicanos, casi siempre con extension .xls
+    aunque el contenido sea XML puro (de ahi que se detecte por contenido,
+    no solo por extension - ver _parsear_filas_extracto)."""
+    try:
+        root = ET.fromstring(contenido)
+    except ET.ParseError as exc:
+        raise ValidationError(f"XML invalido: {exc}") from exc
+    worksheet = root.find("ss:Worksheet", _NS_SPREADSHEETML)
+    tabla = worksheet.find("ss:Table", _NS_SPREADSHEETML) if worksheet is not None else None
+    if tabla is None:
+        raise ValidationError("XML no reconocido como hoja de calculo (se esperaba Excel XML Spreadsheet).")
+
+    filas_crudas = []
+    for fila_xml in tabla.findall("ss:Row", _NS_SPREADSHEETML):
+        fila = []
+        indice_actual = 0
+        for celda in fila_xml.findall("ss:Cell", _NS_SPREADSHEETML):
+            # ss:Index (base 1) - una celda puede declarar su posicion real
+            # y saltarse las vacias intermedias, hay que rellenar el hueco.
+            indice_declarado = celda.get("{urn:schemas-microsoft-com:office:spreadsheet}Index")
+            if indice_declarado:
+                while indice_actual < int(indice_declarado) - 1:
+                    fila.append(None)
+                    indice_actual += 1
+            dato = celda.find("ss:Data", _NS_SPREADSHEETML)
+            fila.append(dato.text if dato is not None else None)
+            indice_actual += 1
+        filas_crudas.append(fila)
+    return filas_crudas
+
+
+def _parsear_xls_legacy(contenido: bytes) -> list[list]:
+    """.xls binario real (formato OLE2, no SpreadsheetML) - openpyxl no lo
+    lee, solo entiende .xlsx/.xlsm."""
+    libro = xlrd.open_workbook(file_contents=contenido)
+    hoja = libro.sheet_by_index(0)
+    filas_crudas = []
+    for indice_fila in range(hoja.nrows):
+        fila = []
+        for indice_columna in range(hoja.ncols):
+            celda = hoja.cell(indice_fila, indice_columna)
+            if celda.ctype == xlrd.XL_CELL_DATE:
+                fila.append(xlrd.xldate_as_datetime(celda.value, libro.datemode))
+            else:
+                fila.append(celda.value)
+        filas_crudas.append(fila)
+    return filas_crudas
+
+
 def _parsear_filas_extracto(nombre_archivo: str, contenido: bytes) -> list[dict]:
-    """Lista de dicts {encabezado: valor} por fila (CSV o Excel), usando
-    _indice_fila_encabezado para ubicar el encabezado real. Sin soporte
-    OFX/PDF por ahora."""
+    """Lista de dicts {encabezado: valor} por fila (CSV, Excel .xls/.xlsx o
+    XML/SpreadsheetML), usando _indice_fila_encabezado para ubicar el
+    encabezado real. El formato real se detecta por el CONTENIDO, no solo
+    por la extension - varios bancos exportan XML/SpreadsheetML con
+    extension .xls. Sin soporte OFX/PDF por ahora."""
     nombre = nombre_archivo.lower()
-    if nombre.endswith(".csv"):
+    inicio = contenido.lstrip()[:200]
+    es_xml = inicio.startswith(b"<?xml") or inicio.startswith(b"<?mso-application") or b"<Workbook" in inicio
+
+    if es_xml:
+        filas_crudas = _parsear_xml_spreadsheet(contenido)
+    elif nombre.endswith(".csv"):
         texto = contenido.decode("utf-8-sig", errors="replace")
         filas_crudas = list(csv.reader(io.StringIO(texto)))
     elif nombre.endswith(".xlsx") or nombre.endswith(".xlsm"):
         libro = load_workbook(io.BytesIO(contenido), data_only=True)
         hoja = libro.active
         filas_crudas = [list(fila) for fila in hoja.iter_rows(values_only=True)]
+    elif nombre.endswith(".xls"):
+        filas_crudas = _parsear_xls_legacy(contenido)
     else:
-        raise ValidationError("Formato no soportado. Sube un archivo CSV o Excel (.xlsx).")
+        raise ValidationError("Formato no soportado. Sube un archivo CSV, Excel (.xls/.xlsx) o XML.")
 
     if not filas_crudas:
         return []
@@ -3665,7 +3836,7 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
     search_fields = ["descripcion", "referencia"]
 
     def get_permissions(self):
-        if self.action == "importar":
+        if self.action in ("importar", "detectar_cuenta"):
             return [require_permission("tesoreria.crear")()]
         if self.action in (
             "sugerencias", "conciliar_automatico", "reporte_conciliacion", "reporte_conciliacion_sheets", "crear_flujo",
@@ -3687,6 +3858,34 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         elif conciliado == "false":
             queryset = queryset.filter(flujo__isnull=True)
         return queryset
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def detectar_cuenta(self, request):
+        """Detecta a que cuenta pertenece un extracto ANTES de importarlo
+        (23/Sep/2026, "que la IA identifique a que cuenta pertenece...pero
+        que se tenga esas dos opciones" - deteccion automatica + seguir
+        pudiendo elegir a mano en el Autocomplete de arriba). No es IA de
+        verdad: busca en el texto crudo del archivo numeros de 8-20 digitos
+        (ej. "Cuenta: 65509560869" en el encabezado de metadata de Banco
+        Actinver) y los compara contra `cuenta`/`clabe` del catalogo. Best-
+        effort - si no encuentra nada, regresa cuenta=null y el usuario
+        sigue eligiendo manualmente, no bloquea nada."""
+        archivo = request.FILES.get("file")
+        if not archivo:
+            raise ValidationError("Se requiere 'file'.")
+        contenido = archivo.read()
+        texto = contenido.decode("utf-8", errors="ignore")
+        numeros_encontrados = set(re.findall(r"\d{8,20}", texto))
+        if not numeros_encontrados:
+            return Response({"cuenta": None})
+
+        for cuenta in TesoreriaCuenta.objects.select_related("banco").all():
+            coincide = (cuenta.cuenta and cuenta.cuenta in numeros_encontrados) or (
+                cuenta.clabe and any(n in cuenta.clabe or cuenta.clabe in n for n in numeros_encontrados)
+            )
+            if coincide:
+                return Response({"cuenta": TesoreriaCuentaSerializer(cuenta).data})
+        return Response({"cuenta": None})
 
     @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
     def importar(self, request):
@@ -3764,7 +3963,13 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
             cuenta=cuenta,
             fecha_final=max(fechas),
             tipo=TesoreriaCorteEdc.TIPO_ESTADO_CUENTA,
-            formato=TesoreriaCorteEdc.FORMATO_CSV if archivo.name.lower().endswith(".csv") else TesoreriaCorteEdc.FORMATO_EXCEL,
+            formato=(
+                TesoreriaCorteEdc.FORMATO_CSV
+                if archivo.name.lower().endswith(".csv")
+                else TesoreriaCorteEdc.FORMATO_OTRO
+                if archivo.name.lower().endswith(".xml")
+                else TesoreriaCorteEdc.FORMATO_EXCEL
+            ),
             link=(resultado_drive or {}).get("web_view_link", ""),
             drive_file_id=(resultado_drive or {}).get("file_id"),
             mime_type=(resultado_drive or {}).get("mime_type"),

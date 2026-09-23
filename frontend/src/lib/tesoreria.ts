@@ -616,6 +616,26 @@ export async function listMovimientosBancarios(params?: {
   return response.json();
 }
 
+// Deteccion automatica de cuenta a partir del extracto (23/Sep/2026, "que
+// la IA identifique a que cuenta pertenece") - best-effort, ver
+// TesoreriaMovimientoBancarioViewSet.detectar_cuenta. El Autocomplete de
+// cuenta sigue disponible para elegir a mano si no detecta nada o detecta
+// mal.
+export async function detectarCuentaExtracto(archivo: File): Promise<TesoreriaCuenta | null> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/detectar_cuenta/`,
+    { method: "POST", body: formData }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  const data = await response.json();
+  return data.cuenta;
+}
+
 export async function importarExtractoBancario(params: {
   cuenta: string;
   file: File;
@@ -1149,6 +1169,7 @@ export interface TesoreriaFlujo {
   autorizado_por: string | null;
   fecha_autorizacion: string | null;
   link_referencia: string | null;
+  drive_file_id_referencia: string | null;
   pagado: boolean | null;
   fecha_pago: string | null;
   fecha_pago_original: string | null;
@@ -1186,6 +1207,7 @@ export async function listFlujos(params?: {
   categoriaGasto?: TesoreriaCategoriaGasto;
   fechaDesde?: string;
   fechaHasta?: string;
+  validacionEstado?: TesoreriaValidacionEstado;
   page?: number;
   pageSize?: number;
 }): Promise<TesoreriaPaginado<TesoreriaFlujo>> {
@@ -1199,6 +1221,7 @@ export async function listFlujos(params?: {
   if (params?.categoriaGasto) query.set("categoria_gasto", params.categoriaGasto);
   if (params?.fechaDesde) query.set("fecha_desde", params.fechaDesde);
   if (params?.fechaHasta) query.set("fecha_hasta", params.fechaHasta);
+  if (params?.validacionEstado) query.set("validacion_estado", params.validacionEstado);
   query.set("page", String(params?.page ?? 1));
   query.set("page_size", String(params?.pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
@@ -1239,10 +1262,15 @@ export interface ConciliacionCfdiFila {
   por_reconocer?: string | null;
 }
 
+export interface ConciliacionCfdiBucket {
+  results: ConciliacionCfdiFila[];
+  count: number;
+}
+
 export interface ConciliacionCfdiResponse {
-  con_cfdi: ConciliacionCfdiFila[];
-  sin_cfdi: ConciliacionCfdiFila[];
-  no_requiere: ConciliacionCfdiFila[];
+  con_cfdi: ConciliacionCfdiBucket;
+  sin_cfdi: ConciliacionCfdiBucket;
+  no_requiere: ConciliacionCfdiBucket;
 }
 
 export async function getConciliacionCfdi(params?: {
@@ -1252,6 +1280,13 @@ export async function getConciliacionCfdi(params?: {
   contrato?: string;
   requiereFactura?: boolean;
   tipoComprobante?: "I" | "E";
+  search?: string;
+  // Bucket cuya pagina real se pide - los otros 2 solo regresan su count
+  // (23/Sep/2026, "no tiene paginacion" - ver TesoreriaFlujoViewSet.
+  // conciliacion en el backend).
+  tab?: "con_cfdi" | "sin_cfdi" | "no_requiere";
+  page?: number;
+  pageSize?: number;
 }): Promise<ConciliacionCfdiResponse> {
   const query = new URLSearchParams();
   // Rango de fechas (10/Sep/2026, "no es por periodo debe ser por rango de
@@ -1264,6 +1299,10 @@ export async function getConciliacionCfdi(params?: {
   if (params?.contrato) query.set("contrato", params.contrato);
   if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
   if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
+  if (params?.search) query.set("search", params.search);
+  if (params?.tab) query.set("tab", params.tab);
+  query.set("page", String(params?.page ?? 1));
+  query.set("page_size", String(params?.pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion/?${query.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
@@ -1549,6 +1588,30 @@ export async function subirComprobanteFlujo(
   return response.json();
 }
 
+// Documento de referencia del flujo (23/Sep/2026, "en flujos, referencia
+// no deben ser los flujos asociados, sino subir un pdf llamado
+// referencia") - mismo patron que subirComprobanteFlujo arriba.
+export async function subirReferenciaFlujo(
+  idFlujo: string,
+  archivo: File,
+  actorUserId?: string
+): Promise<TesoreriaFlujo> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  if (actorUserId) {
+    formData.append("actor_user_id", actorUserId);
+  }
+
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/subir_referencia/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 // Liga un flujo ya capturado a una factura/complemento de pago reales (ver
 // tesoreria/views.py::TesoreriaFlujoViewSet.vincular_factura) - manda el
 // timbre_uuid de cada uno, el backend valida que exista antes de guardar el
@@ -1620,6 +1683,7 @@ export interface SugerenciaCfdiLote {
   concepto: string | null;
   total_mxp: string;
   tipo: "factura" | "complemento";
+  id: number;
   timbre_uuid: string;
   folio: string | null;
   confianza: "alta" | "media";
@@ -2411,6 +2475,10 @@ export async function sincronizarDriveFactura(id: number): Promise<TesoreriaFact
 // Comprobante bancario de un Flujo (09/Sep/2026, apartado de Documentos).
 export function urlVerComprobanteFlujo(idFlujo: string): string {
   return `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/ver_comprobante/`;
+}
+
+export function urlVerReferenciaFlujo(idFlujo: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/ver_referencia/`;
 }
 
 // PDF que el proveedor ya subio por su ticket - no depende de que exista
