@@ -57,7 +57,7 @@ class MaterialCatalogoCrudTests(TestCase):
         view = MaterialCatalogoViewSet.as_view({"get": "list"})
         response = view(request)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data["results"]), 1)
 
 
 class RecibirCompraTests(TestCase):
@@ -274,8 +274,8 @@ class MaterialesScopeTests(TestCase):
         request.effective_scope = EffectiveScope(is_global=False, proyecto_ids=("BBB",))
         view = SolicitudMaterialViewSet.as_view({"get": "list"})
         response = view(request)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["proyecto"], "BBB")
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["proyecto"], "BBB")
 
     def test_global_ve_ambos_proyectos(self):
         Presupuesto.objects.create(proyecto="AAA", monto_total=Decimal("1000"))
@@ -409,3 +409,50 @@ class RequisicionCicloTests(TestCase):
         rechazar_view = RequisicionViewSet.as_view({"post": "rechazar"})
         response = rechazar_view(rechazar_request, pk=req_id)
         self.assertEqual(response.status_code, 400)
+
+    def _validar_y_autorizar(self, req_id):
+        validar_request = self.factory.post(f"/api/requisiciones/{req_id}/validar/", {}, format="json")
+        validar_request.effective_scope = self.scope_editar
+        RequisicionViewSet.as_view({"post": "validar"})(validar_request, pk=req_id)
+
+        autorizar_request = self.factory.post(f"/api/requisiciones/{req_id}/autorizar/", {}, format="json")
+        autorizar_request.effective_scope = self.scope_editar
+        return RequisicionViewSet.as_view({"post": "autorizar"})(autorizar_request, pk=req_id)
+
+    def test_autorizar_sin_secreto_no_llama_a_compras(self):
+        creado = self._crear_requisicion()
+        req_id = creado.data["id_requisicion"]
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", ""), patch("materiales.views.requests.post") as mock_post:
+            response = self._validar_y_autorizar(req_id)
+        self.assertEqual(response.status_code, 200)
+        mock_post.assert_not_called()
+        self.assertIsNone(response.data["id_solicitud_compra"])
+
+    def test_autorizar_con_secreto_crea_solicitud_de_compra(self):
+        creado = self._crear_requisicion()
+        req_id = creado.data["id_requisicion"]
+        mock_response = type("R", (), {"status_code": 201, "json": lambda self: {"id_solicitud": "SC000001"}})()
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"), patch(
+            "materiales.views.requests.post", return_value=mock_response
+        ) as mock_post:
+            response = self._validar_y_autorizar(req_id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id_solicitud_compra"], "SC000001")
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["requisicion"], req_id)
+        self.assertEqual(kwargs["json"]["proyecto"], "AAA")
+        self.assertEqual(kwargs["headers"]["X-Internal-Secret"], "dev-secreto")
+
+    def test_autorizar_fallo_de_red_no_revierte_la_autorizacion(self):
+        import requests
+
+        creado = self._crear_requisicion()
+        req_id = creado.data["id_requisicion"]
+        with patch.object(settings, "COMPRAS_INTERNAL_SECRET", "dev-secreto"), patch(
+            "materiales.views.requests.post", side_effect=requests.RequestException("caido")
+        ):
+            response = self._validar_y_autorizar(req_id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["estado"], "AUTORIZADA")
+        self.assertIsNone(response.data["id_solicitud_compra"])

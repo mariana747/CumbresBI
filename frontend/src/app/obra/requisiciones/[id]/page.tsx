@@ -2,17 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Box, Button, Chip, CircularProgress, Stack, Tab, Tabs, Typography } from "@mui/material";
-import { ArrowLeft, Check, FileSpreadsheet, FileText, X as XIcon } from "lucide-react";
+import { Alert, Box, Button, Chip, CircularProgress, Stack, Tab, Tabs, Typography } from "@mui/material";
+import { ArrowLeft, Check, FileSpreadsheet, X as XIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { DOC, DocCampo, DocPanel } from "@/components/RequisicionDoc";
 import { SessionUser, getSession } from "@/lib/auth";
+import { useExportarSheets } from "@/lib/useExportarSheets";
 import { ObraEtapa, ObraLote, listEtapas, listLotes } from "@/lib/obra";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
   Requisicion,
   RequisicionEstado,
   autorizarRequisicion,
+  exportarRequisicionSheets,
   getRequisicion,
   rechazarRequisicion,
   validarRequisicion,
@@ -59,6 +61,10 @@ export default function RequisicionDetallePage() {
   const [error, setError] = useState<string | null>(null);
   const [accionando, setAccionando] = useState(false);
 
+  const { exportando, error: errorSheets, exportar: handleExportarSheets } = useExportarSheets(
+    (carpetaId) => exportarRequisicionSheets(id, carpetaId)
+  );
+
   useEffect(() => {
     getSession().then(setSession);
   }, []);
@@ -96,53 +102,11 @@ export default function RequisicionDetallePage() {
     }
   }
 
-  // Exportar en vez de solo ver. No hay un motor de .xlsx real con el
-  // formato de Ruben todavia (pendiente, ver memoria del proyecto) - mientras tanto:
-  // Excel = CSV descargable (Excel lo abre nativamente, sin depender de
-  // ninguna libreria nueva) y PDF = vista de impresion limpia del
-  // navegador (sin el chrome de la app), el usuario la guarda como PDF
-  // desde el dialogo de impresion.
-  function celdaCsv(valor: string | number) {
-    const texto = String(valor ?? "");
-    return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
-  }
-
-  function handleExportarExcel() {
-    if (!requisicion) return;
-    const filas = [
-      ["Folio", requisicion.folio],
-      ["Proyecto", proyecto?.alias_proyecto || proyecto?.denominacion || requisicion.proyecto],
-      ["Empresa", requisicion.empresa || ""],
-      ["Responsable", requisicion.responsable || ""],
-      ["Etapa constructiva", requisicion.etapa_constructiva],
-      ["Obras", obrasIncluidas.map(nombreObra).join("; ")],
-      ["Presupuesto asignado", requisicion.presupuesto_asignado],
-      [],
-      ["Material", "Cantidad", "Precio unitario", "Importe", "Cotización"],
-      ...requisicion.lineas.map((l) => [
-        l.material_nombre,
-        l.cantidad_total,
-        l.precio_unitario,
-        l.importe,
-        l.proveedor_cotizacion || "",
-      ]),
-      [],
-      ["Total", "", "", "", total.toFixed(2), ""],
-      [],
-      ["Solicitó", requisicion.solicito_por || ""],
-      ["Validó", requisicion.valido_por || ""],
-      ["Autorizó compra", requisicion.autorizo_compra_por || ""],
-    ];
-    const csv = "﻿" + filas.map((fila) => fila.map(celdaCsv).join(",")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${requisicion.folio}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
+  // PDF = vista de impresion limpia del navegador (sin el chrome de la
+  // app), el usuario la guarda como PDF desde el dialogo de impresion.
+  // El .xlsx descargable se reemplazo por exportar a Google Sheets
+  // (22/Sep/2026, "ya no se descargara un xlsx sino se mandara al
+  // drive", ver handleExportarSheets/useExportarSheets arriba).
   function handleExportarPdf() {
     if (!requisicion) return;
     const ventana = window.open("", "_blank");
@@ -473,21 +437,36 @@ export default function RequisicionDetallePage() {
                   )}
                 </>
               )}
+              {requisicion.id_solicitud_compra && (
+                <Button
+                  size="small"
+                  onClick={() => router.push(`/compras/cotizaciones?solicitud=${requisicion.id_solicitud_compra}`)}
+                  sx={{ textTransform: "none" }}
+                >
+                  Ver Solicitud de Compra
+                </Button>
+              )}
               <Button size="small" disabled sx={{ color: DOC.textFaint, textTransform: "none" }} title="Pendiente de construir">
                 Vista previa
               </Button>
               <Button
                 size="small"
                 variant="contained"
-                disabled
-                title="Pendiente de construir"
-                sx={{ textTransform: "none", bgcolor: DOC.accent, opacity: 0.5 }}
+                startIcon={<FileSpreadsheet size={14} strokeWidth={2} />}
+                onClick={handleExportarSheets}
+                disabled={exportando}
+                sx={{ textTransform: "none", bgcolor: DOC.accent, "&:hover": { bgcolor: "#c9762f" } }}
               >
-                Generar .xlsx
+                {exportando ? "Exportando…" : "Exportar a Google Sheets"}
               </Button>
             </Stack>
           </Stack>
         </Stack>
+        {errorSheets && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            {errorSheets}
+          </Alert>
+        )}
       </Box>
     </AppShell>
   );

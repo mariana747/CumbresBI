@@ -402,6 +402,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "autorizado_por",
             "fecha_autorizacion",
             "link_referencia",
+            "drive_file_id_referencia",
             "pagado",
             "fecha_pago",
             "fecha_pago_original",
@@ -438,6 +439,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "nomina",
             "validacion_estado",
             "drive_file_id_comprobante",
+            "drive_file_id_referencia",
             "created_at",
             "updated_at",
         ]

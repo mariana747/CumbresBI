@@ -72,6 +72,7 @@ import {
   tieneAlgunPermiso,
 } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
+import { MaterialesNotificacion, listNotificacionesMateriales } from "@/lib/materiales";
 import { PldSolicitudEliminacionDoc, listSolicitudesEliminacion } from "@/lib/pld";
 import { Footer } from "@/components/Footer";
 import { BRAND } from "@/theme/theme";
@@ -382,6 +383,12 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         // la compra, distinto de
         // "Materiales" (esa es solo el catalogo + salida de almacen).
         { label: "Requisiciones", href: "/obra/requisiciones", icon: ClipboardList },
+        // Recepciones (21/Sep/2026, "recibir cemento o una silla van
+        // dirigidos a diferentes lugares") - misma pantalla que en
+        // Compras (/compras/recepciones), con entrada tambien aqui porque
+        // quien recibe material de obra no necesariamente entra por
+        // Compras.
+        { label: "Recepciones", href: "/compras/recepciones", icon: Truck },
       ],
     });
   }
@@ -392,9 +399,11 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // cotizacion -> orden -> recepcion), aunque comparte el catalogo de
   // proveedores (tesoreria_contrapartes) via ContraparteSelector.
   //
-  // OCULTO del nav (08/Sep/2026, misma decision de arriba) - quitar el
-  // "false &&" para reactivar cuando Tesoreria este cerrada.
-  if (false && tieneAlgunPermiso(session, ["compras"])) {
+  // Reactivado (21/Sep/2026, "como van a usar los demas [Compras] si esta
+  // oculto") - la conexion real Requisicion->SolicitudCompra ya existe
+  // (autorizar crea la Solicitud sola), sin el menu nadie del equipo de
+  // Compras podia llegar a estas pantallas salvo escribiendo la URL a mano.
+  if (tieneAlgunPermiso(session, ["compras"])) {
     items.push({
       label: "Compras",
       href: "/compras/solicitudes",
@@ -665,6 +674,7 @@ function Header({
   sinRolUsers,
   onVerTodos,
   solicitudesEliminacion,
+  notificacionesMateriales,
   session,
 }: {
   onMenuClick: () => void;
@@ -676,11 +686,14 @@ function Header({
   // de documentos PLD pendientes de aprobar/rechazar, solo se llenan si la
   // sesion tiene pld-documentos.editar (Admin), ver AppShell abajo.
   solicitudesEliminacion: PldSolicitudEliminacionDoc[];
+  // 22/Sep/2026, terreno preparado para "recordatorios de pedido de
+  // material" - hoy siempre vacio (ver AppShell).
+  notificacionesMateriales: MaterialesNotificacion[];
   session: SessionUser | null;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [avatarAnchorEl, setAvatarAnchorEl] = useState<HTMLElement | null>(null);
-  const count = sinRolUsers.length + solicitudesEliminacion.length;
+  const count = sinRolUsers.length + solicitudesEliminacion.length + notificacionesMateriales.length;
 
   return (
     <AppBar
@@ -774,6 +787,31 @@ function Header({
                     )),
                   ].filter(Boolean)
                 : []),
+              // Campana de materiales-service (22/Sep/2026, terreno
+              // preparado para "recordatorios de pedido de material" -
+              // ver docstring de MaterialesNotificacion en el backend).
+              ...(notificacionesMateriales.length > 0
+                ? [
+                    (sinRolUsers.length > 0 || solicitudesEliminacion.length > 0) && (
+                      <Divider key="divider-materiales" />
+                    ),
+                    <MenuItem key="titulo-materiales" disabled sx={{ opacity: "1 !important" }}>
+                      <Typography variant="caption" fontWeight={600} color="text.primary">
+                        {notificacionesMateriales.length} recordatorio(s) de materiales
+                      </Typography>
+                    </MenuItem>,
+                    ...notificacionesMateriales.slice(0, 5).map((notificacion) => (
+                      <MenuItem
+                        key={notificacion.id_notificacion}
+                        component={notificacion.link_url ? "a" : "li"}
+                        href={notificacion.link_url || undefined}
+                        onClick={() => setAnchorEl(null)}
+                      >
+                        {notificacion.mensaje}
+                      </MenuItem>
+                    )),
+                  ].filter(Boolean)
+                : []),
             ]
           )}
         </Menu>
@@ -840,6 +878,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [sinRolUsers, setSinRolUsers] = useState<IamUser[]>([]);
   const [solicitudesEliminacion, setSolicitudesEliminacion] = useState<PldSolicitudEliminacionDoc[]>([]);
+  const [notificacionesMateriales, setNotificacionesMateriales] = useState<MaterialesNotificacion[]>([]);
 
   useEffect(() => {
     getSession().then((session) => {
@@ -913,6 +952,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [checked, session]);
 
+  // Campana de materiales-service (22/Sep/2026, "recordatorios de pedido
+  // de material" - terreno preparado, ver docstring de
+  // MaterialesNotificacion en el backend). Sin filtro de permiso a
+  // proposito - cualquier sesion puede tener recordatorios propios
+  // (destinatario = su identity_user_id), a diferencia de las solicitudes
+  // PLD arriba que son solo para Admin. Hoy siempre viene vacio (la tarea
+  // programada todavia es un no-op).
+  useEffect(() => {
+    if (!checked) return;
+    function refreshNotificacionesMateriales() {
+      listNotificacionesMateriales()
+        .then(setNotificacionesMateriales)
+        .catch(() => undefined);
+    }
+    refreshNotificacionesMateriales();
+    const interval = setInterval(refreshNotificacionesMateriales, 60_000);
+    return () => clearInterval(interval);
+  }, [checked]);
+
   if (!checked) {
     return null;
   }
@@ -937,6 +995,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         sinRolUsers={sinRolUsers}
         onVerTodos={() => router.push("/admin/usuarios?sinRol=true")}
         solicitudesEliminacion={solicitudesEliminacion}
+        notificacionesMateriales={notificacionesMateriales}
         session={session}
       />
 

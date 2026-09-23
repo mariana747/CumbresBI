@@ -1,3 +1,4 @@
+import logging
 import uuid
 from decimal import Decimal, InvalidOperation
 
@@ -13,13 +14,17 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.views import APIView
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
+from . import google_sheets_utils
+from .pagination import ListadoGrandePagination
 from .models import (
     ConceptoPresupuesto,
     EvidenciaRecepcion,
     ManoObraCatalogo,
     MaterialCatalogo,
+    MaterialesNotificacion,
     Presupuesto,
     PresupuestoFirma,
     Requisicion,
@@ -32,11 +37,50 @@ from .serializers import (
     EvidenciaRecepcionSerializer,
     ManoObraCatalogoSerializer,
     MaterialCatalogoSerializer,
+    MaterialesNotificacionSerializer,
     PresupuestoFirmaSerializer,
     PresupuestoSerializer,
     RequisicionSerializer,
     SolicitudMaterialSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _crear_solicitud_compra(requisicion, actor):
+    """POST interno a compras-tesoreria-service al autorizar una
+    Requisicion (21/Sep/2026, ver docstring de Requisicion). Fail-open:
+    si compras-tesoreria-service no responde, la Requisicion igual queda
+    AUTORIZADA - no se revierte nada, mismo criterio que
+    _sincronizar_precio_cotizado en compras-tesoreria-service/views.py.
+    Idempotente del lado de Compras (crear_desde_requisicion regresa la
+    ya existente si vuelve a llamarse)."""
+    if not settings.COMPRAS_INTERNAL_SECRET:
+        return None
+    try:
+        upstream = requests.post(
+            f"{settings.COMPRAS_TESORERIA_SERVICE_URL}/api/solicitudes/crear_desde_requisicion/",
+            json={
+                "requisicion": requisicion.id_requisicion,
+                "proyecto": requisicion.proyecto,
+                "descripcion": f"Requisición {requisicion.folio} — {requisicion.etapa_constructiva}",
+                "solicitado_por": actor,
+            },
+            headers={"X-Internal-Secret": settings.COMPRAS_INTERNAL_SECRET},
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.warning("compras-tesoreria-service no respondio al autorizar %s", requisicion.id_requisicion, exc_info=True)
+        return None
+    if upstream.status_code not in (200, 201):
+        logger.warning(
+            "compras-tesoreria-service rechazo crear_desde_requisicion para %s: %s %s",
+            requisicion.id_requisicion,
+            upstream.status_code,
+            upstream.text[:300],
+        )
+        return None
+    return upstream.json().get("id_solicitud")
 
 
 class _PermisosMaterialesMixin:
@@ -76,10 +120,21 @@ class MaterialCatalogoViewSet(_PermisosMaterialesMixin, ModelViewSet):
     resto de este primer corte de materiales-service, ver models.py: sin
     columna de alcance declarada todavia)."""
 
-    queryset = MaterialCatalogo.objects.all().order_by("material")
     serializer_class = MaterialCatalogoSerializer
     filter_backends = [SearchFilter]
     search_fields = ["material", "unidad_medida"]
+    pagination_class = ListadoGrandePagination
+
+    def get_queryset(self):
+        # `solo_disponibles` (22/Sep/2026, "Catálogo de Materiales
+        # Disponibles" en el frontend) - antes era un .filter() en el
+        # cliente sobre el arreglo completo; con paginacion real esa pagina
+        # ya no trae TODO el catalogo, asi que el filtro tiene que ser del
+        # lado del servidor.
+        queryset = MaterialCatalogo.objects.all().order_by("material")
+        if self.request.query_params.get("solo_disponibles") == "true":
+            queryset = queryset.filter(cantidad_disponible__gt=0)
+        return queryset
 
     def get_permissions(self):
         if self.action in ("recibir_compra", "actualizar_precio_cotizado"):
@@ -332,14 +387,22 @@ class SolicitudMaterialViewSet(_PermisosMaterialesMixin, ModelViewSet):
     serializer_class = SolicitudMaterialSerializer
     filter_backends = [SearchFilter]
     search_fields = ["proyecto", "material__material"]
+    pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
-        return (
+        queryset = (
             SolicitudMaterial.objects.for_scope(self.request.effective_scope)
             .select_related("material")
             .prefetch_related("evidencias")
             .order_by("-fecha_solicitud")
         )
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
+        proyecto = self.request.query_params.get("proyecto")
+        if proyecto:
+            queryset = queryset.filter(proyecto=proyecto)
+        return queryset
 
     def _cambiar_estado(self, request, nuevo_estado, extra_fields=None):
         solicitud = self.get_object()
@@ -521,7 +584,12 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         actor = getattr(request.effective_scope, "identity_user_id", None) or "sistema"
         requisicion.estado = Requisicion.ESTADO_AUTORIZADA
         requisicion.autorizo_compra_por = actor
-        requisicion.save(update_fields=["estado", "autorizo_compra_por", "updated_at"])
+        id_solicitud_compra = _crear_solicitud_compra(requisicion, actor)
+        update_fields = ["estado", "autorizo_compra_por", "updated_at"]
+        if id_solicitud_compra:
+            requisicion.id_solicitud_compra = id_solicitud_compra
+            update_fields.append("id_solicitud_compra")
+        requisicion.save(update_fields=update_fields)
         return Response(RequisicionSerializer(requisicion).data)
 
     @action(detail=True, methods=["post"])
@@ -532,6 +600,39 @@ class RequisicionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         requisicion.estado = Requisicion.ESTADO_RECHAZADA
         requisicion.save(update_fields=["estado", "updated_at"])
         return Response(RequisicionSerializer(requisicion).data)
+
+    @action(detail=True, methods=["post"])
+    def exportar_sheets(self, request, pk=None):
+        """Exporta la Requisicion a Google Sheets, al Drive personal del
+        usuario (22/Sep/2026, "ya no se descargara un xlsx sino se
+        mandara al drive", mismo patron que TesoreriaFlujoViewSet.
+        exportar_sheets). Si el usuario no ha conectado su cuenta de
+        Google, regresa 409 con la url de autorizacion para que el
+        frontend redirija."""
+        requisicion = self.get_object()
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
+
+        encabezados = ["Material", "Cantidad", "Precio unitario", "Importe", "Cotización"]
+        filas = [
+            [linea.material_nombre, str(linea.cantidad_total), str(linea.precio_unitario), str(linea.importe), linea.proveedor_cotizacion or ""]
+            for linea in requisicion.lineas.all()
+        ]
+        titulo = f"Requisición {requisicion.folio}"
+        carpeta_id = request.data.get("carpeta_id") or None
+        try:
+            url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo crear la hoja de cálculo en Google Sheets."}, status=502)
+        return Response({"conectado": True, "url": url})
 
     def get_permissions(self):
         if self.action in ("validar", "autorizar", "rechazar"):
@@ -558,3 +659,98 @@ class EvidenciaRecepcionViewSet(_PermisosMaterialesMixin, ModelViewSet):
         if solicitud_id:
             queryset = queryset.filter(solicitud_id=solicitud_id)
         return queryset
+
+    @action(detail=True, methods=["post"])
+    def subir_evidencia(self, request, pk=None):
+        """Evidencia fotografica real (22/Sep/2026, mismo patron que
+        RecepcionViewSet.subir_evidencia en compras-tesoreria-service):
+        sube a Drive via drive-service y guarda el link. Quien sube es el
+        propio usuario autenticado (forward_auth_headers reenvia su
+        sesion), no una llamada servicio-a-servicio."""
+        evidencia = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Materiales/Evidencias/{evidencia.id_evidencia}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "materiales.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir evidencia de %s", evidencia.id_evidencia, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        evidencia.link_drive = resultado["web_view_link"]
+        evidencia.updated_by = getattr(request.effective_scope, "identity_user_id", None) or "sistema"
+        evidencia.save(update_fields=["link_drive", "updated_by", "updated_at"])
+        return Response(self.get_serializer(evidencia).data)
+
+
+class MaterialesNotificacionViewSet(ReadOnlyModelViewSet):
+    """Campana de materiales-service (22/Sep/2026, ver docstring del
+    modelo). Solo lectura de las propias - no hay alta manual, las crea la
+    tarea programada (ver TareaRecordatoriosView abajo)."""
+
+    serializer_class = MaterialesNotificacionSerializer
+
+    def get_queryset(self):
+        destinatario = getattr(self.request.effective_scope, "identity_user_id", None)
+        queryset = MaterialesNotificacion.objects.filter(destinatario=destinatario)
+        if self.request.query_params.get("solo_no_leidas") == "true":
+            queryset = queryset.filter(leida=False)
+        return queryset
+
+    @action(detail=True, methods=["post"])
+    def marcar_leida(self, request, pk=None):
+        notificacion = self.get_object()
+        notificacion.leida = True
+        notificacion.save(update_fields=["leida"])
+        return Response(self.get_serializer(notificacion).data)
+
+
+class _PermiteSecretoTareasProgramadas(BasePermission):
+    """Gate del endpoint que llama Cloud Scheduler (22/Sep/2026) - mismo
+    criterio que _PermiteSecretoInternoOMaterialesEditar, pero sin permiso
+    normal alternativo: nadie mas que la tarea programada debe disparar
+    esto, no hay un usuario real detras via JWT."""
+
+    message = "Requiere el secreto de tareas programadas."
+
+    def has_permission(self, request, view):
+        secreto_configurado = settings.TAREAS_PROGRAMADAS_SECRET
+        secreto_recibido = request.META.get("HTTP_X_INTERNAL_SECRET")
+        return bool(secreto_configurado) and secreto_recibido == secreto_configurado
+
+
+class TareaRecordatoriosView(APIView):
+    """POST /api/tareas/recordatorios-pedido/ - disparado a diario por
+    Cloud Scheduler (22/Sep/2026, "recordatorios de pedido de material",
+    ver docstring de MaterialesNotificacion). HOY es un no-op real: no
+    existe todavia ningun campo de cantidad/fecha de inicio/dias de
+    anticipacion por material (esos datos los va a dar el arquitecto,
+    extraidos por IA de su documento de estandares - sin construir
+    todavia). Cuando ese dato exista, aqui va la consulta real que
+    compare "fecha de inicio - anticipacion" contra hoy y cree
+    MaterialesNotificacion + mande el correo (mismo patron de
+    mail_utils.py que ya usa Tesoreria) - el modelo/API/campana ya estan
+    listos, no hace falta tocar nada mas del lado de infraestructura."""
+
+    permission_classes = [_PermiteSecretoTareasProgramadas]
+
+    def post(self, request):
+        return Response({"revisados": 0, "creados": 0, "detail": "Sin estándares de material capturados todavía."})

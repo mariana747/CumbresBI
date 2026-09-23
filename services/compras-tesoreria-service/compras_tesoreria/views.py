@@ -1,7 +1,9 @@
 import logging
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 import requests
+from cumbresbi_scope import forward_auth_headers
 from cumbresbi_scope.permissions import require_permission
 from django.conf import settings
 from django.db import transaction
@@ -9,6 +11,7 @@ from django.db.models import F
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
@@ -47,6 +50,25 @@ class _PermisosComprasMixin:
         return super().get_permissions()
 
 
+class _PermiteSecretoInternoOComprasCrear(BasePermission):
+    """Mismo patron que materiales-service/materiales/views.py::
+    _PermiteSecretoInternoOMaterialesEditar - el secreto interno servicio-a-
+    servicio (X-Internal-Secret, ver settings.COMPRAS_INTERNAL_SECRET) es
+    una via ADICIONAL para que materiales-service pueda crear la
+    SolicitudCompra al autorizar una Requisicion, sin que quien autoriza
+    necesite el permiso compras.crear; nunca reemplaza el permiso normal
+    para cualquier otro llamador."""
+
+    message = "No tienes el permiso 'compras.crear' para hacer esto."
+
+    def has_permission(self, request, view):
+        secreto_configurado = settings.COMPRAS_INTERNAL_SECRET
+        secreto_recibido = request.META.get("HTTP_X_INTERNAL_SECRET")
+        if secreto_configurado and secreto_recibido == secreto_configurado:
+            return True
+        return require_permission("compras.crear")().has_permission(request, view)
+
+
 class SolicitudCompraViewSet(_PermisosComprasMixin, ModelViewSet):
     """Cabecera del proceso de compra - puede o no venir de una Requisicion
     ya autorizada de materiales-service (`requisicion`, referencia laxa,
@@ -65,6 +87,9 @@ class SolicitudCompraViewSet(_PermisosComprasMixin, ModelViewSet):
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset
 
     def perform_create(self, serializer):
@@ -73,6 +98,48 @@ class SolicitudCompraViewSet(_PermisosComprasMixin, ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save(updated_by=_actor(self.request))
+
+    def get_permissions(self):
+        if self.action == "crear_desde_requisicion":
+            return [_PermiteSecretoInternoOComprasCrear()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=["post"])
+    def crear_desde_requisicion(self, request):
+        """Crea (o regresa la ya existente) SolicitudCompra al autorizar una
+        Requisicion en materiales-service (21/Sep/2026, "conectar
+        `autorizar` con la creacion de Cotizacion en compras-tesoreria-
+        service", ver Requisicion.__doc__ en ese servicio). Idempotente por
+        `requisicion` - un reintento de red no crea una segunda Solicitud
+        para la misma Requisicion.
+
+        Body: {"requisicion": str (id_requisicion), "proyecto": str,
+        "descripcion": str, "solicitado_por": str (opcional, actor que
+        autorizo del lado de Materiales)}. No usa self.get_queryset()/
+        effective_scope (esta llamada no trae sesion de un usuario real,
+        ver _PermiteSecretoInternoOComprasCrear)."""
+        requisicion_id = (request.data.get("requisicion") or "").strip()
+        proyecto = (request.data.get("proyecto") or "").strip()
+        descripcion = (request.data.get("descripcion") or "").strip()
+        if not requisicion_id or not proyecto or not descripcion:
+            return Response(
+                {"detail": "Se requieren 'requisicion', 'proyecto' y 'descripcion'."}, status=400
+            )
+
+        existente = SolicitudCompra.objects.filter(requisicion=requisicion_id).first()
+        if existente:
+            return Response(SolicitudCompraSerializer(existente).data, status=200)
+
+        actor = (request.data.get("solicitado_por") or "").strip() or "sistema"
+        solicitud = SolicitudCompra.objects.create(
+            proyecto=proyecto,
+            requisicion=requisicion_id,
+            descripcion=descripcion,
+            solicitado_por=actor,
+            created_by="sistema",
+            updated_by="sistema",
+        )
+        return Response(SolicitudCompraSerializer(solicitud).data, status=201)
 
 
 class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
@@ -110,6 +177,9 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
         solicitud = self.request.query_params.get("solicitud")
         if solicitud:
             queryset = queryset.filter(solicitud_id=solicitud)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset
 
     def perform_create(self, serializer):
@@ -123,11 +193,6 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save(updated_by=_actor(self.request))
-
-    def get_permissions(self):
-        if self.action == "confirmar_extraccion":
-            return [require_permission("compras.aprobar")()]
-        return super().get_permissions()
 
     @action(detail=True, methods=["post"])
     def confirmar_extraccion(self, request, pk=None):
@@ -181,6 +246,35 @@ class CotizacionViewSet(_PermisosComprasMixin, ModelViewSet):
         cotizacion.refresh_from_db()
         return Response(self.get_serializer(cotizacion).data)
 
+    def get_permissions(self):
+        if self.action in ("confirmar_extraccion", "reagendar"):
+            return [require_permission("compras.aprobar")()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["post"])
+    def reagendar(self, request, pk=None):
+        """Cuando una cotizacion ya vencio (22/Sep/2026, "no se bloquea,
+        se debe reagendar, se debe volver a pedir") - crea una Cotizacion
+        NUEVA para la misma SolicitudCompra, con el mismo proveedor pero
+        SIN lineas/precios/vigencia (el analista sube un documento de
+        cotizacion nuevo, no se copia el precio viejo que ya vencio). La
+        vencida queda DESCARTADA, como registro historico."""
+        vencida = self.get_object()
+
+        with transaction.atomic():
+            vencida.estado = Cotizacion.ESTADO_DESCARTADA
+            vencida.updated_by = _actor(request)
+            vencida.save(update_fields=["estado", "updated_by", "updated_at"])
+            nueva = Cotizacion.objects.create(
+                solicitud=vencida.solicitud,
+                proveedor=vencida.proveedor,
+                proveedor_nombre=vencida.proveedor_nombre,
+                proveedor_rfc=vencida.proveedor_rfc,
+                created_by=_actor(request),
+                updated_by=_actor(request),
+            )
+        return Response(self.get_serializer(nueva).data, status=201)
+
 
 class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
     """Orden de compra - de solo lectura (list/retrieve) via el CRUD
@@ -202,10 +296,13 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             queryset = queryset.filter(proyecto=proyecto)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset
 
     def get_permissions(self):
-        if self.action == "generar_desde_cotizacion":
+        if self.action in ("generar_desde_cotizacion", "cerrar_con_faltante"):
             return [require_permission("compras.aprobar")()]
         return super().get_permissions()
 
@@ -231,6 +328,18 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
         if cotizacion.estado not in (Cotizacion.ESTADO_PENDIENTE_REVISION, Cotizacion.ESTADO_CONFIRMADA):
             return Response({"detail": "Esa cotización ya fue usada o descartada."}, status=400)
 
+        # Vigencia (22/Sep/2026, "las cotizaciones duran una semana") - solo
+        # se puede validar si la cotizacion trae fecha_cotizacion; sin ella
+        # no hay desde cuando contar y se deja pasar (mismo criterio laxo
+        # que el resto de campos opcionales extraidos por IA).
+        if cotizacion.fecha_cotizacion and cotizacion.vigencia_dias:
+            vence = cotizacion.fecha_cotizacion + timedelta(days=cotizacion.vigencia_dias)
+            if timezone.now().date() > vence:
+                return Response(
+                    {"detail": f"Esta cotización venció el {vence.isoformat()}, no se puede generar la Orden."},
+                    status=400,
+                )
+
         solicitud = cotizacion.solicitud
         actor = _actor(request)
 
@@ -250,6 +359,8 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
                 cotizacion=cotizacion,
                 proveedor=cotizacion.proveedor,
                 proveedor_nombre=cotizacion.proveedor_nombre,
+                subtotal=cotizacion.subtotal,
+                iva=cotizacion.iva,
                 monto_total=cotizacion.total or 0,
                 autorizado_por=actor,
                 created_by=actor,
@@ -269,6 +380,25 @@ class OrdenCompraViewSet(_PermisosComprasMixin, ReadOnlyModelViewSet):
             solicitud.save(update_fields=["estado", "updated_by", "updated_at"])
 
         return Response(self.get_serializer(orden).data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def cerrar_con_faltante(self, request, pk=None):
+        """Cierra una orden con RECIBIDA_PARCIAL cuando el faltante es
+        definitivo (21/Sep/2026, "y que pasa si llega menos de lo
+        esperado") - antes no habia forma de sacarla de "Recibida parcial"
+        si el proveedor ya no iba a mandar el resto. Solo aplica a ordenes
+        con al menos una recepcion ya registrada (RECIBIDA_PARCIAL); una
+        orden sin nada recibido se cancela (estado CANCELADA), no se cierra
+        con faltante."""
+        orden = self.get_object()
+        if orden.estado != OrdenCompra.ESTADO_RECIBIDA_PARCIAL:
+            return Response(
+                {"detail": "Solo se puede cerrar con faltante una orden en estado 'Recibida parcial'."}, status=400
+            )
+        orden.estado = OrdenCompra.ESTADO_CERRADA_CON_FALTANTE
+        orden.updated_by = _actor(request)
+        orden.save(update_fields=["estado", "updated_by", "updated_at"])
+        return Response(self.get_serializer(orden).data)
 
 
 def _llamar_materiales_service(endpoint, payload, contexto):
@@ -408,3 +538,44 @@ class RecepcionViewSet(_PermisosComprasMixin, ModelViewSet):
 
         recepcion.refresh_from_db()
         return Response(self.get_serializer(recepcion).data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def subir_evidencia(self, request, pk=None):
+        """Evidencia fotografica real de una Recepcion (21/Sep/2026, "falta
+        el componente de tomar fotos") - mismo patron que
+        TesoreriaFlujoViewSet.subir_comprobante en tesoreria-service: sube a
+        Drive via drive-service y guarda el link. Quien sube es el propio
+        usuario autenticado (forward_auth_headers reenvia su sesion), no
+        una llamada servicio-a-servicio - por eso no usa X-Internal-Secret."""
+        recepcion = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Compras/Recepciones/{recepcion.id_recepcion}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "compras.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir evidencia de %s", recepcion.id_recepcion, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        recepcion.link_drive = resultado["web_view_link"]
+        recepcion.updated_by = _actor(request)
+        recepcion.save(update_fields=["link_drive", "updated_by", "updated_at"])
+        return Response(self.get_serializer(recepcion).data)

@@ -319,10 +319,13 @@ class Requisicion(models.Model):
     vigente al generar (NUNCA del presupuesto), ver
     RequisicionViewSet.perform_create.
 
+    `autorizar` crea sola la SolicitudCompra en compras-tesoreria-service
+    (21/Sep/2026, ver RequisicionViewSet.autorizar -> _crear_solicitud_
+    compra) - `id_solicitud_compra` guarda esa referencia.
+
     Pendiente: generar el archivo .xlsx real con el formato de Ruben (hoy
     solo se expone la data via API), conectar `autorizo_compra_por`/
-    `valido_por` a firma electronica real, y conectar `autorizar` con la
-    creacion de Cotizacion en compras-tesoreria-service (fase aparte)."""
+    `valido_por` a firma electronica real."""
 
     ESTADO_PENDIENTE = "PENDIENTE"
     ESTADO_AUTORIZADA = "AUTORIZADA"
@@ -344,6 +347,13 @@ class Requisicion(models.Model):
     solicito_por = models.CharField(max_length=8, blank=True, null=True)
     valido_por = models.CharField(max_length=8, blank=True, null=True)
     autorizo_compra_por = models.CharField(max_length=8, blank=True, null=True)
+    # id_solicitud_compra (21/Sep/2026) - referencia laxa a
+    # compras_solicitudes.id_solicitud (compras-tesoreria-service), mismo
+    # criterio sin FK real entre servicios que el resto del proyecto (ver
+    # RequisicionObra.obra). Se llena solo al autorizar (ver
+    # RequisicionViewSet.autorizar -> _crear_solicitud_compra), no editable
+    # a mano.
+    id_solicitud_compra = models.CharField(max_length=8, blank=True, null=True, editable=False)
     comentarios = models.CharField(max_length=500, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=8)
@@ -412,3 +422,36 @@ class RequisicionLinea(models.Model):
 
     def __str__(self):
         return f"{self.requisicion_id}-{self.material_nombre}"
+
+
+class MaterialesNotificacion(models.Model):
+    """Campana generica de materiales-service (22/Sep/2026, "recordatorios
+    de pedido de material" - ver reporte-materiales-recordatorios-pedido en
+    memoria del proyecto). Terreno preparado para cuando existan los
+    estandares del arquitecto (cantidad/fecha de inicio/dias de
+    anticipacion por material, hoy sin capturar en ningun lado) - la tarea
+    programada (ver TareasProgramadasViewSet.recordatorios_pedido en
+    views.py) hoy no genera ninguna fila porque no hay ese dato para
+    calcular la fecha de aviso; el modelo/API/campana ya quedan listos, solo
+    falta la consulta real el dia que llegue el dato.
+
+    Generico a proposito (no solo "recordatorio de pedido") - cualquier
+    aviso futuro de materiales-service puede usar esta misma tabla, mismo
+    criterio que se documento para el scheduler en
+    patron-aviso-automatico-antes-de-vencer (Cloud Scheduler + campana +
+    correo, reusable entre modulos)."""
+
+    id_notificacion = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    destinatario = models.CharField(max_length=8)
+    tipo = models.CharField(max_length=50)
+    mensaje = models.CharField(max_length=500)
+    link_url = models.CharField(max_length=500, blank=True, null=True)
+    leida = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "materiales_notificaciones"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.destinatario}-{self.tipo}"
