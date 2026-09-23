@@ -1332,26 +1332,28 @@ function TesoreriaFlujosPageContent() {
                 disabled
                 fullWidth
               />
-              <FormControl size="small" fullWidth required disabled={!!editing}>
-                <InputLabel id="contrato-label">Contrato</InputLabel>
-                <Select
-                  labelId="contrato-label"
-                  label="Contrato"
-                  value={form.contrato}
-                  onChange={(e) => setForm({ ...form, contrato: e.target.value })}
-                >
-                  {contratos.map((c) => (
-                    <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                      {c.id_contrato} — {c.contraparte_nombre}
-                    </MenuItem>
-                  ))}
-                </Select>
-                {form.reembolso && (
-                  <FormHelperText>
-                    Para reembolsos sin contrato de obra, elige la empresa abajo para usar su contrato genérico.
-                  </FormHelperText>
+              <Autocomplete
+                size="small"
+                fullWidth
+                disabled={!!editing}
+                options={contratos}
+                value={contratos.find((c) => c.id_contrato === form.contrato) || null}
+                onChange={(_, seleccion) => setForm({ ...form, contrato: seleccion?.id_contrato || "" })}
+                getOptionLabel={(c) => `${c.id_contrato} — ${c.contraparte_nombre}`}
+                isOptionEqualToValue={(a, b) => a.id_contrato === b.id_contrato}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Contrato"
+                    required
+                    helperText={
+                      form.reembolso
+                        ? "Para reembolsos sin contrato de obra, elige la empresa abajo para usar su contrato genérico."
+                        : undefined
+                    }
+                  />
                 )}
-              </FormControl>
+              />
               {form.reembolso && !editing && (
                 <FormControl size="small" fullWidth>
                   <InputLabel id="empresa-reembolso-label">Empresa (para el contrato genérico)</InputLabel>
