@@ -91,7 +91,6 @@ jobs:
   build-and-push:
     name: Build y push (${{ matrix.service }})
     needs: [detect-changes]
-    if: needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), matrix.service)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -112,11 +111,18 @@ jobs:
             obra-service,
             api-gateway,
           ]
+    # El contexto "matrix" no esta disponible en el "if" de job (solo en el de
+    # step, ver docs de "context availability") - por eso el filtro de cambios
+    # se repite en cada step con "if:", en vez de un solo "if:" a nivel de job.
+    env:
+      DEBE_CORRER: ${{ needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), matrix.service) }}
     steps:
       - uses: actions/checkout@v4
+        if: env.DEBE_CORRER == 'true'
 
       - id: auth
         name: Autenticar con GCP (Workload Identity Federation)
+        if: env.DEBE_CORRER == 'true'
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -124,9 +130,11 @@ jobs:
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
 
       - name: Configurar Docker para Artifact Registry
+        if: env.DEBE_CORRER == 'true'
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
       - name: Build y push
+        if: env.DEBE_CORRER == 'true'
         run: |
           IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ matrix.service }}:${{ github.sha }}"
           docker build -f services/${{ matrix.service }}/Dockerfile -t "$IMAGE" .
@@ -168,13 +176,11 @@ jobs:
     name: Deploy (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [detect-changes, build-and-push]
-    # always() porque build-and-push se salta (no falla) para los servicios sin
-    # cambios (ver detect-changes arriba) - sin always() ese skip se propagaria
-    # aqui y saltaria TODOS los servicios, incluso los que si cambiaron.
-    if: |
-      always() &&
-      needs.build-and-push.result != 'failure' &&
-      (needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), matrix.service))
+    # Mismo motivo que build-and-push: "matrix" no esta disponible en el "if"
+    # de job, solo en env/steps.if - el filtro va en env.DEBE_CORRER de abajo.
+    # build-and-push nunca queda en estado "skipped" (sus steps se saltan
+    # individualmente pero el job si corre), asi que aqui no hace falta
+    # always() ni checar needs.build-and-push.result.
     strategy:
       matrix:
         # api-gateway va al final (deploy-gateway job) porque el resto no
@@ -195,8 +201,11 @@ jobs:
             materiales-service,
             obra-service,
           ]
+    env:
+      DEBE_CORRER: ${{ needs.detect-changes.outputs.deploy_all == 'true' || contains(fromJSON(needs.detect-changes.outputs.changes || '[]'), matrix.service) }}
     steps:
       - id: auth
+        if: env.DEBE_CORRER == 'true'
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -204,8 +213,10 @@ jobs:
           service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
 
       - uses: google-github-actions/setup-gcloud@v2
+        if: env.DEBE_CORRER == 'true'
 
       - name: Deploy a Cloud Run
+        if: env.DEBE_CORRER == 'true'
         run: |
           gcloud run deploy "${{ matrix.service }}-${{ env.ENV_SUFFIX }}" \
             --image "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ matrix.service }}:${{ github.sha }}" \
