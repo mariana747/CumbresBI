@@ -1149,6 +1149,7 @@ export interface TesoreriaFlujo {
   autorizado_por: string | null;
   fecha_autorizacion: string | null;
   link_referencia: string | null;
+  drive_file_id_referencia: string | null;
   pagado: boolean | null;
   fecha_pago: string | null;
   fecha_pago_original: string | null;
@@ -1186,6 +1187,7 @@ export async function listFlujos(params?: {
   categoriaGasto?: TesoreriaCategoriaGasto;
   fechaDesde?: string;
   fechaHasta?: string;
+  validacionEstado?: TesoreriaValidacionEstado;
   page?: number;
   pageSize?: number;
 }): Promise<TesoreriaPaginado<TesoreriaFlujo>> {
@@ -1199,6 +1201,7 @@ export async function listFlujos(params?: {
   if (params?.categoriaGasto) query.set("categoria_gasto", params.categoriaGasto);
   if (params?.fechaDesde) query.set("fecha_desde", params.fechaDesde);
   if (params?.fechaHasta) query.set("fecha_hasta", params.fechaHasta);
+  if (params?.validacionEstado) query.set("validacion_estado", params.validacionEstado);
   query.set("page", String(params?.page ?? 1));
   query.set("page_size", String(params?.pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
@@ -1549,6 +1552,30 @@ export async function subirComprobanteFlujo(
   return response.json();
 }
 
+// Documento de referencia del flujo (23/Sep/2026, "en flujos, referencia
+// no deben ser los flujos asociados, sino subir un pdf llamado
+// referencia") - mismo patron que subirComprobanteFlujo arriba.
+export async function subirReferenciaFlujo(
+  idFlujo: string,
+  archivo: File,
+  actorUserId?: string
+): Promise<TesoreriaFlujo> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  if (actorUserId) {
+    formData.append("actor_user_id", actorUserId);
+  }
+
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/subir_referencia/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 // Liga un flujo ya capturado a una factura/complemento de pago reales (ver
 // tesoreria/views.py::TesoreriaFlujoViewSet.vincular_factura) - manda el
 // timbre_uuid de cada uno, el backend valida que exista antes de guardar el
@@ -1620,6 +1647,7 @@ export interface SugerenciaCfdiLote {
   concepto: string | null;
   total_mxp: string;
   tipo: "factura" | "complemento";
+  id: number;
   timbre_uuid: string;
   folio: string | null;
   confianza: "alta" | "media";
@@ -2411,6 +2439,10 @@ export async function sincronizarDriveFactura(id: number): Promise<TesoreriaFact
 // Comprobante bancario de un Flujo (09/Sep/2026, apartado de Documentos).
 export function urlVerComprobanteFlujo(idFlujo: string): string {
   return `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/ver_comprobante/`;
+}
+
+export function urlVerReferenciaFlujo(idFlujo: string): string {
+  return `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/ver_referencia/`;
 }
 
 // PDF que el proveedor ya subio por su ticket - no depende de que exista

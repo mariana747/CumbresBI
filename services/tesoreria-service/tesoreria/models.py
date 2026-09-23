@@ -1223,7 +1223,13 @@ class TesoreriaFlujo(models.Model):
     autorizacion = models.BooleanField(blank=True, null=True)
     autorizado_por = models.CharField(max_length=100, blank=True, null=True)
     fecha_autorizacion = models.DateField(blank=True, null=True)
+    # Referencia (23/Sep/2026, "en flujos, referencia no deben ser los
+    # flujos asociados, sino subir un pdf llamado referencia") - mismo
+    # patron que link_comprobante_banco/drive_file_id_comprobante abajo:
+    # link_referencia guarda el web_view_link, drive_file_id_referencia el
+    # ID del archivo (permite reemplazarlo sin duplicar).
     link_referencia = models.TextField(blank=True, null=True)
+    drive_file_id_referencia = models.TextField(blank=True, null=True)
     pagado = models.BooleanField(blank=True, null=True)
     fecha_pago = models.DateField(blank=True, null=True)
     fecha_pago_original = models.DateField(blank=True, null=True)

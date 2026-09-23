@@ -1004,6 +1004,12 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         fecha_hasta = self.request.query_params.get("fecha_hasta")
         if fecha_hasta:
             queryset = queryset.filter(fecha_efectiva__lte=fecha_hasta)
+        # ?validacion_estado= (23/Sep/2026, "agrega filtro para el estado")
+        # - mismos valores que la columna Estado de la tabla (PENDIENTE/
+        # APROBADA/RECHAZADA, ver TesoreriaValidacionEstado en el frontend).
+        validacion_estado = self.request.query_params.get("validacion_estado")
+        if validacion_estado:
+            queryset = queryset.filter(validacion_estado=validacion_estado)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -1388,6 +1394,68 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             valores_nuevos={"nombre_archivo": archivo.name},
         )
         return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_referencia(self, request, pk=None):
+        """Documento de referencia del flujo (23/Sep/2026, "en flujos,
+        referencia no deben ser los flujos asociados, sino subir un pdf
+        llamado referencia") - mismo patron que subir_comprobante arriba,
+        carpeta y campos propios (link_referencia/drive_file_id_referencia)
+        para no mezclarse con el comprobante bancario."""
+        flujo = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Tesoreria/Flujos/{flujo.id_flujo}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "tesoreria.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir referencia de %s", flujo.id_flujo, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        flujo.link_referencia = resultado["web_view_link"]
+        flujo.drive_file_id_referencia = resultado["file_id"]
+        flujo.save(update_fields=["link_referencia", "drive_file_id_referencia"])
+
+        emitir_evento_auditoria(
+            "tesoreria_flujos.subir_referencia",
+            "tesoreria_flujos",
+            flujo.id_flujo,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(flujo).data)
+
+    @action(detail=True, methods=["get"])
+    @xframe_options_exempt
+    def ver_referencia(self, request, pk=None):
+        """Preview embebido del PDF de referencia - mismo patron que
+        ver_comprobante abajo."""
+        flujo = self.get_object()
+        return _servir_documento_drive(
+            request,
+            drive_file_id=flujo.drive_file_id_referencia,
+            mime_type=None,
+            nombre_archivo=f"referencia-{flujo.id_flujo}",
+            carpeta=f"Tesoreria/Flujos/{flujo.id_flujo}",
+        )
 
     @action(detail=True, methods=["get"])
     @xframe_options_exempt

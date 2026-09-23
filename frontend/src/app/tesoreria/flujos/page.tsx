@@ -61,10 +61,12 @@ import {
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
+import { MIME_TYPES_COMPROBANTE } from "@/lib/googleDriveFilePicker";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { CATEGORIA_GASTO_LABELS, TesoreriaCategoriaGasto } from "@/lib/miCumbres";
 import FiltrosBar from "@/components/FiltrosBar";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
+import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive";
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import { useExportarSheets } from "@/lib/useExportarSheets";
@@ -96,7 +98,11 @@ import {
   rechazarFlujo,
   registrarPagoFlujo,
   subirComprobanteFlujo,
+  subirReferenciaFlujo,
   urlVerComprobanteFlujo,
+  urlVerComplementoPagoPdf,
+  urlVerFacturaPdf,
+  urlVerReferenciaFlujo,
   updateFlujo,
   vincularFactura,
 } from "@/lib/tesoreria";
@@ -145,7 +151,7 @@ const FORM_VACIO = {
 // comprobante bancario solo vivia como un campo de texto suelto en
 // Detalles, sin boton de ver real (streaming) ni vista consolidada de a
 // que CFDI esta ligado el flujo.
-const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Documentos", "Control"] as const;
+const TABS_FLUJO = ["Detalles", "Referencias", "CFDI", "Comprobante de pago", "Control"] as const;
 type TabFlujo = (typeof TABS_FLUJO)[number];
 
 // Link real de Drive a partir del file_id - "Abrir en pestaña nueva" debe
@@ -216,6 +222,9 @@ function TesoreriaFlujosPageContent() {
   // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas" -
   // el campo ya existia en modelo/API desde 09/Sep, sin usarse en frontend).
   const [filtroCategoriaGasto, setFiltroCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
+  // Filtro por Estado (23/Sep/2026, "agrega filtro para el estado") - mismos
+  // valores que la columna Estado de la tabla.
+  const [filtroEstado, setFiltroEstado] = useState<TesoreriaValidacionEstado | "">("");
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
@@ -237,15 +246,20 @@ function TesoreriaFlujosPageContent() {
   const [soloLectura, setSoloLectura] = useState(false);
   // Preview embebido del comprobante (09/Sep/2026, apartado de Documentos)
   const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
+  // Documento de referencia del flujo (23/Sep/2026, "en flujos, referencia
+  // no deben ser los flujos asociados, sino subir un pdf llamado
+  // referencia") - sube directo al elegir el archivo, mismo criterio que
+  // el comprobante pero sin pasar por el dialogo de "Registrar pago".
+  const [subiendoReferencia, setSubiendoReferencia] = useState(false);
+  const [errorReferencia, setErrorReferencia] = useState<string | null>(null);
+  // Selector local/Drive (23/Sep/2026, "debe verse como el de conciliacion
+  // bancaria") - mismo componente que importar extracto; solo elige el
+  // archivo, subirReferenciaFlujo() sigue siendo quien lo sube de verdad.
+  const [archivoReferenciaPendiente, setArchivoReferenciaPendiente] = useState<File | null>(null);
+  const [reemplazandoReferencia, setReemplazandoReferencia] = useState(false);
   // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
   // Flujos") - ver componente PanelReferenciaCruzada.
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
-  // Flujos asociados por mismo contrato, mostrados en la pestana
-  // Referencias (17/Sep/2026) - NO incluye logica de nomina, esa ya vive
-  // aparte (columna Nomina, boton "Ver nomina", PanelReferenciaCruzada
-  // tipo=nomina) y se ve en Flujos y en Nominas por sus propios caminos.
-  const [flujosDelContrato, setFlujosDelContrato] = useState<TesoreriaFlujo[]>([]);
-  const [cargandoFlujosContrato, setCargandoFlujosContrato] = useState(false);
   // "ID de empleado" (pestana Referencias) solo aplica a Flujos de nomina -
   // periodo_nomina es la liga real, pero hay Flujos legacy con id_empleado
   // capturado sin periodo_nomina (ver auditoria 17/Sep/2026), de ahi el
@@ -539,6 +553,7 @@ function TesoreriaFlujosPageContent() {
       categoriaGasto: filtroCategoriaGasto || undefined,
       fechaDesde: filtroFechaDesde || undefined,
       fechaHasta: filtroFechaHasta || undefined,
+      validacionEstado: filtroEstado || undefined,
       page: pagina + 1,
       pageSize: filasPorPagina,
     })
@@ -562,6 +577,7 @@ function TesoreriaFlujosPageContent() {
     filtroCategoriaGasto,
     filtroFechaDesde,
     filtroFechaHasta,
+    filtroEstado,
     pagina,
     filasPorPagina,
   ]);
@@ -572,7 +588,7 @@ function TesoreriaFlujosPageContent() {
   useEffect(() => {
     setPagina(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroContrato, filtroEmpresa, filtroNomina, filtroCategoriaGasto, filtroFechaDesde, filtroFechaHasta]);
+  }, [search, filtroContrato, filtroEmpresa, filtroNomina, filtroCategoriaGasto, filtroFechaDesde, filtroFechaHasta, filtroEstado]);
 
   // Redirigido desde Conciliación Bancaria tras "Crear Flujo" (11/Sep/2026,
   // "quiero que muestre lo importado y para mostrar y redirigir") - abre
@@ -589,20 +605,6 @@ function TesoreriaFlujosPageContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flujos]);
-
-  // Flujos asociados (mismo contrato) para la pestana Referencias - se
-  // piden solo al entrar a esa pestana, no de entrada con el dialogo.
-  useEffect(() => {
-    if (tab !== "Referencias" || !editing?.contrato) {
-      setFlujosDelContrato([]);
-      return;
-    }
-    setCargandoFlujosContrato(true);
-    listFlujos({ contrato: editing.contrato, pageSize: 200 })
-      .then((res) => setFlujosDelContrato(res.results.filter((f) => f.id_flujo !== editing.id_flujo)))
-      .catch(() => setFlujosDelContrato([]))
-      .finally(() => setCargandoFlujosContrato(false));
-  }, [tab, editing?.contrato, editing?.id_flujo]);
 
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
   // hook reusable en lib/useExportarSheets.ts.
@@ -822,6 +824,23 @@ function TesoreriaFlujosPageContent() {
     }
   }
 
+  async function handleSubirReferencia(archivo: File) {
+    if (!editing) return;
+    setSubiendoReferencia(true);
+    setErrorReferencia(null);
+    try {
+      const actualizado = await subirReferenciaFlujo(editing.id_flujo, archivo, session?.user_id);
+      setEditing(actualizado);
+      setArchivoReferenciaPendiente(null);
+      setReemplazandoReferencia(false);
+      refresh();
+    } catch (err) {
+      setErrorReferencia(err instanceof Error ? err.message : "No se pudo subir la referencia.");
+    } finally {
+      setSubiendoReferencia(false);
+    }
+  }
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
@@ -935,83 +954,57 @@ function TesoreriaFlujosPageContent() {
           </Stack>
         }
       >
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
-          <Select
-            labelId="filtro-empresa-label"
-            label="Filtrar por empresa"
-            value={filtroEmpresa}
-            onChange={(e) => {
-              setFiltroEmpresa(e.target.value);
-              setFiltroContrato("");
-            }}
-          >
-            <MenuItem value="">
-              <em>Todas las empresas</em>
-            </MenuItem>
-            {sociedades.map((s) => (
-              <MenuItem key={s.rfc} value={s.rfc}>
-                {s.alias_sociedad || s.razon_social || s.rfc}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel id="filtro-categoria-gasto-label">Categoría de gasto</InputLabel>
-          <Select
-            labelId="filtro-categoria-gasto-label"
-            label="Categoría de gasto"
-            value={filtroCategoriaGasto}
-            onChange={(e) => setFiltroCategoriaGasto(e.target.value as TesoreriaCategoriaGasto | "")}
-          >
-            <MenuItem value="">
-              <em>Todas las categorías</em>
-            </MenuItem>
-            {(Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]).map((c) => (
-              <MenuItem key={c} value={c}>
-                {CATEGORIA_GASTO_LABELS[c]}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel id="filtro-contrato-label">Filtrar por contrato</InputLabel>
-          <Select
-            labelId="filtro-contrato-label"
-            label="Filtrar por contrato"
-            value={filtroContrato}
-            onChange={(e) => setFiltroContrato(e.target.value)}
-          >
-            <MenuItem value="">
-              <em>Todos los contratos</em>
-            </MenuItem>
-            {contratos
-              .filter((c) => !filtroEmpresa || c.sociedad === filtroEmpresa)
-              .map((c) => (
-              <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                {c.id_contrato} — {c.contraparte_nombre}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel id="filtro-nomina-label">Filtrar por nómina</InputLabel>
-          <Select
-            labelId="filtro-nomina-label"
-            label="Filtrar por nómina"
-            value={filtroNomina}
-            onChange={(e) => setFiltroNomina(e.target.value)}
-          >
-            <MenuItem value="">
-              <em>Todas las nóminas</em>
-            </MenuItem>
-            {nominas.map((n) => (
-              <MenuItem key={n.id_nomina} value={n.id_nomina}>
-                {n.id_nomina} — {n.serie}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <Autocomplete
+          size="small"
+          sx={{ minWidth: 180 }}
+          options={sociedades}
+          value={sociedades.find((s) => s.rfc === filtroEmpresa) || null}
+          onChange={(_, seleccion) => {
+            setFiltroEmpresa(seleccion?.rfc || "");
+            setFiltroContrato("");
+          }}
+          getOptionLabel={(s) => s.alias_sociedad || s.razon_social || s.rfc}
+          isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
+          renderInput={(params) => <TextField {...params} label="Filtrar por empresa" />}
+        />
+        <Autocomplete
+          size="small"
+          sx={{ minWidth: 180 }}
+          options={Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]}
+          value={filtroCategoriaGasto || null}
+          onChange={(_, seleccion) => setFiltroCategoriaGasto(seleccion || "")}
+          getOptionLabel={(c) => CATEGORIA_GASTO_LABELS[c]}
+          renderInput={(params) => <TextField {...params} label="Categoría de gasto" />}
+        />
+        <Autocomplete
+          size="small"
+          sx={{ minWidth: 200 }}
+          options={contratos.filter((c) => !filtroEmpresa || c.sociedad === filtroEmpresa)}
+          value={contratos.find((c) => c.id_contrato === filtroContrato) || null}
+          onChange={(_, seleccion) => setFiltroContrato(seleccion?.id_contrato || "")}
+          getOptionLabel={(c) => `${c.id_contrato} — ${c.contraparte_nombre}`}
+          isOptionEqualToValue={(a, b) => a.id_contrato === b.id_contrato}
+          renderInput={(params) => <TextField {...params} label="Filtrar por contrato" />}
+        />
+        <Autocomplete
+          size="small"
+          sx={{ minWidth: 180 }}
+          options={nominas}
+          value={nominas.find((n) => n.id_nomina === filtroNomina) || null}
+          onChange={(_, seleccion) => setFiltroNomina(seleccion?.id_nomina || "")}
+          getOptionLabel={(n) => `${n.id_nomina} — ${n.serie}`}
+          isOptionEqualToValue={(a, b) => a.id_nomina === b.id_nomina}
+          renderInput={(params) => <TextField {...params} label="Filtrar por nómina" />}
+        />
+        <Autocomplete
+          size="small"
+          sx={{ minWidth: 160 }}
+          options={Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]}
+          value={filtroEstado || null}
+          onChange={(_, seleccion) => setFiltroEstado(seleccion || "")}
+          getOptionLabel={(e) => e.charAt(0) + e.slice(1).toLowerCase()}
+          renderInput={(params) => <TextField {...params} label="Estado" />}
+        />
         <TextField
           size="small"
           type="date"
@@ -1635,59 +1628,91 @@ function TesoreriaFlujosPageContent() {
               )}
             </Stack>
 
-            {editing && editing.contrato && (
+            {editing && (
               <Box sx={{ mt: 3 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  Flujos asociados (mismo contrato) {flujosDelContrato.length > 0 && `(${flujosDelContrato.length})`}
+                  Referencia
                 </Typography>
-                {cargandoFlujosContrato ? (
-                  <CircularProgress size={16} />
-                ) : flujosDelContrato.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    Sin otros flujos en este contrato.
-                  </Typography>
-                ) : (
-                  <Stack spacing={0.5}>
-                    {flujosDelContrato.map((f) => (
-                      <Stack
-                        key={f.id_flujo}
-                        direction="row"
-                        spacing={1}
-                        alignItems="center"
-                        sx={{ border: 1, borderColor: "divider", borderRadius: 0, p: 1 }}
-                      >
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
-                            {f.id_flujo}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {f.concepto || "—"} — {f.fecha_efectiva || "—"}
-                          </Typography>
-                        </Box>
-                        <Chip
+                <Paper variant="outlined" sx={{ p: 1.5 }}>
+                  {editing.drive_file_id_referencia && !reemplazandoReferencia ? (
+                    <>
+                      <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <FileCheck2 size={18} strokeWidth={1.5} />
+                          <Typography variant="body2">PDF de referencia</Typography>
+                        </Stack>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <IconButton
+                            size="small"
+                            aria-label="Ver referencia"
+                            title="Ver referencia"
+                            onClick={() => {
+                              if (!editing.drive_file_id_referencia) return;
+                              setPreviewDoc({
+                                url: urlVerReferenciaFlujo(editing.id_flujo),
+                                titulo: `Flujo ${editing.id_flujo} — Referencia`,
+                                urlExterna: urlDriveWebView(editing.drive_file_id_referencia),
+                              });
+                            }}
+                          >
+                            <Eye size={16} strokeWidth={1.5} />
+                          </IconButton>
+                          <Chip size="small" color="success" label="Disponible en Drive" />
+                        </Stack>
+                      </Stack>
+                      {!soloLectura && (
+                        <Button
                           size="small"
-                          label={f.pagado ? "Pagado" : "Sin pagar"}
-                          color={f.pagado ? "success" : "default"}
-                          variant="outlined"
-                          sx={{ borderRadius: 0.5 }}
-                        />
-                        {f.drive_file_id_comprobante && (
+                          startIcon={<Upload size={14} strokeWidth={1.5} />}
+                          sx={{ mt: 1.5 }}
+                          onClick={() => setReemplazandoReferencia(true)}
+                        >
+                          Reemplazar referencia
+                        </Button>
+                      )}
+                    </>
+                  ) : soloLectura ? (
+                    <Alert severity="info">No hay documentos.</Alert>
+                  ) : (
+                    <>
+                      <SelectorArchivoLocalODrive
+                        archivo={archivoReferenciaPendiente}
+                        onChange={setArchivoReferenciaPendiente}
+                        accept="application/pdf"
+                        mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+                        tituloDrive="Elige la referencia"
+                      />
+                      <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={!archivoReferenciaPendiente || subiendoReferencia}
+                          startIcon={subiendoReferencia ? <CircularProgress size={14} /> : undefined}
+                          onClick={() => archivoReferenciaPendiente && handleSubirReferencia(archivoReferenciaPendiente)}
+                        >
+                          Subir referencia
+                        </Button>
+                        {reemplazandoReferencia && (
                           <Button
                             size="small"
-                            startIcon={<Eye size={14} strokeWidth={1.5} />}
-                            component="a"
-                            href={urlVerComprobanteFlujo(f.id_flujo)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            sx={{ ml: 1 }}
+                            onClick={() => {
+                              setReemplazandoReferencia(false);
+                              setArchivoReferenciaPendiente(null);
+                              setErrorReferencia(null);
+                            }}
                           >
-                            Ver comprobante
+                            Cancelar
                           </Button>
                         )}
                       </Stack>
-                    ))}
-                  </Stack>
-                )}
+                    </>
+                  )}
+                  {errorReferencia && (
+                    <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
+                      {errorReferencia}
+                    </Typography>
+                  )}
+                </Paper>
               </Box>
             )}
             </>
@@ -1700,6 +1725,51 @@ function TesoreriaFlujosPageContent() {
                 con «Vincular CFDI» en la tabla (Facturación CFDI todavía no tiene catálogo de
                 nóminas propio).
               </Typography>
+              {editing && (() => {
+                const facturaVinculada = editing.factura ? facturas.find((fa) => fa.timbre_uuid === editing.factura) : null;
+                const complementoVinculado = editing.complemento
+                  ? complementos.find((c) => c.timbre_uuid === editing.complemento)
+                  : null;
+                if (!editing.factura && !editing.complemento) {
+                  return <Alert severity="info">No hay factura ni complemento vinculado.</Alert>;
+                }
+                return (
+                  <Stack direction="row" spacing={1} flexWrap="wrap">
+                    {editing.factura && (
+                      <Button
+                        size="small"
+                        startIcon={<Eye size={14} strokeWidth={1.5} />}
+                        disabled={!facturaVinculada}
+                        onClick={() => {
+                          if (!facturaVinculada) return;
+                          setPreviewDoc({
+                            url: urlVerFacturaPdf(facturaVinculada.id),
+                            titulo: `Factura ${facturaVinculada.comprobante_folio || facturaVinculada.timbre_uuid}`,
+                          });
+                        }}
+                      >
+                        Ver factura
+                      </Button>
+                    )}
+                    {editing.complemento && (
+                      <Button
+                        size="small"
+                        startIcon={<Eye size={14} strokeWidth={1.5} />}
+                        disabled={!complementoVinculado}
+                        onClick={() => {
+                          if (!complementoVinculado) return;
+                          setPreviewDoc({
+                            url: urlVerComplementoPagoPdf(complementoVinculado.id),
+                            titulo: `Complemento ${complementoVinculado.folio || complementoVinculado.timbre_uuid}`,
+                          });
+                        }}
+                      >
+                        Ver complemento
+                      </Button>
+                    )}
+                  </Stack>
+                );
+              })()}
               <ToggleCard
                 icon={FileCheck2}
                 title="Requiere complemento de pago"
@@ -1724,43 +1794,58 @@ function TesoreriaFlujosPageContent() {
             </Stack>
           )}
 
-          {tab === "Documentos" && (
+          {tab === "Comprobante de pago" && (
             <Stack spacing={1.5}>
-              <Typography variant="caption" color="text.secondary">
-                El comprobante se trae directo de Drive - se sube desde "Registrar pago" o el menú de
-                tres puntos de la fila.
-              </Typography>
-              <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
-                  <Stack direction="row" spacing={1.5} alignItems="center">
-                    <FileCheck2 size={18} strokeWidth={1.5} />
-                    <Typography variant="body2">Comprobante de pago</Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <IconButton
-                      size="small"
-                      aria-label="Ver comprobante"
-                      title="Ver comprobante"
-                      disabled={!editing?.drive_file_id_comprobante}
-                      onClick={() => {
-                        if (!editing?.drive_file_id_comprobante) return;
-                        setPreviewDoc({
-                          url: urlVerComprobanteFlujo(editing.id_flujo),
-                          titulo: `Flujo ${editing.id_flujo} — Comprobante`,
-                          urlExterna: urlDriveWebView(editing.drive_file_id_comprobante),
-                        });
-                      }}
-                    >
-                      <Eye size={16} strokeWidth={1.5} />
-                    </IconButton>
-                    <Chip
-                      size="small"
-                      color={editing?.drive_file_id_comprobante ? "success" : "default"}
-                      label={editing?.drive_file_id_comprobante ? "Disponible en Drive" : "Sin archivo"}
-                    />
-                  </Stack>
-                </Stack>
-              </Paper>
+              {soloLectura && !editing?.drive_file_id_comprobante ? (
+                <Alert severity="info">No hay documentos.</Alert>
+              ) : (
+                <>
+                  <Typography variant="caption" color="text.secondary">
+                    El comprobante se trae directo de Drive.
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                      <Stack direction="row" spacing={1.5} alignItems="center">
+                        <FileCheck2 size={18} strokeWidth={1.5} />
+                        <Typography variant="body2">Comprobante de pago</Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <IconButton
+                          size="small"
+                          aria-label="Ver comprobante"
+                          title="Ver comprobante"
+                          disabled={!editing?.drive_file_id_comprobante}
+                          onClick={() => {
+                            if (!editing?.drive_file_id_comprobante) return;
+                            setPreviewDoc({
+                              url: urlVerComprobanteFlujo(editing.id_flujo),
+                              titulo: `Flujo ${editing.id_flujo} — Comprobante`,
+                              urlExterna: urlDriveWebView(editing.drive_file_id_comprobante),
+                            });
+                          }}
+                        >
+                          <Eye size={16} strokeWidth={1.5} />
+                        </IconButton>
+                        <Chip
+                          size="small"
+                          color={editing?.drive_file_id_comprobante ? "success" : "default"}
+                          label={editing?.drive_file_id_comprobante ? "Disponible en Drive" : "Sin archivo"}
+                        />
+                      </Stack>
+                    </Stack>
+                    {editing && puedeEditar && (
+                      <Button
+                        size="small"
+                        startIcon={<Upload size={14} strokeWidth={1.5} />}
+                        sx={{ mt: 1.5 }}
+                        onClick={() => abrirDialogoPago(editing)}
+                      >
+                        {editing.link_comprobante_banco ? "Reemplazar comprobante" : "Subir comprobante"}
+                      </Button>
+                    )}
+                  </Paper>
+                </>
+              )}
             </Stack>
           )}
 
@@ -1824,11 +1909,6 @@ function TesoreriaFlujosPageContent() {
                           </Button>
                         </span>
                       </Tooltip>
-                    )}
-                    {puedeEditar && editing.pagado && (
-                      <Button size="small" startIcon={<Upload size={14} strokeWidth={1.5} />} onClick={() => abrirDialogoPago(editing)}>
-                        {editing.link_comprobante_banco ? "Reemplazar comprobante" : "Subir comprobante"}
-                      </Button>
                     )}
                   </Stack>
                   <Divider />
@@ -2194,14 +2274,13 @@ function TesoreriaFlujosPageContent() {
                 fullWidth
               />
             )}
-            <Button component="label" variant="outlined" startIcon={<Upload size={16} strokeWidth={1.5} />}>
-              {pagoArchivo ? pagoArchivo.name : "Elegir comprobante desde mi computadora"}
-              <input
-                type="file"
-                hidden
-                onChange={(e) => setPagoArchivo(e.target.files?.[0] ?? null)}
-              />
-            </Button>
+            <SelectorArchivoLocalODrive
+              archivo={pagoArchivo}
+              onChange={setPagoArchivo}
+              accept="image/*,application/pdf"
+              mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+              tituloDrive="Elige el comprobante"
+            />
             {pagoDialogFlujo?.link_comprobante_banco && !pagoArchivo && (
               <FormHelperText>
                 Ya hay un comprobante subido. Elige un archivo para reemplazarlo.
