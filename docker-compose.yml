@@ -473,6 +473,43 @@ services:
       obra-service-db:
         condition: service_healthy
 
+  tickets-service-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${TICKETS_DB_NAME:-tickets_service}
+      MYSQL_USER: ${TICKETS_DB_USER:-tickets_app}
+      MYSQL_PASSWORD: ${TICKETS_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${TICKETS_DB_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "33072:3306"
+    volumes:
+      - tickets_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${TICKETS_DB_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  tickets-service:
+    build:
+      context: .
+      dockerfile: services/tickets-service/Dockerfile
+    restart: unless-stopped
+    # --reload local (ver comentario completo en api-gateway arriba).
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 2 --reload --reload-engine poll
+    env_file:
+      - .env
+    environment:
+      TICKETS_DB_HOST: tickets-service-db
+    volumes:
+      - ./services/tickets-service:/app
+    ports:
+      - "8013:8080"
+    depends_on:
+      tickets-service-db:
+        condition: service_healthy
+
   drive-service:
     build:
       context: .
@@ -526,3 +563,4 @@ volumes:
   tesoreria_db_data:
   rentas_db_data:
   obra_db_data:
+  tickets_db_data:

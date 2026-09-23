@@ -51,6 +51,7 @@ jobs:
             tesoreria-service,
             rentas-service,
             document-intelligence-service,
+            tickets-service,
           ]
     services:
       # iam-service, audit-service y pld-service ya tienen suites reales que
@@ -83,6 +84,7 @@ jobs:
       TESORERIA_DB_HOST: 127.0.0.1
       RENTAS_DB_HOST: 127.0.0.1
       DOCINT_DB_HOST: 127.0.0.1
+      TICKETS_DB_HOST: 127.0.0.1
       IAM_DB_USER: root
       AUDIT_DB_USER: root
       PLD_DB_USER: root
@@ -93,6 +95,7 @@ jobs:
       TESORERIA_DB_USER: root
       RENTAS_DB_USER: root
       DOCINT_DB_USER: root
+      TICKETS_DB_USER: root
     steps:
       - uses: actions/checkout@v4
 
@@ -233,6 +236,7 @@ jobs:
             tesoreria-service,
             rentas-service,
             document-intelligence-service,
+            tickets-service,
             drive-service,
             mail-service,
             api-gateway,

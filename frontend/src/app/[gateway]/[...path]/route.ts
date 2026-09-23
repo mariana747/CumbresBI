@@ -27,6 +27,7 @@ const GATEWAY_PREFIXES = [
   "drive",
   "mail",
   "obra",
+  "tickets",
 ];
 
 // Headers hop-by-hop (RFC 7230 sec. 6.1) - no se reenvian tal cual entre

@@ -427,10 +427,13 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   if (tieneAlgunPermiso(session, ["rrhh"])) {
     items.push({ label: "RRHH y Talento", href: "/rrhh/empleados", icon: UserCheck, enabled: true });
   }
-  // Tickets/Rentas quitados del sidebar - ninguno de los dos tiene backend
-  // real todavia, quedaban como placeholders "en desarrollo" sin nada
-  // detras. Si se retoman esos modulos, revivir este bloque (ver git blame)
-  // en vez de reinventarlo.
+  // Rentas sigue sin backend real, se queda fuera del sidebar (si se
+  // retoma, revivir el bloque original via git blame en vez de
+  // reinventarlo). Tickets si (23/Sep/2026, Fase 1: Centros/Proyectos/
+  // Participantes ya tienen CRUD real, ver tickets-service).
+  if (tieneAlgunPermiso(session, ["tickets"])) {
+    items.push({ label: "Tickets", href: "/tickets", icon: ClipboardList, enabled: true });
+  }
   // "Tickets de reembolso" (pantalla PROVISIONAL) - visible para
   // cualquier sesion real (self-service, sin exigir perm_key alguno,
   // mismo criterio que el resto de MiCumbres) mientras no exista el

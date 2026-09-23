@@ -102,4 +102,5 @@ SERVICE_ROUTES = {
     "drive": env("GATEWAY_ROUTE_DRIVE", default="http://drive-service:8080"),
     "mail": env("GATEWAY_ROUTE_MAIL", default="http://mail-service:8080"),
     "obra": env("GATEWAY_ROUTE_OBRA", default="http://obra-service:8080"),
+    "tickets": env("GATEWAY_ROUTE_TICKETS", default="http://tickets-service:8080"),
 }
