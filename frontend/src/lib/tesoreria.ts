@@ -1278,6 +1278,7 @@ export async function getConciliacionCfdi(params?: {
   hasta?: string;
   sociedad?: string;
   contrato?: string;
+  contraparte?: string;
   requiereFactura?: boolean;
   tipoComprobante?: "I" | "E";
   search?: string;
@@ -1297,6 +1298,7 @@ export async function getConciliacionCfdi(params?: {
   if (params?.hasta) query.set("hasta", params.hasta);
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
   if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
   if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
   if (params?.search) query.set("search", params.search);
@@ -1393,6 +1395,7 @@ export async function exportarConciliacionCfdiSheets(
     hasta?: string;
     sociedad?: string;
     contrato?: string;
+    contraparte?: string;
     requiereFactura?: boolean;
     tipoComprobante?: "I" | "E";
   },
@@ -1403,6 +1406,7 @@ export async function exportarConciliacionCfdiSheets(
   if (params?.hasta) query.set("hasta", params.hasta);
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
   if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
   if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
   const response = await apiFetch(
@@ -1697,12 +1701,14 @@ export async function getSugerenciasCfdiLote(params?: {
   hasta?: string;
   sociedad?: string;
   contrato?: string;
+  contraparte?: string;
 }): Promise<SugerenciaCfdiLote[]> {
   const query = new URLSearchParams();
   if (params?.desde) query.set("desde", params.desde);
   if (params?.hasta) query.set("hasta", params.hasta);
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/flujos/sugerencias_cfdi_lote/?${query.toString()}`
