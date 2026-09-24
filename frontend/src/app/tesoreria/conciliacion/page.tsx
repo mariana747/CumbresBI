@@ -30,6 +30,7 @@ import {
 } from "@mui/material";
 import { FileSpreadsheet, Landmark, RefreshCw, Sparkles, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import ContratoSelector from "@/components/ContratoSelector";
 import FiltrosBar from "@/components/FiltrosBar";
 import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -48,7 +49,6 @@ import {
   detectarCuentaExtracto,
   exportarReporteConciliacionSheets,
   importarExtractoBancario,
-  listContratos,
   listCortesEdc,
   listCuentas,
   listMovimientosBancarios,
@@ -153,8 +153,9 @@ export default function TesoreriaConciliacionPage() {
 
   // Precargar Flujo desde un movimiento sin match (11/Sep/2026, "Subida de
   // archivos CRCM para precargar Flujos") - contrato es lo unico que el
-  // extracto no puede traer, se elige aqui mismo antes de crear.
-  const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
+  // extracto no puede traer, se elige aqui mismo antes de crear. Busca en
+  // vivo (23/Sep/2026, ContratoSelector) en vez de una lista fija de 200 -
+  // hay 900+ contratos reales.
   const [contratoNuevoFlujo, setContratoNuevoFlujo] = useState<TesoreriaContrato | null>(null);
   const [creandoFlujo, setCreandoFlujo] = useState(false);
 
@@ -163,9 +164,6 @@ export default function TesoreriaConciliacionPage() {
     listCuentas(undefined, undefined, 200)
       .then((res) => setCuentas(res.results))
       .catch(() => setCuentas([]));
-    listContratos(undefined, undefined, undefined, 200)
-      .then((res) => setContratos(res.results))
-      .catch(() => setContratos([]));
   }, []);
 
   useEffect(() => {
@@ -881,16 +879,7 @@ export default function TesoreriaConciliacionPage() {
                 Cuenta, concepto y monto ya vienen del estado de cuenta; solo falta el contrato.
               </Typography>
               <Stack direction="row" spacing={1}>
-                <Autocomplete
-                  size="small"
-                  fullWidth
-                  options={contratos}
-                  value={contratoNuevoFlujo}
-                  onChange={(_, valor) => setContratoNuevoFlujo(valor)}
-                  getOptionLabel={(c) => `${c.id_contrato}${c.contraparte_nombre ? ` — ${c.contraparte_nombre}` : ""}`}
-                  isOptionEqualToValue={(a, b) => a?.id_contrato === b?.id_contrato}
-                  renderInput={(params) => <TextField {...params} label="Contrato" />}
-                />
+                <ContratoSelector value={contratoNuevoFlujo} onChange={setContratoNuevoFlujo} />
                 <Button
                   variant="contained"
                   disabled={!contratoNuevoFlujo || creandoFlujo}

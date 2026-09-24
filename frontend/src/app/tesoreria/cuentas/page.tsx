@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Checkbox,
@@ -158,6 +159,14 @@ export default function TesoreriaCuentasPage() {
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
+
+  // Buscador local (23/Sep/2026) - "bancos" ya trae el catalogo completo
+  // (pageSize 200, ~90 reales, ver comentario del estado arriba), asi que
+  // filtrar por texto aqui mismo es mas simple que reconectar cada uso a
+  // busqueda en vivo contra el backend (bajo riesgo, catalogo Banxico estable).
+  function etiquetaBanco(b: TesoreriaBanco): string {
+    return b.alias ? `${b.banco || b.id_banxico} (${b.alias})` : b.banco || b.id_banxico;
+  }
 
   function refreshCuentas() {
     setLoadingCuentas(true);
@@ -492,24 +501,17 @@ export default function TesoreriaCuentasPage() {
                     ))}
                   </Select>
                 </FormControl>
-                <FormControl size="small" sx={{ minWidth: 200 }}>
-                  <InputLabel id="filtro-banco-cuenta-label">Banco</InputLabel>
-                  <Select
-                    labelId="filtro-banco-cuenta-label"
-                    label="Banco"
-                    value={filtroBancoCuenta}
-                    onChange={(e) => setFiltroBancoCuenta(e.target.value)}
-                  >
-                    <MenuItem value="">
-                      <em>Todos los bancos</em>
-                    </MenuItem>
-                    {bancos.map((b) => (
-                      <MenuItem key={b.id_banxico} value={b.id_banxico}>
-                        {b.banco || b.id_banxico}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <Autocomplete
+                  size="small"
+                  openOnFocus
+                  sx={{ minWidth: 200 }}
+                  options={bancos}
+                  value={bancos.find((b) => b.id_banxico === filtroBancoCuenta) || null}
+                  onChange={(_, seleccion) => setFiltroBancoCuenta(seleccion?.id_banxico || "")}
+                  getOptionLabel={etiquetaBanco}
+                  isOptionEqualToValue={(a, b) => a.id_banxico === b.id_banxico}
+                  renderInput={(params) => <TextField {...params} label="Banco" />}
+                />
               </FiltrosBar>
             </Box>
             {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
@@ -523,6 +525,7 @@ export default function TesoreriaCuentasPage() {
                     <TableCell>ID</TableCell>
                     <TableCell>Alias</TableCell>
                     <TableCell>Banco</TableCell>
+                    <TableCell>Cuenta</TableCell>
                     <TableCell>CLABE</TableCell>
                     <TableCell>Titular</TableCell>
                     <TableCell>Estado</TableCell>
@@ -532,13 +535,13 @@ export default function TesoreriaCuentasPage() {
                 <TableBody>
                   {loadingCuentas ? (
                     <TableRow>
-                      <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                      <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                         <CircularProgress size={20} />
                       </TableCell>
                     </TableRow>
                   ) : cuentas.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                      <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                         <Typography variant="body2" color="text.secondary">
                           Sin cuentas registradas.
                         </Typography>
@@ -550,6 +553,7 @@ export default function TesoreriaCuentasPage() {
                         <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_cuenta_bancaria}</TableCell>
                         <TableCell>{c.alias || c.label || "—"}</TableCell>
                         <TableCell>{c.banco_nombre || "—"}</TableCell>
+                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.cuenta || "—"}</TableCell>
                         <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.clabe || "—"}</TableCell>
                         <TableCell>{c.rfc_razon_social || "—"}</TableCell>
                         <TableCell>
@@ -616,6 +620,9 @@ export default function TesoreriaCuentasPage() {
                         <strong>Banco:</strong> {c.banco_nombre || "—"}
                       </Typography>
                       <Typography variant="body2">
+                        <strong>Cuenta:</strong> {c.cuenta || "—"}
+                      </Typography>
+                      <Typography variant="body2">
                         <strong>CLABE:</strong> {c.clabe || "—"}
                       </Typography>
                       <Typography variant="body2">
@@ -660,24 +667,17 @@ export default function TesoreriaCuentasPage() {
                 onSearchChange={setSearchBancos}
                 searchPlaceholder="Buscar por nombre o alias..."
               >
-                <FormControl size="small" sx={{ minWidth: 200 }}>
-                  <InputLabel id="filtro-banco-tabla-label">Banco</InputLabel>
-                  <Select
-                    labelId="filtro-banco-tabla-label"
-                    label="Banco"
-                    value={filtroBancoTabla}
-                    onChange={(e) => setFiltroBancoTabla(e.target.value)}
-                  >
-                    <MenuItem value="">
-                      <em>Todos los bancos</em>
-                    </MenuItem>
-                    {bancos.map((b) => (
-                      <MenuItem key={b.id_banxico} value={b.id_banxico}>
-                        {b.banco || b.id_banxico}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <Autocomplete
+                  size="small"
+                  openOnFocus
+                  sx={{ minWidth: 200 }}
+                  options={bancos}
+                  value={bancos.find((b) => b.id_banxico === filtroBancoTabla) || null}
+                  onChange={(_, seleccion) => setFiltroBancoTabla(seleccion?.id_banxico || "")}
+                  getOptionLabel={etiquetaBanco}
+                  isOptionEqualToValue={(a, b) => a.id_banxico === b.id_banxico}
+                  renderInput={(params) => <TextField {...params} label="Banco" />}
+                />
               </FiltrosBar>
             </Box>
             {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
@@ -846,21 +846,17 @@ export default function TesoreriaCuentasPage() {
             </Stack>
             {!editingCuenta && (
               <>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="banco-label">Banco</InputLabel>
-                  <Select
-                    labelId="banco-label"
-                    label="Banco"
-                    value={cuentaForm.banco}
-                    onChange={(e) => setCuentaForm({ ...cuentaForm, banco: e.target.value })}
-                  >
-                    {bancos.map((b) => (
-                      <MenuItem key={b.id_banxico} value={b.id_banxico}>
-                        {b.banco || b.id_banxico}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <Autocomplete
+                  size="small"
+                  openOnFocus
+                  fullWidth
+                  options={bancos}
+                  value={bancos.find((b) => b.id_banxico === cuentaForm.banco) || null}
+                  onChange={(_, seleccion) => setCuentaForm({ ...cuentaForm, banco: seleccion?.id_banxico || "" })}
+                  getOptionLabel={etiquetaBanco}
+                  isOptionEqualToValue={(a, b) => a.id_banxico === b.id_banxico}
+                  renderInput={(params) => <TextField {...params} label="Banco" />}
+                />
                 <TextField
                   size="small"
                   label="RFC / Razón social (titular)"
