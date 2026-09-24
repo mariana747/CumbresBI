@@ -367,7 +367,7 @@ class TicketsDependenciaCrudTests(TestCase):
         view = TicketsDependenciaViewSet.as_view({"post": "create"})
         response = view(request)
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["tipo"], "FIN_A_INICIO")
+        self.assertEqual(response.data["tipo"], "ESTRICTO")
 
     def test_no_permite_autoreferencia(self):
         request = self.factory.post(
@@ -425,7 +425,7 @@ class TicketsLogCrudTests(TestCase):
     def test_crear_sin_permiso_da_403(self):
         request = self.factory.post(
             "/api/log/",
-            {"id_ticket": self.ticket.pk, "accion": "Cambio de estado a EN CURSO"},
+            {"id_ticket": self.ticket.pk, "accion": "ACTUALIZACION"},
             format="json",
         )
         request.effective_scope = EffectiveScope(is_global=True, perm_keys=())
@@ -436,7 +436,7 @@ class TicketsLogCrudTests(TestCase):
     def test_crear_con_permiso_tickets_crear(self):
         request = self.factory.post(
             "/api/log/",
-            {"id_ticket": self.ticket.pk, "accion": "Cambio de estado a EN CURSO"},
+            {"id_ticket": self.ticket.pk, "accion": "ACTUALIZACION"},
             format="json",
         )
         request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tickets.crear",), identity_user_id="u001")

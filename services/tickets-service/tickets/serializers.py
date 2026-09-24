@@ -151,11 +151,14 @@ class TicketsLogSerializer(serializers.ModelSerializer):
             "id_log",
             "id_ticket",
             "accion",
+            "comentario",
             "progreso_nuevo",
             "horas_incurridas",
-            "evidencia",
-            "comentarios",
+            "descripcion_archivo",
+            "url_archivo",
             "created_at",
             "created_by",
+            "updated_at",
+            "updated_by",
         ]
-        read_only_fields = ["id_log", "created_at", "created_by"]
+        read_only_fields = ["id_log", "created_at", "created_by", "updated_at", "updated_by"]

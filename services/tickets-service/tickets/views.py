@@ -135,8 +135,9 @@ class TicketViewSet(_PermisosTicketsMixin, ModelViewSet):
 
 
 class TicketsDependenciaViewSet(_PermisosTicketsMixin, ModelViewSet):
-    """Precedencia tipo Gantt entre tickets - hereda alcance via
-    predecesora (ver TicketsDependencia.SCOPE_FIELD_SOCIEDAD)."""
+    """Precedencia entre tickets (ESTRICTO/FLEXIBLE, ver
+    TicketsDependencia.TIPO_CHOICES) - hereda alcance via predecesora (ver
+    TicketsDependencia.SCOPE_FIELD_SOCIEDAD)."""
 
     serializer_class = TicketsDependenciaSerializer
     pagination_class = ListadoGrandePagination
@@ -165,7 +166,6 @@ class TicketsLogViewSet(_PermisosTicketsMixin, ModelViewSet):
             queryset = queryset.filter(id_ticket=id_ticket)
         return queryset
 
-    # TicketsLog no tiene updated_by/updated_at (bitacora append-only) -
-    # override sin el updated_by que si manda _PermisosTicketsMixin.perform_create.
-    def perform_create(self, serializer):
-        serializer.save(created_by=self.request.effective_scope.identity_user_id)
+    # TicketsLog si tiene updated_by/updated_at (ver models.py, calzan con
+    # el ERD) - perform_create del mixin ya cubre ambos, sin override.
+    # http_method_names arriba impide que se usen fuera de la creacion.

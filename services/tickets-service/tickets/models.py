@@ -193,17 +193,18 @@ class TicketsDependencia(models.Model):
     Hereda alcance via predecesora (mismo criterio que Ticket, ambos
     tickets de una dependencia real siempre caen en la misma sociedad)."""
 
+    # ERD (20260727_Cumbres_ERD.sql:838-849): ESTRICTO/FLEXIBLE, no el
+    # FIN_A_INICIO/... tipo Gantt estandar que se uso en el primer corte
+    # (corregido 24/Sep/2026, calzar exacto con el ERD).
     TIPO_CHOICES = [
-        ("FIN_A_INICIO", "Fin a inicio"),
-        ("INICIO_A_INICIO", "Inicio a inicio"),
-        ("FIN_A_FIN", "Fin a fin"),
-        ("INICIO_A_FIN", "Inicio a fin"),
+        ("ESTRICTO", "Estricto"),
+        ("FLEXIBLE", "Flexible"),
     ]
 
     id_dependencia = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     predecesora = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="dependencias_como_predecesora")
     sucesora = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="dependencias_como_sucesora")
-    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default="FIN_A_INICIO")
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default="ESTRICTO")
     ventaja_desfase_dias = models.IntegerField(blank=True, null=True)
     comentarios = models.CharField(max_length=500, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -229,19 +230,32 @@ class TicketsDependencia(models.Model):
 
 class TicketsLog(models.Model):
     """Fase 4 (24/Sep/2026): bitacora de cambios de un Ticket - accion,
-    progreso, horas incurridas y evidencia adjunta (Drive), mismo criterio
+    progreso, horas incurridas y archivo adjunto (Drive), mismo criterio
     de `carpeta`/link suelto que el resto del modulo (sin FK real a
-    Drive)."""
+    Drive). Campos calzan exacto con el ERD (20260727_Cumbres_ERD.sql:
+    851-864) - `accion` es un enum cerrado, no texto libre como en el
+    primer corte."""
+
+    ACCION_CHOICES = [
+        ("COMENTARIO", "Comentario"),
+        ("ACTUALIZACION", "Actualización"),
+        ("CARGA ARCHIVO", "Carga de archivo"),
+        ("CAMBIO ASIGNACION", "Cambio de asignación"),
+        ("OTRO", "Otro"),
+    ]
 
     id_log = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     id_ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="log")
-    accion = models.CharField(max_length=255)
+    accion = models.CharField(max_length=20, choices=ACCION_CHOICES, default="ACTUALIZACION")
+    comentario = models.CharField(max_length=500, blank=True, null=True)
     progreso_nuevo = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
-    horas_incurridas = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
-    evidencia = models.CharField(max_length=2083, blank=True, null=True)
-    comentarios = models.CharField(max_length=500, blank=True, null=True)
+    horas_incurridas = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
+    descripcion_archivo = models.CharField(max_length=250, blank=True, null=True)
+    url_archivo = models.CharField(max_length=2083, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=8)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8)
 
     SCOPE_FIELD_SOCIEDAD = "id_ticket__id_subproyecto__sociedad"
     objects = ScopedManager()
