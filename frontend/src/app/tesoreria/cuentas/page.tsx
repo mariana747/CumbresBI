@@ -76,6 +76,7 @@ const TIPO_CUENTA_LABELS: Record<TesoreriaCuentaTipo, string> = {
   CHEQUES: "Cheques",
   INVERSION: "Inversión",
   NOMINA: "Nómina",
+  PAGARE: "Pagaré",
   OTRA: "Otra",
 };
 

@@ -263,11 +263,15 @@ class TesoreriaCuenta(models.Model):
     TIPO_CHEQUES = "CHEQUES"
     TIPO_INVERSION = "INVERSION"
     TIPO_NOMINA = "NOMINA"
+    TIPO_PAGARE = "PAGARE"
     TIPO_OTRA = "OTRA"
     TIPO_CHOICES = [
         (TIPO_CHEQUES, "Cheques"),
         (TIPO_INVERSION, "Inversión"),
         (TIPO_NOMINA, "Nómina"),
+        # PAGARE (23/Sep/2026) - categoria propia, distinta de Inversion
+        # aunque tambien es un instrumento financiero.
+        (TIPO_PAGARE, "Pagaré"),
         (TIPO_OTRA, "Otra"),
     ]
 
