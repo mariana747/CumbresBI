@@ -10,7 +10,7 @@ from django.db import migrations, models
 # pena todavia con el volumen actual (500-900 filas).
 class Migration(migrations.Migration):
     dependencies = [
-        ("tesoreria", "0053_contrato_sociedad_nullable"),
+        ("tesoreria", "0054_backfill_cuenta_tipo_inversion"),
     ]
 
     operations = [
