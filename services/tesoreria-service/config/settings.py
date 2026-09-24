@@ -19,6 +19,16 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-only-insecure-key")
 DEBUG = env.bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
 
+# Sube el default de Django (2.5MB) - mismo hallazgo real que en
+# pld-service (24/Sep/2026): subir un comprobante/referencia/factura PDF
+# de mas de 2.5MB tronaba con "RequestDataTooBig" (500 crudo de Django,
+# antes de que la vista pudiera dar un mensaje explicito) en
+# subir_comprobante/subir_referencia/subir_documento_factura. El
+# api-gateway ya permite hasta 12MB - sin este override el servicio era
+# el eslabon mas corto de la cadena.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+
 # Default False a proposito (seguro por default): Cloud Run no fija esta
 # variable (ver deploy.yml/gcp_setup.sh), asi que cualquier ambiente real
 # donde nadie la configure queda protegido sin esfuerzo extra. Solo
