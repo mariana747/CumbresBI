@@ -20,19 +20,21 @@ import {
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { ClipboardList, Pencil, Plus, Trash2, UserPlus, X as CloseIcon } from "lucide-react";
+import { ClipboardList, Layers, Pencil, Plus, Trash2, UserPlus, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -42,18 +44,23 @@ import {
   TicketsProyecto,
   TicketsProyectoEstado,
   TicketsProyectoParticipante,
+  TicketsSubproyecto,
   addParticipante,
   createCentro,
   createProyecto,
   deleteCentro,
   deleteProyecto,
+  deleteSubproyecto,
   listCentros,
   listParticipantes,
   listProyectos,
+  listSubproyectos,
   removeParticipante,
   updateCentro,
   updateProyecto,
 } from "@/lib/tickets";
+import SubproyectoDetalleDialog from "./SubproyectoDetalleDialog";
+import SubproyectoFormDialog from "./SubproyectoFormDialog";
 
 const ESTADOS: TicketsProyectoEstado[] = ["PLANEADO", "EN CURSO", "COMPLETADO", "CANCELADO"];
 
@@ -81,11 +88,12 @@ const PROYECTO_VACIO = {
   comentarios: "",
 };
 
-// Fase 1 del modulo Tickets (23/Sep/2026, ver memoria
-// tickets-modulo-jerarquia-sin-construir): Centros -> Proyectos ->
-// Participantes. Subproyectos/Tickets/Log/Dependencias quedan para las
-// siguientes fases - esta pantalla solo cubre lo que ya existe en el
-// backend (tickets-service, Fase 1).
+// Pantalla principal del modulo Tickets (24/Sep/2026, ver memoria
+// tickets-modulo-jerarquia-sin-construir): Proyectos por Centro, con
+// Participantes y Subproyectos en el detalle. Cada Subproyecto abre su
+// propio dialogo con sus Tickets (SubproyectoDetalleDialog), y cada
+// Ticket el suyo con Dependencias/Log (TicketDetalleDialog) - Centros
+// tiene pantalla aparte (ver /tickets/centros).
 export default function TicketsPage() {
   const theme = useTheme();
   const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
@@ -110,10 +118,19 @@ export default function TicketsPage() {
   const [proyectoError, setProyectoError] = useState<string | null>(null);
 
   const [detalle, setDetalle] = useState<TicketsProyecto | null>(null);
+  const [detalleTab, setDetalleTab] = useState<"participantes" | "subproyectos">("participantes");
   const [participantes, setParticipantes] = useState<TicketsProyectoParticipante[]>([]);
   const [cargandoParticipantes, setCargandoParticipantes] = useState(false);
   const [nuevoParticipante, setNuevoParticipante] = useState<IamUser | null>(null);
   const [agregandoParticipante, setAgregandoParticipante] = useState(false);
+
+  // Subproyectos del Proyecto en detalle (24/Sep/2026, Fase 2) - mismo
+  // patron de tab pegado a la tabla que Participantes.
+  const [subproyectos, setSubproyectos] = useState<TicketsSubproyecto[]>([]);
+  const [cargandoSubproyectos, setCargandoSubproyectos] = useState(false);
+  const [subproyectoFormOpen, setSubproyectoFormOpen] = useState(false);
+  const [subproyectoEditando, setSubproyectoEditando] = useState<TicketsSubproyecto | null>(null);
+  const [subproyectoDetalle, setSubproyectoDetalle] = useState<TicketsSubproyecto | null>(null);
 
   const puedeCrear = session?.perm_keys.includes("tickets.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tickets.editar") ?? false;
@@ -297,12 +314,14 @@ export default function TicketsPage() {
 
   function abrirDetalle(p: TicketsProyecto) {
     setDetalle(p);
+    setDetalleTab("participantes");
     setNuevoParticipante(null);
     setCargandoParticipantes(true);
     listParticipantes(p.id_proyecto)
       .then((res) => setParticipantes(res.results))
       .catch(() => setParticipantes([]))
       .finally(() => setCargandoParticipantes(false));
+    refrescarSubproyectos(p.id_proyecto);
   }
 
   async function agregarParticipante() {
@@ -335,14 +354,36 @@ export default function TicketsPage() {
     [usuarios, participantes]
   );
 
+  // --- Subproyectos --------------------------------------------------------
+
+  function refrescarSubproyectos(idProyecto: string) {
+    setCargandoSubproyectos(true);
+    listSubproyectos({ idProyecto })
+      .then((res) => setSubproyectos(res.results))
+      .catch(() => setSubproyectos([]))
+      .finally(() => setCargandoSubproyectos(false));
+  }
+
+  async function borrarSubproyecto(s: TicketsSubproyecto) {
+    if (!detalle) return;
+    if (!window.confirm(`¿Borrar el subproyecto "${s.denominacion}"? Esto falla si ya tiene tickets.`)) return;
+    try {
+      await deleteSubproyecto(s.id_subproyecto);
+      setSubproyectoDetalle(null);
+      refrescarSubproyectos(detalle.id_proyecto);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
   return (
     <AppShell>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 0.5 }}>
         <ClipboardList size={22} strokeWidth={1.5} />
-        <Typography variant="h5">Tickets</Typography>
+        <Typography variant="h5">Proyectos</Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Proyectos por Centro — responsables y participantes (Fase 1).
+        Proyectos por Centro — responsables, participantes, subproyectos y tickets.
       </Typography>
 
       <FiltrosBar
@@ -746,57 +787,113 @@ export default function TicketsPage() {
                 )}
               </Stack>
 
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Participantes
-              </Typography>
-              {cargandoParticipantes ? (
-                <Stack alignItems="center" sx={{ py: 2 }}>
-                  <CircularProgress size={20} />
-                </Stack>
-              ) : (
-                <Stack spacing={0.5} sx={{ mb: 2 }}>
-                  {participantes.length === 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                      Sin participantes todavía.
-                    </Typography>
-                  )}
-                  {participantes.map((p) => (
-                    <Stack key={p.id_proyectos_part} direction="row" alignItems="center" justifyContent="space-between">
-                      <Typography variant="body2">{nombreUsuario(p.id_participante)}</Typography>
-                      {puedeEditar && (
-                        <IconButton size="small" aria-label="Quitar" onClick={() => quitarParticipante(p)}>
-                          <Trash2 size={13} strokeWidth={1.5} />
-                        </IconButton>
-                      )}
+              <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
+                <Tabs value={detalleTab} onChange={(_, v) => setDetalleTab(v)}>
+                  <Tab value="participantes" label="Participantes" />
+                  <Tab value="subproyectos" label="Subproyectos" />
+                </Tabs>
+              </Box>
+
+              {detalleTab === "participantes" && (
+                <>
+                  {cargandoParticipantes ? (
+                    <Stack alignItems="center" sx={{ py: 2 }}>
+                      <CircularProgress size={20} />
                     </Stack>
-                  ))}
-                </Stack>
+                  ) : (
+                    <Stack spacing={0.5} sx={{ mb: 2 }}>
+                      {participantes.length === 0 && (
+                        <Typography variant="body2" color="text.secondary">
+                          Sin participantes todavía.
+                        </Typography>
+                      )}
+                      {participantes.map((p) => (
+                        <Stack key={p.id_proyectos_part} direction="row" alignItems="center" justifyContent="space-between">
+                          <Typography variant="body2">{nombreUsuario(p.id_participante)}</Typography>
+                          {puedeEditar && (
+                            <IconButton size="small" aria-label="Quitar" onClick={() => quitarParticipante(p)}>
+                              <Trash2 size={13} strokeWidth={1.5} />
+                            </IconButton>
+                          )}
+                        </Stack>
+                      ))}
+                    </Stack>
+                  )}
+                  {puedeEditar && (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Autocomplete
+                        size="small"
+                        fullWidth
+                        openOnFocus
+                        options={usuariosDisponibles}
+                        value={nuevoParticipante}
+                        onChange={(_, value) => setNuevoParticipante(value)}
+                        getOptionLabel={(u) => u.display_name || u.primary_email}
+                        isOptionEqualToValue={(o, v) => o.user_id === v.user_id}
+                        renderInput={(params) => <TextField {...params} label="Agregar participante" />}
+                      />
+                      <Tooltip title="Agregar">
+                        <span>
+                          <IconButton
+                            color="primary"
+                            onClick={agregarParticipante}
+                            disabled={!nuevoParticipante || agregandoParticipante}
+                          >
+                            <UserPlus size={18} strokeWidth={1.5} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Stack>
+                  )}
+                </>
               )}
-              {puedeEditar && (
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Autocomplete
-                    size="small"
-                    fullWidth
-                    openOnFocus
-                    options={usuariosDisponibles}
-                    value={nuevoParticipante}
-                    onChange={(_, value) => setNuevoParticipante(value)}
-                    getOptionLabel={(u) => u.display_name || u.primary_email}
-                    isOptionEqualToValue={(o, v) => o.user_id === v.user_id}
-                    renderInput={(params) => <TextField {...params} label="Agregar participante" />}
-                  />
-                  <Tooltip title="Agregar">
-                    <span>
-                      <IconButton
-                        color="primary"
-                        onClick={agregarParticipante}
-                        disabled={!nuevoParticipante || agregandoParticipante}
+
+              {detalleTab === "subproyectos" && (
+                <>
+                  <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
+                    {puedeCrear && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<Plus size={14} strokeWidth={2} />}
+                        onClick={() => {
+                          setSubproyectoEditando(null);
+                          setSubproyectoFormOpen(true);
+                        }}
                       >
-                        <UserPlus size={18} strokeWidth={1.5} />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                </Stack>
+                        Nuevo Subproyecto
+                      </Button>
+                    )}
+                  </Stack>
+                  {cargandoSubproyectos ? (
+                    <Stack alignItems="center" sx={{ py: 2 }}>
+                      <CircularProgress size={20} />
+                    </Stack>
+                  ) : subproyectos.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
+                      Sin subproyectos todavía.
+                    </Typography>
+                  ) : (
+                    <Stack spacing={0.5}>
+                      {subproyectos.map((s) => (
+                        <Stack
+                          key={s.id_subproyecto}
+                          direction="row"
+                          alignItems="center"
+                          justifyContent="space-between"
+                          onClick={() => setSubproyectoDetalle(s)}
+                          sx={{ cursor: "pointer", py: 0.5, "&:hover": { bgcolor: "action.hover" } }}
+                        >
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Layers size={14} strokeWidth={1.5} />
+                            <Typography variant="body2">{s.denominacion}</Typography>
+                          </Stack>
+                          <Chip size="small" label={s.estado} color={ESTADO_COLOR[s.estado]} />
+                        </Stack>
+                      ))}
+                    </Stack>
+                  )}
+                </>
               )}
             </DialogContent>
             <DialogActions>
@@ -819,6 +916,34 @@ export default function TicketsPage() {
           </>
         )}
       </Dialog>
+
+      <SubproyectoFormDialog
+        open={subproyectoFormOpen}
+        onClose={() => setSubproyectoFormOpen(false)}
+        idProyecto={detalle?.id_proyecto || ""}
+        subproyecto={subproyectoEditando}
+        usuarios={usuarios}
+        onSaved={() => detalle && refrescarSubproyectos(detalle.id_proyecto)}
+      />
+
+      <SubproyectoDetalleDialog
+        open={!!subproyectoDetalle}
+        onClose={() => setSubproyectoDetalle(null)}
+        subproyecto={subproyectoDetalle}
+        usuarios={usuarios}
+        puedeEditar={puedeEditar}
+        puedeCrear={puedeCrear}
+        onEditar={() => {
+          if (subproyectoDetalle) {
+            setSubproyectoEditando(subproyectoDetalle);
+            setSubproyectoFormOpen(true);
+            setSubproyectoDetalle(null);
+          }
+        }}
+        onBorrar={() => {
+          if (subproyectoDetalle) borrarSubproyecto(subproyectoDetalle);
+        }}
+      />
     </AppShell>
   );
 }
