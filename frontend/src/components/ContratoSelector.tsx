@@ -13,11 +13,15 @@ export default function ContratoSelector({
   onChange,
   label = "Contrato",
   disabled,
+  sociedad,
 }: {
   value: TesoreriaContrato | null;
   onChange: (contrato: TesoreriaContrato | null) => void;
   label?: string;
   disabled?: boolean;
+  // Filtra a los contratos de una sola empresa (opcional) - mismo patron
+  // que CuentaBancariaSelector.sociedad.
+  sociedad?: string;
 }) {
   const [inputValue, setInputValue] = useState(value ? etiqueta(value) : "");
   const [opciones, setOpciones] = useState<TesoreriaContrato[]>([]);
@@ -26,14 +30,14 @@ export default function ContratoSelector({
   useEffect(() => {
     setBuscando(true);
     const timeout = setTimeout(() => {
-      listContratos(inputValue || undefined, undefined, 1, 200)
+      listContratos(inputValue || undefined, undefined, 1, 200, sociedad)
         .then((res) => setOpciones(res.results))
         .catch(() => setOpciones([]))
         .finally(() => setBuscando(false));
     }, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValue]);
+  }, [inputValue, sociedad]);
 
   return (
     <Autocomplete
