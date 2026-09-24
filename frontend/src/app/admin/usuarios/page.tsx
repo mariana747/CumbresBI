@@ -35,9 +35,8 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Ban, Building2, Clock, PencilLine, RotateCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
+import { Ban, Clock, PencilLine, RotateCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import AppShell, { notifySinRolChanged } from "@/components/AppShell";
-import EmpresaAssignmentDialog from "@/components/EmpresaAssignmentDialog";
 import RoleAssignmentDialog from "@/components/RoleAssignmentDialog";
 import { getSession, SessionUser } from "@/lib/auth";
 import {
@@ -58,6 +57,25 @@ import {
   revokeInvitation,
   scopeChipColor,
 } from "@/lib/iam";
+
+// Leyenda de colores del Directorio (23/Sep/2026, pedido explicito) - los
+// mismos colores usados en los Chips de la tabla, explicados aparte.
+// Estado y Tipo usan colores estandar de MUI (success/warning/default/info);
+// Alcance de rol usa la paleta custom del theme (SCOPE_PALETTE en
+// theme/theme.ts), referenciada aqui via su nombre de color de tema
+// (ej. "scopeGlobal.main"), nunca un hex suelto.
+const LEYENDA_COLORES = [
+  { grupo: "Estado", label: "Activo", color: "success.main" },
+  { grupo: "Estado", label: "Suspendido", color: "warning.main" },
+  { grupo: "Estado", label: "Eliminado", color: "grey.400" },
+  { grupo: "Tipo", label: "Interno", color: "grey.400" },
+  { grupo: "Tipo", label: "Externo", color: "info.main" },
+  { grupo: "Alcance de rol", label: "Global", color: "scopeGlobal.main" },
+  { grupo: "Alcance de rol", label: "Sociedad", color: "scopeSociedad.main" },
+  { grupo: "Alcance de rol", label: "Proyecto", color: "scopeProyecto.main" },
+  { grupo: "Alcance de rol", label: "Centro", color: "scopeCentro.main" },
+  { grupo: "Alcance de rol", label: "Contrato", color: "scopeContrato.main" },
+] as const;
 
 const STATUS_LABELS: Record<IamUser["status"], string> = {
   ACTIVE: "Activo",
@@ -175,7 +193,6 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managingUser, setManagingUser] = useState<IamUser | null>(null);
-  const [managingEmpresaUser, setManagingEmpresaUser] = useState<IamUser | null>(null);
   const [eliminando, setEliminando] = useState<string | null>(null);
   const [confirmandoEliminar, setConfirmandoEliminar] = useState<IamUser | null>(null);
   const [confirmandoSuspender, setConfirmandoSuspender] = useState<IamUser | null>(null);
@@ -191,8 +208,8 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
     setMenuUser(null);
   }
 
-  // Mismo criterio de permiso que RoleAssignmentDialog/EmpresaAssignmentDialog
-  // (iam.editar) - eliminar un usuario es tan "editar" como cambiarle el rol.
+  // Mismo criterio de permiso que RoleAssignmentDialog (iam.editar) -
+  // eliminar un usuario es tan "editar" como cambiarle el rol.
   const puedeEditar = session?.perm_keys.includes("iam.editar") ?? false;
 
   const sinRol = roleFilter === SIN_ROL_VALUE;
@@ -310,6 +327,28 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
         Usuarios registrados en iam-service. Búsqueda por correo/nombre y
         filtros por estado, rol y empresa.
       </Typography>
+
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+        <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
+          {["Estado", "Tipo", "Alcance de rol"].map((grupo) => (
+            <Stack key={grupo} spacing={0.5}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                {grupo}
+              </Typography>
+              <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                {LEYENDA_COLORES.filter((item) => item.grupo === grupo).map((item) => (
+                  <Stack key={item.label} direction="row" spacing={0.5} alignItems="center">
+                    <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: item.color }} />
+                    <Typography variant="caption" color="text.secondary">
+                      {item.label}
+                    </Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </Stack>
+          ))}
+        </Stack>
+      </Paper>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
         <TextField
@@ -579,15 +618,6 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
       <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={cerrarMenu}>
         <MenuItem
           onClick={() => {
-            if (menuUser) setManagingEmpresaUser(menuUser);
-            cerrarMenu();
-          }}
-        >
-          <Building2 size={15} strokeWidth={1.5} style={{ marginRight: 10 }} />
-          Cambiar empresa
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
             if (menuUser) setManagingUser(menuUser);
             cerrarMenu();
           }}
@@ -647,17 +677,6 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
           userId={managingUser.user_id}
           userLabel={managingUser.display_name || managingUser.primary_email}
           allRoles={roles}
-          onChanged={refreshUsers}
-        />
-      )}
-
-      {managingEmpresaUser && (
-        <EmpresaAssignmentDialog
-          open={!!managingEmpresaUser}
-          onClose={() => setManagingEmpresaUser(null)}
-          userId={managingEmpresaUser.user_id}
-          userLabel={managingEmpresaUser.display_name || managingEmpresaUser.primary_email}
-          allGroups={groups}
           onChanged={refreshUsers}
         />
       )}
