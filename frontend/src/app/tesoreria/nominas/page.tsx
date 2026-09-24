@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   Checkbox,
   Chip,
@@ -35,6 +36,7 @@ import {
 } from "@mui/material";
 import { Eye, MoreVertical, Pencil, Plus, Users, X as CloseIcon, Zap } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import CuentaBancariaSelector from "@/components/CuentaBancariaSelector";
 import FiltrosBar from "@/components/FiltrosBar";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -49,7 +51,6 @@ import {
   createFlujo,
   createNomina,
   getContratoGenericoNomina,
-  listCuentas,
   listFlujos,
   listNominas,
   updateNomina,
@@ -215,13 +216,14 @@ export default function TesoreriaNominasPage() {
   // ESTIMADO (salario_diario x dias del periodo, sin ISR/IMSS ni otras
   // deducciones reales de nomina) que Tesoreria debe revisar/ajustar en
   // cada Flujo antes de pagar - no reemplaza el calculo real de nomina.
-  const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
   const [generandoPara, setGenerandoPara] = useState<TesoreriaNomina | null>(null);
   const [puestosVigentes, setPuestosVigentes] = useState<RrhhPuesto[]>([]);
   const [empleadosConFlujo, setEmpleadosConFlujo] = useState<Set<string>>(new Set());
   const [cargandoPuestos, setCargandoPuestos] = useState(false);
   const [seleccionPuestos, setSeleccionPuestos] = useState<Set<string>>(new Set());
-  const [cuentaGeneracion, setCuentaGeneracion] = useState("");
+  // CuentaBancariaSelector requiere el objeto completo (23/Sep/2026, busca
+  // en vivo en vez de una lista fija de 200 - ver comentario del componente).
+  const [cuentaGeneracion, setCuentaGeneracion] = useState<TesoreriaCuenta | null>(null);
   const [generando, setGenerando] = useState(false);
   const [errorGeneracion, setErrorGeneracion] = useState<string | null>(null);
   const [resultadoGeneracion, setResultadoGeneracion] = useState<string | null>(null);
@@ -230,9 +232,6 @@ export default function TesoreriaNominasPage() {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listProyectos().then(setProyectos).catch(() => setProyectos([]));
-    listCuentas(undefined, undefined, 200)
-      .then((res) => setCuentas(res.results))
-      .catch(() => setCuentas([]));
   }, []);
 
   function diasDelPeriodo(n: TesoreriaNomina): number {
@@ -245,7 +244,7 @@ export default function TesoreriaNominasPage() {
     setGenerandoPara(n);
     setErrorGeneracion(null);
     setResultadoGeneracion(null);
-    setCuentaGeneracion("");
+    setCuentaGeneracion(null);
     setCargandoPuestos(true);
     Promise.all([
       // Una sociedad de la Nomina puede no tener listPuestos({sociedad:})
@@ -308,7 +307,7 @@ export default function TesoreriaNominasPage() {
         const idContrato = await contratoDe(puesto.sociedad || generandoPara.sociedades[0]);
         await createFlujo({
           contrato: idContrato,
-          cuenta: cuentaGeneracion,
+          cuenta: cuentaGeneracion?.id_cuenta_bancaria || "",
           periodoNomina: generandoPara.id_nomina,
           concepto: generandoPara.serie,
           totalMxp: total,
@@ -887,21 +886,9 @@ export default function TesoreriaNominasPage() {
               {resultadoGeneracion}
             </Alert>
           )}
-          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-            <InputLabel id="cuenta-generacion-label">Cuenta bancaria</InputLabel>
-            <Select
-              labelId="cuenta-generacion-label"
-              label="Cuenta bancaria"
-              value={cuentaGeneracion}
-              onChange={(e) => setCuentaGeneracion(e.target.value)}
-            >
-              {cuentas.map((c) => (
-                <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                  {c.alias || c.clabe}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Box sx={{ mb: 2 }}>
+            <CuentaBancariaSelector value={cuentaGeneracion} onChange={setCuentaGeneracion} />
+          </Box>
           {cargandoPuestos ? (
             <Stack alignItems="center" sx={{ py: 3 }}>
               <CircularProgress size={20} />

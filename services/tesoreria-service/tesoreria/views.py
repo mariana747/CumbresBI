@@ -497,10 +497,13 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         # mismo id_contrato (fallaria con IntegrityError, no en silencio) -
         # aceptable para el volumen esperado de esta pantalla (alta manual
         # por un analista, no un flujo de alta frecuencia).
-        sociedad = serializer.validated_data["sociedad"]
+        sociedad = serializer.validated_data.get("sociedad")
         contraparte = serializer.validated_data["contraparte"]
         consecutivo = TesoreriaContrato.objects.filter(sociedad=sociedad, contraparte=contraparte).count() + 1
-        serializer.save(id_contrato=f"{sociedad}-{contraparte.id_contraparte}-{consecutivo:03d}")
+        # "Sin sociedad" (23/Sep/2026) - prefijo legible en vez de dejar el
+        # id_contrato empezando en "-" (sociedad vacia).
+        prefijo = sociedad or "SINSOC"
+        serializer.save(id_contrato=f"{prefijo}-{contraparte.id_contraparte}-{consecutivo:03d}")
 
     @action(detail=True, methods=["post"])
     def enviar_recordatorio_documentos(self, request, pk=None):

@@ -34,6 +34,7 @@ import {
 } from "@mui/material";
 import { ExternalLink, Eye, FileSpreadsheet, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import ContratoSelector from "@/components/ContratoSelector";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
@@ -47,8 +48,6 @@ import {
   getConciliacionCfdi,
   getSugerenciasCfdi,
   getSugerenciasCfdiLote,
-  listContrapartes,
-  listContratos,
   SugerenciaCfdiLote,
   SugerenciasCfdiResponse,
   TesoreriaContraparte,
@@ -113,7 +112,11 @@ export default function ConciliacionFacturasPage() {
   const [hasta, setHasta] = useState(ultimoDiaDelMes());
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroContrato, setFiltroContrato] = useState("");
-  const [filtroContraparte, setFiltroContraparte] = useState("");
+  // ContratoSelector requiere el objeto completo (23/Sep/2026, busca en
+  // vivo en vez de una lista fija de 200 - hay 900+ contratos reales,
+  // ver comentario del componente); filtroContrato sigue siendo el id
+  // plano que ya usa el resto de la pantalla.
+  const [contratoSeleccionado, setContratoSeleccionado] = useState<TesoreriaContrato | null>(null);
   const [filtroTipoComprobante, setFiltroTipoComprobante] = useState<"" | "I" | "E">("");
 
   // Paginacion server-side 
@@ -251,9 +254,6 @@ export default function ConciliacionFacturasPage() {
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
-    listContratos(undefined, undefined, undefined, 200)
-      .then((res) => setContratos(res.results))
-      .catch(() => setContratos([]));
   }, []);
 
   // Cambiar de pestaña es otro bucket (con su propia paginacion) - vuelve
@@ -361,6 +361,7 @@ export default function ConciliacionFacturasPage() {
             setHasta(ultimoDiaDelMes());
             setFiltroEmpresa("");
             setFiltroContrato("");
+            setContratoSeleccionado(null);
             setFiltroTipoComprobante("");
             setPagina(0);
           }}
@@ -402,6 +403,7 @@ export default function ConciliacionFacturasPage() {
               onChange={(e) => {
                 setFiltroEmpresa(e.target.value);
                 setFiltroContrato("");
+                setContratoSeleccionado(null);
               }}
             >
               <MenuItem value="">
@@ -414,26 +416,15 @@ export default function ConciliacionFacturasPage() {
               ))}
             </Select>
           </FormControl>
-          <FormControl size="small">
-            <InputLabel id="filtro-contrato-label">Contrato</InputLabel>
-            <Select
-              labelId="filtro-contrato-label"
-              label="Contrato"
-              value={filtroContrato}
-              onChange={(e) => setFiltroContrato(e.target.value)}
-            >
-              <MenuItem value="">
-                <em>Todos los contratos</em>
-              </MenuItem>
-              {contratos
-                .filter((c) => !filtroEmpresa || c.sociedad === filtroEmpresa)
-                .map((c) => (
-                  <MenuItem key={c.id_contrato} value={c.id_contrato}>
-                    {c.id_contrato} — {c.contraparte_nombre}
-                  </MenuItem>
-                ))}
-            </Select>
-          </FormControl>
+          <ContratoSelector
+            label="Contrato"
+            sociedad={filtroEmpresa || undefined}
+            value={contratoSeleccionado}
+            onChange={(seleccion) => {
+              setContratoSeleccionado(seleccion);
+              setFiltroContrato(seleccion?.id_contrato || "");
+            }}
+          />
           <FormControl size="small">
             <InputLabel id="filtro-tipo-label">Ingreso/Egreso</InputLabel>
             <Select

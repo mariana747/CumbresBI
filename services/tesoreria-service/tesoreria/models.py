@@ -141,7 +141,13 @@ class TesoreriaContraparte(models.Model):
 
     id_contraparte = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
     rfc = models.CharField(max_length=13, unique=True, blank=True, null=True)
-    razon_social = models.CharField(max_length=100)
+    # db_index (23/Sep/2026, "rentable a largo plazo" del buscador en vivo de
+    # ContraparteSelector) - acelera el order_by("razon_social") del queryset
+    # por default (ver TesoreriaContraparteViewSet.get_queryset), que sin
+    # indice hace filesort en cada request. No acelera el LIKE '%texto%' en
+    # si (wildcard al inicio no usa el indice en MySQL/InnoDB) - para eso
+    # haria falta FULLTEXT, no vale la pena todavia con el volumen actual.
+    razon_social = models.CharField(max_length=100, db_index=True)
     contacto = models.CharField(max_length=100, blank=True, null=True)
     telefono_sms = models.CharField(max_length=10, blank=True, null=True)
     # Obligatorio, vuelve al ERD original (se habia relajado a blank/null
@@ -263,11 +269,15 @@ class TesoreriaCuenta(models.Model):
     TIPO_CHEQUES = "CHEQUES"
     TIPO_INVERSION = "INVERSION"
     TIPO_NOMINA = "NOMINA"
+    TIPO_PAGARE = "PAGARE"
     TIPO_OTRA = "OTRA"
     TIPO_CHOICES = [
         (TIPO_CHEQUES, "Cheques"),
         (TIPO_INVERSION, "Inversión"),
         (TIPO_NOMINA, "Nómina"),
+        # PAGARE (23/Sep/2026) - categoria propia, distinta de Inversion
+        # aunque tambien es un instrumento financiero.
+        (TIPO_PAGARE, "Pagaré"),
         (TIPO_OTRA, "Otra"),
     ]
 
@@ -291,7 +301,12 @@ class TesoreriaCuenta(models.Model):
     )
     cuenta = models.CharField(max_length=20, blank=True, null=True)
     clabe = models.CharField(max_length=18, blank=True, null=True)
-    alias = models.CharField(max_length=50, blank=True, null=True)
+    # db_index (23/Sep/2026) - mismo motivo que TesoreriaContraparte.razon_social:
+    # acelera el order_by("-created_at") indirectamente al reducir el volumen
+    # a ordenar en el filtro por alias de CuentaBancariaSelector, y cualquier
+    # busqueda exacta/prefijo (el LIKE '%texto%' con wildcard al inicio sigue
+    # sin usar el indice en MySQL/InnoDB).
+    alias = models.CharField(max_length=50, blank=True, null=True, db_index=True)
     label = models.CharField(max_length=100, blank=True, null=True)
     activa = models.BooleanField(blank=True, null=True)
     apertura = models.DateField()
@@ -365,7 +380,12 @@ class TesoreriaContrato(models.Model):
     contraparte = models.ForeignKey(
         TesoreriaContraparte, db_column="id_contraparte", on_delete=models.PROTECT, related_name="contratos"
     )
-    sociedad = models.CharField(max_length=13)
+    # Nullable (23/Sep/2026, "Sin sociedad") - contratos que no pertenecen a
+    # ninguna sociedad en particular (gasto corporativo compartido). Vacio
+    # queda FUERA del filtro de alcance por sociedad (ScopedQuerySet.for_scope,
+    # "sociedad__in" nunca hace match con NULL) - solo alcance GLOBAL los ve,
+    # a proposito.
+    sociedad = models.CharField(max_length=13, blank=True, null=True)
     proyecto = models.CharField(max_length=3, blank=True, null=True)
     propiedad = models.CharField(max_length=50, blank=True, null=True)
     centro = models.CharField(max_length=100, blank=True, null=True)
