@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Checkbox,
@@ -49,6 +50,7 @@ import {
   X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import ContraparteSelector from "@/components/ContraparteSelector";
 import FiltrosBar from "@/components/FiltrosBar";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import { ToggleCard } from "@/components/ToggleCard";
@@ -77,6 +79,12 @@ import {
   listContratos,
   updateContrato,
 } from "@/lib/tesoreria";
+
+// Sentinel para "Sin sociedad" (23/Sep/2026, gasto corporativo compartido) -
+// distinto de "" (que en el Select significa "no elegido todavia") - se
+// traduce a null al mandar al backend (ver handleGuardar). Solo lo ve alcance
+// GLOBAL (ScopedQuerySet.for_scope: sociedad__in nunca hace match con NULL).
+const SIN_SOCIEDAD = "__SIN_SOCIEDAD__";
 
 const FORM_VACIO = {
   sociedad: "",
@@ -152,7 +160,14 @@ function TesoreriaContratosPageContent() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  // Buscador en vivo (23/Sep/2026, "no aparecen las contrapartes nuevas" -
+  // antes era una sola carga de 200 sin buscador, y ya hay 500+ contrapartes:
+  // una nueva que no cae en las primeras 200 alfabeticas nunca aparecia aqui).
+  // Se re-consulta contra el catalogo real cada vez que se escribe, mismo
+  // criterio que ContraparteSelector.
   const [contrapartes, setContrapartes] = useState<TesoreriaContraparte[]>([]);
+  const [filtroContraparteInput, setFiltroContraparteInput] = useState("");
+  const [buscandoContrapartesFiltro, setBuscandoContrapartesFiltro] = useState(false);
   const [search, setSearch] = useState("");
   const [filtroSociedad, setFiltroSociedad] = useState("");
   // Precargado desde ?contraparte=<id> - solo muestra los contratos de esa
@@ -197,6 +212,10 @@ function TesoreriaContratosPageContent() {
   // servidor al guardar, mismo riesgo de condicion de carrera ya
   // documentado y aceptado en TesoreriaContratoViewSet.perform_create.
   const [idContratoPrevio, setIdContratoPrevio] = useState("");
+  // Objeto completo de la contraparte elegida en el alta (23/Sep/2026,
+  // ContraparteSelector lo requiere controlado) - form.contraparte sigue
+  // siendo el id plano que ya usaba el resto del formulario/backend.
+  const [contraparteSeleccionada, setContraparteSeleccionada] = useState<TesoreriaContraparte | null>(null);
 
   // Checklist de documentos requeridos (diseño Tesoreria2.pdf, 28/Ago/2026)
   // - solo tiene sentido con un id_contrato ya existente (al editar), por
@@ -219,10 +238,21 @@ function TesoreriaContratosPageContent() {
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
-    listContrapartes(undefined, undefined, undefined, undefined, 200)
-      .then((res) => setContrapartes(res.results))
-      .catch(() => setContrapartes([]));
   }, []);
+
+  // Busqueda en vivo del filtro "Filtrar por contraparte" (ver comentario
+  // del estado arriba) - sin gate por texto vacio, igual que
+  // ContraparteSelector: abrir el campo ya muestra el catalogo.
+  useEffect(() => {
+    setBuscandoContrapartesFiltro(true);
+    const timeout = setTimeout(() => {
+      listContrapartes(filtroContraparteInput || undefined, undefined, undefined, undefined, 200)
+        .then((res) => setContrapartes(res.results))
+        .catch(() => setContrapartes([]))
+        .finally(() => setBuscandoContrapartesFiltro(false));
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [filtroContraparteInput]);
 
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
@@ -301,6 +331,7 @@ function TesoreriaContratosPageContent() {
     setEditing(null);
     setSoloLectura(false);
     setForm(FORM_VACIO);
+    setContraparteSeleccionada(null);
     setTab("Detalles");
     setFormError(null);
     setIdContratoPrevio("");
@@ -317,12 +348,19 @@ function TesoreriaContratosPageContent() {
       if (!editing) setIdContratoPrevio("");
       return;
     }
+    // "Sin sociedad" (23/Sep/2026) - prefijo "SINSOC", mismo criterio que
+    // TesoreriaContratoViewSet.perform_create. El conteo aqui es solo
+    // vista previa (no filtra por "sin sociedad" especificamente, el
+    // backend no distingue "sin filtro" de "sociedad NULL") - el ID real
+    // siempre lo asigna el servidor al guardar.
+    const esSinSociedad = form.sociedad === SIN_SOCIEDAD;
+    const prefijo = esSinSociedad ? "SINSOC" : form.sociedad;
     // pageSize:1 (21/Sep/2026, fix paginacion) - solo hace falta el conteo
     // total (res.count), mismo patron que idFlujoPrevio en flujos/page.tsx.
-    listContratos(undefined, form.contraparte, 1, 1, form.sociedad)
+    listContratos(undefined, form.contraparte, 1, 1, esSinSociedad ? undefined : form.sociedad)
       .then((res) => {
         const consecutivo = res.count + 1;
-        setIdContratoPrevio(`${form.sociedad}-${form.contraparte}-${consecutivo.toString().padStart(3, "0")}`);
+        setIdContratoPrevio(`${prefijo}-${form.contraparte}-${consecutivo.toString().padStart(3, "0")}`);
       })
       .catch(() => setIdContratoPrevio(""));
   }, [dialogOpen, editing, form.sociedad, form.contraparte]);
@@ -461,7 +499,7 @@ function TesoreriaContratosPageContent() {
         });
       } else {
         await createContrato({
-          sociedad: form.sociedad,
+          sociedad: form.sociedad === SIN_SOCIEDAD ? "" : form.sociedad,
           contraparte: form.contraparte,
           categoria: form.categoria || undefined,
           tipo: form.tipo,
@@ -548,24 +586,34 @@ function TesoreriaContratosPageContent() {
               ))}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel id="filtro-contraparte-label">Filtrar por contraparte</InputLabel>
-            <Select
-              labelId="filtro-contraparte-label"
-              label="Filtrar por contraparte"
-              value={filtroContraparte}
-              onChange={(e) => setFiltroContraparte(e.target.value)}
-            >
-              <MenuItem value="">
-                <em>Todas las contrapartes</em>
-              </MenuItem>
-              {contrapartes.map((c) => (
-                <MenuItem key={c.id_contraparte} value={c.id_contraparte}>
-                  {c.razon_social}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Autocomplete
+            size="small"
+            openOnFocus
+            sx={{ minWidth: 220 }}
+            loading={buscandoContrapartesFiltro}
+            options={contrapartes}
+            value={contrapartes.find((c) => c.id_contraparte === filtroContraparte) || null}
+            inputValue={filtroContraparteInput}
+            onInputChange={(_, nuevoValor) => setFiltroContraparteInput(nuevoValor)}
+            onChange={(_, seleccion) => setFiltroContraparte(seleccion?.id_contraparte || "")}
+            getOptionLabel={(c) => c.razon_social}
+            isOptionEqualToValue={(a, b) => a.id_contraparte === b.id_contraparte}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Filtrar por contraparte"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {buscandoContrapartesFiltro && <CircularProgress size={16} />}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+          />
           <TextField
             size="small"
             label="Filtrar por proyecto"
@@ -885,21 +933,13 @@ function TesoreriaContratosPageContent() {
               </FormControl>
               {!editing && (
                 <>
-                  <FormControl size="small" fullWidth>
-                    <InputLabel id="contraparte-label">Contraparte</InputLabel>
-                    <Select
-                      labelId="contraparte-label"
-                      label="Contraparte"
-                      value={form.contraparte}
-                      onChange={(e) => setForm({ ...form, contraparte: e.target.value })}
-                    >
-                      {contrapartes.map((c) => (
-                        <MenuItem key={c.id_contraparte} value={c.id_contraparte}>
-                          {c.razon_social}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                  <ContraparteSelector
+                    value={contraparteSeleccionada}
+                    onChange={(seleccion) => {
+                      setContraparteSeleccionada(seleccion);
+                      setForm({ ...form, contraparte: seleccion?.id_contraparte || "" });
+                    }}
+                  />
                   <FormControl size="small" fullWidth>
                     <InputLabel id="sociedad-label">Sociedad</InputLabel>
                     <Select
@@ -913,6 +953,12 @@ function TesoreriaContratosPageContent() {
                           {s.razon_social || s.rfc}
                         </MenuItem>
                       ))}
+                      {/* "Sin sociedad" (23/Sep/2026, gasto corporativo
+                          compartido) - solo alcance GLOBAL vera despues este
+                          contrato (ver SIN_SOCIEDAD arriba). */}
+                      <MenuItem value={SIN_SOCIEDAD}>
+                        <em>Sin sociedad</em>
+                      </MenuItem>
                     </Select>
                   </FormControl>
                 </>
