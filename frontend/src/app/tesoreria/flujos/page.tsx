@@ -59,6 +59,7 @@ import {
   X as CloseIcon,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import CuentaBancariaSelector from "@/components/CuentaBancariaSelector";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import { MIME_TYPES_COMPROBANTE } from "@/lib/googleDriveFilePicker";
@@ -211,7 +212,9 @@ function TesoreriaFlujosPageContent() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [flujos, setFlujos] = useState<TesoreriaFlujo[]>([]);
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
-  const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
+  // CuentaBancariaSelector requiere el objeto completo (23/Sep/2026, ver
+  // comentario del componente) - form.cuenta sigue siendo el id plano.
+  const [cuentaSeleccionada, setCuentaSeleccionada] = useState<TesoreriaCuenta | null>(null);
   const [facturas, setFacturas] = useState<TesoreriaFactura[]>([]);
   const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
   const [nominas, setNominas] = useState<TesoreriaNomina[]>([]);
@@ -383,16 +386,13 @@ function TesoreriaFlujosPageContent() {
 
   useEffect(() => {
     getSession().then(setSession);
-    // pageSize alto (20-21/Sep/2026, fix paginacion) - estas listas solo se
-    // usan para resolver referencias localmente (folioFactura(), selects de
-    // contrato/cuenta/etc en el formulario), no son la pantalla dedicada de
-    // cada catalogo.
+    // pageSize alto (20-21/Sep/2026, fix paginacion) - solo se usa para
+    // resolver referencias localmente (folioFactura(), select de contrato
+    // en el formulario), no es la pantalla dedicada de ese catalogo. Cuenta
+    // bancaria ahora busca en vivo (CuentaBancariaSelector, 23/Sep/2026).
     listContratos(undefined, undefined, undefined, 200)
       .then((res) => setContratos(res.results))
       .catch(() => setContratos([]));
-    listCuentas(undefined, undefined, 200)
-      .then((res) => setCuentas(res.results))
-      .catch(() => setCuentas([]));
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listFacturas({ pageSize: 200 })
       .then((res) => setFacturas(res.results))
@@ -631,6 +631,7 @@ function TesoreriaFlujosPageContent() {
     setEditing(null);
     setSoloLectura(false);
     setForm(FORM_VACIO);
+    setCuentaSeleccionada(null);
     setTab("Detalles");
     setFormError(null);
     setIdFlujoPrevio("");
@@ -1494,21 +1495,14 @@ function TesoreriaFlujosPageContent() {
                   fullWidth
                 />
               )}
-              <FormControl size="small" fullWidth disabled={!!editing}>
-                <InputLabel id="cuenta-label">Cuenta bancaria</InputLabel>
-                <Select
-                  labelId="cuenta-label"
-                  label="Cuenta bancaria"
-                  value={form.cuenta}
-                  onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
-                >
-                  {cuentas.map((c) => (
-                    <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                      {c.alias || c.clabe}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <CuentaBancariaSelector
+                disabled={!!editing}
+                value={cuentaSeleccionada}
+                onChange={(seleccion) => {
+                  setCuentaSeleccionada(seleccion);
+                  setForm({ ...form, cuenta: seleccion?.id_cuenta_bancaria || "" });
+                }}
+              />
               <TextField
                 size="small"
                 label="Total (MXP)"
