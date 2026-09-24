@@ -432,7 +432,22 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
   // reinventarlo). Tickets si (23/Sep/2026, Fase 1: Centros/Proyectos/
   // Participantes ya tienen CRUD real, ver tickets-service).
   if (tieneAlgunPermiso(session, ["tickets"])) {
-    items.push({ label: "Tickets", href: "/tickets", icon: ClipboardList, enabled: true });
+    items.push({
+      label: "Tickets",
+      href: "/tickets",
+      icon: ClipboardList,
+      enabled: true,
+      // Centros en pantalla aparte (24/Sep/2026, pedido explicito) -
+      // antes solo se gestionaba desde un dialogo dentro de /tickets. Un
+      // item con "children" nunca navega a su propio href (ver
+      // NavItemConChildren mas abajo, solo expande/colapsa) - "Proyectos"
+      // tiene que ir como primer child o /tickets queda inalcanzable
+      // desde el menu (bug real encontrado 24/Sep/2026).
+      children: [
+        { label: "Proyectos", href: "/tickets", icon: ClipboardList },
+        { label: "Centros", href: "/tickets/centros", icon: Building2 },
+      ],
+    });
   }
   // "Tickets de reembolso" (pantalla PROVISIONAL) - visible para
   // cualquier sesion real (self-service, sin exigir perm_key alguno,
