@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
-  Autocomplete,
   Box,
   Button,
   Checkbox,
@@ -50,7 +49,6 @@ import {
   getSugerenciasCfdiLote,
   SugerenciaCfdiLote,
   SugerenciasCfdiResponse,
-  TesoreriaContraparte,
   TesoreriaContrato,
   exportarConciliacionCfdiSheets,
   urlVerComplementoPagoPdf,
@@ -99,8 +97,6 @@ export default function ConciliacionFacturasPage() {
   const [tab, setTab] = useState<TabPrincipal>("ligado");
   const [datos, setDatos] = useState<ConciliacionCfdiResponse>(VACIO);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
-  const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
-  const [contrapartes, setContrapartes] = useState<TesoreriaContraparte[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
