@@ -365,7 +365,12 @@ class TesoreriaContrato(models.Model):
     contraparte = models.ForeignKey(
         TesoreriaContraparte, db_column="id_contraparte", on_delete=models.PROTECT, related_name="contratos"
     )
-    sociedad = models.CharField(max_length=13)
+    # Nullable (23/Sep/2026, "Sin sociedad") - contratos que no pertenecen a
+    # ninguna sociedad en particular (gasto corporativo compartido). Vacio
+    # queda FUERA del filtro de alcance por sociedad (ScopedQuerySet.for_scope,
+    # "sociedad__in" nunca hace match con NULL) - solo alcance GLOBAL los ve,
+    # a proposito.
+    sociedad = models.CharField(max_length=13, blank=True, null=True)
     proyecto = models.CharField(max_length=3, blank=True, null=True)
     propiedad = models.CharField(max_length=50, blank=True, null=True)
     centro = models.CharField(max_length=100, blank=True, null=True)

@@ -982,7 +982,7 @@ export async function createContrato(params: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      sociedad: params.sociedad,
+      sociedad: params.sociedad || null,
       contraparte: params.contraparte,
       categoria: params.categoria || null,
       tipo: params.tipo || null,
