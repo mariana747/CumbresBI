@@ -194,6 +194,15 @@ export interface MotorDocumentalContexto {
   // archivo via guessDocumentTypeFromFilename - aqui el llamador ya sabe
   // que todo lo que se sube a esta carpeta es del mismo tipo de documento).
   expectedDocumentType?: string;
+  // El archivo que el propio llamador ya sabe que es el correcto (25/Sep/2026,
+  // Flujos: "que conciliar con IA tome el comprobante de pago ya subido en
+  // automatico, sin tener que dar Ver archivos en Drive") - mismo criterio
+  // que el modo expediente KYC (kycActual.documentos, ver el useEffect que
+  // puebla `driveFiles` mas abajo), generalizado al modo `contexto`. Si se
+  // manda, se precarga solo, sin necesidad de listar la carpeta completa;
+  // "Ver archivos en Drive" se queda disponible por si el analista de
+  // todos modos quiere elegir otro archivo de la misma carpeta.
+  archivoConocido?: DriveArchivo;
   camposConfirmables: readonly string[];
   // Comparacion "documento vs. lo que ya declaro el usuario" (07/Sep/2026,
   // Reembolsos - mismo mecanismo de PLD/kycActual, generalizado). Llaves =
@@ -345,6 +354,16 @@ export default function MotorDocumentalDialog({
         }))
     );
   }, [contexto, kycActual]);
+
+  // Mismo criterio que el useEffect de arriba, pero para el modo `contexto`
+  // generico (25/Sep/2026) - si el llamador ya sabe cual es el archivo
+  // correcto (ej. TesoreriaFlujo.drive_file_id_comprobante), se precarga
+  // solo al abrir, sin depender de "Ver archivos en Drive".
+  useEffect(() => {
+    if (!open || !contexto?.archivoConocido) return;
+    setDriveFiles([contexto.archivoConocido]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, contexto?.archivoConocido]);
 
   const [documents, setDocuments] = useState<DocumentResult[]>([]);
 

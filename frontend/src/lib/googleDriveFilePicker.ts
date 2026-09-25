@@ -28,7 +28,22 @@ function asegurarZIndexPicker() {
   style.id = "google-picker-zindex-fix";
   style.textContent = `
     .picker-dialog-bg { z-index: 1400 !important; }
-    .picker-dialog { z-index: 1401 !important; }
+    /* 25/Sep/2026, "se va muy arriba, debe estar centrada" - el Picker
+       calcula su propio top/left (inline, vía JS) a partir del alto TOTAL
+       del documento, no del viewport visible; al abrirse desde un MUI
+       Dialog ya scrolleado (ej. el formulario de Contrato/Registrar pago)
+       ese calculo queda mal y lo manda muy arriba. position:fixed +
+       top/left:50% + transform lo centra siempre respecto al viewport,
+       sin importar el scroll del documento debajo - !important en una
+       hoja de estilos SI le gana a un inline style sin !important. */
+    .picker-dialog {
+      z-index: 1401 !important;
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      margin: 0 !important;
+    }
   `;
   document.head.appendChild(style);
 }

@@ -203,9 +203,20 @@ def _calcular_corte(cuentas, fecha) -> dict:
             saldo_hoy_total += monto_hoy
             hay_saldo_hoy_en_alguna = True
 
+        # "alias" (25/Sep/2026, "se necesita unir alias + ultimos 4 digitos
+        # de la cuenta" - antes solo mostraba el alias libre, dos cuentas
+        # con el mismo alias en distintos bancos eran indistinguibles en el
+        # reporte). numero_cuenta cae a la CLABE si la cuenta no tiene
+        # numero corto capturado (mismo criterio que aliasCuenta() en
+        # /tesoreria/saldos).
+        numero_cuenta = cuenta.cuenta or cuenta.clabe
+        ultimos_digitos = numero_cuenta[-4:] if numero_cuenta else None
+        alias_base = cuenta.alias or cuenta.id_cuenta_bancaria
+        alias_mostrado = f"{alias_base} ({ultimos_digitos})" if ultimos_digitos else alias_base
+
         fila = {
             "id_cuenta_bancaria": cuenta.id_cuenta_bancaria,
-            "alias": cuenta.alias or cuenta.id_cuenta_bancaria,
+            "alias": alias_mostrado,
             # El alias sigue siendo lo que usa la pantalla (mismo criterio
             # de siempre); banco_nombre/clabe son solo para que el correo
             # pueda mostrar banco real + CLABE en vez del alias libre.

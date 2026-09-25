@@ -26,7 +26,16 @@ function asegurarZIndexPicker() {
   style.id = "google-picker-zindex-fix";
   style.textContent = `
     .picker-dialog-bg { z-index: 1400 !important; }
-    .picker-dialog { z-index: 1401 !important; }
+    /* 25/Sep/2026, "se va muy arriba, debe estar centrada" - ver el mismo
+       comentario en googleDriveFilePicker.ts::asegurarZIndexPicker. */
+    .picker-dialog {
+      z-index: 1401 !important;
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      margin: 0 !important;
+    }
   `;
   document.head.appendChild(style);
 }
