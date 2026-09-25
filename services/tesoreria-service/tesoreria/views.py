@@ -70,6 +70,7 @@ from .models import (
     TesoreriaMovimientoBancario,
     TesoreriaNomina,
     TesoreriaNotaCredito,
+    TesoreriaProyectoCodigo,
     TesoreriaRecNomina,
     TesoreriaSaldo,
     TesoreriaSolicitudPago,
@@ -97,6 +98,7 @@ from .serializers import (
     TesoreriaMovimientoBancarioSerializer,
     TesoreriaNominaSerializer,
     TesoreriaNotaCreditoSerializer,
+    TesoreriaProyectoCodigoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
     TesoreriaSolicitudPagoSerializer,
@@ -356,6 +358,22 @@ class TesoreriaBancoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         if id_banxico:
             queryset = queryset.filter(id_banxico=id_banxico)
         return queryset
+
+
+class TesoreriaProyectoCodigoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Catalogo de codigos de 3 letras de TesoreriaContrato.proyecto
+    (25/Sep/2026, ver models.py) - se crea al vuelo desde el Autocomplete
+    del dialogo de Contrato (freeSolo + "crear nuevo"), no tiene pantalla
+    dedicada. Mismo criterio de permisos que Contraparte/Banco."""
+
+    queryset = TesoreriaProyectoCodigo.objects.all()
+    serializer_class = TesoreriaProyectoCodigoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["codigo", "significado"]
+    pagination_class = ListadoGrandePagination
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.effective_scope.identity_user_id)
 
 
 class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):

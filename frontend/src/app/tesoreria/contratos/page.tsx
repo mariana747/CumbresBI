@@ -68,15 +68,18 @@ import {
   TesoreriaContratoTipo,
   TesoreriaFrecuencia,
   TesoreriaMoneda,
+  TesoreriaProyectoCodigo,
   TesoreriaTipoPago,
   createContrato,
   createContratoDocumento,
+  createProyectoCodigo,
   deleteContratoDocumento,
   enviarRecordatorioDocumentos,
   getContrato,
   listContrapartes,
   listContratoDocumentos,
   listContratos,
+  listProyectoCodigos,
   updateContrato,
 } from "@/lib/tesoreria";
 
@@ -160,6 +163,15 @@ function TesoreriaContratosPageContent() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  // Catalogo de codigos de Proyecto (25/Sep/2026, antes texto libre sin
+  // catalogo - ver TesoreriaProyectoCodigo). Se carga una sola vez al abrir
+  // la pantalla, no por busqueda en vivo (volumen bajo, a diferencia de
+  // Contrapartes).
+  const [proyectoCodigos, setProyectoCodigos] = useState<TesoreriaProyectoCodigo[]>([]);
+  const [creandoProyectoCodigo, setCreandoProyectoCodigo] = useState(false);
+  const [nuevoProyectoCodigo, setNuevoProyectoCodigo] = useState<{ codigo: string; significado: string } | null>(
+    null
+  );
   // Buscador en vivo (23/Sep/2026, "no aparecen las contrapartes nuevas" -
   // antes era una sola carga de 200 sin buscador, y ya hay 500+ contrapartes:
   // una nueva que no cae en las primeras 200 alfabeticas nunca aparecia aqui).
@@ -238,6 +250,9 @@ function TesoreriaContratosPageContent() {
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
+    listProyectoCodigos()
+      .then((r) => setProyectoCodigos(r.results))
+      .catch(() => setProyectoCodigos([]));
   }, []);
 
   // Busqueda en vivo del filtro "Filtrar por contraparte" (ver comentario
@@ -970,12 +985,51 @@ function TesoreriaContratosPageContent() {
                   3. */}
               {!ocultaCamposFormales && (
                 <>
-                  <TextField
+                  <Autocomplete
                     size="small"
-                    label="Proyecto"
-                    value={form.proyecto}
-                    onChange={(e) => setForm({ ...form, proyecto: e.target.value })}
                     fullWidth
+                    freeSolo
+                    disabled={soloLectura}
+                    options={proyectoCodigos}
+                    value={proyectoCodigos.find((p) => p.codigo === form.proyecto) || form.proyecto || null}
+                    getOptionLabel={(opcion) =>
+                      typeof opcion === "string" ? opcion : `${opcion.codigo}${opcion.significado ? ` - ${opcion.significado}` : ""}`
+                    }
+                    isOptionEqualToValue={(a, b) => a.codigo === (typeof b === "string" ? b : b.codigo)}
+                    filterOptions={(opciones, params) => {
+                      const texto = params.inputValue.trim().toUpperCase();
+                      const filtradas = opciones.filter(
+                        (o) => o.codigo.includes(texto) || (o.significado || "").toUpperCase().includes(texto)
+                      );
+                      // "Crear nuevo" (25/Sep/2026, pedido explicito: mismo
+                      // criterio que Contraparte) - solo si el texto no es ya
+                      // un codigo existente y cabe en 3 caracteres.
+                      if (texto && texto.length <= 3 && !opciones.some((o) => o.codigo === texto)) {
+                        filtradas.push({ codigo: texto, significado: null, created_at: "", created_by: null, __crear: true } as any);
+                      }
+                      return filtradas;
+                    }}
+                    onChange={(_, seleccion) => {
+                      if (!seleccion) {
+                        setForm({ ...form, proyecto: "" });
+                        return;
+                      }
+                      if (typeof seleccion === "string") {
+                        setForm({ ...form, proyecto: seleccion.toUpperCase().slice(0, 3) });
+                        return;
+                      }
+                      if ((seleccion as any).__crear) {
+                        setNuevoProyectoCodigo({ codigo: seleccion.codigo, significado: "" });
+                        return;
+                      }
+                      setForm({ ...form, proyecto: seleccion.codigo });
+                    }}
+                    renderOption={(props, opcion) => (
+                      <li {...props} key={opcion.codigo}>
+                        {(opcion as any).__crear ? `Crear nuevo "${opcion.codigo}"...` : opcion.significado ? `${opcion.codigo} - ${opcion.significado}` : opcion.codigo}
+                      </li>
+                    )}
+                    renderInput={(params) => <TextField {...params} label="Proyecto" />}
                   />
                   <TextField
                     size="small"
@@ -1354,6 +1408,59 @@ function TesoreriaContratosPageContent() {
               {saving ? <CircularProgress size={16} /> : "Guardar"}
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Crear codigo de Proyecto al vuelo (25/Sep/2026) - mismo criterio
+          "Dialog solo cierra con X" del resto de la app. */}
+      <Dialog open={!!nuevoProyectoCodigo} onClose={() => {}} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          Nuevo código de proyecto
+          <IconButton size="small" onClick={() => setNuevoProyectoCodigo(null)}>
+            <CloseIcon size={18} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField size="small" label="Código" value={nuevoProyectoCodigo?.codigo || ""} disabled fullWidth />
+            <TextField
+              size="small"
+              label="Significado"
+              placeholder="Ej. Fideicomiso"
+              value={nuevoProyectoCodigo?.significado || ""}
+              onChange={(e) =>
+                setNuevoProyectoCodigo((prev) => (prev ? { ...prev, significado: e.target.value } : prev))
+              }
+              fullWidth
+              autoFocus
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNuevoProyectoCodigo(null)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            disabled={creandoProyectoCodigo || !nuevoProyectoCodigo?.codigo}
+            onClick={async () => {
+              if (!nuevoProyectoCodigo) return;
+              setCreandoProyectoCodigo(true);
+              try {
+                const creado = await createProyectoCodigo({
+                  codigo: nuevoProyectoCodigo.codigo,
+                  significado: nuevoProyectoCodigo.significado || undefined,
+                });
+                setProyectoCodigos((prev) => [...prev, creado].sort((a, b) => a.codigo.localeCompare(b.codigo)));
+                setForm((prev) => ({ ...prev, proyecto: creado.codigo }));
+                setNuevoProyectoCodigo(null);
+              } catch (e) {
+                setFormError(e instanceof Error ? e.message : "No se pudo crear el código.");
+              } finally {
+                setCreandoProyectoCodigo(false);
+              }
+            }}
+          >
+            {creandoProyectoCodigo ? <CircularProgress size={16} /> : "Crear"}
+          </Button>
         </DialogActions>
       </Dialog>
 

@@ -20,6 +20,7 @@ from .models import (
     TesoreriaNomina,
     TesoreriaNominaSociedad,
     TesoreriaNotaCredito,
+    TesoreriaProyectoCodigo,
     TesoreriaRecNomina,
     TesoreriaSaldo,
     TesoreriaSolicitudPago,
@@ -146,6 +147,20 @@ class TesoreriaBancoSerializer(serializers.ModelSerializer):
         model = TesoreriaBanco
         fields = ["id_banxico", "banco", "alias", "created_at", "created_by", "updated_at", "updated_by"]
         read_only_fields = ["created_at", "updated_at"]
+
+
+class TesoreriaProyectoCodigoSerializer(serializers.ModelSerializer):
+    """Catalogo de codigos de 3 letras de TesoreriaContrato.proyecto (ver
+    models.py). `codigo` se guarda en mayusculas para evitar duplicados
+    tipo "fid"/"FID"."""
+
+    class Meta:
+        model = TesoreriaProyectoCodigo
+        fields = ["codigo", "significado", "created_at", "created_by"]
+        read_only_fields = ["created_at"]
+
+    def validate_codigo(self, valor):
+        return valor.upper()
 
 
 class TesoreriaCuentaSerializer(serializers.ModelSerializer):
