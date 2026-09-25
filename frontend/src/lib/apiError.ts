@@ -49,6 +49,12 @@ export async function friendlyApiError(serviceCode: string, response: Response):
       const primerCampo = Object.values(parsed)[0];
       if (Array.isArray(primerCampo) && typeof primerCampo[0] === "string") {
         detail = primerCampo[0];
+      } else if (typeof primerCampo === "string") {
+        // Vistas que regresan {"campo": "mensaje legible"} en vez del
+        // estilo DRF {"campo": ["mensaje"]} (ej. registrar_pago en
+        // tesoreria/views.py) - mismo criterio, un humano ya lo escribio
+        // legible, se muestra tal cual.
+        detail = primerCampo;
       }
     }
   } catch {

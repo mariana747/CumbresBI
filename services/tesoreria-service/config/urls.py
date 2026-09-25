@@ -22,6 +22,7 @@ from tesoreria.views import (
     TesoreriaMovimientoBancarioViewSet,
     TesoreriaNominaViewSet,
     TesoreriaNotaCreditoViewSet,
+    TesoreriaProyectoCodigoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
     TesoreriaSolicitudPagoViewSet,
@@ -36,6 +37,7 @@ router.register("bancos", TesoreriaBancoViewSet, basename="tesoreriabanco")
 router.register("cuentas", TesoreriaCuentaViewSet, basename="tesoreriacuenta")
 router.register("dias-festivos", TesoreriaDiaFestivoViewSet, basename="tesoreriadiafestivo")
 router.register("contratos", TesoreriaContratoViewSet, basename="tesoreriacontrato")
+router.register("proyecto-codigos", TesoreriaProyectoCodigoViewSet, basename="tesoreriaproyectocodigo")
 router.register("nominas", TesoreriaNominaViewSet, basename="tesorerianomina")
 router.register("contrato-documentos", TesoreriaContratoDocumentoViewSet, basename="tesoreriacontratodocumento")
 router.register("documento-tickets", TesoreriaDocumentoTicketViewSet, basename="tesoreriadocumentoticket")

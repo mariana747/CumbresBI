@@ -70,6 +70,7 @@ from .models import (
     TesoreriaMovimientoBancario,
     TesoreriaNomina,
     TesoreriaNotaCredito,
+    TesoreriaProyectoCodigo,
     TesoreriaRecNomina,
     TesoreriaSaldo,
     TesoreriaSolicitudPago,
@@ -97,6 +98,7 @@ from .serializers import (
     TesoreriaMovimientoBancarioSerializer,
     TesoreriaNominaSerializer,
     TesoreriaNotaCreditoSerializer,
+    TesoreriaProyectoCodigoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
     TesoreriaSolicitudPagoSerializer,
@@ -356,6 +358,22 @@ class TesoreriaBancoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         if id_banxico:
             queryset = queryset.filter(id_banxico=id_banxico)
         return queryset
+
+
+class TesoreriaProyectoCodigoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
+    """Catalogo de codigos de 3 letras de TesoreriaContrato.proyecto
+    (25/Sep/2026, ver models.py) - se crea al vuelo desde el Autocomplete
+    del dialogo de Contrato (freeSolo + "crear nuevo"), no tiene pantalla
+    dedicada. Mismo criterio de permisos que Contraparte/Banco."""
+
+    queryset = TesoreriaProyectoCodigo.objects.all()
+    serializer_class = TesoreriaProyectoCodigoSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["codigo", "significado"]
+    pagination_class = ListadoGrandePagination
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.effective_scope.identity_user_id)
 
 
 class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
@@ -1346,14 +1364,24 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def registrar_pago(self, request, pk=None):
-        """Marca el flujo como pagado - exige autorizacion=True primero. 
+        """Marca el flujo como pagado - exige autorizacion=True primero.
         Permiso tesoreria.editar
         (no .aprobar) porque el analista es quien de verdad hace/registra
-        la transferencia, la decision de autorizar ya la tomo aprobar()."""
+        la transferencia, la decision de autorizar ya la tomo aprobar().
+
+        24/Sep/2026, hallazgo real: faltaba validar validacion_estado
+        aqui - el CheckConstraint de la BD (pagado=True exige
+        validacion_estado=APROBADA, ver models.py) igual lo bloqueaba,
+        pero como IntegrityError 500 crudo en vez de un 400 explicito."""
         flujo = self.get_object()
         if not flujo.autorizacion:
             return Response(
                 {"autorizacion": "Este flujo todavía no está autorizado para pago."}, status=400
+            )
+        if flujo.validacion_estado != TesoreriaFlujo.VALIDACION_APROBADA:
+            return Response(
+                {"validacion_estado": "Este flujo todavía no está aprobado - no se puede registrar el pago."},
+                status=400,
             )
         flujo.pagado = True
         flujo.fecha_pago = timezone.now().date()

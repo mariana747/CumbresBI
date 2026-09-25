@@ -894,6 +894,42 @@ export interface TesoreriaContrato {
   updated_by: string | null;
 }
 
+export interface TesoreriaProyectoCodigo {
+  codigo: string;
+  significado: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+export async function listProyectoCodigos(search?: string): Promise<TesoreriaPaginado<TesoreriaProyectoCodigo>> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  params.set("page_size", "200");
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/proyecto-codigos/?${params.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function createProyectoCodigo(params: {
+  codigo: string;
+  significado?: string;
+}): Promise<TesoreriaProyectoCodigo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/proyecto-codigos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo: params.codigo, significado: params.significado || null }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function listContratos(
   search?: string,
   contraparteId?: string,
@@ -1278,6 +1314,7 @@ export async function getConciliacionCfdi(params?: {
   hasta?: string;
   sociedad?: string;
   contrato?: string;
+  contraparte?: string;
   requiereFactura?: boolean;
   tipoComprobante?: "I" | "E";
   search?: string;
@@ -1297,6 +1334,7 @@ export async function getConciliacionCfdi(params?: {
   if (params?.hasta) query.set("hasta", params.hasta);
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
   if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
   if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
   if (params?.search) query.set("search", params.search);
@@ -1393,6 +1431,7 @@ export async function exportarConciliacionCfdiSheets(
     hasta?: string;
     sociedad?: string;
     contrato?: string;
+    contraparte?: string;
     requiereFactura?: boolean;
     tipoComprobante?: "I" | "E";
   },
@@ -1403,6 +1442,7 @@ export async function exportarConciliacionCfdiSheets(
   if (params?.hasta) query.set("hasta", params.hasta);
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
   if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
   if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
   const response = await apiFetch(
@@ -1697,12 +1737,14 @@ export async function getSugerenciasCfdiLote(params?: {
   hasta?: string;
   sociedad?: string;
   contrato?: string;
+  contraparte?: string;
 }): Promise<SugerenciaCfdiLote[]> {
   const query = new URLSearchParams();
   if (params?.desde) query.set("desde", params.desde);
   if (params?.hasta) query.set("hasta", params.hasta);
   if (params?.sociedad) query.set("sociedad", params.sociedad);
   if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/flujos/sugerencias_cfdi_lote/?${query.toString()}`

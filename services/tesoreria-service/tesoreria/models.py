@@ -82,6 +82,32 @@ class TesoreriaBanco(models.Model):
         return self.banco or self.id_banxico
 
 
+class TesoreriaProyectoCodigo(models.Model):
+    """Catalogo de codigos de 3 letras usados en TesoreriaContrato.proyecto
+    (25/Sep/2026, antes era texto libre sin catalogo - ver memoria
+    "TesoreriaContrato.proyecto no es ViviendaProyecto": NO referencia
+    ViviendaProyecto, son codigos de negocio propios, algunos ya en uso
+    (TCC/ZVP/HOT/Z21/ZVT/EDH/BIP/HGQ/LMR) y otros nuevos como FID
+    (Fideicomiso). Se crea desde el mismo Autocomplete del dialogo de
+    Contrato (freeSolo + opcion "crear nuevo"), sin pantalla dedicada."""
+
+    codigo = models.CharField(max_length=3, primary_key=True)
+    # blank/null (25/Sep/2026) - los 8 codigos legacy migrados (TCC/HOT/Z21/
+    # ZVT/EDH/BIP/HGQ/LMR) no tienen significado conocido todavia ("son para
+    # el futuro", ver memoria del proyecto), se siembran sin significado en
+    # la migracion de datos y se completa despues a mano si se llega a saber.
+    significado = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_proyecto_codigos"
+        ordering = ["codigo"]
+
+    def __str__(self):
+        return f"{self.codigo} - {self.significado}"
+
+
 class TesoreriaContraparte(models.Model):
     TIPO_FISICA = "fisica"
     TIPO_MORAL = "moral"

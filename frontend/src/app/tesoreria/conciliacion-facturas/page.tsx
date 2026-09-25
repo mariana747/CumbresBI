@@ -91,17 +91,7 @@ const TAB_A_BUCKET: Record<TabPrincipal, keyof ConciliacionCfdiResponse> = {
 type TabPrincipal = "ligado" | "sin_cfdi" | "no_requiere";
 type TabDetalle = "detalles" | "vincular" | "recordatorio";
 
-// Conciliacion de Facturas (10/Sep/2026, notas de reunion "Conciliaciones")
-// - una sola pantalla con 3 tabs (no 3 rutas separadas, pedido explicito) -
-// clasifica cada pago (Flujo) del mes segun si ya tiene CFDI, lo necesita
-// pero no lo tiene, o no lo requiere. Calculo real en tesoreria-service/
-// tesoreria/reportes.py::calcular_conciliacion_cfdi.
-//
-// Detalle del pago (10/Sep/2026, "deben estar dentro de una pantalla
-// emergente con su propio tabs...vincular no es intuitivo") - Vincular,
-// Recordatorio y Referencias cruzadas ya no son botones sueltos en la
-// tabla: un solo boton "Ver" por fila abre este dialogo con sus propios
-// tabs, mismo criterio en las 3 pestañas principales.
+
 export default function ConciliacionFacturasPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [tab, setTab] = useState<TabPrincipal>("ligado");
@@ -125,7 +115,7 @@ export default function ConciliacionFacturasPage() {
   const [contratoSeleccionado, setContratoSeleccionado] = useState<TesoreriaContrato | null>(null);
   const [filtroTipoComprobante, setFiltroTipoComprobante] = useState<"" | "I" | "E">("");
 
-  // Paginacion server-side (23/Sep/2026, "no tiene paginacion") - mismo
+  // Paginacion server-side 
   // patron que Flujos (page-based, no cursor).
   const [pagina, setPagina] = useState(0);
   const [filasPorPagina, setFilasPorPagina] = useState(50);
@@ -152,8 +142,6 @@ export default function ConciliacionFacturasPage() {
   // Dialogo de detalle (un pago) con sus propios tabs internos.
   const [detalle, setDetalle] = useState<ConciliacionCfdiFila | null>(null);
   const [detalleTab, setDetalleTab] = useState<TabDetalle>("detalles");
-  // "No requiere CFDI" no necesita vincular ni recordatorio (10/Sep/2026,
-  // "en los que no requiere CFDI, no debe aparecer...ni recordatorio").
   const [detalleEsNoRequiere, setDetalleEsNoRequiere] = useState(false);
 
   const [timbreUuid, setTimbreUuid] = useState("");
@@ -170,11 +158,11 @@ export default function ConciliacionFacturasPage() {
 
   const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string } | null>(null);
 
-  // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
-  // Flujos") - extraido a PanelReferenciaCruzada, reusado tal cual.
+  // Referencias cruzadas 
+  // extraido a PanelReferenciaCruzada, reusado tal cual.
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
 
-  // Aprobacion en lote (10/Sep/2026, "aprobar en lote, no uno por uno") -
+  // Aprobacion en lote 
   // el humano sigue decidiendo (puede desmarcar filas), solo deja de abrir
   // cada pago para aprobarlo de uno en uno.
   const [loteAbierto, setLoteAbierto] = useState(false);
