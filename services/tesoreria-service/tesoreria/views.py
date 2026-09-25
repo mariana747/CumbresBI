@@ -115,6 +115,38 @@ from .reembolso_utils import (
 logger = logging.getLogger(__name__)
 
 
+def _rfcs_sociedad_por_texto(request, texto):
+    """Resuelve los RFC de las sociedades cuyo nombre/alias/rfc contenga
+    `texto` (25/Sep/2026, "el buscador... debe poder buscar tambien por
+    sociedad", "es por nombre de la sociedad, no por rfc") - GeneralSociedad
+    vive en iam-service, otra BD (ver TesoreriaContrato.sociedad, RFC plano
+    sin FK real); sin esto el buscador de Contratos/Flujos solo podia
+    matchear el RFC guardado tal cual, nunca el nombre visible en pantalla.
+    Reusa el mismo `?search=` de GeneralSociedadViewSet (razon_social/rfc/
+    alias_sociedad). Lista vacia si iam-service no responde o no hay
+    coincidencias - el buscador cae entonces a lo que ya matcheaba antes
+    (id/concepto/contraparte/rfc de sociedad), no truena."""
+    headers, cookies = forward_auth_headers(request)
+    try:
+        upstream = requests.get(
+            f"{settings.IAM_SERVICE_URL}/api/sociedades/",
+            params={"search": texto},
+            headers=headers,
+            cookies=cookies,
+            timeout=5,
+        )
+    except requests.RequestException:
+        logger.warning("iam-service no respondio al resolver sociedades por nombre '%s'", texto, exc_info=True)
+        return []
+    if upstream.status_code != 200:
+        return []
+    try:
+        datos = upstream.json()
+    except ValueError:
+        return []
+    return [s["rfc"] for s in datos if s.get("rfc")]
+
+
 class _EsEmpleadoAutenticado(BasePermission):
     """Cualquier usuario con sesion real (identity_user_id presente en su
     EffectiveScope, ver cumbresbi_scope/scope.py) - no requiere ningun
@@ -443,11 +475,17 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     que tampoco lo valida - queda documentado como limitacion conocida, no
     como descuido).
 
-    Busqueda de texto libre (?search=) sobre id_contrato/sociedad."""
+    Busqueda de texto libre (?search=) sobre id_contrato/sociedad (por RFC
+    O por nombre)/contraparte (25/Sep/2026, "en contratos por sociedad y
+    contraparte", "es por nombre de la sociedad, no por rfc" -
+    contraparte__razon_social cubre persona moral y el nombre visible de
+    persona fisica, ver TesoreriaContraparte.razon_social; rfc/apellidos
+    tambien por si buscan por esos en vez del nombre). Manual en
+    get_queryset en vez de SearchFilter - el nombre de la sociedad vive en
+    iam-service (_rfcs_sociedad_por_texto), asi que hace falta armar el OR
+    a mano contra esos RFC resueltos junto con los demas campos."""
 
     serializer_class = TesoreriaContratoSerializer
-    filter_backends = [SearchFilter]
-    search_fields = ["id_contrato", "sociedad"]
     pagination_class = ListadoGrandePagination
 
     def get_permissions(self):
@@ -485,6 +523,20 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         fecha_hasta = self.request.query_params.get("fecha_hasta")
         if fecha_hasta:
             queryset = queryset.filter(fecha_generacion__lte=fecha_hasta)
+        search = self.request.query_params.get("search")
+        if search:
+            condicion = (
+                Q(id_contrato__icontains=search)
+                | Q(sociedad__icontains=search)
+                | Q(contraparte__razon_social__icontains=search)
+                | Q(contraparte__apellido_paterno__icontains=search)
+                | Q(contraparte__apellido_materno__icontains=search)
+                | Q(contraparte__rfc__icontains=search)
+            )
+            rfcs_sociedad = _rfcs_sociedad_por_texto(self.request, search)
+            if rfcs_sociedad:
+                condicion |= Q(sociedad__in=rfcs_sociedad)
+            queryset = queryset.filter(condicion)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -933,12 +985,16 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     FINANZAS_MANAGER tiene LCEA - el analista puede capturar y registrar el
     pago, pero no autorizarlo el mismo.
 
-    Busqueda de texto libre (?search=) sobre id_flujo/concepto. Filtro
+    Busqueda de texto libre (?search=) sobre id_flujo/concepto/sociedad,
+    por RFC O por nombre (25/Sep/2026, "el buscador de flujos debe poder
+    buscar tambien por sociedad", "es por nombre de la sociedad, no por
+    rfc" - contrato__sociedad es el RFC plano de TesoreriaContrato, ver su
+    docstring; el nombre vive en iam-service, otro servicio/BD, se resuelve
+    a mano con _rfcs_sociedad_por_texto). Manual en get_queryset en vez de
+    SearchFilter, mismo criterio que TesoreriaContratoViewSet. Filtro
     adicional ?contrato=<id> desde la vista de detalle de un contrato."""
 
     serializer_class = TesoreriaFlujoSerializer
-    filter_backends = [SearchFilter]
-    search_fields = ["id_flujo", "concepto"]
     pagination_class = ListadoGrandePagination
 
     # Whitelist de columnas que confirmar_conciliacion puede escribir - mismo
@@ -1034,6 +1090,15 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         validacion_estado = self.request.query_params.get("validacion_estado")
         if validacion_estado:
             queryset = queryset.filter(validacion_estado=validacion_estado)
+        search = self.request.query_params.get("search")
+        if search:
+            condicion = Q(id_flujo__icontains=search) | Q(concepto__icontains=search) | Q(
+                contrato__sociedad__icontains=search
+            )
+            rfcs_sociedad = _rfcs_sociedad_por_texto(self.request, search)
+            if rfcs_sociedad:
+                condicion |= Q(contrato__sociedad__in=rfcs_sociedad)
+            queryset = queryset.filter(condicion)
         return queryset
 
     @action(detail=False, methods=["get"])
@@ -1349,8 +1414,19 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         """Contraparte de aprobar() - un flujo rechazado no se puede pagar
         (ver registrar_pago). No borra el registro, deja evidencia de que
         se capturo y se rechazo, mismo criterio que PldContraparteKyc no
-        borrar expedientes."""
+        borrar expedientes.
+
+        25/Sep/2026, hallazgo real: un flujo YA pagado se podia
+        "rechazar" igual, y el CheckConstraint de la BD
+        (tesoreria_flujo_pagado_requiere_aprobada, pagado=True exige
+        validacion_estado=APROBADA) lo bloqueaba con un IntegrityError 500
+        crudo en vez de un 400 explicito - mismo criterio que la
+        validacion ya existente en registrar_pago."""
         flujo = self.get_object()
+        if flujo.pagado:
+            return Response(
+                {"pagado": "Este flujo ya está pagado - no se puede rechazar."}, status=400
+            )
         flujo.autorizacion = False
         flujo.validacion_estado = TesoreriaFlujo.VALIDACION_RECHAZADA
         flujo.save(update_fields=["autorizacion", "validacion_estado"])

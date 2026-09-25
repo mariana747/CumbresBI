@@ -2508,7 +2508,9 @@ class ReporteDiarioSaldosTests(TestCase):
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         alias_en_reporte = [f["alias"] for e in reporte["sociedades"] for f in e["cuentas"]]
-        self.assertEqual(alias_en_reporte, ["Cuenta operativa"])
+        # "Cuenta operativa (0001)" (25/Sep/2026, alias + ultimos 4 digitos
+        # de la cuenta/clabe - ver calcular_reporte_diario/_calcular_corte).
+        self.assertEqual(alias_en_reporte, ["Cuenta operativa (0001)"])
 
     def test_endpoint_reporte_diario_no_requiere_permiso_especial(self):
         request = self.factory.get("/api/saldos/reporte_diario/", {"sociedades": RFC_TIZARA, "fecha": "2026-08-25"})
