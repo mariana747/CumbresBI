@@ -40,7 +40,6 @@ import {
 } from "@mui/material";
 import {
   Banknote,
-  Check,
   Copy,
   ExternalLink,
   Eye,
@@ -229,6 +228,15 @@ function TesoreriaFlujosPageContent() {
   // valores que la columna Estado de la tabla.
   const [filtroEstado, setFiltroEstado] = useState<TesoreriaValidacionEstado | "">("");
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  // Columna "Empresa" (25/Sep/2026) - contrato_sociedad ya viene resuelto
+  // del backend (TesoreriaFlujoSerializer.contrato_sociedad, RFC plano vía
+  // contrato.sociedad), aquí solo se traduce a un nombre legible. Mismo
+  // fallback que el label del filtro "Filtrar por empresa" de arriba.
+  const nombreSociedad = (rfc: string | null) => {
+    if (!rfc) return "—";
+    const s = sociedades.find((soc) => soc.rfc === rfc);
+    return s ? s.alias_sociedad || s.razon_social || s.rfc : rfc;
+  };
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   // Paginacion server-side (20/Sep/2026, fix del 503 en produccion - el
@@ -260,6 +268,18 @@ function TesoreriaFlujosPageContent() {
   // archivo, subirReferenciaFlujo() sigue siendo quien lo sube de verdad.
   const [archivoReferenciaPendiente, setArchivoReferenciaPendiente] = useState<File | null>(null);
   const [reemplazandoReferencia, setReemplazandoReferencia] = useState(false);
+  // Comprobante de pago inline (25/Sep/2026, "que se vea igual a
+  // Referencias"; unificado con Registrar pago el mismo dia, "ya no es
+  // necesario el boton, se sube el comprobante y se pone como pagado") -
+  // sube directo al elegir el archivo, sin dialogo aparte. Si el flujo aun
+  // no esta pagado, subir el comprobante TAMBIEN llama a registrarPagoFlujo
+  // (requiere autorizacion=True, ver validacion en el backend) - ya no
+  // existe una accion separada de "Registrar pago" sin comprobante.
+  const [subiendoComprobante, setSubiendoComprobante] = useState(false);
+  const [errorComprobante, setErrorComprobante] = useState<string | null>(null);
+  const [archivoComprobantePendiente, setArchivoComprobantePendiente] = useState<File | null>(null);
+  const [reemplazandoComprobante, setReemplazandoComprobante] = useState(false);
+  const [descripcionPagoPendiente, setDescripcionPagoPendiente] = useState("");
   // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
   // Flujos") - ver componente PanelReferenciaCruzada.
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
@@ -320,17 +340,6 @@ function TesoreriaFlujosPageContent() {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuFlujo, setMenuFlujo] = useState<TesoreriaFlujo | null>(null);
 
-  // Dialogo de "Registrar pago" / "Subir comprobante" (26/Ago/2026,
-  // finanzas.md: "upload receipts/references from their computer" - antes
-  // registrar_pago se disparaba directo sin poder adjuntar nada). Mismo
-  // dialogo sirve para los dos casos: si el flujo aun no esta pagado,
-  // tambien llama a registrarPagoFlujo; si ya esta pagado, solo sube/
-  // reemplaza el comprobante.
-  const [pagoDialogFlujo, setPagoDialogFlujo] = useState<TesoreriaFlujo | null>(null);
-  const [pagoDescripcion, setPagoDescripcion] = useState("");
-  const [pagoArchivo, setPagoArchivo] = useState<File | null>(null);
-  const [pagoError, setPagoError] = useState<string | null>(null);
-  const [pagoEnviando, setPagoEnviando] = useState(false);
   // Conciliacion bancaria por IA (28/Ago/2026, ver memoria
   // "tesoreria-flujos-registro-y-conciliacion-ia-plan") - el analista ya
   // subio el comprobante (subir_comprobante) y ahora lo analiza con el
@@ -775,7 +784,12 @@ function TesoreriaFlujosPageContent() {
     if (!session) return;
     setAccionando(f.id_flujo);
     try {
-      await aprobarFlujo(f.id_flujo);
+      const actualizado = await aprobarFlujo(f.id_flujo);
+      // 25/Sep/2026, bug real: solo se refrescaba la tabla, no `editing` -
+      // el tab "Comprobante de pago" (gateado por autorizacion/
+      // validacion_estado, ver mas abajo) seguia bloqueado hasta cerrar y
+      // reabrir el dialogo, aunque el backend ya habia aprobado.
+      setEditing((prev) => (prev?.id_flujo === actualizado.id_flujo ? actualizado : prev));
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
@@ -787,41 +801,13 @@ function TesoreriaFlujosPageContent() {
   async function handleRechazar(f: TesoreriaFlujo) {
     setAccionando(f.id_flujo);
     try {
-      await rechazarFlujo(f.id_flujo);
+      const actualizado = await rechazarFlujo(f.id_flujo);
+      setEditing((prev) => (prev?.id_flujo === actualizado.id_flujo ? actualizado : prev));
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
       setAccionando(null);
-    }
-  }
-
-  function abrirDialogoPago(f: TesoreriaFlujo) {
-    setPagoDialogFlujo(f);
-    setPagoDescripcion("");
-    setPagoArchivo(null);
-    setPagoError(null);
-  }
-
-  async function handleConfirmarPago() {
-    if (!pagoDialogFlujo) return;
-    setPagoEnviando(true);
-    setPagoError(null);
-    try {
-      if (pagoArchivo) {
-        await subirComprobanteFlujo(pagoDialogFlujo.id_flujo, pagoArchivo, session?.user_id);
-      }
-      if (!pagoDialogFlujo.pagado) {
-        await registrarPagoFlujo(pagoDialogFlujo.id_flujo, {
-          descripcionPago: pagoDescripcion || undefined,
-        });
-      }
-      setPagoDialogFlujo(null);
-      refresh();
-    } catch (err) {
-      setPagoError(err instanceof Error ? err.message : "Error desconocido");
-    } finally {
-      setPagoEnviando(false);
     }
   }
 
@@ -839,6 +825,35 @@ function TesoreriaFlujosPageContent() {
       setErrorReferencia(err instanceof Error ? err.message : "No se pudo subir la referencia.");
     } finally {
       setSubiendoReferencia(false);
+    }
+  }
+
+  async function handleSubirComprobanteInline(archivo: File) {
+    if (!editing) return;
+    setSubiendoComprobante(true);
+    setErrorComprobante(null);
+    try {
+      let actualizado = await subirComprobanteFlujo(editing.id_flujo, archivo, session?.user_id);
+      // Unificado con "Registrar pago" (25/Sep/2026, "ya no es necesario el
+      // boton, se sube el comprobante y se pone como pagado") - si el
+      // flujo aun no estaba pagado, subir el comprobante ahora TAMBIEN lo
+      // marca pagado. El backend sigue exigiendo autorizacion=True y
+      // validacion_estado=APROBADA (ver registrar_pago en views.py) - el
+      // Alert de arriba en este mismo tab ya bloquea llegar aqui sin eso.
+      if (!editing.pagado) {
+        actualizado = await registrarPagoFlujo(editing.id_flujo, {
+          descripcionPago: descripcionPagoPendiente || undefined,
+        });
+      }
+      setEditing(actualizado);
+      setArchivoComprobantePendiente(null);
+      setReemplazandoComprobante(false);
+      setDescripcionPagoPendiente("");
+      refresh();
+    } catch (err) {
+      setErrorComprobante(err instanceof Error ? err.message : "No se pudo subir el comprobante.");
+    } finally {
+      setSubiendoComprobante(false);
     }
   }
 
@@ -1037,6 +1052,7 @@ function TesoreriaFlujosPageContent() {
               <TableRow>
                 <TableCell>ID Flujo</TableCell>
                 <TableCell>ID Contrato</TableCell>
+                <TableCell>Sociedad</TableCell>
                 <TableCell>Descripción de Pago</TableCell>
                 <TableCell>
                   <LabelTip
@@ -1080,13 +1096,13 @@ function TesoreriaFlujosPageContent() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : flujosFiltrados.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin flujos registrados.
                     </Typography>
@@ -1097,6 +1113,7 @@ function TesoreriaFlujosPageContent() {
                   <TableRow key={f.id_flujo} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.id_flujo}</TableCell>
                     <TableCell>{f.contrato || "—"}</TableCell>
+                    <TableCell>{nombreSociedad(f.contrato_sociedad)}</TableCell>
                     <TableCell>{f.descripcion_pago || "—"}</TableCell>
                     <TableCell>{f.fecha_efectiva || "—"}</TableCell>
                     <TableCell>{f.concepto || "—"}</TableCell>
@@ -1788,68 +1805,23 @@ function TesoreriaFlujosPageContent() {
             </Stack>
           )}
 
+          {/* Comprobante de pago (25/Sep/2026, "que se vea igual a
+          Referencias", unificado con Registrar pago el mismo dia: "ya no es
+          necesario el boton, se sube el comprobante y se pone como
+          pagado") - mismo Paper + SelectorArchivoLocalODrive inline, sube
+          directo al elegir el archivo, sin Dialog. Si el flujo aun no esta
+          pagado, subir el comprobante aqui TAMBIEN llama a
+          registrarPagoFlujo (ver handleSubirComprobanteInline) - ya no
+          existe un boton separado de "Registrar pago". El backend sigue
+          exigiendo autorizacion=True (validar_estado APROBADA), asi que se
+          bloquea aqui mismo con el mismo mensaje que antes vivia en el
+          boton del tab Control. */}
           {tab === "Comprobante de pago" && (
             <Stack spacing={1.5}>
-              {soloLectura && !editing?.drive_file_id_comprobante ? (
-                <Alert severity="info">No hay documentos.</Alert>
-              ) : (
-                <>
-                  <Typography variant="caption" color="text.secondary">
-                    El comprobante se trae directo de Drive.
-                  </Typography>
-                  <Paper variant="outlined" sx={{ p: 1.5 }}>
-                    <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
-                      <Stack direction="row" spacing={1.5} alignItems="center">
-                        <FileCheck2 size={18} strokeWidth={1.5} />
-                        <Typography variant="body2">Comprobante de pago</Typography>
-                      </Stack>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <IconButton
-                          size="small"
-                          aria-label="Ver comprobante"
-                          title="Ver comprobante"
-                          disabled={!editing?.drive_file_id_comprobante}
-                          onClick={() => {
-                            if (!editing?.drive_file_id_comprobante) return;
-                            setPreviewDoc({
-                              url: urlVerComprobanteFlujo(editing.id_flujo),
-                              titulo: `Flujo ${editing.id_flujo} — Comprobante`,
-                              urlExterna: urlDriveWebView(editing.drive_file_id_comprobante),
-                            });
-                          }}
-                        >
-                          <Eye size={16} strokeWidth={1.5} />
-                        </IconButton>
-                        <Chip
-                          size="small"
-                          color={editing?.drive_file_id_comprobante ? "success" : "default"}
-                          label={editing?.drive_file_id_comprobante ? "Disponible en Drive" : "Sin archivo"}
-                        />
-                      </Stack>
-                    </Stack>
-                    {editing && puedeEditar && (
-                      <Button
-                        size="small"
-                        startIcon={<Upload size={14} strokeWidth={1.5} />}
-                        sx={{ mt: 1.5 }}
-                        onClick={() => abrirDialogoPago(editing)}
-                      >
-                        {editing.link_comprobante_banco ? "Reemplazar comprobante" : "Subir comprobante"}
-                      </Button>
-                    )}
-                  </Paper>
-                </>
-              )}
-            </Stack>
-          )}
-
-          {tab === "Control" && (
-            <Stack spacing={2}>
-              {/* Panel de acciones (10/Sep/2026, "esta parte no se ve muy
-              bien...que sea como panel de control") - antes vivian sueltas
-              en el menu de 3 puntos de la fila; ahora se ven aqui, dentro
-              del mismo dialogo de edicion, junto con el resto del estado
-              de control. */}
+              {/* Panel de acciones (25/Sep/2026, movido aqui desde el tab
+              Control - Vincular/Conciliar/Aprobar/Rechazar viven junto al
+              comprobante porque son las acciones que mas se usan justo
+              antes/despues de subirlo). */}
               {editing && !soloLectura && (
                 <Stack spacing={1}>
                   <Typography variant="overline" color="text.secondary">
@@ -1888,26 +1860,119 @@ function TesoreriaFlujosPageContent() {
                         Rechazar
                       </Button>
                     )}
-                    {puedeEditar && !editing.pagado && (
-                      <Tooltip
-                        title={editing.autorizacion ? "" : 'Da clic en "Aprobar" para autorizar el pago'}
-                      >
-                        <span>
-                          <Button
-                            size="small"
-                            startIcon={<Check size={14} strokeWidth={1.5} />}
-                            disabled={!editing.autorizacion}
-                            onClick={() => abrirDialogoPago(editing)}
-                          >
-                            {editing.autorizacion ? "Registrar pago" : "Falta autorizar antes de pagar"}
-                          </Button>
-                        </span>
-                      </Tooltip>
-                    )}
                   </Stack>
                   <Divider />
                 </Stack>
               )}
+              {!editing?.pagado && (!editing?.autorizacion || editing?.validacion_estado !== "APROBADA") ? (
+                <Alert severity="info">
+                  Este flujo todavía no está autorizado para pago - da clic en &quot;Aprobar&quot; (tab
+                  Control) antes de poder subir el comprobante.
+                </Alert>
+              ) : (
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    Comprobante de pago
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 1.5 }}>
+                    {editing.drive_file_id_comprobante && !reemplazandoComprobante ? (
+                      <>
+                        <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <FileCheck2 size={18} strokeWidth={1.5} />
+                            <Typography variant="body2">Comprobante de pago</Typography>
+                          </Stack>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <IconButton
+                              size="small"
+                              aria-label="Ver comprobante"
+                              title="Ver comprobante"
+                              onClick={() => {
+                                if (!editing.drive_file_id_comprobante) return;
+                                setPreviewDoc({
+                                  url: urlVerComprobanteFlujo(editing.id_flujo),
+                                  titulo: `Flujo ${editing.id_flujo} — Comprobante`,
+                                  urlExterna: urlDriveWebView(editing.drive_file_id_comprobante),
+                                });
+                              }}
+                            >
+                              <Eye size={16} strokeWidth={1.5} />
+                            </IconButton>
+                            <Chip size="small" color="success" label="Disponible en Drive" />
+                          </Stack>
+                        </Stack>
+                        {puedeEditar && (
+                          <Button
+                            size="small"
+                            startIcon={<Upload size={14} strokeWidth={1.5} />}
+                            sx={{ mt: 1.5 }}
+                            onClick={() => setReemplazandoComprobante(true)}
+                          >
+                            Reemplazar comprobante
+                          </Button>
+                        )}
+                      </>
+                    ) : soloLectura ? (
+                      <Alert severity="info">No hay documentos.</Alert>
+                    ) : (
+                      <>
+                        {!editing.pagado && (
+                          <TextField
+                            size="small"
+                            label="Descripción de pago"
+                            value={descripcionPagoPendiente}
+                            onChange={(e) => setDescripcionPagoPendiente(e.target.value)}
+                            fullWidth
+                            sx={{ mb: 1.5 }}
+                          />
+                        )}
+                        <SelectorArchivoLocalODrive
+                          archivo={archivoComprobantePendiente}
+                          onChange={setArchivoComprobantePendiente}
+                          accept="image/*,application/pdf"
+                          mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+                          tituloDrive="Elige el comprobante"
+                        />
+                        <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            disabled={!archivoComprobantePendiente || subiendoComprobante}
+                            startIcon={subiendoComprobante ? <CircularProgress size={14} /> : undefined}
+                            onClick={() =>
+                              archivoComprobantePendiente && handleSubirComprobanteInline(archivoComprobantePendiente)
+                            }
+                          >
+                            {editing.pagado ? "Subir comprobante" : "Subir comprobante y marcar pagado"}
+                          </Button>
+                          {reemplazandoComprobante && (
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                setReemplazandoComprobante(false);
+                                setArchivoComprobantePendiente(null);
+                                setErrorComprobante(null);
+                              }}
+                            >
+                              Cancelar
+                            </Button>
+                          )}
+                        </Stack>
+                      </>
+                    )}
+                    {errorComprobante && (
+                      <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
+                        {errorComprobante}
+                      </Typography>
+                    )}
+                  </Paper>
+                </Box>
+              )}
+            </Stack>
+          )}
+
+          {tab === "Control" && (
+            <Stack spacing={2}>
               <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
                 size="small"
@@ -2248,54 +2313,6 @@ function TesoreriaFlujosPageContent() {
         ]}
       </Menu>
 
-      <Dialog open={!!pagoDialogFlujo} onClose={() => setPagoDialogFlujo(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          {pagoDialogFlujo?.pagado ? "Subir comprobante" : "Registrar pago"} — {pagoDialogFlujo?.id_flujo}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {pagoError && (
-              <Alert severity="error" onClose={() => setPagoError(null)}>
-                {pagoError}
-              </Alert>
-            )}
-            {!pagoDialogFlujo?.pagado && (
-              <TextField
-                size="small"
-                label="Descripción de pago"
-                value={pagoDescripcion}
-                onChange={(e) => setPagoDescripcion(e.target.value)}
-                fullWidth
-              />
-            )}
-            <SelectorArchivoLocalODrive
-              archivo={pagoArchivo}
-              onChange={setPagoArchivo}
-              accept="image/*,application/pdf"
-              mimeTypesDrive={MIME_TYPES_COMPROBANTE}
-              tituloDrive="Elige el comprobante"
-            />
-            {pagoDialogFlujo?.link_comprobante_banco && !pagoArchivo && (
-              <FormHelperText>
-                Ya hay un comprobante subido. Elige un archivo para reemplazarlo.
-              </FormHelperText>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPagoDialogFlujo(null)} disabled={pagoEnviando}>
-            Cancelar
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleConfirmarPago}
-            disabled={pagoEnviando || (!!pagoDialogFlujo?.pagado && !pagoArchivo)}
-          >
-            {pagoEnviando ? <CircularProgress size={20} /> : "Confirmar"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <MotorDocumentalDialog
         open={!!motorFlujo}
         onClose={() => setMotorFlujo(null)}
@@ -2310,6 +2327,17 @@ function TesoreriaFlujosPageContent() {
                 // falta subirlo de nuevo.
                 carpeta: `Tesoreria/Flujos/${motorFlujo.id_flujo}`,
                 permKey: "tesoreria.editar",
+                // 25/Sep/2026, "que lo tome en automatico sin tener que dar
+                // Ver archivos en Drive" - el flujo ya conoce su propio
+                // comprobante (drive_file_id_comprobante, ver subir_comprobante
+                // en views.py), no hace falta listar la carpeta para encontrarlo.
+                archivoConocido: motorFlujo.drive_file_id_comprobante
+                  ? {
+                      file_id: motorFlujo.drive_file_id_comprobante,
+                      nombre: `Comprobante de pago — ${motorFlujo.id_flujo}`,
+                      web_view_link: urlDriveWebView(motorFlujo.drive_file_id_comprobante),
+                    }
+                  : undefined,
                 expectedDocumentType: "tesoreria.comprobante_bancario",
                 camposConfirmables: TESORERIA_FLUJO_CAMPOS_CONFIRMABLES,
                 onConfirmar: handleConfirmarConciliacionFlujo,

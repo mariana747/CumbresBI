@@ -1,9 +1,10 @@
 "use client";
 
 import { Alert, Button, IconButton, Stack, Typography } from "@mui/material";
-import { FileText, HardDrive, Upload, X as CloseIcon } from "lucide-react";
-import { useState } from "react";
+import { Eye, FileText, HardDrive, Upload, X as CloseIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 import { elegirArchivoDrive } from "@/lib/googleDriveFilePicker";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 
 // Limite real del backend (24/Sep/2026, hallazgo real: subir un PDF de
 // mas de 2.5MB tronaba con "RequestDataTooBig" - DATA_UPLOAD_MAX_MEMORY_SIZE
@@ -32,6 +33,27 @@ export default function SelectorArchivoLocalODrive({
   tituloDrive: string;
 }) {
   const [errorPickerDrive, setErrorPickerDrive] = useState<string | null>(null);
+  // Previsualizar antes de subir (25/Sep/2026, pedido explicito: "tanto en
+  // local y en Drive" - elegirArchivoDrive ya descarga los bytes a un File
+  // normal, ver su docstring, asi que un solo blob: URL cubre los dos
+  // origenes sin distinguirlos). Se genera/revoca solo cuando el dialogo de
+  // preview esta abierto, no en cada render.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  function verPreview() {
+    if (!archivo) return;
+    setPreviewUrl(URL.createObjectURL(archivo));
+  }
+
+  function cerrarPreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  }
 
   function elegirLocal(archivoElegido: File | null) {
     setErrorPickerDrive(null);
@@ -90,11 +112,21 @@ export default function SelectorArchivoLocalODrive({
           <Typography variant="body2" sx={{ flexGrow: 1, wordBreak: "break-word" }}>
             {archivo.name}
           </Typography>
+          <IconButton size="small" aria-label="Previsualizar archivo" title="Previsualizar" onClick={verPreview}>
+            <Eye size={16} strokeWidth={1.5} />
+          </IconButton>
           <IconButton size="small" aria-label="Quitar archivo" onClick={() => onChange(null)}>
             <CloseIcon size={16} strokeWidth={1.5} />
           </IconButton>
         </Stack>
       )}
+      <DocumentoPreviewDialog
+        open={!!previewUrl}
+        onClose={cerrarPreview}
+        url={previewUrl}
+        titulo={archivo?.name || "Previsualización"}
+        probablementeImagen={archivo?.type.startsWith("image/") ?? true}
+      />
     </>
   );
 }
