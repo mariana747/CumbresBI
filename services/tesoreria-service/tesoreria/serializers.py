@@ -394,6 +394,17 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
     # criterio que contrato_sociedad arriba, para no obligar al frontend a
     # resolver la serie con una llamada aparte a /api/nominas/.
     periodo_nomina_serie = serializers.CharField(source="periodo_nomina.serie", read_only=True, default=None)
+    # cuenta_ultimos_digitos (25/Sep/2026, "unir sociedad con terminacion de
+    # cuenta") - mismo criterio que el alias del Reporte Diario
+    # (reportes.py::_calcular_corte): ultimos 4 de cuenta.cuenta, cae a
+    # clabe si no hay numero corto capturado. El frontend lo combina con el
+    # nombre de la sociedad (que vive en iam-service, no se puede resolver
+    # aqui) para armar la columna "{sociedad}_{ultimos4}".
+    cuenta_ultimos_digitos = serializers.SerializerMethodField()
+
+    def get_cuenta_ultimos_digitos(self, obj):
+        numero = (obj.cuenta.cuenta or obj.cuenta.clabe) if obj.cuenta_id else None
+        return numero[-4:] if numero else None
 
     class Meta:
         model = TesoreriaFlujo
@@ -412,6 +423,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "id_empleado_reembolso",
             "cuenta",
             "cuenta_alias",
+            "cuenta_ultimos_digitos",
             "total_mxp",
             "autorizacion",
             "autorizado_por",
