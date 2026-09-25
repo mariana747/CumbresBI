@@ -35,6 +35,7 @@ import FiltrosBar from "@/components/FiltrosBar";
 import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive";
 import { SessionUser, getSession } from "@/lib/auth";
 import { MIME_TYPES_EXTRACTO } from "@/lib/googleDriveFilePicker";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { useExportarSheets } from "@/lib/useExportarSheets";
 import {
   ConciliarAutomaticoResultado,
@@ -75,6 +76,20 @@ export default function TesoreriaConciliacionPage() {
 
   const [cuentas, setCuentas] = useState<TesoreriaCuenta[]>([]);
   const [cuenta, setCuenta] = useState<TesoreriaCuenta | null>(null);
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  // "Sociedad_cuenta_terminacion de cuenta" (25/Sep/2026, "poner la cuenta
+  // bancaria como sociedad_cuenta_terminacion de cuenta") - reemplaza el
+  // `c.alias || c.id_cuenta_bancaria` que traia antes en los dos
+  // Autocomplete de "Cuenta bancaria" y en el aviso de deteccion
+  // automatica. Cae a los pedazos que si haya si falta alguno.
+  const etiquetaCuenta = (c: TesoreriaCuenta) => {
+    const soc = sociedades.find((s) => s.rfc === c.sociedad);
+    const numero = c.cuenta || c.clabe;
+    const partes = [soc?.alias_sociedad || soc?.razon_social, c.alias, numero ? numero.slice(-4) : null].filter(
+      Boolean
+    );
+    return partes.length ? partes.join("_") : c.id_cuenta_bancaria;
+  };
 
   const [movimientos, setMovimientos] = useState<TesoreriaMovimientoBancario[]>([]);
   const [search, setSearch] = useState("");
@@ -164,6 +179,7 @@ export default function TesoreriaConciliacionPage() {
     listCuentas(undefined, undefined, 200)
       .then((res) => setCuentas(res.results))
       .catch(() => setCuentas([]));
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
   }, []);
 
   useEffect(() => {
@@ -404,7 +420,7 @@ export default function TesoreriaConciliacionPage() {
                   options={cuentas}
                   value={cuenta}
                   onChange={(_, v) => setCuenta(v)}
-                  getOptionLabel={(c) => c.alias || c.id_cuenta_bancaria}
+                  getOptionLabel={etiquetaCuenta}
                   isOptionEqualToValue={(a, b) => a?.id_cuenta_bancaria === b?.id_cuenta_bancaria}
                   renderInput={(params) => <TextField {...params} label="Cuenta bancaria" />}
                 />
@@ -549,7 +565,7 @@ export default function TesoreriaConciliacionPage() {
                   options={cuentas}
                   value={cuenta}
                   onChange={(_, v) => setCuenta(v)}
-                  getOptionLabel={(c) => c.alias || c.id_cuenta_bancaria}
+                  getOptionLabel={etiquetaCuenta}
                   isOptionEqualToValue={(a, b) => a?.id_cuenta_bancaria === b?.id_cuenta_bancaria}
                   renderInput={(params) => <TextField {...params} label="Cuenta bancaria" />}
                 />
@@ -783,7 +799,7 @@ export default function TesoreriaConciliacionPage() {
           )}
           {!detectandoCuenta && cuentaDetectada && (
             <Alert severity="success" sx={{ mt: 2 }}>
-              Detectamos que este extracto es de: {cuentaDetectada.alias || cuentaDetectada.id_cuenta_bancaria}.
+              Detectamos que este extracto es de: {etiquetaCuenta(cuentaDetectada)}.
             </Alert>
           )}
           {!detectandoCuenta && archivo && !cuentaDetectada && !cuenta && (

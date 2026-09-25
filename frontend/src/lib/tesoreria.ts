@@ -1200,6 +1200,7 @@ export interface TesoreriaFlujo {
   id_empleado_reembolso: string | null;
   cuenta: string;
   cuenta_alias: string | null;
+  cuenta_ultimos_digitos: string | null;
   total_mxp: string | null;
   autorizacion: boolean | null;
   autorizado_por: string | null;

@@ -237,6 +237,17 @@ function TesoreriaFlujosPageContent() {
     const s = sociedades.find((soc) => soc.rfc === rfc);
     return s ? s.alias_sociedad || s.razon_social || s.rfc : rfc;
   };
+  // "Sociedad_terminacion de cuenta" (25/Sep/2026, "unir sociedad con
+  // terminacion de cuenta") - reemplaza la columna de Sociedad sola;
+  // cuenta_ultimos_digitos ya viene resuelto del backend
+  // (TesoreriaFlujoSerializer.cuenta_ultimos_digitos, ultimos 4 de
+  // cuenta.cuenta/clabe). Cae a solo uno de los dos si falta el otro, en
+  // vez de dejar un "_" suelto.
+  const nombreSociedadCuenta = (f: TesoreriaFlujo) => {
+    const soc = f.contrato_sociedad ? nombreSociedad(f.contrato_sociedad) : null;
+    const partes = [soc && soc !== "—" ? soc : null, f.cuenta_ultimos_digitos].filter(Boolean);
+    return partes.length ? partes.join("_") : "—";
+  };
   const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   // Paginacion server-side (20/Sep/2026, fix del 503 en produccion - el
@@ -1066,6 +1077,9 @@ function TesoreriaFlujosPageContent() {
               <TableRow>
                 <TableCell>ID Flujo</TableCell>
                 <TableCell>ID Contrato</TableCell>
+                {/* Sociedad_terminacion de cuenta (25/Sep/2026, "unir
+                sociedad con terminacion de cuenta") - ver
+                nombreSociedadCuenta() mas abajo. */}
                 <TableCell>Sociedad</TableCell>
                 <TableCell>Descripción de Pago</TableCell>
                 <TableCell>
@@ -1077,7 +1091,6 @@ function TesoreriaFlujosPageContent() {
                 <TableCell>Concepto</TableCell>
 
                 <TableCell align="right">Total MXP</TableCell>
-                <TableCell>CFDI vinculado</TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={0.5} alignItems="center">
                     <span>Estado</span>
@@ -1110,13 +1123,13 @@ function TesoreriaFlujosPageContent() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : flujosFiltrados.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin flujos registrados.
                     </Typography>
@@ -1127,7 +1140,7 @@ function TesoreriaFlujosPageContent() {
                   <TableRow key={f.id_flujo} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.id_flujo}</TableCell>
                     <TableCell>{f.contrato || "—"}</TableCell>
-                    <TableCell>{nombreSociedad(f.contrato_sociedad)}</TableCell>
+                    <TableCell>{nombreSociedadCuenta(f)}</TableCell>
                     <TableCell>{f.descripcion_pago || "—"}</TableCell>
                     <TableCell>{f.fecha_efectiva || "—"}</TableCell>
                     <TableCell>{f.concepto || "—"}</TableCell>
@@ -1135,21 +1148,6 @@ function TesoreriaFlujosPageContent() {
                       {f.total_mxp
                         ? Number(f.total_mxp).toLocaleString("es-MX", { style: "currency", currency: "MXN" })
                         : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {f.factura || f.complemento || f.nomina ? (
-                        <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                          {f.factura && <Chip size="small" label={`Factura ${folioFactura(f.factura)}`} variant="outlined" />}
-                          {f.complemento && (
-                            <Chip size="small" label={`REP ${folioComplemento(f.complemento)}`} variant="outlined" />
-                          )}
-                          {f.nomina && (
-                            <Chip size="small" label={`Nómina ${folioRecNomina(f.nomina)}`} variant="outlined" />
-                          )}
-                        </Stack>
-                      ) : (
-                        "—"
-                      )}
                     </TableCell>
                     <TableCell>
                       <Chip
