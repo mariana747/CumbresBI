@@ -1374,6 +1374,18 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         # una que ya este cerrada).
         self._validar_nomina_editable(serializer.instance.periodo_nomina)
         self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
+        # 25/Sep/2026, "habilitar editar Cuenta solo si no esta pagado" -
+        # correccion de errores de captura (transaccion en la cuenta
+        # equivocada, ver caso real de conciliacion de Estacionamiento/3257).
+        # El frontend ya deshabilita el selector en ese caso; esto es la
+        # misma regla del lado del backend, por si se llama a la API
+        # directo. Una vez pagado (dinero ya conciliado/liquidado), la
+        # cuenta queda fija.
+        nueva_cuenta = serializer.validated_data.get("cuenta")
+        if serializer.instance.pagado and nueva_cuenta and nueva_cuenta != serializer.instance.cuenta:
+            raise ValidationError(
+                {"cuenta": "No se puede cambiar la cuenta de un flujo que ya está pagado."}
+            )
         serializer.save()
 
     def perform_destroy(self, instance):
