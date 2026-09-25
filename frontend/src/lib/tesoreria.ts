@@ -894,6 +894,42 @@ export interface TesoreriaContrato {
   updated_by: string | null;
 }
 
+export interface TesoreriaProyectoCodigo {
+  codigo: string;
+  significado: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+export async function listProyectoCodigos(search?: string): Promise<TesoreriaPaginado<TesoreriaProyectoCodigo>> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  params.set("page_size", "200");
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/proyecto-codigos/?${params.toString()}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function createProyectoCodigo(params: {
+  codigo: string;
+  significado?: string;
+}): Promise<TesoreriaProyectoCodigo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/proyecto-codigos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo: params.codigo, significado: params.significado || null }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function listContratos(
   search?: string,
   contraparteId?: string,
