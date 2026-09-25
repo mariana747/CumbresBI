@@ -833,25 +833,39 @@ function TesoreriaFlujosPageContent() {
     setSubiendoComprobante(true);
     setErrorComprobante(null);
     try {
-      let actualizado = await subirComprobanteFlujo(editing.id_flujo, archivo, session?.user_id);
-      // Unificado con "Registrar pago" (25/Sep/2026, "ya no es necesario el
-      // boton, se sube el comprobante y se pone como pagado") - si el
-      // flujo aun no estaba pagado, subir el comprobante ahora TAMBIEN lo
-      // marca pagado. El backend sigue exigiendo autorizacion=True y
-      // validacion_estado=APROBADA (ver registrar_pago en views.py) - el
-      // Alert de arriba en este mismo tab ya bloquea llegar aqui sin eso.
-      if (!editing.pagado) {
-        actualizado = await registrarPagoFlujo(editing.id_flujo, {
-          descripcionPago: descripcionPagoPendiente || undefined,
-        });
-      }
+      // Separado de nuevo de "Marcar como pagado" (25/Sep/2026, "separalos,
+      // todavia no estan marcados como pagadas" - la union de hace un rato
+      // obligaba a marcar pagado en el mismo paso que subir el archivo,
+      // pero en la practica se necesita poder subir/corregir el
+      // comprobante de un flujo que sigue sin pagar, ej. mientras se
+      // resuelve un error de captura como la reasignacion de cuenta). Subir
+      // el comprobante ya NO cambia el estado pagado - ver
+      // handleMarcarPagado para esa accion aparte.
+      const actualizado = await subirComprobanteFlujo(editing.id_flujo, archivo, session?.user_id);
       setEditing(actualizado);
       setArchivoComprobantePendiente(null);
       setReemplazandoComprobante(false);
-      setDescripcionPagoPendiente("");
       refresh();
     } catch (err) {
       setErrorComprobante(err instanceof Error ? err.message : "No se pudo subir el comprobante.");
+    } finally {
+      setSubiendoComprobante(false);
+    }
+  }
+
+  async function handleMarcarPagado() {
+    if (!editing) return;
+    setSubiendoComprobante(true);
+    setErrorComprobante(null);
+    try {
+      const actualizado = await registrarPagoFlujo(editing.id_flujo, {
+        descripcionPago: descripcionPagoPendiente || undefined,
+      });
+      setEditing(actualizado);
+      setDescripcionPagoPendiente("");
+      refresh();
+    } catch (err) {
+      setErrorComprobante(err instanceof Error ? err.message : "No se pudo marcar como pagado.");
     } finally {
       setSubiendoComprobante(false);
     }
@@ -1284,7 +1298,18 @@ function TesoreriaFlujosPageContent() {
         />
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog
+        open={dialogOpen}
+        onClose={(_, reason) => {
+          // Regla del proyecto: Dialog solo cierra con la X, nunca con
+          // click fuera o Escape (25/Sep/2026, "al momento de editar se
+          // cierra dando click fuera del dialog").
+          if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+          setDialogOpen(false);
+        }}
+        fullWidth
+        maxWidth="sm"
+      >
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {soloLectura ? `Ver ${editing?.id_flujo}` : editing ? `Editar ${editing.id_flujo}` : "Nuevo Flujo"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -1513,7 +1538,17 @@ function TesoreriaFlujosPageContent() {
                 />
               )}
               <CuentaBancariaSelector
-                disabled={!!editing}
+                // 25/Sep/2026, "habilitar editar Cuenta solo si no esta
+                // pagado" - antes se bloqueaba siempre al editar, sin
+                // importar el estado, y no habia forma de corregir un
+                // error de captura (transaccion asignada a la cuenta
+                // equivocada) sin pasar por soporte tecnico. Una vez
+                // pagado (dinero ya conciliado/liquidado), sigue
+                // bloqueado - mover la cuenta de un movimiento ya
+                // liquidado es una correccion mas delicada que un
+                // simple PATCH (ver historial de Saldos), queda fuera de
+                // este cambio.
+                disabled={!!editing && !!editing.pagado}
                 value={cuentaSeleccionada}
                 onChange={(seleccion) => {
                   setCuentaSeleccionada(seleccion);
@@ -1604,10 +1639,6 @@ function TesoreriaFlujosPageContent() {
                       fullWidth
                     />
                   )}
-                  <Typography variant="caption" color="text.secondary">
-                    Se actualizan con las acciones Aprobar / Rechazar / Registrar pago, no
-                    aquí.
-                  </Typography>
                 </>
               ) : (
                 <Typography variant="caption" color="text.secondary">
@@ -1806,16 +1837,16 @@ function TesoreriaFlujosPageContent() {
           )}
 
           {/* Comprobante de pago (25/Sep/2026, "que se vea igual a
-          Referencias", unificado con Registrar pago el mismo dia: "ya no es
-          necesario el boton, se sube el comprobante y se pone como
-          pagado") - mismo Paper + SelectorArchivoLocalODrive inline, sube
-          directo al elegir el archivo, sin Dialog. Si el flujo aun no esta
-          pagado, subir el comprobante aqui TAMBIEN llama a
-          registrarPagoFlujo (ver handleSubirComprobanteInline) - ya no
-          existe un boton separado de "Registrar pago". El backend sigue
-          exigiendo autorizacion=True (validar_estado APROBADA), asi que se
-          bloquea aqui mismo con el mismo mensaje que antes vivia en el
-          boton del tab Control. */}
+          Referencias") - mismo Paper + SelectorArchivoLocalODrive inline,
+          sube directo al elegir el archivo, sin Dialog. Se unifico
+          brevemente con "Registrar pago" (subir el archivo tambien
+          marcaba pagado) pero se separo de nuevo el mismo dia ("separalos,
+          todavia no estan marcados como pagadas") - subir/reemplazar el
+          comprobante YA NO depende de estar autorizado/pagado (sirve para
+          adjuntar evidencia mientras se resuelve un error de captura, ej.
+          reasignar la cuenta); "Marcar como pagado" es un bloque aparte
+          mas abajo, con su propio gate de autorizacion=True +
+          validacion_estado=APROBADA (backend en registrar_pago). */}
           {tab === "Comprobante de pago" && (
             <Stack spacing={1.5}>
               {/* Panel de acciones (25/Sep/2026, movido aqui desde el tab
@@ -1864,12 +1895,7 @@ function TesoreriaFlujosPageContent() {
                   <Divider />
                 </Stack>
               )}
-              {!editing?.pagado && (!editing?.autorizacion || editing?.validacion_estado !== "APROBADA") ? (
-                <Alert severity="info">
-                  Este flujo todavía no está autorizado para pago - da clic en &quot;Aprobar&quot; (tab
-                  Control) antes de poder subir el comprobante.
-                </Alert>
-              ) : (
+              {editing && (
                 <Box>
                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
                     Comprobante de pago
@@ -1901,7 +1927,7 @@ function TesoreriaFlujosPageContent() {
                             <Chip size="small" color="success" label="Disponible en Drive" />
                           </Stack>
                         </Stack>
-                        {puedeEditar && (
+                        {puedeEditar && !soloLectura && (
                           <Button
                             size="small"
                             startIcon={<Upload size={14} strokeWidth={1.5} />}
@@ -1916,16 +1942,6 @@ function TesoreriaFlujosPageContent() {
                       <Alert severity="info">No hay documentos.</Alert>
                     ) : (
                       <>
-                        {!editing.pagado && (
-                          <TextField
-                            size="small"
-                            label="Descripción de pago"
-                            value={descripcionPagoPendiente}
-                            onChange={(e) => setDescripcionPagoPendiente(e.target.value)}
-                            fullWidth
-                            sx={{ mb: 1.5 }}
-                          />
-                        )}
                         <SelectorArchivoLocalODrive
                           archivo={archivoComprobantePendiente}
                           onChange={setArchivoComprobantePendiente}
@@ -1943,7 +1959,7 @@ function TesoreriaFlujosPageContent() {
                               archivoComprobantePendiente && handleSubirComprobanteInline(archivoComprobantePendiente)
                             }
                           >
-                            {editing.pagado ? "Subir comprobante" : "Subir comprobante y marcar pagado"}
+                            Subir comprobante
                           </Button>
                           {reemplazandoComprobante && (
                             <Button
@@ -1966,6 +1982,48 @@ function TesoreriaFlujosPageContent() {
                       </Typography>
                     )}
                   </Paper>
+                </Box>
+              )}
+
+              {/* "Marcar como pagado" (25/Sep/2026, separado de nuevo de
+              subir comprobante) - bloque aparte, independiente del archivo.
+              El backend exige autorizacion=True + validacion_estado=APROBADA
+              (ver registrar_pago en views.py); se bloquea aqui mismo con el
+              mismo mensaje que antes vivia en el boton del tab Control. */}
+              {editing && !soloLectura && !editing.pagado && (
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    Marcar como pagado
+                  </Typography>
+                  {!editing.autorizacion || editing.validacion_estado !== "APROBADA" ? (
+                    <Alert severity="info">
+                      Este flujo todavía no está autorizado para pago - da clic en &quot;Aprobar&quot;
+                      (arriba) antes de poder marcarlo como pagado.
+                    </Alert>
+                  ) : (
+                    <Paper variant="outlined" sx={{ p: 1.5 }}>
+                      <Stack spacing={1.5}>
+                        <TextField
+                          size="small"
+                          label="Descripción de pago"
+                          value={descripcionPagoPendiente}
+                          onChange={(e) => setDescripcionPagoPendiente(e.target.value)}
+                          fullWidth
+                        />
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="success"
+                          sx={{ alignSelf: "flex-start" }}
+                          disabled={subiendoComprobante}
+                          startIcon={subiendoComprobante ? <CircularProgress size={14} /> : undefined}
+                          onClick={handleMarcarPagado}
+                        >
+                          Marcar como pagado
+                        </Button>
+                      </Stack>
+                    </Paper>
+                  )}
                 </Box>
               )}
             </Stack>
@@ -2105,7 +2163,15 @@ function TesoreriaFlujosPageContent() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!vinculando} onClose={() => setVinculando(null)} fullWidth maxWidth="sm">
+      <Dialog
+        open={!!vinculando}
+        onClose={(_, reason) => {
+          if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+          setVinculando(null);
+        }}
+        fullWidth
+        maxWidth="sm"
+      >
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {vinculando ? `Vincular CFDI a ${vinculando.id_flujo}` : ""}
           <IconButton onClick={() => setVinculando(null)} size="small" aria-label="Cerrar">
