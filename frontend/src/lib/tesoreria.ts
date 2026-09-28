@@ -370,7 +370,7 @@ export async function deleteBanco(idBanxico: string): Promise<void> {
   }
 }
 
-export type TesoreriaCuentaTipo = "CHEQUES" | "INVERSION" | "NOMINA" | "PAGARE" | "OTRA";
+export type TesoreriaCuentaTipo = "CHEQUES" | "INVERSION" | "NOMINA" | "PAGARE" | "FIDEICOMISO" | "OTRA";
 
 export interface TesoreriaCuenta {
   id_cuenta_bancaria: string;
