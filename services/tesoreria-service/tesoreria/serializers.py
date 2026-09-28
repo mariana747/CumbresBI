@@ -882,6 +882,7 @@ class TesoreriaSaldoSerializer(serializers.ModelSerializer):
             "saldo",
             "cambio_dinero",
             "cambio_porcentual",
+            "disponible_ministrar",
             "created_at",
             "created_by",
             "updated_at",
