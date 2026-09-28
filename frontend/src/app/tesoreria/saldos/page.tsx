@@ -52,6 +52,7 @@ const FORM_VACIO = {
   saldo: "",
   cambioDinero: "",
   cambioPorcentual: "",
+  disponibleMinistrar: "",
 };
 
 // Fecha de "hoy" en hora local, no UTC (23/Sep/2026, bug real: guardando en
@@ -226,6 +227,7 @@ export default function TesoreriaSaldosPage() {
       saldo: s.saldo,
       cambioDinero: s.cambio_dinero || "",
       cambioPorcentual: s.cambio_porcentual || "",
+      disponibleMinistrar: s.disponible_ministrar || "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -241,6 +243,7 @@ export default function TesoreriaSaldosPage() {
       saldo: s.saldo,
       cambioDinero: "",
       cambioPorcentual: "",
+      disponibleMinistrar: "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -259,6 +262,7 @@ export default function TesoreriaSaldosPage() {
           saldo: form.saldo || undefined,
           cambioDinero: form.cambioDinero || undefined,
           cambioPorcentual: form.cambioPorcentual || undefined,
+          disponibleMinistrar: form.disponibleMinistrar || null,
         });
       } else {
         await createSaldo({
@@ -268,6 +272,7 @@ export default function TesoreriaSaldosPage() {
           saldo: form.saldo || "0",
           cambioDinero: form.cambioDinero || undefined,
           cambioPorcentual: form.cambioPorcentual || undefined,
+          disponibleMinistrar: form.disponibleMinistrar || undefined,
         });
       }
       setDialogOpen(false);
@@ -711,6 +716,17 @@ export default function TesoreriaSaldosPage() {
               onChange={(e) => setForm({ ...form, cambioDinero: e.target.value })}
               fullWidth
             />
+            {cuentas.find((c) => c.id_cuenta_bancaria === form.cuenta)?.tipo === "CREDITO" && (
+              <TextField
+                size="small"
+                type="number"
+                label="Disponible por ministrar"
+                helperText="Dato de la línea de crédito para esta fecha, se captura a mano (no se calcula de Flujos)."
+                value={form.disponibleMinistrar}
+                onChange={(e) => setForm({ ...form, disponibleMinistrar: e.target.value })}
+                fullWidth
+              />
+            )}
             <TextField
               size="small"
               label="Cambio porcentual"
