@@ -87,6 +87,9 @@ export default function CuentaBancariaSelector({
 // ni numero capturado.
 function etiqueta(c: TesoreriaCuenta): string {
   const numero = c.cuenta || c.clabe;
-  const nombre = c.alias || c.id_cuenta_bancaria;
+  // alias suele venir vacio (la migracion solo lleno label, ej.
+  // "TCC/BBVA/3257") - sin este fallback se mostraba el id_cuenta_bancaria
+  // en vez del nombre legible.
+  const nombre = c.alias || c.label || c.id_cuenta_bancaria;
   return numero ? `${nombre} — ${numero}` : nombre;
 }
