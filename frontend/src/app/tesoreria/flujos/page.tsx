@@ -1552,17 +1552,6 @@ function TesoreriaFlujosPageContent() {
                 />
               )}
               <CuentaBancariaSelector
-                // 25/Sep/2026, "habilitar editar Cuenta solo si no esta
-                // pagado" - antes se bloqueaba siempre al editar, sin
-                // importar el estado, y no habia forma de corregir un
-                // error de captura (transaccion asignada a la cuenta
-                // equivocada) sin pasar por soporte tecnico. Una vez
-                // pagado (dinero ya conciliado/liquidado), sigue
-                // bloqueado - mover la cuenta de un movimiento ya
-                // liquidado es una correccion mas delicada que un
-                // simple PATCH (ver historial de Saldos), queda fuera de
-                // este cambio.
-                disabled={!!editing && !!editing.pagado}
                 value={cuentaSeleccionada}
                 onChange={(seleccion) => {
                   setCuentaSeleccionada(seleccion);
