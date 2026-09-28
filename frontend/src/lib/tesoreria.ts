@@ -460,6 +460,14 @@ export async function createCuenta(params: {
   return response.json();
 }
 
+export async function getCuenta(idCuentaBancaria: string): Promise<TesoreriaCuenta> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/cuentas/${idCuentaBancaria}/`);
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function updateCuenta(
   idCuentaBancaria: string,
   params: Partial<{
