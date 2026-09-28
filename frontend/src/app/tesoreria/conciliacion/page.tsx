@@ -93,6 +93,29 @@ function guardarFiltroImportado(valor: { cuenta: string; corteEdc: string } | nu
   }
 }
 
+// Persistencia de la Cuenta bancaria seleccionada (28/Sep/2026, "tambien
+// debe mantener seleccionada la cuenta bancaria") - mismo criterio que el
+// filtro de arriba, pero independiente: se guarda con cada seleccion
+// manual o detectada, y se limpia solo cuando el usuario borra el campo.
+const CUENTA_SELECCIONADA_KEY = "tesoreria_conciliacion_cuenta_seleccionada";
+
+function leerCuentaGuardada(): string | null {
+  try {
+    return sessionStorage.getItem(CUENTA_SELECCIONADA_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function guardarCuentaSeleccionada(idCuentaBancaria: string | null) {
+  try {
+    if (idCuentaBancaria) sessionStorage.setItem(CUENTA_SELECCIONADA_KEY, idCuentaBancaria);
+    else sessionStorage.removeItem(CUENTA_SELECCIONADA_KEY);
+  } catch {
+    // best-effort, sessionStorage puede no estar disponible (modo privado)
+  }
+}
+
 export default function TesoreriaConciliacionPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [tab, setTab] = useState(0);
@@ -213,6 +236,17 @@ export default function TesoreriaConciliacionPage() {
       listCortesEdc(guardado.cuenta)
         .then((cortes) => setCorteImportado(cortes.find((c) => c.id === guardado.corteEdc) || null))
         .catch(() => setCorteImportado(null));
+    } else {
+      // Cuenta seleccionada sin un "recien importado" activo (28/Sep/2026,
+      // "tambien debe mantener seleccionada la cuenta bancaria") - el caso
+      // de arriba ya la restaura como parte del filtro, este es el caso
+      // normal (solo viendo/importando, sin filtro).
+      const idCuentaGuardada = leerCuentaGuardada();
+      if (idCuentaGuardada) {
+        listCuentas(idCuentaGuardada, undefined, 1)
+          .then((res) => setCuenta(res.results.find((c) => c.id_cuenta_bancaria === idCuentaGuardada) || null))
+          .catch(() => {});
+      }
     }
   }, []);
 
@@ -240,7 +274,10 @@ export default function TesoreriaConciliacionPage() {
     detectarCuentaExtracto(archivo)
       .then((detectada) => {
         setCuentaDetectada(detectada);
-        if (detectada) setCuenta(detectada);
+        if (detectada) {
+          setCuenta(detectada);
+          guardarCuentaSeleccionada(detectada.id_cuenta_bancaria);
+        }
       })
       .catch(() => setCuentaDetectada(null))
       .finally(() => setDetectandoCuenta(false));
@@ -455,7 +492,10 @@ export default function TesoreriaConciliacionPage() {
                   size="small"
                   options={cuentas}
                   value={cuenta}
-                  onChange={(_, v) => setCuenta(v)}
+                  onChange={(_, v) => {
+                    setCuenta(v);
+                    guardarCuentaSeleccionada(v?.id_cuenta_bancaria || null);
+                  }}
                   getOptionLabel={etiquetaCuenta}
                   isOptionEqualToValue={(a, b) => a?.id_cuenta_bancaria === b?.id_cuenta_bancaria}
                   renderInput={(params) => <TextField {...params} label="Cuenta bancaria" />}
@@ -603,7 +643,10 @@ export default function TesoreriaConciliacionPage() {
                   size="small"
                   options={cuentas}
                   value={cuenta}
-                  onChange={(_, v) => setCuenta(v)}
+                  onChange={(_, v) => {
+                    setCuenta(v);
+                    guardarCuentaSeleccionada(v?.id_cuenta_bancaria || null);
+                  }}
                   getOptionLabel={etiquetaCuenta}
                   isOptionEqualToValue={(a, b) => a?.id_cuenta_bancaria === b?.id_cuenta_bancaria}
                   renderInput={(params) => <TextField {...params} label="Cuenta bancaria" />}
@@ -838,15 +881,35 @@ export default function TesoreriaConciliacionPage() {
           )}
           {!detectandoCuenta && cuentaDetectada && (
             <Alert severity="success" sx={{ mt: 2 }}>
-              Detectamos que este extracto es de: {etiquetaCuenta(cuentaDetectada)}.
+              Detectamos que este extracto es de: {etiquetaCuenta(cuentaDetectada)}. Si no es correcto, corrígela
+              abajo antes de importar.
             </Alert>
           )}
           {!detectandoCuenta && archivo && !cuentaDetectada && !cuenta && (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              No pudimos detectar la cuenta automáticamente. Elige una cuenta bancaria (arriba, se puede buscar) para
+              No pudimos detectar la cuenta automáticamente. Elige una cuenta bancaria abajo (se puede buscar) para
               poder importar.
             </Alert>
           )}
+          {/* 28/Sep/2026, "dejaria poder modificarlo" - antes el unico
+          selector de Cuenta bancaria vivia en el filtro de la pantalla,
+          detras de este dialogo (inalcanzable mientras estaba abierto); la
+          deteccion (regex + respaldo por IA) solo sugiere, esto es lo que
+          deja corregirla sin cerrar el dialogo. */}
+          <Box sx={{ mt: 2 }}>
+            <Autocomplete
+              size="small"
+              options={cuentas}
+              value={cuenta}
+              onChange={(_, v) => {
+                    setCuenta(v);
+                    guardarCuentaSeleccionada(v?.id_cuenta_bancaria || null);
+                  }}
+              getOptionLabel={etiquetaCuenta}
+              isOptionEqualToValue={(a, b) => a?.id_cuenta_bancaria === b?.id_cuenta_bancaria}
+              renderInput={(params) => <TextField {...params} label="Cuenta bancaria" />}
+            />
+          </Box>
           {importResultado && (
             <Alert severity={importResultado.errores.length > 0 ? "warning" : "success"} sx={{ mt: 2 }}>
               {importResultado.importados} movimiento(s) importado(s).

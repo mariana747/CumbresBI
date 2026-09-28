@@ -31,6 +31,8 @@ from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from . import google_sheets_utils, recaptcha
 from .audit_utils import emitir_evento_auditoria
+from .gemini_conciliacion import desambiguar_candidatos_por_ia
+from .gemini_deteccion_cuenta import detectar_numero_cuenta_por_ia
 from .pagination import ListadoGrandePagination
 from .mail_utils import (
     enviar_correo_aviso_saldo_ppd,
@@ -3880,7 +3882,7 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
     candidatos = (
         TesoreriaFlujo.objects.filter(cuenta=movimiento.cuenta, total_mxp__isnull=False)
         .exclude(movimientos_bancarios__isnull=False)
-        .select_related("contrato")
+        .select_related("contrato", "contrato__contraparte")
     )
     candidatos = candidatos.filter(
         total_mxp__gte=abs(monto) - TOLERANCIA_MONTO, total_mxp__lte=abs(monto) + TOLERANCIA_MONTO
@@ -3915,6 +3917,85 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
         sugerencias.append((score, flujo, motivos))
 
     sugerencias.sort(key=lambda t: t[0], reverse=True)
+
+    # Respaldo por IA cuando NO hay ningun candidato por monto/fecha
+    # (28/Sep/2026, "en los que estan Sin candidatos...liga el flujo a mano
+    # si sabes cual es" - la idea es que la IA intente eso mismo, leyendo la
+    # descripcion del banco contra concepto/contraparte, en vez de dejarlo
+    # siempre en manual). Amplia la busqueda: sin tolerancia de monto/fecha,
+    # solo flujos sin conciliar de la misma cuenta, tope MAX_SIN_MATCH para
+    # no mandarle a Gemini cientos de flujos.
+    MAX_CANDIDATOS_SIN_MATCH = 30
+    if not sugerencias:
+        flujos_sin_match = (
+            TesoreriaFlujo.objects.filter(cuenta=movimiento.cuenta, total_mxp__isnull=False)
+            .exclude(movimientos_bancarios__isnull=False)
+            .select_related("contrato", "contrato__contraparte")
+            .order_by("-fecha_efectiva")[:MAX_CANDIDATOS_SIN_MATCH]
+        )
+        candidatos_ia = [
+            {
+                "id_flujo": flujo.id_flujo,
+                "concepto": flujo.concepto,
+                "contraparte_nombre": getattr(getattr(flujo.contrato, "contraparte", None), "razon_social", None),
+                "total_mxp": flujo.total_mxp,
+            }
+            for flujo in flujos_sin_match
+        ]
+        sugerido_ia = desambiguar_candidatos_por_ia(movimiento.descripcion, candidatos_ia)
+        if sugerido_ia:
+            flujo_sugerido = next(
+                (f for f in flujos_sin_match if f.id_flujo == sugerido_ia["id_flujo_sugerido"]), None
+            )
+            if flujo_sugerido:
+                razon = sugerido_ia.get("razon")
+                motivos = [f"IA: {razon}"] if razon else ["sugerido por IA (sin match por monto/fecha)"]
+                return [
+                    {
+                        "id_flujo": flujo_sugerido.id_flujo,
+                        "concepto": flujo_sugerido.concepto,
+                        "total_mxp": flujo_sugerido.total_mxp,
+                        "fecha_pago": flujo_sugerido.fecha_pago,
+                        "fecha_efectiva": flujo_sugerido.fecha_efectiva,
+                        "contrato": flujo_sugerido.contrato_id,
+                        "pagado": flujo_sugerido.pagado,
+                        "score": 0,
+                        "motivos": motivos,
+                    }
+                ]
+        return []
+
+    # Respaldo por IA (28/Sep/2026, "el matching de movimientos como
+    # podemos usar ia") - solo entra si queda ambiguo: 2+ candidatos y el de
+    # arriba no es un match claro (empatado con el siguiente, o su score no
+    # llega al maximo de "mismo monto exacto + misma fecha"). El heuristico
+    # ya resuelve el resto sin gastar una llamada a Gemini.
+    PUNTAJE_MAXIMO_CLARO = 4
+    es_ambiguo = len(sugerencias) > 1 and (
+        sugerencias[0][0] < PUNTAJE_MAXIMO_CLARO or sugerencias[0][0] == sugerencias[1][0]
+    )
+    if es_ambiguo:
+        candidatos_ia = [
+            {
+                "id_flujo": flujo.id_flujo,
+                "concepto": flujo.concepto,
+                "contraparte_nombre": getattr(getattr(flujo.contrato, "contraparte", None), "razon_social", None),
+                "total_mxp": flujo.total_mxp,
+            }
+            for _, flujo, _ in sugerencias
+        ]
+        sugerido_ia = desambiguar_candidatos_por_ia(movimiento.descripcion, candidatos_ia)
+        if sugerido_ia:
+            for i, (score, flujo, motivos) in enumerate(sugerencias):
+                if flujo.id_flujo == sugerido_ia["id_flujo_sugerido"]:
+                    motivos_ia = motivos + [f"IA: {sugerido_ia['razon']}"] if sugerido_ia.get("razon") else motivos + ["sugerido por IA"]
+                    sugerencias[i] = (score, flujo, motivos_ia)
+                    # Sube el sugerido por IA al primer lugar sin pisar el
+                    # orden entre los demas (best-effort, no cambia sus
+                    # scores).
+                    sugerencias.insert(0, sugerencias.pop(i))
+                    break
+
     return [
         {
             "id_flujo": flujo.id_flujo,
@@ -3971,11 +4052,14 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         """Detecta a que cuenta pertenece un extracto ANTES de importarlo
         (23/Sep/2026, "que la IA identifique a que cuenta pertenece...pero
         que se tenga esas dos opciones" - deteccion automatica + seguir
-        pudiendo elegir a mano en el Autocomplete de arriba). No es IA de
-        verdad: busca en el texto crudo del archivo numeros de 8-20 digitos
-        (ej. "Cuenta: 65509560869" en el encabezado de metadata de Banco
-        Actinver) y los compara contra `cuenta`/`clabe` del catalogo. Best-
-        effort - si no encuentra nada, regresa cuenta=null y el usuario
+        pudiendo elegir a mano en el Autocomplete de arriba). Primero busca
+        en el texto crudo del archivo numeros de 8-20 digitos (ej. "Cuenta:
+        65509560869" en el encabezado de metadata de Banco Actinver) y los
+        compara contra `cuenta`/`clabe` del catalogo - rapido y sin costo.
+        Si eso no encuentra nada (28/Sep/2026, "usemos la IA...para que no
+        falle la busqueda"), respalda con Gemini sobre el mismo texto (ver
+        gemini_deteccion_cuenta.py) antes de rendirse. Best-effort en ambos
+        casos - si nada encuentra nada, regresa cuenta=null y el usuario
         sigue eligiendo manualmente, no bloquea nada."""
         archivo = request.FILES.get("file")
         if not archivo:
@@ -3983,16 +4067,27 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         contenido = archivo.read()
         texto = contenido.decode("utf-8", errors="ignore")
         numeros_encontrados = set(re.findall(r"\d{8,20}", texto))
-        if not numeros_encontrados:
-            return Response({"cuenta": None})
 
-        for cuenta in TesoreriaCuenta.objects.select_related("banco").all():
-            coincide = (cuenta.cuenta and cuenta.cuenta in numeros_encontrados) or (
-                cuenta.clabe and any(n in cuenta.clabe or cuenta.clabe in n for n in numeros_encontrados)
-            )
-            if coincide:
-                return Response({"cuenta": TesoreriaCuentaSerializer(cuenta).data})
-        return Response({"cuenta": None})
+        cuentas = TesoreriaCuenta.objects.select_related("banco").all()
+
+        def _buscar_coincidencia(numeros):
+            for cuenta in cuentas:
+                coincide = (cuenta.cuenta and cuenta.cuenta in numeros) or (
+                    cuenta.clabe and any(n in cuenta.clabe or cuenta.clabe in n for n in numeros)
+                )
+                if coincide:
+                    return cuenta
+            return None
+
+        cuenta_encontrada = _buscar_coincidencia(numeros_encontrados) if numeros_encontrados else None
+        if cuenta_encontrada is None:
+            numero_ia = detectar_numero_cuenta_por_ia(texto)
+            if numero_ia:
+                cuenta_encontrada = _buscar_coincidencia({numero_ia})
+
+        if cuenta_encontrada is None:
+            return Response({"cuenta": None})
+        return Response({"cuenta": TesoreriaCuentaSerializer(cuenta_encontrada).data})
 
     @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
     def importar(self, request):
