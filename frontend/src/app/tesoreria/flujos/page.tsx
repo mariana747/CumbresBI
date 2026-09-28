@@ -91,6 +91,7 @@ import {
   listComplementosPago,
   listContratos,
   listCuentas,
+  getCuenta,
   listFacturas,
   listFlujos,
   listNominas,
@@ -664,6 +665,15 @@ function TesoreriaFlujosPageContent() {
   function abrirEdicion(f: TesoreriaFlujo, verSolo = false) {
     setEditing(f);
     setSoloLectura(verSolo);
+    // El selector necesita el objeto TesoreriaCuenta completo, no solo el id
+    // (ver comentario de CuentaBancariaSelector) - sin esto la edicion abria
+    // con el campo Cuenta bancaria vacio aunque form.cuenta si traia el id.
+    setCuentaSeleccionada(null);
+    if (f.cuenta) {
+      getCuenta(f.cuenta)
+        .then(setCuentaSeleccionada)
+        .catch(() => setCuentaSeleccionada(null));
+    }
     setForm({
       contrato: f.contrato || "",
       periodoNomina: f.periodo_nomina || "",
@@ -701,6 +711,12 @@ function TesoreriaFlujosPageContent() {
   function abrirDuplicado(f: TesoreriaFlujo) {
     setEditing(null);
     setSoloLectura(false);
+    setCuentaSeleccionada(null);
+    if (f.cuenta) {
+      getCuenta(f.cuenta)
+        .then(setCuentaSeleccionada)
+        .catch(() => setCuentaSeleccionada(null));
+    }
     setForm({
       contrato: f.contrato || "",
       periodoNomina: f.periodo_nomina || "",
