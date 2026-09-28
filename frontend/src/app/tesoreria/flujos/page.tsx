@@ -52,6 +52,7 @@ import {
   Plus,
   Sparkles,
   ThumbsUp,
+  Trash2,
   Undo2,
   Upload,
   X,
@@ -59,6 +60,7 @@ import {
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import CuentaBancariaSelector from "@/components/CuentaBancariaSelector";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import { MIME_TYPES_COMPROBANTE } from "@/lib/googleDriveFilePicker";
@@ -92,6 +94,7 @@ import {
   listContratos,
   listCuentas,
   getCuenta,
+  deleteFlujo,
   listFacturas,
   listFlujos,
   listNominas,
@@ -351,6 +354,7 @@ function TesoreriaFlujosPageContent() {
   // Rechazar/Registrar pago) para no amontonar hasta 5 iconos por fila.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuFlujo, setMenuFlujo] = useState<TesoreriaFlujo | null>(null);
+  const [flujoABorrar, setFlujoABorrar] = useState<TesoreriaFlujo | null>(null);
 
   // Conciliacion bancaria por IA (28/Ago/2026, ver memoria
   // "tesoreria-flujos-registro-y-conciliacion-ia-plan") - el analista ya
@@ -561,6 +565,22 @@ function TesoreriaFlujosPageContent() {
       setError(err instanceof Error ? err.message : "Error al vincular la factura sugerida");
     } finally {
       setVinculandoSugerencia(null);
+    }
+  }
+
+  function pedirBorrarFlujo(f: TesoreriaFlujo) {
+    setFlujoABorrar(f);
+  }
+
+  async function confirmarBorrarFlujo() {
+    if (!flujoABorrar) return;
+    try {
+      await deleteFlujo(flujoABorrar.id_flujo);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setFlujoABorrar(null);
     }
   }
 
@@ -2379,8 +2399,29 @@ function TesoreriaFlujosPageContent() {
             </ListItemIcon>
             <ListItemText>Duplicar</ListItemText>
           </MenuItem>,
+          <MenuItem
+            key="eliminar"
+            disabled={!puedeEditar}
+            onClick={() => {
+              pedirBorrarFlujo(menuFlujo);
+              setMenuAnchor(null);
+            }}
+          >
+            <ListItemIcon>
+              <Trash2 size={16} strokeWidth={1.5} />
+            </ListItemIcon>
+            <ListItemText>Eliminar</ListItemText>
+          </MenuItem>,
         ]}
       </Menu>
+
+      <ConfirmDialog
+        open={!!flujoABorrar}
+        title="Borrar flujo"
+        description={`¿Seguro que quieres borrar el flujo ${flujoABorrar?.id_flujo}? Esta acción no se puede deshacer.`}
+        onConfirm={confirmarBorrarFlujo}
+        onCancel={() => setFlujoABorrar(null)}
+      />
 
       <MotorDocumentalDialog
         open={!!motorFlujo}
