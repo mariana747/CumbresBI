@@ -1,5 +1,6 @@
 import base64
 import logging
+from decimal import Decimal
 from urllib.parse import quote
 
 import requests
@@ -170,8 +171,15 @@ def _tabla_corte_html(corte: dict, nombres_sociedades: dict[str, str]) -> str:
     for i, empresa in enumerate(corte["sociedades"]):
         rfc = empresa["sociedad"] or ""
         nombre_empresa = nombres_sociedades.get(rfc) or rfc or "Sin empresa"
+        # Credito es aparte (28/Sep/2026, "no se une con saldo consolidado
+        # de las cuentas") - mismo criterio que el frontend (reportes/
+        # page.tsx), esta tabla es solo cuentas normales; ver
+        # _tabla_creditos_html para las de tipo CREDITO.
+        cuentas_normales = [f for f in empresa["cuentas"] if f["tipo"] != "CREDITO"]
+        if not cuentas_normales:
+            continue
         filas_html += _fila_empresa_html(nombre_empresa, _COLORES_EMPRESA[i % len(_COLORES_EMPRESA)])
-        for fila in empresa["cuentas"]:
+        for fila in cuentas_normales:
             numero += 1
             filas_html += _fila_cuenta_html(numero, fila)
 
@@ -210,12 +218,75 @@ def _tabla_corte_html(corte: dict, nombres_sociedades: dict[str, str]) -> str:
     </table>"""
 
 
+def _tabla_creditos_html(corte: dict, nombres_sociedades: dict[str, str]) -> str:
+    """Apartado de Creditos (28/Sep/2026, "debe ser un apartado solo de
+    credito" + "ya no debe aparecer saldos positivos y saldo negativo" -
+    mismo diseño que reportes/page.tsx::renderCreditos) - lista todas las
+    cuentas tipo CREDITO juntas (sin importar la empresa) con su saldo
+    (deuda, normalmente negativo) y su disponible por ministrar, mas su
+    propio consolidado (disponible total / deuda total) - NO se mezcla con
+    el consolidado de cuentas normales de _tabla_corte_html."""
+    creditos = [
+        (nombres_sociedades.get(empresa["sociedad"] or "") or empresa["sociedad"] or "Sin empresa", fila)
+        for empresa in corte["sociedades"]
+        for fila in empresa["cuentas"]
+        if fila["tipo"] == "CREDITO"
+    ]
+    if not creditos:
+        return ""
+
+    filas_html = ""
+    disponible_total = Decimal("0")
+    deuda_total = Decimal("0")
+    for nombre_empresa, fila in creditos:
+        saldo_texto = f"{fila['saldo_hoy']:,.2f}" if fila["saldo_hoy"] is not None else "Sin saldo capturado"
+        color_saldo = _ROJO if fila["saldo_hoy"] is not None and fila["saldo_hoy"] < 0 else _INK_MUTED
+        disponible_texto = (
+            f"{fila['disponible_ministrar']:,.2f}" if fila.get("disponible_ministrar") is not None else "—"
+        )
+        if fila["disponible_ministrar"] is not None:
+            disponible_total += fila["disponible_ministrar"]
+        if fila["saldo_hoy"] is not None and fila["saldo_hoy"] < 0:
+            deuda_total += fila["saldo_hoy"]
+        filas_html += f"""
+    <tr>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;">{escape(fila['alias'])}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;">{escape(nombre_empresa)}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;color:{color_saldo};font-weight:600;">{saldo_texto}</td>
+      <td style="padding:10px;border-bottom:1px solid #EEEFF1;text-align:right;">{disponible_texto}</td>
+    </tr>"""
+
+    return f"""
+    <div style="font-size:13.5px;font-weight:700;color:{_CHARCOAL};margin:28px 0 10px;">
+      Créditos
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;color:#4B4F58;">
+      <thead>
+        <tr style="text-align:left;">
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;">Crédito</th>
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;">Empresa</th>
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;text-align:right;">Saldo del crédito</th>
+          <th style="padding:10px;border-bottom:2px solid #E1E4E9;text-align:right;">Disponible por ministrar</th>
+        </tr>
+      </thead>
+      <tbody>{filas_html}</tbody>
+      <tfoot>
+        <tr style="background:#F7F7F8;font-weight:700;color:#23252B;">
+          <td style="padding:10px;border-top:2px solid #E1E4E9;" colspan="2">Total</td>
+          <td style="padding:10px;border-top:2px solid #E1E4E9;text-align:right;color:{_ROJO};">{deuda_total:,.2f}</td>
+          <td style="padding:10px;border-top:2px solid #E1E4E9;text-align:right;">{disponible_total:,.2f}</td>
+        </tr>
+      </tfoot>
+    </table>"""
+
+
 def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str]) -> str:
     """Un solo corte, el de `reporte['fecha']` (14/Sep/2026, "se quitara el
     dia anterior tanto en la ui y el correo" y "se quitara la fecha
     generada" - revierte el rediseño de dos cortes + "Generado al" del
     11/Sep sobre el formato legado de Wall-E Homes)."""
     tabla_hoy = _tabla_corte_html(reporte, nombres_sociedades)
+    tabla_creditos = _tabla_creditos_html(reporte, nombres_sociedades)
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
   <div style="max-width:920px;margin:0 auto;background:#FFFFFF;border-radius:12px;
@@ -229,6 +300,7 @@ def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str]) -> st
     <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 16px;
                letter-spacing:-0.01em;">Registro diario de saldos finales en cuentas bancarias</h1>
     {tabla_hoy}
+    {tabla_creditos}
     <div style="margin-top:26px;padding-top:16px;border-top:1px solid #EEEFF1;
                 font-size:11.5px;color:#9BA0AB;">
       Consultoría y Proyectos Cumbres · este correo se generó automáticamente, no respondas a él.

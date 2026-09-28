@@ -370,7 +370,7 @@ export async function deleteBanco(idBanxico: string): Promise<void> {
   }
 }
 
-export type TesoreriaCuentaTipo = "CHEQUES" | "INVERSION" | "NOMINA" | "PAGARE" | "FIDEICOMISO" | "OTRA";
+export type TesoreriaCuentaTipo = "CHEQUES" | "INVERSION" | "NOMINA" | "PAGARE" | "FIDEICOMISO" | "CREDITO" | "OTRA";
 
 export interface TesoreriaCuenta {
   id_cuenta_bancaria: string;
@@ -1567,6 +1567,35 @@ export async function deleteFlujo(idFlujo: string): Promise<void> {
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }
+}
+
+// Ministrar/pagar una linea de credito (28/Sep/2026, "boton dedicado") -
+// crea los 2 Flujos ligados (cheques + credito) en un solo paso, ver
+// TesoreriaFlujoViewSet.registrar_movimiento_credito.
+export async function registrarMovimientoCredito(params: {
+  tipo: "ministracion" | "pago";
+  cuentaCredito: string;
+  cuentaCheques: string;
+  monto: string;
+  fechaEfectiva?: string;
+  concepto?: string;
+}): Promise<{ flujo_cheques: TesoreriaFlujo; flujo_credito: TesoreriaFlujo }> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/registrar_movimiento_credito/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tipo: params.tipo,
+      cuenta_credito: params.cuentaCredito,
+      cuenta_cheques: params.cuentaCheques,
+      monto: params.monto,
+      fecha_efectiva: params.fechaEfectiva || undefined,
+      concepto: params.concepto || undefined,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
 }
 
 // Ciclo de vida propio del flujo (segregacion de funciones: aprobar/
@@ -3498,6 +3527,10 @@ export interface TesoreriaSaldo {
   saldo: string;
   cambio_dinero: string | null;
   cambio_porcentual: string | null;
+  // disponible_ministrar (28/Sep/2026, cuentas tipo CREDITO) - con
+  // historial por fecha, igual que saldo (antes vivia como campo fijo en
+  // TesoreriaCuenta, sin historial).
+  disponible_ministrar: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -3541,6 +3574,7 @@ export async function createSaldo(params: {
   saldo: string;
   cambioDinero?: string;
   cambioPorcentual?: string;
+  disponibleMinistrar?: string;
 }): Promise<TesoreriaSaldo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/`, {
     method: "POST",
@@ -3552,6 +3586,7 @@ export async function createSaldo(params: {
       saldo: params.saldo,
       cambio_dinero: params.cambioDinero || null,
       cambio_porcentual: params.cambioPorcentual || null,
+      disponible_ministrar: params.disponibleMinistrar || null,
     }),
   });
   if (!response.ok) {
@@ -3562,7 +3597,7 @@ export async function createSaldo(params: {
 
 export async function updateSaldo(
   id: string,
-  params: Partial<{ saldo: string; cambioDinero: string; cambioPorcentual: string }>
+  params: Partial<{ saldo: string; cambioDinero: string; cambioPorcentual: string; disponibleMinistrar: string | null }>
 ): Promise<TesoreriaSaldo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/saldos/${id}/`, {
     method: "PATCH",
@@ -3571,6 +3606,7 @@ export async function updateSaldo(
       saldo: params.saldo,
       cambio_dinero: params.cambioDinero,
       cambio_porcentual: params.cambioPorcentual,
+      ...(params.disponibleMinistrar !== undefined ? { disponible_ministrar: params.disponibleMinistrar || null } : {}),
     }),
   });
   if (!response.ok) {
@@ -3605,6 +3641,7 @@ export interface ReporteDiarioCuenta {
   id_cuenta_bancaria: string;
   alias: string;
   tipo: TesoreriaCuentaTipo;
+  disponible_ministrar: string | null;
   saldo_anterior: string;
   saldo_hoy: string | null;
   tiene_saldo_hoy: boolean;
@@ -3628,6 +3665,8 @@ export interface ReporteDiarioConsolidado {
   cambio_neto_pct: string | null;
   nomina_total_quincenal: string;
   nomina_total_semanal: string;
+  suma_saldos_positivos: string | null;
+  suma_saldos_negativos: string | null;
 }
 
 export interface ReporteDiarioCorte {
