@@ -1560,6 +1560,15 @@ export async function updateFlujo(
   return response.json();
 }
 
+export async function deleteFlujo(idFlujo: string): Promise<void> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+}
+
 // Ciclo de vida propio del flujo (segregacion de funciones: aprobar/
 // rechazar requieren tesoreria.aprobar, distinto de crear/editar - ver
 // docstring de TesoreriaFlujoViewSet). El backend resuelve "quien aprueba"
