@@ -1538,6 +1538,7 @@ export async function updateFlujo(
     fechaPagoOriginal: string;
     linkComprobanteBanco: string;
     categoriaGasto: TesoreriaCategoriaGasto | "";
+    cuenta: string;
   }>
 ): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`, {
@@ -1552,6 +1553,7 @@ export async function updateFlujo(
       fecha_pago_original: params.fechaPagoOriginal,
       link_comprobante_banco: params.linkComprobanteBanco,
       ...(params.categoriaGasto !== undefined ? { categoria_gasto: params.categoriaGasto || null } : {}),
+      ...(params.cuenta !== undefined ? { cuenta: params.cuenta } : {}),
     }),
   });
   if (!response.ok) {
