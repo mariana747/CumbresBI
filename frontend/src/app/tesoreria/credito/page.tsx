@@ -331,7 +331,7 @@ export default function TesoreriaCreditoPage() {
   const esMinistracion = detalleF?.total_mxp ? parseFloat(detalleF.total_mxp) < 0 : false;
 
   return (
-    <AppShell session={session}>
+    <AppShell>
       <Box sx={{ p: 3, maxWidth: 1100, mx: "auto" }}>
          <Box sx={{ mb: 2, display: "flex", alignItems: "center", gap: 1 }}>
           <Typography variant="h5" fontWeight={600}>
