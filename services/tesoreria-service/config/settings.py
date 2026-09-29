@@ -204,3 +204,11 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Deteccion de cuenta bancaria por IA (28/Sep/2026, "usemos la IA para la
+# deteccion de cuenta bancaria") - mismo API key que document-intelligence-
+# service (docint), pero llamado directo desde aqui (sin pasar por el Motor
+# Documental: ese requiere que el archivo ya este en Drive y es async, y
+# aqui se llama sobre el archivo local recien seleccionado, antes de
+# importar - ver tesoreria/gemini_deteccion_cuenta.py).
+GEMINI_API_KEY = env("GEMINI_API_KEY", default=None)

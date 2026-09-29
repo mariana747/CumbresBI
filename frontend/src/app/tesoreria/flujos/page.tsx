@@ -60,6 +60,7 @@ import {
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import CuentaBancariaSelector from "@/components/CuentaBancariaSelector";
+import ContratoSelector from "@/components/ContratoSelector";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
@@ -91,9 +92,8 @@ import {
   getContratoGenericoNomina,
   getContratoGenericoReembolsoPorSociedad,
   listComplementosPago,
-  listContratos,
-  listCuentas,
   getCuenta,
+  getContrato,
   deleteFlujo,
   listFacturas,
   listFlujos,
@@ -214,7 +214,12 @@ function TesoreriaFlujosPageContent() {
   const searchParams = useSearchParams();
   const [session, setSession] = useState<SessionUser | null>(null);
   const [flujos, setFlujos] = useState<TesoreriaFlujo[]>([]);
-  const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
+  // 28/Sep/2026, "no aparecen todos los contratos" - listContratos(200) sin
+  // buscador se quedaba corto (937 contratos reales, mismo hallazgo que
+  // ContratoSelector.tsx). contratoFiltro/contratoForm cargan el objeto
+  // completo via el selector con busqueda en vivo.
+  const [contratoFiltro, setContratoFiltro] = useState<TesoreriaContrato | null>(null);
+  const [contratoForm, setContratoForm] = useState<TesoreriaContrato | null>(null);
   // CuentaBancariaSelector requiere el objeto completo (23/Sep/2026, ver
   // comentario del componente) - form.cuenta sigue siendo el id plano.
   const [cuentaSeleccionada, setCuentaSeleccionada] = useState<TesoreriaCuenta | null>(null);
@@ -411,13 +416,6 @@ function TesoreriaFlujosPageContent() {
 
   useEffect(() => {
     getSession().then(setSession);
-    // pageSize alto (20-21/Sep/2026, fix paginacion) - solo se usa para
-    // resolver referencias localmente (folioFactura(), select de contrato
-    // en el formulario), no es la pantalla dedicada de ese catalogo. Cuenta
-    // bancaria ahora busca en vivo (CuentaBancariaSelector, 23/Sep/2026).
-    listContratos(undefined, undefined, undefined, 200)
-      .then((res) => setContratos(res.results))
-      .catch(() => setContratos([]));
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
     listFacturas({ pageSize: 200 })
       .then((res) => setFacturas(res.results))
@@ -673,6 +671,7 @@ function TesoreriaFlujosPageContent() {
     setSoloLectura(false);
     setForm(FORM_VACIO);
     setCuentaSeleccionada(null);
+    setContratoForm(null);
     setTab("Detalles");
     setFormError(null);
     setIdFlujoPrevio("");
@@ -693,6 +692,12 @@ function TesoreriaFlujosPageContent() {
       getCuenta(f.cuenta)
         .then(setCuentaSeleccionada)
         .catch(() => setCuentaSeleccionada(null));
+    }
+    setContratoForm(null);
+    if (f.contrato) {
+      getContrato(f.contrato)
+        .then(setContratoForm)
+        .catch(() => setContratoForm(null));
     }
     setForm({
       contrato: f.contrato || "",
@@ -736,6 +741,12 @@ function TesoreriaFlujosPageContent() {
       getCuenta(f.cuenta)
         .then(setCuentaSeleccionada)
         .catch(() => setCuentaSeleccionada(null));
+    }
+    setContratoForm(null);
+    if (f.contrato) {
+      getContrato(f.contrato)
+        .then(setContratoForm)
+        .catch(() => setContratoForm(null));
     }
     setForm({
       contrato: f.contrato || "",
@@ -791,6 +802,7 @@ function TesoreriaFlujosPageContent() {
           fechaPagoOriginal: form.fechaPagoOriginal || undefined,
           linkComprobanteBanco: form.linkComprobanteBanco || undefined,
           categoriaGasto: form.categoriaGasto,
+          cuenta: form.cuenta || undefined,
         });
       } else {
         await createFlujo({
@@ -1039,6 +1051,7 @@ function TesoreriaFlujosPageContent() {
           onChange={(_, seleccion) => {
             setFiltroEmpresa(seleccion?.rfc || "");
             setFiltroContrato("");
+            setContratoFiltro(null);
           }}
           getOptionLabel={(s) => s.alias_sociedad || s.razon_social || s.rfc}
           isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
@@ -1053,16 +1066,17 @@ function TesoreriaFlujosPageContent() {
           getOptionLabel={(c) => CATEGORIA_GASTO_LABELS[c]}
           renderInput={(params) => <TextField {...params} label="Categoría de gasto" />}
         />
-        <Autocomplete
-          size="small"
-          sx={{ minWidth: 200 }}
-          options={contratos.filter((c) => !filtroEmpresa || c.sociedad === filtroEmpresa)}
-          value={contratos.find((c) => c.id_contrato === filtroContrato) || null}
-          onChange={(_, seleccion) => setFiltroContrato(seleccion?.id_contrato || "")}
-          getOptionLabel={(c) => `${c.id_contrato} — ${c.contraparte_nombre}`}
-          isOptionEqualToValue={(a, b) => a.id_contrato === b.id_contrato}
-          renderInput={(params) => <TextField {...params} label="Filtrar por contrato" />}
-        />
+        <Box sx={{ minWidth: 200 }}>
+          <ContratoSelector
+            label="Filtrar por contrato"
+            sociedad={filtroEmpresa || undefined}
+            value={contratoFiltro}
+            onChange={(seleccion) => {
+              setContratoFiltro(seleccion);
+              setFiltroContrato(seleccion?.id_contrato || "");
+            }}
+          />
+        </Box>
         <Autocomplete
           size="small"
           sx={{ minWidth: 180 }}
@@ -1402,28 +1416,19 @@ function TesoreriaFlujosPageContent() {
                 disabled
                 fullWidth
               />
-              <Autocomplete
-                size="small"
-                fullWidth
+              <ContratoSelector
                 disabled={!!editing}
-                options={contratos}
-                value={contratos.find((c) => c.id_contrato === form.contrato) || null}
-                onChange={(_, seleccion) => setForm({ ...form, contrato: seleccion?.id_contrato || "" })}
-                getOptionLabel={(c) => `${c.id_contrato} — ${c.contraparte_nombre}`}
-                isOptionEqualToValue={(a, b) => a.id_contrato === b.id_contrato}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Contrato"
-                    required
-                    helperText={
-                      form.reembolso
-                        ? "Para reembolsos sin contrato de obra, elige la empresa abajo para usar su contrato genérico."
-                        : undefined
-                    }
-                  />
-                )}
+                value={contratoForm}
+                onChange={(seleccion) => {
+                  setContratoForm(seleccion);
+                  setForm({ ...form, contrato: seleccion?.id_contrato || "" });
+                }}
               />
+              {form.reembolso && (
+                <Typography variant="caption" color="text.secondary">
+                  Para reembolsos sin contrato de obra, elige la empresa abajo para usar su contrato genérico.
+                </Typography>
+              )}
               {form.reembolso && !editing && (
                 <FormControl size="small" fullWidth>
                   <InputLabel id="empresa-reembolso-label">Empresa (para el contrato genérico)</InputLabel>
