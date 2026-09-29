@@ -290,6 +290,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
 
         { label: "Solicitudes de Pago", href: "/tesoreria/solicitudes-pago", icon: CreditCard, group: "OPERACIONES" },
         { label: "Reembolsos", href: "/tesoreria/reembolsos", icon: Receipt, group: "OPERACIONES" },
+        { label: "Líneas de Crédito", href: "/tesoreria/credito", icon: Wallet, group: "OPERACIONES" },
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote, group: "OPERACIONES" },
         // Nominas (10/Sep/2026, modulo de Nominas Fase 1) - el periodo/
         // agrupador que se desglosa en Flujos, distinto de "Recibos de
