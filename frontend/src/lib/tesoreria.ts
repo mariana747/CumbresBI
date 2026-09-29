@@ -1253,6 +1253,7 @@ export async function listFlujos(params?: {
   fechaDesde?: string;
   fechaHasta?: string;
   validacionEstado?: TesoreriaValidacionEstado;
+  cuenta?: string;
   page?: number;
   pageSize?: number;
 }): Promise<TesoreriaPaginado<TesoreriaFlujo>> {
@@ -1267,6 +1268,7 @@ export async function listFlujos(params?: {
   if (params?.fechaDesde) query.set("fecha_desde", params.fechaDesde);
   if (params?.fechaHasta) query.set("fecha_hasta", params.fechaHasta);
   if (params?.validacionEstado) query.set("validacion_estado", params.validacionEstado);
+  if (params?.cuenta) query.set("cuenta", params.cuenta);
   query.set("page", String(params?.page ?? 1));
   query.set("page_size", String(params?.pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/?${query.toString()}`);
