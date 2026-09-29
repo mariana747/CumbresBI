@@ -484,7 +484,7 @@ export default function TesoreriaCuentasPage() {
               <FiltrosBar
                 search={searchCuentas}
                 onSearchChange={setSearchCuentas}
-                searchPlaceholder="Buscar por alias, titular o CLABE..."
+                searchPlaceholder="Buscar por cuenta, ID, alias o titular..."
               >
                 <FormControl size="small" sx={{ minWidth: 200 }}>
                   <InputLabel id="filtro-sociedad-cuenta-label">Empresa</InputLabel>

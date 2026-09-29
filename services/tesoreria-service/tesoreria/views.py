@@ -419,7 +419,7 @@ class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
 
     serializer_class = TesoreriaCuentaSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["alias", "label", "rfc_razon_social", "clabe"]
+    search_fields = ["id_cuenta_bancaria", "cuenta", "alias", "label", "rfc_razon_social"]
     pagination_class = ListadoGrandePagination
 
     def get_queryset(self):

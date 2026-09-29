@@ -21,6 +21,7 @@ class EffectiveScope:
     centro_ids: tuple = field(default_factory=tuple)
     contrato_ids: tuple = field(default_factory=tuple)
     identity_user_id: str | None = None
+    user_email: str | None = None
     # role_keys: claves de los roles activos del usuario (union, igual que el
     # resto de los claims). No se usa para el filtrado por ScopedManager
     # (eso es solo sociedad/proyecto/centro/contrato/identidad) - sirve para
@@ -45,6 +46,7 @@ class EffectiveScope:
             centro_ids=tuple(claims.get("centro_ids", []) or []),
             contrato_ids=tuple(claims.get("contrato_ids", []) or []),
             identity_user_id=claims.get("identity_user_id"),
+            user_email=claims.get("email"),
             role_keys=tuple(claims.get("role_keys", []) or []),
             perm_keys=tuple(claims.get("perm_keys", []) or []),
         )
