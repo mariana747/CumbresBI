@@ -17,7 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
 from . import google_oauth
-from .models import IamGooglePersonalToken
+from .models import IamGmailSendToken, IamGooglePersonalToken
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,82 @@ def google_personal_access_token(request):
         logger.info("refresh_token invalido para %s, se borra la conexion", token.user_id, exc_info=True)
         token.delete()
         return JsonResponse({"detail": "La conexión con Google ya no es válida, hay que reconectar."}, status=404)
+    return JsonResponse({"access_token": tokens["access_token"]})
+
+
+@require_GET
+def gmail_send_estado(request):
+    """GET /api/gmail-send/estado/ - {conectado, email} para usuarios @gmail.com
+    que necesitan autorizar gmail.send antes de poder enviar el reporte diario."""
+    error = _requiere_identidad(request)
+    if error:
+        return error
+    token = IamGmailSendToken.objects.filter(user_id=request.effective_scope.identity_user_id).first()
+    return JsonResponse({"conectado": bool(token), "email": token.gmail_email if token else None})
+
+
+@require_GET
+def gmail_send_autorizar(request):
+    """GET /api/gmail-send/autorizar/ - {url} de consentimiento de Google para gmail.send."""
+    error = _requiere_identidad(request)
+    if error:
+        return error
+    if not google_oauth.configurado_gmail_send():
+        return JsonResponse({"detail": "La conexion con Gmail no esta configurada en este ambiente."}, status=503)
+    return JsonResponse({"url": google_oauth.url_autorizacion_gmail_send(request.effective_scope.identity_user_id)})
+
+
+@csrf_exempt
+@require_GET
+def gmail_send_callback(request):
+    """GET /api/gmail-send/callback/ - PUBLICO - Google redirige aqui tras autorizar gmail.send."""
+    error_google = request.GET.get("error")
+    state = request.GET.get("state", "")
+    identity_user_id = google_oauth.leer_state_gmail_send(state)
+    retorno = _url_retorno()
+
+    if error_google:
+        return redirect(f"{retorno}?gmail_send=cancelado")
+    if not identity_user_id:
+        return redirect(f"{retorno}?gmail_send=error")
+
+    code = request.GET.get("code")
+    try:
+        tokens = google_oauth.intercambiar_code_gmail_send(code)
+    except requests.RequestException:
+        logger.warning("fallo el intercambio de code por tokens de Gmail Send", exc_info=True)
+        return redirect(f"{retorno}?gmail_send=error")
+
+    refresh_token = tokens.get("refresh_token")
+    if not refresh_token:
+        logger.warning("Google no regreso refresh_token para gmail_send %s", identity_user_id)
+        return redirect(f"{retorno}?gmail_send=error")
+
+    email = google_oauth.obtener_email(tokens.get("access_token", ""))
+    IamGmailSendToken.objects.update_or_create(
+        user_id=identity_user_id,
+        defaults={"refresh_token": refresh_token, "gmail_email": email},
+    )
+    return redirect(f"{retorno}?gmail_send=conectado")
+
+
+@require_GET
+def gmail_send_access_token(request):
+    """GET /api/gmail-send/access-token/ - servicio-a-servicio, regresa un
+    access_token fresco de gmail.send para el usuario autenticado, o 404 si
+    nunca conecto su cuenta."""
+    error = _requiere_identidad(request)
+    if error:
+        return error
+    token = IamGmailSendToken.objects.filter(user_id=request.effective_scope.identity_user_id).first()
+    if not token:
+        return JsonResponse({"detail": "El usuario no ha conectado su cuenta de Gmail."}, status=404)
+    try:
+        tokens = google_oauth.refrescar_access_token(token.refresh_token)
+    except requests.RequestException:
+        logger.info("refresh_token gmail_send invalido para %s, se borra", token.user_id, exc_info=True)
+        token.delete()
+        return JsonResponse({"detail": "La conexión con Gmail ya no es válida, hay que reconectar."}, status=404)
     return JsonResponse({"access_token": tokens["access_token"]})
 
 

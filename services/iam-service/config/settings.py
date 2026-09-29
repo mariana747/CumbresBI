@@ -254,6 +254,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 GOOGLE_PERSONAL_OAUTH_CLIENT_ID = env("GOOGLE_PERSONAL_OAUTH_CLIENT_ID", default="")
 GOOGLE_PERSONAL_OAUTH_CLIENT_SECRET = env("GOOGLE_PERSONAL_OAUTH_CLIENT_SECRET", default="")
 GOOGLE_PERSONAL_OAUTH_REDIRECT_URI = env("GOOGLE_PERSONAL_OAUTH_REDIRECT_URI", default="")
+GOOGLE_GMAIL_SEND_OAUTH_REDIRECT_URI = env("GOOGLE_GMAIL_SEND_OAUTH_REDIRECT_URI", default="")
 # A donde regresar al usuario despues del callback (exito o error) - la
 # pantalla que abrio el flujo, no un endpoint de API.
 GOOGLE_PERSONAL_OAUTH_RETORNO_URL = env("GOOGLE_PERSONAL_OAUTH_RETORNO_URL", default="http://localhost:3000")

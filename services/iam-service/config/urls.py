@@ -6,6 +6,10 @@ from rest_framework.routers import DefaultRouter
 
 from iam.auth_views import canjear_acceso_externo, google_callback, google_start, logout, me, refresh
 from iam.google_personal_views import (
+    gmail_send_access_token,
+    gmail_send_autorizar,
+    gmail_send_callback,
+    gmail_send_estado,
     google_personal_access_token,
     google_personal_autorizar,
     google_personal_callback,
@@ -57,6 +61,12 @@ urlpatterns = [
     path("api/personal/autorizar/", google_personal_autorizar, name="google-personal-autorizar"),
     path("api/personal/callback/", google_personal_callback, name="google-personal-callback"),
     path("api/personal/access-token/", google_personal_access_token, name="google-personal-access-token"),
+    # OAuth personal para gmail.send (usuarios @gmail.com que no pueden ser
+    # impersonados via domain-wide delegation del Workspace corporativo).
+    path("api/gmail-send/estado/", gmail_send_estado, name="gmail-send-estado"),
+    path("api/gmail-send/autorizar/", gmail_send_autorizar, name="gmail-send-autorizar"),
+    path("api/gmail-send/callback/", gmail_send_callback, name="gmail-send-callback"),
+    path("api/gmail-send/access-token/", gmail_send_access_token, name="gmail-send-access-token"),
 ]
 
 # TEMPORAL (ver iam/dev_views.py) - ni siquiera se registra la ruta si

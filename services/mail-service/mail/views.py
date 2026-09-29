@@ -36,14 +36,23 @@ class SendEmailView(APIView):
         adjuntos = request.data.get("adjuntos")
         from_email = request.data.get("from")
         reply_to = request.data.get("reply_to")
+        gmail_access_token = request.data.get("gmail_access_token")
+        gmail_sender_email = request.data.get("gmail_sender_email")
         if not to or not subject or not html_body:
             return Response({"detail": "Campos 'to', 'subject' y 'html_body' requeridos"}, status=400)
 
         try:
-            resultado = gmailclient.send_email(
-                to=to, subject=subject, html_body=html_body, adjuntos=adjuntos,
-                sender=from_email, reply_to=reply_to,
-            )
+            if gmail_access_token and gmail_sender_email:
+                resultado = gmailclient.send_email_with_bearer_token(
+                    to=to, subject=subject, html_body=html_body,
+                    access_token=gmail_access_token, sender_email=gmail_sender_email,
+                    adjuntos=adjuntos, reply_to=reply_to,
+                )
+            else:
+                resultado = gmailclient.send_email(
+                    to=to, subject=subject, html_body=html_body, adjuntos=adjuntos,
+                    sender=from_email, reply_to=reply_to,
+                )
         except gmailclient.MailError as exc:
             return Response({"detail": str(exc)}, status=502)
 
