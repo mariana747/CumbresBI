@@ -505,14 +505,11 @@ def _resolver_nombres_sociedades(headers, cookies, rfcs: set[str]) -> dict[str, 
 
 
 def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> bool:
-    """Envia el reporte diario de saldos por correo via mail-service (Gmail
-    API) - mismo patron que pld-service/pld/mail_utils.py::enviar_correo_ticket_cliente.
-    No propaga la excepcion - un fallo de envio no debe tumbar la
-    generacion del reporte en si (el frontend lo sigue mostrando en
-    pantalla aunque el correo falle). El campo `from` usa el email del usuario
-    que dispara el envio (via domain-wide delegation en mail-service), de modo
-    que si Jenn envia el reporte, llega desde su cuenta, no desde la cuenta
-    fija de notificaciones."""
+    """Envia el reporte diario de saldos por correo via mail-service (Gmail API).
+    No propaga la excepcion - un fallo de envio no debe tumbar la generacion del
+    reporte en si (el frontend lo sigue mostrando en pantalla aunque el correo falle).
+    El remitente usa GMAIL_SENDER_SUBJECT (cuenta fija de notificaciones) porque el
+    domain-wide delegation no esta configurado para todos los usuarios."""
     headers, cookies = forward_auth_headers(request)
     rfcs = {e["sociedad"] for e in reporte["sociedades"]}
     nombres_sociedades = _resolver_nombres_sociedades(headers, cookies, rfcs)
@@ -527,13 +524,10 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
 
     html_body = _renderizar_reporte(reporte, nombres_sociedades, empresa_label)
     subject = f"Reporte diario de saldos — {empresa_label} — {reporte['fecha']}"
-    from_email = request.effective_scope.user_email or None
 
     ok_total = True
     for destinatario in destinatarios:
         payload = {"to": destinatario, "subject": subject, "html_body": html_body}
-        if from_email:
-            payload["from"] = from_email
         try:
             respuesta = requests.post(
                 f"{settings.MAIL_SERVICE_URL}/api/send/",
