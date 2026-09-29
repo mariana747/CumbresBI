@@ -13,12 +13,8 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControl,
   IconButton,
-  InputLabel,
-  MenuItem,
   Paper,
-  Select,
   Stack,
   Table,
   TableBody,
@@ -319,7 +315,9 @@ export default function TesoreriaReporteDiarioPage() {
                                   <TableHead>
                                     <TableRow>
                                       <TableCell>ID Flujo</TableCell>
-                                      <TableCell>Concepto</TableCell>
+                                      <TableCell>Contraparte</TableCell>
+                                      <TableCell>Concepto Factura</TableCell>
+                                      <TableCell>Descripcion</TableCell>
                                       <TableCell>Comentario</TableCell>
                                       <TableCell align="right">Total MXP</TableCell>
                                     </TableRow>
@@ -328,6 +326,8 @@ export default function TesoreriaReporteDiarioPage() {
                                     {c.transacciones.map((t) => (
                                       <TableRow key={t.id_flujo}>
                                         <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.id_flujo}</TableCell>
+                                        <TableCell>{t.contraparte || "—"}</TableCell>
+                                        <TableCell>{t.concepto_factura || "—"}</TableCell>
                                         <TableCell>
                                           <Stack direction="row" spacing={0.75} alignItems="center">
                                             <span>{t.concepto || "—"}</span>
@@ -421,6 +421,16 @@ export default function TesoreriaReporteDiarioPage() {
                               <Typography variant="caption" sx={{ fontFamily: "var(--font-mono, monospace)", display: "block" }}>
                                 {t.id_flujo}
                               </Typography>
+                              {t.contraparte && (
+                                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                  {t.contraparte}
+                                </Typography>
+                              )}
+                              {t.concepto_factura && (
+                                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                  {t.concepto_factura}
+                                </Typography>
+                              )}
                               <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
                                 <Typography variant="body2">{t.concepto || "—"}</Typography>
                                 {t.nomina_tipo && (
@@ -605,24 +615,20 @@ export default function TesoreriaReporteDiarioPage() {
             sx={{ flex: { xs: "1 1 auto", sm: "1 1 160px" } }}
           />
           {cuentasDelReporte.length > 0 && (
-            <FormControl size="small" sx={{ flex: { xs: "1 1 auto", sm: "1 1 200px" } }}>
-              <InputLabel id="filtro-cuenta-reporte-label">Filtrar por cuenta</InputLabel>
-              <Select
-                labelId="filtro-cuenta-reporte-label"
-                label="Filtrar por cuenta"
-                value={filtroCuenta}
-                onChange={(e) => setFiltroCuenta(e.target.value)}
-              >
-                <MenuItem value="">
-                  <em>Todas las cuentas</em>
-                </MenuItem>
-                {cuentasDelReporte.map((c) => (
-                  <MenuItem key={c.id_cuenta_bancaria} value={c.id_cuenta_bancaria}>
-                    {c.alias}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Autocomplete
+              size="small"
+              sx={{ flex: { xs: "1 1 auto", sm: "1 1 220px" } }}
+              options={cuentasDelReporte}
+              value={cuentasDelReporte.find((c) => c.id_cuenta_bancaria === filtroCuenta) || null}
+              onChange={(_, seleccion) => setFiltroCuenta(seleccion?.id_cuenta_bancaria || "")}
+              getOptionLabel={(c) => {
+                const numero = c.cuenta || c.clabe;
+                const nombre = c.alias || c.label || c.id_cuenta_bancaria;
+                return numero ? `${nombre} — ${numero}` : nombre;
+              }}
+              isOptionEqualToValue={(a, b) => a.id_cuenta_bancaria === b.id_cuenta_bancaria}
+              renderInput={(params) => <TextField {...params} label="Filtrar por cuenta" />}
+            />
           )}
           <Button variant="contained" onClick={generar} disabled={loading} sx={{ flexShrink: 0 }}>
             {loading ? <CircularProgress size={16} /> : "Generar"}

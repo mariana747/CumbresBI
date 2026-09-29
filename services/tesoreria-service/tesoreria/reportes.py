@@ -191,7 +191,7 @@ def _calcular_corte(cuentas, fecha) -> dict:
         )
         transacciones = (
             TesoreriaFlujo.objects.filter(cuenta=cuenta, fecha_efectiva=fecha)
-            .select_related("periodo_nomina")
+            .select_related("periodo_nomina", "contrato", "contrato__contraparte")
             .order_by("id_flujo")
         )
         suma_transacciones = sum((t.total_mxp or Decimal("0")) for t in transacciones)
@@ -266,14 +266,15 @@ def _calcular_corte(cuentas, fecha) -> dict:
                 {
                     "id_flujo": t.id_flujo,
                     "concepto": t.concepto,
-                    # descripcion_pago (11/Sep/2026, "comentario por
-                    # transaccion como en el reporte legado") - campo ya
-                    # existente en TesoreriaFlujo, no uno nuevo; aqui solo se
-                    # expone en el reporte, igual que "PARA IMPUESTOS" o
-                    # "GEORGIA" en el formato de origen.
                     "descripcion_pago": t.descripcion_pago,
                     "total_mxp": t.total_mxp,
                     "nomina_tipo": t.periodo_nomina.tipo if t.periodo_nomina_id else None,
+                    "contraparte": (
+                        t.contrato.contraparte.razon_social
+                        if t.contrato_id and t.contrato.contraparte_id
+                        else None
+                    ),
+                    "concepto_factura": t.contrato.concepto_factura if t.contrato_id else None,
                 }
                 for t in transacciones
             ],

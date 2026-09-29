@@ -34,12 +34,13 @@ class SendEmailView(APIView):
         subject = request.data.get("subject")
         html_body = request.data.get("html_body")
         adjuntos = request.data.get("adjuntos")
+        from_email = request.data.get("from")
         if not to or not subject or not html_body:
             return Response({"detail": "Campos 'to', 'subject' y 'html_body' requeridos"}, status=400)
 
         try:
             resultado = gmailclient.send_email(
-                to=to, subject=subject, html_body=html_body, adjuntos=adjuntos
+                to=to, subject=subject, html_body=html_body, adjuntos=adjuntos, sender=from_email
             )
         except gmailclient.MailError as exc:
             return Response({"detail": str(exc)}, status=502)

@@ -39,11 +39,12 @@ def _modo_real() -> bool:
     return bool(settings.GMAIL_SERVICE_ACCOUNT_JSON)
 
 
-def _servicio_real():
+def _servicio_real(impersonar: str | None = None):
     """Construye el cliente de googleapiclient - import perezoso a proposito
     (google-api-python-client/google-auth solo hacen falta en modo real; el
     modo simulado no debe requerir que esten instalados, ej. en pruebas
-    unitarias rapidas)."""
+    unitarias rapidas). `impersonar` anula GMAIL_SENDER_SUBJECT para enviar
+    desde la cuenta del usuario que disparo el correo (domain-wide delegation)."""
     import json
 
     from google.oauth2 import service_account
@@ -51,26 +52,36 @@ def _servicio_real():
 
     info = json.loads(settings.GMAIL_SERVICE_ACCOUNT_JSON)
     credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
-    if settings.GMAIL_SENDER_SUBJECT:
-        credentials = credentials.with_subject(settings.GMAIL_SENDER_SUBJECT)
+    sujeto = impersonar or settings.GMAIL_SENDER_SUBJECT
+    if sujeto:
+        credentials = credentials.with_subject(sujeto)
     return build("gmail", "v1", credentials=credentials, cache_discovery=False)
 
 
-def send_email(to: str, subject: str, html_body: str, adjuntos: list[dict] | None = None) -> dict:
+def send_email(
+    to: str,
+    subject: str,
+    html_body: str,
+    adjuntos: list[dict] | None = None,
+    sender: str | None = None,
+) -> dict:
     """Manda un correo HTML, opcionalmente con adjuntos reales (07/Sep/2026 -
     antes solo mandaba texto, Magic Links/tickets de cliente solo mandaban un
     link). `adjuntos` es una lista de {"filename", "content_type", "data_b64"}
     - el llamador ya trae el archivo descargado y codificado en base64 (mismo
     criterio que drive-service: este servicio no descarga nada por su cuenta,
-    solo envia lo que le pasan). Regresa {"message_id": ...} (real o
-    simulado)."""
+    solo envia lo que le pasan). `sender` permite impersonar una cuenta distinta
+    a GMAIL_SENDER_SUBJECT via domain-wide delegation (ej. el email del usuario
+    que disparo el envio). Regresa {"message_id": ...} (real o simulado)."""
+    remitente = sender or settings.GMAIL_SENDER_SUBJECT
     if not _modo_real():
         logger.warning(
             "GMAIL_SERVICE_ACCOUNT_JSON vacio - modo simulado, correo NO enviado de verdad: "
-            "to=%s subject=%s adjuntos=%d",
+            "to=%s subject=%s adjuntos=%d from=%s",
             to,
             subject,
             len(adjuntos or []),
+            remitente,
         )
         return {"message_id": "sim-no-enviado"}
 
@@ -78,8 +89,8 @@ def send_email(to: str, subject: str, html_body: str, adjuntos: list[dict] | Non
         mensaje = MIMEMultipart()
         mensaje["to"] = to
         mensaje["subject"] = subject
-        if settings.GMAIL_SENDER_SUBJECT:
-            mensaje["from"] = settings.GMAIL_SENDER_SUBJECT
+        if remitente:
+            mensaje["from"] = remitente
         mensaje.attach(MIMEText(html_body, "html", "utf-8"))
         for adjunto in adjuntos:
             parte = MIMEApplication(base64.b64decode(adjunto["data_b64"]))
@@ -93,11 +104,11 @@ def send_email(to: str, subject: str, html_body: str, adjuntos: list[dict] | Non
         mensaje = MIMEText(html_body, "html", "utf-8")
         mensaje["to"] = to
         mensaje["subject"] = subject
-        if settings.GMAIL_SENDER_SUBJECT:
-            mensaje["from"] = settings.GMAIL_SENDER_SUBJECT
+        if remitente:
+            mensaje["from"] = remitente
     raw = base64.urlsafe_b64encode(mensaje.as_bytes()).decode("ascii")
 
-    servicio = _servicio_real()
+    servicio = _servicio_real(impersonar=sender)
     try:
         resultado = servicio.users().messages().send(userId="me", body={"raw": raw}).execute()
     except Exception as exc:  # noqa: BLE001 - cualquier error de googleapiclient
