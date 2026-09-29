@@ -210,12 +210,13 @@ def _tabla_corte_html(corte: dict, nombres_sociedades: dict[str, str]) -> str:
     </table>"""
 
 
-def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str]) -> str:
+def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str], empresa_label: str = "") -> str:
     """Un solo corte, el de `reporte['fecha']` (14/Sep/2026, "se quitara el
     dia anterior tanto en la ui y el correo" y "se quitara la fecha
     generada" - revierte el rediseño de dos cortes + "Generado al" del
     11/Sep sobre el formato legado de Wall-E Homes)."""
     tabla_hoy = _tabla_corte_html(reporte, nombres_sociedades)
+    subtitulo = f'<p style="margin:0 0 18px;font-size:14px;color:{_INK_MUTED};">{escape(empresa_label)}</p>' if empresa_label else ""
     return f"""
 <div style="background:#F1F3F5;padding:32px 16px;font-family:'DM Sans',Arial,sans-serif;">
   <div style="max-width:920px;margin:0 auto;background:#FFFFFF;border-radius:12px;
@@ -226,8 +227,9 @@ def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str]) -> st
                     background:{_AZUL};color:#fff;font-size:12px;font-weight:800;
                     text-align:center;line-height:22px;margin-right:8px;">C</span>CumbresBI
     </div>
-    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 16px;
+    <h1 style="font-size:20px;font-weight:700;color:#23252B;margin:0 0 6px;
                letter-spacing:-0.01em;">Registro diario de saldos finales en cuentas bancarias</h1>
+    {subtitulo}
     {tabla_hoy}
     <div style="margin-top:26px;padding-top:16px;border-top:1px solid #EEEFF1;
                 font-size:11.5px;color:#9BA0AB;">
@@ -435,23 +437,36 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
     API) - mismo patron que pld-service/pld/mail_utils.py::enviar_correo_ticket_cliente.
     No propaga la excepcion - un fallo de envio no debe tumbar la
     generacion del reporte en si (el frontend lo sigue mostrando en
-    pantalla aunque el correo falle)."""
+    pantalla aunque el correo falle). El campo `from` usa el email del usuario
+    que dispara el envio (via domain-wide delegation en mail-service), de modo
+    que si Jenn envia el reporte, llega desde su cuenta, no desde la cuenta
+    fija de notificaciones."""
     headers, cookies = forward_auth_headers(request)
     rfcs = {e["sociedad"] for e in reporte["sociedades"]}
     nombres_sociedades = _resolver_nombres_sociedades(headers, cookies, rfcs)
-    html_body = _renderizar_reporte(reporte, nombres_sociedades)
+
+    nombres = list(nombres_sociedades.values()) if nombres_sociedades else list(rfcs)
+    if len(nombres) == 1:
+        empresa_label = nombres[0]
+    elif len(nombres) <= 3:
+        empresa_label = ", ".join(nombres)
+    else:
+        empresa_label = f"{len(nombres)} empresas"
+
+    html_body = _renderizar_reporte(reporte, nombres_sociedades, empresa_label)
+    subject = f"Reporte diario de saldos — {empresa_label} — {reporte['fecha']}"
+    from_email = request.effective_scope.user_email or None
 
     ok_total = True
     for destinatario in destinatarios:
+        payload = {"to": destinatario, "subject": subject, "html_body": html_body}
+        if from_email:
+            payload["from"] = from_email
         try:
             respuesta = requests.post(
                 f"{settings.MAIL_SERVICE_URL}/api/send/",
                 params={"perm": "tesoreria.crear"},
-                json={
-                    "to": destinatario,
-                    "subject": f"Reporte diario de saldos — {reporte['fecha']}",
-                    "html_body": html_body,
-                },
+                json=payload,
                 headers=headers,
                 cookies=cookies,
                 timeout=_TIMEOUT_SEGUNDOS,

@@ -3601,6 +3601,8 @@ export interface ReporteDiarioTransaccion {
   descripcion_pago: string | null;
   total_mxp: string | null;
   nomina_tipo: TesoreriaNominaTipo | null;
+  contraparte: string | null;
+  concepto_factura: string | null;
 }
 
 export interface ReporteDiarioCuenta {
