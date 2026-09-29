@@ -247,6 +247,29 @@ export async function revokeRolePermission(
   return response.json();
 }
 
+// OAuth gmail.send para usuarios @gmail.com (reporte diario de tesorería).
+export interface GmailSendEstado {
+  conectado: boolean;
+  email: string | null;
+}
+
+export async function getGmailSendEstado(): Promise<GmailSendEstado> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/gmail-send/estado/`, {
+    credentials: "include",
+  });
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  return response.json();
+}
+
+export async function getGmailSendAutorizarUrl(): Promise<string> {
+  const response = await apiFetch("IAM", `${IAM_API_BASE_URL}/api/gmail-send/autorizar/`, {
+    credentials: "include",
+  });
+  if (!response.ok) throw await friendlyApiError("IAM", response);
+  const data = await response.json();
+  return data.url;
+}
+
 // Catalogo real de sociedades (contrato: iam/views.py, GeneralSociedadViewSet)
 // - CRUD real (pantalla /admin/organizacion, Gestion organizacional) ademas
 // de alimentar el autocomplete de RFC en RoleAssignmentDialog. Centro y

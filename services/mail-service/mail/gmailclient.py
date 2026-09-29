@@ -120,3 +120,51 @@ def send_email(
         raise MailError(f"No se pudo enviar el correo a '{to}': {exc}") from exc
 
     return {"message_id": resultado.get("id", "")}
+
+
+def send_email_with_bearer_token(
+    to: str,
+    subject: str,
+    html_body: str,
+    access_token: str,
+    sender_email: str,
+    adjuntos: list[dict] | None = None,
+    reply_to: str | None = None,
+) -> dict:
+    """Manda correo usando un access_token OAuth personal (gmail.send scope),
+    para usuarios @gmail.com que no pueden ser impersonados via domain-wide
+    delegation. El access_token viene de iam-service (ya refrescado)."""
+    if adjuntos:
+        mensaje = MIMEMultipart()
+        mensaje["to"] = to
+        mensaje["subject"] = subject
+        mensaje["from"] = sender_email
+        if reply_to:
+            mensaje["Reply-To"] = reply_to
+        mensaje.attach(MIMEText(html_body, "html", "utf-8"))
+        for adjunto in adjuntos:
+            parte = MIMEApplication(base64.b64decode(adjunto["data_b64"]))
+            parte.add_header("Content-Disposition", "attachment", filename=adjunto["filename"])
+            if adjunto.get("content_type"):
+                parte.set_type(adjunto["content_type"])
+            mensaje.attach(parte)
+    else:
+        mensaje = MIMEText(html_body, "html", "utf-8")
+        mensaje["to"] = to
+        mensaje["subject"] = subject
+        mensaje["from"] = sender_email
+        if reply_to:
+            mensaje["Reply-To"] = reply_to
+    raw = base64.urlsafe_b64encode(mensaje.as_bytes()).decode("ascii")
+
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+
+        credentials = Credentials(token=access_token)
+        servicio = build("gmail", "v1", credentials=credentials, cache_discovery=False)
+        resultado = servicio.users().messages().send(userId="me", body={"raw": raw}).execute()
+    except Exception as exc:  # noqa: BLE001
+        raise MailError(f"No se pudo enviar el correo a '{to}': {exc}") from exc
+
+    return {"message_id": resultado.get("id", "")}

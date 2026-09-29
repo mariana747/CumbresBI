@@ -28,8 +28,10 @@ _USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # Picker con su propio token efimero de drive.readonly, ver
 # frontend/src/lib/googleFolderPicker.ts, no con este refresh_token).
 _SCOPE = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file"
+_GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 _TIMEOUT_SEGUNDOS = 15
 _SALT = "iam.google_oauth.state"
+_GMAIL_SEND_SALT = "iam.google_oauth.gmail_send_state"
 _STATE_MAX_AGE_SEGUNDOS = 600
 
 
@@ -106,6 +108,55 @@ def refrescar_access_token(refresh_token: str) -> dict:
             "client_id": settings.GOOGLE_PERSONAL_OAUTH_CLIENT_ID,
             "client_secret": settings.GOOGLE_PERSONAL_OAUTH_CLIENT_SECRET,
             "grant_type": "refresh_token",
+        },
+        timeout=_TIMEOUT_SEGUNDOS,
+    )
+    respuesta.raise_for_status()
+    return respuesta.json()
+
+
+def configurado_gmail_send() -> bool:
+    return bool(
+        settings.GOOGLE_PERSONAL_OAUTH_CLIENT_ID
+        and settings.GOOGLE_PERSONAL_OAUTH_CLIENT_SECRET
+        and settings.GOOGLE_GMAIL_SEND_OAUTH_REDIRECT_URI
+    )
+
+
+def firmar_state_gmail_send(identity_user_id: str) -> str:
+    return signing.dumps({"identity_user_id": identity_user_id}, salt=_GMAIL_SEND_SALT)
+
+
+def leer_state_gmail_send(state: str) -> str | None:
+    try:
+        datos = signing.loads(state, salt=_GMAIL_SEND_SALT, max_age=_STATE_MAX_AGE_SEGUNDOS)
+    except signing.BadSignature:
+        return None
+    return datos.get("identity_user_id")
+
+
+def url_autorizacion_gmail_send(identity_user_id: str) -> str:
+    params = {
+        "client_id": settings.GOOGLE_PERSONAL_OAUTH_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_GMAIL_SEND_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": _GMAIL_SEND_SCOPE,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": firmar_state_gmail_send(identity_user_id),
+    }
+    return f"{_AUTH_URL}?{requests.compat.urlencode(params)}"
+
+
+def intercambiar_code_gmail_send(code: str) -> dict:
+    respuesta = requests.post(
+        _TOKEN_URL,
+        data={
+            "code": code,
+            "client_id": settings.GOOGLE_PERSONAL_OAUTH_CLIENT_ID,
+            "client_secret": settings.GOOGLE_PERSONAL_OAUTH_CLIENT_SECRET,
+            "redirect_uri": settings.GOOGLE_GMAIL_SEND_OAUTH_REDIRECT_URI,
+            "grant_type": "authorization_code",
         },
         timeout=_TIMEOUT_SEGUNDOS,
     )
