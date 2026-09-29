@@ -64,15 +64,16 @@ def send_email(
     html_body: str,
     adjuntos: list[dict] | None = None,
     sender: str | None = None,
+    reply_to: str | None = None,
 ) -> dict:
     """Manda un correo HTML, opcionalmente con adjuntos reales (07/Sep/2026 -
     antes solo mandaba texto, Magic Links/tickets de cliente solo mandaban un
     link). `adjuntos` es una lista de {"filename", "content_type", "data_b64"}
     - el llamador ya trae el archivo descargado y codificado en base64 (mismo
     criterio que drive-service: este servicio no descarga nada por su cuenta,
-    solo envia lo que le pasan). `sender` permite impersonar una cuenta distinta
-    a GMAIL_SENDER_SUBJECT via domain-wide delegation (ej. el email del usuario
-    que disparo el envio). Regresa {"message_id": ...} (real o simulado)."""
+    solo envia lo que le pasan). `reply_to` pone el header Reply-To para que
+    las respuestas vayan a esa cuenta en vez de al remitente fijo. Regresa
+    {"message_id": ...} (real o simulado)."""
     remitente = sender or settings.GMAIL_SENDER_SUBJECT
     if not _modo_real():
         logger.warning(
@@ -91,6 +92,8 @@ def send_email(
         mensaje["subject"] = subject
         if remitente:
             mensaje["from"] = remitente
+        if reply_to:
+            mensaje["Reply-To"] = reply_to
         mensaje.attach(MIMEText(html_body, "html", "utf-8"))
         for adjunto in adjuntos:
             parte = MIMEApplication(base64.b64decode(adjunto["data_b64"]))
@@ -106,6 +109,8 @@ def send_email(
         mensaje["subject"] = subject
         if remitente:
             mensaje["from"] = remitente
+        if reply_to:
+            mensaje["Reply-To"] = reply_to
     raw = base64.urlsafe_b64encode(mensaje.as_bytes()).decode("ascii")
 
     servicio = _servicio_real(impersonar=sender)

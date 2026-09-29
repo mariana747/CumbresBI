@@ -280,7 +280,7 @@ def _tabla_creditos_html(corte: dict, nombres_sociedades: dict[str, str]) -> str
     </table>"""
 
 
-def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str], empresa_label: str = "") -> str:
+def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str], empresa_label: str = "", enviado_por: str | None = None) -> str:
     """Un solo corte, el de `reporte['fecha']` (14/Sep/2026, "se quitara el
     dia anterior tanto en la ui y el correo" y "se quitara la fecha
     generada" - revierte el rediseño de dos cortes + "Generado al" del
@@ -305,7 +305,7 @@ def _renderizar_reporte(reporte: dict, nombres_sociedades: dict[str, str], empre
     {tabla_creditos}
     <div style="margin-top:26px;padding-top:16px;border-top:1px solid #EEEFF1;
                 font-size:11.5px;color:#9BA0AB;">
-      Consultoría y Proyectos Cumbres · este correo se generó automáticamente, no respondas a él.
+      Consultoría y Proyectos Cumbres · generado automáticamente por CumbresBI{f' · enviado por {escape(enviado_por)}' if enviado_por else ''}.
     </div>
   </div>
 </div>
@@ -508,8 +508,8 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
     """Envia el reporte diario de saldos por correo via mail-service (Gmail API).
     No propaga la excepcion - un fallo de envio no debe tumbar la generacion del
     reporte en si (el frontend lo sigue mostrando en pantalla aunque el correo falle).
-    El remitente usa GMAIL_SENDER_SUBJECT (cuenta fija de notificaciones) porque el
-    domain-wide delegation no esta configurado para todos los usuarios."""
+    Remitente fijo (GMAIL_SENDER_SUBJECT) para que usuarios de cualquier dominio
+    puedan enviar — domain-wide delegation solo funciona dentro de cypcumbres.mx."""
     headers, cookies = forward_auth_headers(request)
     rfcs = {e["sociedad"] for e in reporte["sociedades"]}
     nombres_sociedades = _resolver_nombres_sociedades(headers, cookies, rfcs)
@@ -522,12 +522,19 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
     else:
         empresa_label = f"{len(nombres)} empresas"
 
-    html_body = _renderizar_reporte(reporte, nombres_sociedades, empresa_label)
+    from_email = request.effective_scope.user_email or None
+    lista = list(destinatarios)
+    if from_email and from_email not in lista:
+        lista.append(from_email)
+
+    html_body = _renderizar_reporte(reporte, nombres_sociedades, empresa_label, enviado_por=from_email)
     subject = f"Reporte diario de saldos — {empresa_label} — {reporte['fecha']}"
 
     ok_total = True
-    for destinatario in destinatarios:
+    for destinatario in lista:
         payload = {"to": destinatario, "subject": subject, "html_body": html_body}
+        if from_email:
+            payload["reply_to"] = from_email
         try:
             respuesta = requests.post(
                 f"{settings.MAIL_SERVICE_URL}/api/send/",
