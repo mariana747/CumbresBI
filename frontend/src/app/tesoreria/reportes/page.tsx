@@ -27,8 +27,7 @@ import {
 } from "@mui/material";
 import { ChevronDown, ChevronRight, FileBarChart, Mail, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
-import { GmailSendEstado, GeneralSociedad, getGmailSendAutorizarUrl, getGmailSendEstado, listSociedades } from "@/lib/iam";
-import { getSession } from "@/lib/auth";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   ReporteDiario,
   ReporteDiarioCorte,
@@ -64,11 +63,6 @@ export default function TesoreriaReporteDiarioPage() {
   const [envioError, setEnvioError] = useState<string | null>(null);
   const [envioOk, setEnvioOk] = useState(false);
 
-  // Gmail OAuth para usuarios @gmail.com
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [gmailEstado, setGmailEstado] = useState<GmailSendEstado | null>(null);
-  const [gmailCargando, setGmailCargando] = useState(false);
-
   // Detalle de Flujos por cuenta (09/Sep/2026, "agrega flujos para verlos
   // en el reporte diario") - antes solo se veia la suma, no cada
   // transaccion real.
@@ -92,25 +86,7 @@ export default function TesoreriaReporteDiarioPage() {
     listCuentas(undefined, undefined, 200)
       .then((res) => setCuentas(res.results))
       .catch(() => setCuentas([]));
-    getSession().then((s) => setUserEmail(s?.email ?? null)).catch(() => {});
-    // Retomar tras conectar Gmail (callback con ?gmail_send=conectado)
-    const params = new URLSearchParams(window.location.search);
-    const gmailParam = params.get("gmail_send");
-    if (gmailParam) {
-      params.delete("gmail_send");
-      window.history.replaceState({}, "", window.location.pathname + (params.toString() ? `?${params.toString()}` : ""));
-      if (gmailParam === "conectado") setEnvioAbierto(true);
-    }
   }, []);
-
-  useEffect(() => {
-    if (!envioAbierto || !userEmail?.endsWith("@gmail.com")) return;
-    setGmailCargando(true);
-    getGmailSendEstado()
-      .then(setGmailEstado)
-      .catch(() => setGmailEstado(null))
-      .finally(() => setGmailCargando(false));
-  }, [envioAbierto, userEmail]);
 
   // Bloquear envio si hay diferencia: no se debe enviar el reporte diario
   // con diferencia - el backend ya lo rechaza, esto solo evita el viaje
@@ -707,40 +683,6 @@ export default function TesoreriaReporteDiarioPage() {
               No se puede enviar: hay diferencia sin resolver en {cuentasConDiferencia.join(", ")}.
             </Alert>
           )}
-          {userEmail?.endsWith("@gmail.com") && (
-            gmailCargando ? (
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-                <CircularProgress size={14} />
-                <Typography variant="caption">Verificando cuenta Gmail…</Typography>
-              </Box>
-            ) : !gmailEstado?.conectado ? (
-              <Alert
-                severity="warning"
-                sx={{ mb: 2 }}
-                action={
-                  <Button
-                    size="small"
-                    onClick={async () => {
-                      try {
-                        const url = await getGmailSendAutorizarUrl();
-                        window.location.href = url;
-                      } catch {
-                        setEnvioError("No se pudo iniciar la conexión con Gmail.");
-                      }
-                    }}
-                  >
-                    Conectar
-                  </Button>
-                }
-              >
-                Conecta tu cuenta Gmail para enviar desde tu correo.
-              </Alert>
-            ) : (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Se enviará desde {gmailEstado.email}.
-              </Alert>
-            )
-          )}
           <TextField
             size="small"
             label="Destinatarios (separados por coma)"
@@ -755,11 +697,7 @@ export default function TesoreriaReporteDiarioPage() {
           <Button
             variant="contained"
             onClick={handleEnviar}
-            disabled={
-              enviando ||
-              cuentasConDiferencia.length > 0 ||
-              (userEmail?.endsWith("@gmail.com") && !gmailEstado?.conectado)
-            }
+            disabled={enviando || cuentasConDiferencia.length > 0}
           >
             {enviando ? <CircularProgress size={16} /> : "Enviar"}
           </Button>
