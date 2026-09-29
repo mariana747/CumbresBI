@@ -504,25 +504,6 @@ def _resolver_nombres_sociedades(headers, cookies, rfcs: set[str]) -> dict[str, 
     return nombres
 
 
-def _obtener_gmail_access_token(request) -> str | None:
-    """Pide a iam-service un access_token fresco de gmail.send para el usuario
-    autenticado. Retorna None si el usuario no ha conectado su cuenta de Gmail
-    (en ese caso el envio cae al remitente fijo GMAIL_SENDER_SUBJECT)."""
-    headers, cookies = forward_auth_headers(request)
-    try:
-        respuesta = requests.get(
-            f"{settings.IAM_SERVICE_URL}/api/gmail-send/access-token/",
-            headers=headers,
-            cookies=cookies,
-            timeout=_TIMEOUT_SEGUNDOS,
-        )
-    except requests.RequestException:
-        logger.warning("iam-service no respondio al obtener gmail access token", exc_info=True)
-        return None
-    if respuesta.status_code == 200:
-        return respuesta.json().get("access_token")
-    return None
-
 
 def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> bool:
     """Envia el reporte diario de saldos por correo via mail-service (Gmail API).
@@ -547,12 +528,10 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
     if from_email and from_email not in lista:
         lista.append(from_email)
 
-    # Credenciales de envio segun dominio del remitente:
-    # @gmail.com -> OAuth personal (gmail.send token de iam-service)
-    # @cypcumbres.mx / .com -> service account con domain-wide delegation
-    gmail_access_token = None
-    if from_email and from_email.lower().endswith("@gmail.com"):
-        gmail_access_token = _obtener_gmail_access_token(request)
+    # @cypcumbres.mx / .com -> service account con domain-wide delegation (impersonacion)
+    # @gmail.com -> sale desde GMAIL_SENDER_SUBJECT con Reply-To al usuario
+    _DOMINIOS_CORPORATIVOS = ("@cypcumbres.mx", "@cypcumbres.com")
+    es_corporativo = from_email and any(from_email.lower().endswith(d) for d in _DOMINIOS_CORPORATIVOS)
 
     html_body = _renderizar_reporte(reporte, nombres_sociedades, empresa_label, enviado_por=from_email)
     subject = f"Reporte diario de saldos — {empresa_label} — {reporte['fecha']}"
@@ -562,10 +541,7 @@ def enviar_reporte_diario(request, destinatarios: list[str], reporte: dict) -> b
         payload = {"to": destinatario, "subject": subject, "html_body": html_body}
         if from_email:
             payload["reply_to"] = from_email
-        if gmail_access_token:
-            payload["gmail_access_token"] = gmail_access_token
-            payload["gmail_sender_email"] = from_email
-        elif from_email:
+        if es_corporativo:
             payload["from"] = from_email
         try:
             respuesta = requests.post(
