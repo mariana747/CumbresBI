@@ -78,6 +78,7 @@ from .models import (
     TesoreriaSolicitudPago,
     TesoreriaTicketProveedor,
     TesoreriaTicketReembolso,
+    contrato_generico_credito,
     contrato_generico_nomina,
     contrato_generico_reembolso,
 )
@@ -1014,7 +1015,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     }
 
     def get_permissions(self):
-        if self.action == "create":
+        if self.action in ("create", "registrar_movimiento_credito"):
             return [require_permission("tesoreria.crear")()]
         if self.action in (
             "update",
@@ -1664,6 +1665,94 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             except (TesoreriaFactura.DoesNotExist, TesoreriaComplementoPago.DoesNotExist):
                 resultados.append({"id_flujo": id_flujo, "ok": False, "detalle": "El comprobante ya no existe."})
         return Response({"resultados": resultados})
+
+    @action(detail=False, methods=["post"])
+    def registrar_movimiento_credito(self, request):
+        """Boton dedicado "Ministrar/Pagar credito" (28/Sep/2026, "tiene su
+        propia cuenta de credito para que pueda hacer esos dos
+        movimientos") - una ministracion o un pago de una linea de credito
+        mueve dinero en DOS cuentas a la vez (la de cheques y la de
+        credito), pero un Flujo solo puede tener una `cuenta` (FK) - esta
+        accion crea los 2 Flujos ligados en un solo paso para que no se le
+        olvide a nadie capturar el segundo.
+
+        Convencion de signos (igual que cualquier libro contable de doble
+        entrada, consistente con como el Reporte Diario ya reconcilia
+        cambio de saldo vs. suma de transacciones):
+        - Ministracion: entra efectivo a cheques (+monto) Y sube la deuda
+          del credito, es decir el saldo de esa cuenta se vuelve MAS
+          negativo (-monto).
+        - Pago: sale efectivo de cheques (-monto) Y baja la deuda del
+          credito, el saldo se vuelve MENOS negativo (+monto). No modela
+          capital vs. interes por separado (amortizacion) - eso sigue
+          fuera de alcance, ver memoria "tesoreria-linea-credito-mecanica-
+          y-estado".
+
+        Body: {"tipo": "ministracion"|"pago", "cuenta_credito",
+        "cuenta_cheques", "monto" (positivo), "fecha_efectiva", "concepto"}.
+        """
+        tipo = request.data.get("tipo")
+        if tipo not in ("ministracion", "pago"):
+            return Response({"detail": "'tipo' debe ser 'ministracion' o 'pago'."}, status=400)
+
+        monto = request.data.get("monto")
+        try:
+            monto = Decimal(str(monto))
+        except Exception:
+            return Response({"detail": "'monto' invalido."}, status=400)
+        if monto <= 0:
+            return Response({"detail": "'monto' debe ser mayor a 0."}, status=400)
+
+        try:
+            cuenta_credito = TesoreriaCuenta.objects.get(pk=request.data.get("cuenta_credito"))
+        except TesoreriaCuenta.DoesNotExist:
+            return Response({"detail": "Cuenta de crédito no encontrada."}, status=400)
+        if cuenta_credito.tipo != TesoreriaCuenta.TIPO_CREDITO:
+            return Response({"detail": "'cuenta_credito' debe ser una cuenta de tipo Crédito."}, status=400)
+
+        try:
+            cuenta_cheques = TesoreriaCuenta.objects.get(pk=request.data.get("cuenta_cheques"))
+        except TesoreriaCuenta.DoesNotExist:
+            return Response({"detail": "Cuenta de cheques no encontrada."}, status=400)
+        if cuenta_cheques.tipo == TesoreriaCuenta.TIPO_CREDITO:
+            return Response({"detail": "'cuenta_cheques' no puede ser otra cuenta de crédito."}, status=400)
+
+        fecha_efectiva = request.data.get("fecha_efectiva") or None
+        concepto_base = request.data.get("concepto") or (
+            f"Ministración crédito {cuenta_credito.alias or cuenta_credito.id_cuenta_bancaria}"
+            if tipo == "ministracion"
+            else f"Pago crédito {cuenta_credito.alias or cuenta_credito.id_cuenta_bancaria}"
+        )
+
+        monto_cheques = monto if tipo == "ministracion" else -monto
+        monto_credito = -monto if tipo == "ministracion" else monto
+
+        actor = (request.data.get("actor_user_id") or "")[:100]
+        flujo_cheques = TesoreriaFlujo.objects.create(
+            id_flujo=_generar_id_flujo(),
+            contrato=contrato_generico_credito(cuenta_cheques.sociedad or cuenta_credito.sociedad or ""),
+            cuenta=cuenta_cheques,
+            concepto=concepto_base,
+            total_mxp=monto_cheques,
+            fecha_efectiva=fecha_efectiva,
+            created_by=actor,
+        )
+        flujo_credito = TesoreriaFlujo.objects.create(
+            id_flujo=_generar_id_flujo(),
+            contrato=contrato_generico_credito(cuenta_credito.sociedad or ""),
+            cuenta=cuenta_credito,
+            concepto=concepto_base,
+            total_mxp=monto_credito,
+            fecha_efectiva=fecha_efectiva,
+            created_by=actor,
+        )
+        return Response(
+            {
+                "flujo_cheques": TesoreriaFlujoSerializer(flujo_cheques).data,
+                "flujo_credito": TesoreriaFlujoSerializer(flujo_credito).data,
+            },
+            status=201,
+        )
 
     @action(detail=True, methods=["post"])
     def vincular_factura(self, request, pk=None):

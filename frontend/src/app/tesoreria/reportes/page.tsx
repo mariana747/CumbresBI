@@ -174,6 +174,49 @@ export default function TesoreriaReporteDiarioPage() {
   }
   const sociedadesFiltradas = useMemo(() => filtrarSociedades(reporte ?? undefined), [reporte, filtroCuenta]);
 
+  // Apartado aparte para creditos (28/Sep/2026, "debe ser un apartado solo
+  // de credito") - antes se mezclaban con las cuentas normales de la
+  // empresa; se sacan de sociedadesFiltradas y se listan juntas en su
+  // propia seccion, sin importar de que empresa sean.
+  const sociedadesSinCredito = useMemo(
+    () =>
+      sociedadesFiltradas
+        .map((empresa) => ({ ...empresa, cuentas: empresa.cuentas.filter((c) => c.tipo !== "CREDITO") }))
+        .filter((empresa) => empresa.cuentas.length > 0),
+    [sociedadesFiltradas]
+  );
+  const cuentasCredito = useMemo(
+    () =>
+      sociedadesFiltradas.flatMap((empresa) =>
+        empresa.cuentas.filter((c) => c.tipo === "CREDITO").map((c) => ({ ...c, sociedad: empresa.sociedad }))
+      ),
+    [sociedadesFiltradas]
+  );
+
+  // Consolidado propio de Creditos (28/Sep/2026, "sumas separadas...otra
+  // del credito con los saldos + y -", luego "el saldo positivo es al
+  // ministrar") - a diferencia de una cuenta normal, un credito no tiene un
+  // "saldo positivo" real (el saldo siempre es la deuda, negativa):
+  // "positivos" aqui es la suma de disponible_ministrar, "negativo" es la
+  // suma del saldo del credito (deuda).
+  const resumenCredito = useMemo(() => {
+    let positivos = 0;
+    let negativos = 0;
+    let hayAlguna = false;
+    for (const c of cuentasCredito) {
+      if (c.disponible_ministrar !== null) {
+        hayAlguna = true;
+        positivos += Number(c.disponible_ministrar);
+      }
+      if (c.tiene_saldo_hoy) {
+        hayAlguna = true;
+        const monto = Number(c.saldo_hoy);
+        if (monto < 0) negativos += monto;
+      }
+    }
+    return hayAlguna ? { positivos, negativos } : null;
+  }, [cuentasCredito]);
+
   function renderEmpresas(lista: { sociedad: string; cuentas: ReporteDiarioCuenta[] }[]) {
     if (lista.length === 0) {
       return (
@@ -231,9 +274,28 @@ export default function TesoreriaReporteDiarioPage() {
                             )}
                           </TableCell>
                           <TableCell align="right">{numero(c.saldo_anterior)}</TableCell>
-                          <TableCell align="right">{numero(c.saldo_hoy)}</TableCell>
-                          <TableCell align="right">{numero(c.cambio)}</TableCell>
-                          <TableCell align="right">{porcentaje(c.cambio_pct)}</TableCell>
+                          <TableCell
+                            align="right"
+                            sx={
+                              c.tiene_saldo_hoy && Number(c.saldo_hoy) < 0
+                                ? { color: "error.main", fontWeight: 700 }
+                                : undefined
+                            }
+                          >
+                            {numero(c.saldo_hoy)}
+                          </TableCell>
+                          <TableCell
+                            align="right"
+                            sx={c.cambio !== null && Number(c.cambio) < 0 ? { color: "error.main" } : undefined}
+                          >
+                            {numero(c.cambio)}
+                          </TableCell>
+                          <TableCell
+                            align="right"
+                            sx={c.cambio !== null && Number(c.cambio) < 0 ? { color: "error.main" } : undefined}
+                          >
+                            {porcentaje(c.cambio_pct)}
+                          </TableCell>
                           <TableCell align="right">{numero(c.suma_transacciones)}</TableCell>
                           <TableCell
                             align="right"
@@ -316,10 +378,16 @@ export default function TesoreriaReporteDiarioPage() {
                     <Typography variant="body2">
                       <strong>Saldo anterior:</strong> {numero(c.saldo_anterior)}
                     </Typography>
-                    <Typography variant="body2">
+                    <Typography
+                      variant="body2"
+                      sx={c.tiene_saldo_hoy && Number(c.saldo_hoy) < 0 ? { color: "error.main", fontWeight: 700 } : undefined}
+                    >
                       <strong>Saldo:</strong> {numero(c.saldo_hoy)}
                     </Typography>
-                    <Typography variant="body2">
+                    <Typography
+                      variant="body2"
+                      sx={c.cambio !== null && Number(c.cambio) < 0 ? { color: "error.main" } : undefined}
+                    >
                       <strong>Cambio:</strong> {numero(c.cambio)} ({porcentaje(c.cambio_pct)})
                     </Typography>
                     <Typography variant="body2">
@@ -397,6 +465,78 @@ export default function TesoreriaReporteDiarioPage() {
     });
   }
 
+  // Apartado de Creditos (28/Sep/2026, "debe ser un apartado solo de
+  // credito") - lista todas las cuentas tipo CREDITO juntas, sin importar
+  // la empresa, con su saldo (deuda, normalmente negativo) y el disponible
+  // por ministrar (dato fijo capturado a mano en TesoreriaCuenta).
+  function renderCreditos(lista: (ReporteDiarioCuenta & { sociedad: string })[]) {
+    if (lista.length === 0) return null;
+    return (
+      <Paper variant="outlined" sx={{ mb: 3 }}>
+        <Typography variant="subtitle1" fontWeight={600} sx={{ p: 2, pb: 1 }}>
+          Créditos
+        </Typography>
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Crédito</TableCell>
+                  <TableCell>Empresa</TableCell>
+                  <TableCell align="right">Saldo del crédito</TableCell>
+                  <TableCell align="right">Disponible por ministrar</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {lista.map((c) => {
+                  const nombreEmpresa = sociedades.find((s) => s.rfc === c.sociedad)?.razon_social || c.sociedad || "Sin empresa";
+                  return (
+                    <TableRow key={c.id_cuenta_bancaria} hover>
+                      <TableCell>{c.alias}</TableCell>
+                      <TableCell>{nombreEmpresa}</TableCell>
+                      <TableCell
+                        align="right"
+                        sx={c.tiene_saldo_hoy && Number(c.saldo_hoy) < 0 ? { color: "error.main", fontWeight: 700 } : undefined}
+                      >
+                        {numero(c.saldo_hoy)}
+                      </TableCell>
+                      <TableCell align="right">{numero(c.disponible_ministrar)}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+        <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+          {lista.map((c) => {
+            const nombreEmpresa = sociedades.find((s) => s.rfc === c.sociedad)?.razon_social || c.sociedad || "Sin empresa";
+            return (
+              <Paper key={c.id_cuenta_bancaria} variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="subtitle2">{c.alias}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {nombreEmpresa}
+                </Typography>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography
+                    variant="body2"
+                    sx={c.tiene_saldo_hoy && Number(c.saldo_hoy) < 0 ? { color: "error.main", fontWeight: 700 } : undefined}
+                  >
+                    <strong>Saldo del crédito:</strong> {numero(c.saldo_hoy)}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Disponible por ministrar:</strong> {numero(c.disponible_ministrar)}
+                  </Typography>
+                </Stack>
+              </Paper>
+            );
+          })}
+        </Stack>
+   
+      </Paper>
+    );
+  }
+
   function renderConsolidado(consolidado: ReporteDiarioCorte["consolidado"], mostrarNomina?: boolean) {
     return (
       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
@@ -404,7 +544,10 @@ export default function TesoreriaReporteDiarioPage() {
           <Typography variant="body1">
             <strong>Saldo consolidado:</strong> {numero(consolidado.saldo_hoy_total)}
           </Typography>
-          <Typography variant="body1">
+          <Typography
+            variant="body1"
+            sx={consolidado.cambio_neto !== null && Number(consolidado.cambio_neto) < 0 ? { color: "error.main" } : undefined}
+          >
             <strong>Cambio neto:</strong> {numero(consolidado.cambio_neto)} ({porcentaje(consolidado.cambio_neto_pct)})
           </Typography>
         </Stack>
@@ -510,8 +653,9 @@ export default function TesoreriaReporteDiarioPage() {
 
       {reporte && (
         <>
-          {renderEmpresas(sociedadesFiltradas)}
+          {renderEmpresas(sociedadesSinCredito)}
           {renderConsolidado(reporte.consolidado, true)}
+          {renderCreditos(cuentasCredito)}
         </>
       )}
 

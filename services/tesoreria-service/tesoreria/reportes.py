@@ -170,6 +170,14 @@ def _calcular_corte(cuentas, fecha) -> dict:
     saldo_anterior_total = Decimal("0")
     saldo_hoy_total = Decimal("0")
     hay_saldo_hoy_en_alguna = False
+    # Resumen de creditos (28/Sep/2026, "reporte de creditos (saldos
+    # negativos)...resumen de las cuentas como tabla: suma de saldos
+    # positivos, suma de saldos negativos, suma de los saldos positivos y
+    # negativos") - saldo negativo = cuenta en numeros rojos (linea de
+    # credito, fideicomiso sobregirado, etc.), se separa del resto para que
+    # destaque en el correo en vez de perderse en el consolidado neto.
+    suma_saldos_positivos = Decimal("0")
+    suma_saldos_negativos = Decimal("0")
     # nomina_total_* (11/Sep/2026, "el reporte diario debe reflejar tambien
     # la nomina de ambos tipos") - consolidado del dia completo, para verlo
     # sin tener que expandir cuenta por cuenta.
@@ -198,10 +206,23 @@ def _calcular_corte(cuentas, fecha) -> dict:
         cambio = (monto_hoy - monto_anterior) if monto_hoy is not None else None
         diferencia = (cambio - suma_transacciones) if cambio is not None else None
 
-        saldo_anterior_total += monto_anterior
-        if monto_hoy is not None:
-            saldo_hoy_total += monto_hoy
-            hay_saldo_hoy_en_alguna = True
+        # Cuentas tipo CREDITO quedan FUERA de todos los totales
+        # consolidados (28/Sep/2026, "lo de credito no se une con saldo
+        # consolidado de las cuentas, es aparte") - una linea de credito no
+        # es efectivo disponible, mezclar su saldo (deuda, normalmente muy
+        # negativo) con el consolidado de cuentas bancarias distorsiona el
+        # total. Sigue apareciendo en su propia fila/seccion (el frontend ya
+        # la separa en "Creditos"), solo no suma aqui.
+        es_credito = cuenta.tipo == TesoreriaCuenta.TIPO_CREDITO
+        if not es_credito:
+            saldo_anterior_total += monto_anterior
+            if monto_hoy is not None:
+                saldo_hoy_total += monto_hoy
+                hay_saldo_hoy_en_alguna = True
+                if monto_hoy >= Decimal("0"):
+                    suma_saldos_positivos += monto_hoy
+                else:
+                    suma_saldos_negativos += monto_hoy
 
         # "alias" (25/Sep/2026, "se necesita unir alias + ultimos 4 digitos
         # de la cuenta" - antes solo mostraba el alias libre, dos cuentas
@@ -223,6 +244,11 @@ def _calcular_corte(cuentas, fecha) -> dict:
             "banco_nombre": cuenta.banco.banco if cuenta.banco_id else None,
             "clabe": cuenta.clabe,
             "tipo": cuenta.tipo,
+            # disponible_ministrar (28/Sep/2026, cuentas tipo CREDITO) - vive
+            # en TesoreriaSaldo (con historial por fecha, igual que saldo),
+            # no en TesoreriaCuenta - viene del mismo saldo_hoy_obj/fecha
+            # que ya se consulto arriba para el saldo del dia.
+            "disponible_ministrar": saldo_hoy_obj.disponible_ministrar if saldo_hoy_obj else None,
             "saldo_anterior": monto_anterior,
             "saldo_hoy": monto_hoy,
             "tiene_saldo_hoy": monto_hoy is not None,
@@ -271,6 +297,11 @@ def _calcular_corte(cuentas, fecha) -> dict:
             ),
             "nomina_total_quincenal": nomina_total_quincenal,
             "nomina_total_semanal": nomina_total_semanal,
+            # Solo cuenta cuentas CON saldo_hoy capturado, igual criterio
+            # que hay_saldo_hoy_en_alguna - una cuenta sin saldo del dia no
+            # debe aparecer como "0" en ninguna de las dos sumas.
+            "suma_saldos_positivos": suma_saldos_positivos if hay_saldo_hoy_en_alguna else None,
+            "suma_saldos_negativos": suma_saldos_negativos if hay_saldo_hoy_en_alguna else None,
         },
     }
 

@@ -297,6 +297,15 @@ class TesoreriaCuenta(models.Model):
     TIPO_NOMINA = "NOMINA"
     TIPO_PAGARE = "PAGARE"
     TIPO_FIDEICOMISO = "FIDEICOMISO"
+    # CREDITO (28/Sep/2026, "vamos a ponerlos como datos fijos como una
+    # cuenta bancaria solo para el credito" - caso real: linea de credito
+    # ZOE VIDA PUEBLA). El saldo del credito se captura como NEGATIVO en
+    # TesoreriaSaldo (deuda), igual que cualquier cuenta bancaria - queda
+    # excluido de los totales consolidados de cuentas normales (Reporte
+    # Diario) y vive en su propio apartado "Creditos". disponible_ministrar
+    # (ver TesoreriaSaldo.disponible_ministrar) es el segundo dato fijo que
+    # no encaja como saldo, con historial por fecha igual que saldo.
+    TIPO_CREDITO = "CREDITO"
     TIPO_OTRA = "OTRA"
     TIPO_CHOICES = [
         (TIPO_CHEQUES, "Cheques"),
@@ -304,6 +313,7 @@ class TesoreriaCuenta(models.Model):
         (TIPO_NOMINA, "Nómina"),
         (TIPO_PAGARE, "Pagaré"),
         (TIPO_FIDEICOMISO, "Fideicomiso"),
+        (TIPO_CREDITO, "Crédito"),
         (TIPO_OTRA, "Otra"),
     ]
 
@@ -481,6 +491,43 @@ def contrato_generico_nomina(sociedad: str) -> "TesoreriaContrato":
             "tipo": TesoreriaContrato.TIPO_INTERNO,
             "contraparte_id": CONTRAPARTE_NOMINA_ID,
             "concepto_factura": "Nómina",
+            "status": TesoreriaContrato.STATUS_ACTIVO,
+            "requiere_factura": False,
+        },
+    )
+    return contrato
+
+
+CONTRATO_CREDITO_PREFIJO = "GEN-CREDITO-"
+
+
+def _id_contraparte_credito(sociedad: str) -> str:
+    """Mismo criterio que _id_contraparte_reembolso - hash corto
+    determinista por sociedad (CharField(8))."""
+    return "CR" + hashlib.sha1(sociedad.encode()).hexdigest()[:6].upper()
+
+
+def contrato_generico_credito(sociedad: str) -> "TesoreriaContrato":
+    """Contrato Y Contraparte genericos para movimientos de linea de
+    credito (28/Sep/2026, "boton dedicado Ministrar/Pagar credito"), uno
+    POR SOCIEDAD - mismo criterio que contrato_generico_reembolso. Se usa
+    para los 2 Flujos que crea TesoreriaFlujoViewSet.registrar_movimiento_credito
+    (uno en la cuenta de cheques, otro en la cuenta CREDITO).
+
+    get_or_create es idempotente."""
+    id_contraparte = _id_contraparte_credito(sociedad)
+    TesoreriaContraparte.objects.get_or_create(
+        id_contraparte=id_contraparte,
+        defaults={"razon_social": f"Movimientos de línea de crédito (genérico) - {sociedad}"},
+    )
+    id_contrato = f"{CONTRATO_CREDITO_PREFIJO}{sociedad}"
+    contrato, _ = TesoreriaContrato.objects.get_or_create(
+        id_contrato=id_contrato,
+        defaults={
+            "sociedad": sociedad,
+            "tipo": TesoreriaContrato.TIPO_INTERNO,
+            "contraparte_id": id_contraparte,
+            "concepto_factura": "Línea de crédito",
             "status": TesoreriaContrato.STATUS_ACTIVO,
             "requiere_factura": False,
         },
@@ -1725,6 +1772,14 @@ class TesoreriaSaldo(models.Model):
     saldo = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     cambio_dinero = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True)
     cambio_porcentual = models.DecimalField(max_digits=8, decimal_places=4, blank=True, null=True)
+    # disponible_ministrar (28/Sep/2026, cuentas tipo CREDITO) - antes vivia
+    # como campo fijo en TesoreriaCuenta (un solo valor "actual", sin
+    # historial); Mariana pidio llevarlo con historial por fecha igual que
+    # `saldo`, mismo criterio (ambos cambian con cada ministracion/pago,
+    # deben poder compararse dia a dia). Solo tiene sentido para cuentas
+    # tipo CREDITO, pero se deja disponible para cualquier cuenta (nullable)
+    # en vez de condicionar a nivel DB.
+    disponible_ministrar = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True)
     # Ver docstring de TesoreriaBanco - misma correccion de Actividad 10.
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=8, blank=True, null=True)
