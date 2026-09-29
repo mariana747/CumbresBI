@@ -431,3 +431,24 @@ class IamGooglePersonalToken(models.Model):
 
     def __str__(self):
         return f"{self.user_id} — {self.google_email or 'sin email'}"
+
+
+class IamGmailSendToken(models.Model):
+    """Token OAuth de Gmail personal para ENVIAR correos (gmail.send scope),
+    distinto de IamGooglePersonalToken (Sheets/Drive). Aplica a usuarios
+    con cuenta @gmail.com que no pueden ser impersonados via domain-wide
+    delegation del Workspace corporativo."""
+
+    user = models.OneToOneField(
+        IamUser, on_delete=models.CASCADE, primary_key=True, related_name="gmail_send_token"
+    )
+    gmail_email = models.EmailField(max_length=254, blank=True, null=True)
+    refresh_token = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "iam_gmail_send_tokens"
+
+    def __str__(self):
+        return f"{self.user_id} — {self.gmail_email or 'sin email'}"
