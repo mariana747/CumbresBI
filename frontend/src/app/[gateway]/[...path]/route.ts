@@ -45,9 +45,14 @@ async function proxy(request: NextRequest, params: { gateway: string; path: stri
   // "/" final es justo lo que Django exige por convencion DRF - sin el,
   // Django responde su propio 301 APPEND_SLASH con un Location relativo sin
   // el prefijo /iam, /pld, etc., y el navegador termina pidiendo "/api/me/"
-  // en vez de "/iam/api/me/" -> 404 real). Usar el pathname original, que
-  // SI conserva el "/" final tal cual lo pidio el navegador.
-  const trailingSlash = request.nextUrl.pathname.endsWith("/") ? "/" : "";
+  // en vez de "/iam/api/me/" -> 404 real).
+  // Rutas DRF siempre empiezan con "api/" - forzar "/" independientemente
+  // del pathname detectado (Next.js 14 App Router puede normalizar el
+  // pathname antes de pasarlo al handler, perdiendo el "/" final aunque el
+  // navegador lo haya enviado). Rutas no-DRF (/iam/auth/google/start, etc.)
+  // se preservan tal cual.
+  const isDrfPath = params.path[0] === "api";
+  const trailingSlash = (isDrfPath || request.nextUrl.pathname.endsWith("/")) ? "/" : "";
   const targetUrl = new URL(`/${params.gateway}/${params.path.join("/")}${trailingSlash}`, gatewayBase);
   targetUrl.search = request.nextUrl.search;
 
@@ -72,6 +77,21 @@ async function proxy(request: NextRequest, params: { gateway: string; path: stri
     return NextResponse.json({ detail: "El servicio no respondio. Intenta de nuevo." }, { status: 502 });
   }
 
+  // NextResponse lanza TypeError para status 204/304 con body (spec HTTP prohíbe
+  // body en esas respuestas). Se devuelve sin body en esos casos.
+  if (upstream.status === 204 || upstream.status === 304) {
+    const response = new NextResponse(null, { status: upstream.status });
+    upstream.headers.forEach((value, key) => {
+      if (!HOP_BY_HOP.has(key.toLowerCase()) && key.toLowerCase() !== "set-cookie") {
+        response.headers.set(key, value);
+      }
+    });
+    for (const rawCookie of upstream.headers.getSetCookie()) {
+      response.headers.append("set-cookie", rawCookie);
+    }
+    return response;
+  }
+
   const responseBody = await upstream.arrayBuffer();
   const response = new NextResponse(responseBody, { status: upstream.status });
 
@@ -80,6 +100,13 @@ async function proxy(request: NextRequest, params: { gateway: string; path: stri
       response.headers.set(key, value);
     }
   });
+  // Evita que el browser cachee redirects (3xx) del proxy - si Django
+  // devuelve un 301 APPEND_SLASH con Location relativo y el browser lo
+  // almacena, las llamadas siguientes van al destino incorrecto sin pasar
+  // por route.ts (bug real: /pld/api/... → cacheado como /api/...).
+  if (upstream.status >= 300 && upstream.status < 400) {
+    response.headers.set("cache-control", "no-store");
+  }
 
   // getSetCookie() (Node 18+/undici) devuelve cada Set-Cookie por
   // separado - Headers.get("set-cookie") los uniria con comas y los
