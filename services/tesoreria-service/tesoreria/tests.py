@@ -3327,6 +3327,14 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         )
         parche_drive.start()
         self.addCleanup(parche_drive.stop)
+        # La ventana mensual de reembolso depende del dia/hora en que corre el
+        # CI - si corre despues de mediodia en el ultimo dia habil del mes la
+        # validacion rechaza todos los creates con 400. Los tests de CRUD no
+        # prueban esa logica (ya cubierta en TesoreriaFechaLimiteReembolsoTests),
+        # asi que se neutraliza aqui para que no interfiera.
+        parche_fecha = patch("tesoreria.views.validar_fecha_limite", return_value=None)
+        parche_fecha.start()
+        self.addCleanup(parche_fecha.stop)
 
     def _post_crear(self, campos):
         """Arma un POST multipart valido para create() - conceptos va como
