@@ -1682,11 +1682,8 @@ function TesoreriaFlujosPageContent() {
           {tab === "Referencias" && (
             <>
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-              {/* ID de requisicion y Link de referencia se quitaron
-              (17/Sep/2026): 0 de 28 Flujos reales los han usado alguna vez.
-              ID de empleado solo aplica a Flujos de nomina (contrato
-              GEN-NOMINA-<sociedad>) - en el resto tambien queda siempre
-              vacio en la practica. */}
+              {/* ID de requisicion quitado (17/Sep/2026): nunca usado.
+              ID de empleado solo aplica a Flujos de nomina. */}
               {esFlujoDeNomina && (
                 <TextField
                   size="small"
@@ -1696,6 +1693,14 @@ function TesoreriaFlujosPageContent() {
                   fullWidth
                 />
               )}
+              <TextField
+                size="small"
+                label="Referencia (link)"
+                value={form.linkReferencia}
+                onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
             </Stack>
 
             {editing && (

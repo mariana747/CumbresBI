@@ -997,6 +997,38 @@ def _actualizar_disponible_ministrar(cuenta_credito, delta: Decimal, fecha: str,
     )
 
 
+def _nombre_comprobante_flujo(flujo, nombre_original: str) -> str:
+    """Nombre canónico para el archivo de comprobante en Drive:
+    YYYYMMDD_idflujo_contraparte_descripcionpago_totalMXP.ext"""
+    ext = ""
+    if "." in nombre_original:
+        ext = "." + nombre_original.rsplit(".", 1)[-1]
+
+    def _limpia(s: str) -> str:
+        return re.sub(r"[^\w\s\-]", "", s or "").strip()
+
+    fecha = ""
+    if flujo.fecha_efectiva:
+        fecha = flujo.fecha_efectiva.strftime("%Y%m%d")
+
+    id_corto = (flujo.id_flujo or "")[:8]
+
+    contraparte = ""
+    try:
+        contraparte = _limpia(flujo.contrato.contraparte.nombre)
+    except Exception:
+        pass
+
+    descripcion = _limpia(flujo.descripcion_pago or "")
+
+    total = ""
+    if flujo.total_mxp is not None:
+        total = str(int(flujo.total_mxp))
+
+    partes = [p for p in [fecha, id_corto, contraparte, descripcion, total] if p]
+    return "_".join(partes) + ext
+
+
 def _generar_id_flujo() -> str:
     # 8 hex minusculas (17/Sep/2026, "podemos dejar este FLJ-000001 atras?")
     # - mismo formato que los Flujos migrados del legacy (ej. "0ca3e654"),
@@ -1572,13 +1604,15 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         if not archivo:
             return Response({"detail": "Campo 'file' requerido"}, status=400)
 
+        nombre_archivo = _nombre_comprobante_flujo(flujo, archivo.name)
+
         headers, cookies = forward_auth_headers(request)
         carpeta = f"Tesoreria/Flujos/{flujo.id_flujo}"
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
                 params={"perm": "tesoreria.editar"},
-                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                files={"file": (nombre_archivo, archivo.read(), archivo.content_type)},
                 data={"carpeta": carpeta},
                 headers=headers,
                 cookies=cookies,
@@ -1604,7 +1638,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             "tesoreria_flujos",
             flujo.id_flujo,
             actor_user_id=request.data.get("actor_user_id"),
-            valores_nuevos={"nombre_archivo": archivo.name},
+            valores_nuevos={"nombre_archivo": nombre_archivo},
         )
         return Response(self.get_serializer(flujo).data)
 
