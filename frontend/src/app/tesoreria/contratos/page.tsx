@@ -99,6 +99,7 @@ const FORM_VACIO = {
   proyecto: "",
   propiedad: "",
   centro: "",
+  concepto: "",
   tipoPago: "" as TesoreriaTipoPago | "",
   frecuencia: "" as TesoreriaFrecuencia | "",
   duracion: "",
@@ -278,6 +279,10 @@ function TesoreriaContratosPageContent() {
   // resuelve a razon_social del lado del cliente, mismo patron que
   // tesoreria/contrapartes/page.tsx.
   const nombreSociedad = (rfc: string) => sociedades.find((s) => s.rfc === rfc)?.razon_social || rfc;
+  const aliasSociedad = (rfc: string) => {
+    const s = sociedades.find((x) => x.rfc === rfc);
+    return s?.alias_sociedad || s?.razon_social || rfc;
+  };
 
   function refresh() {
     setLoading(true);
@@ -459,6 +464,7 @@ function TesoreriaContratosPageContent() {
       proyecto: c.proyecto || "",
       propiedad: c.propiedad || "",
       centro: c.centro || "",
+      concepto: c.concepto || "",
       tipoPago: c.tipo_pago || "",
       frecuencia: c.frecuencia || "",
       duracion: c.duracion || "",
@@ -489,6 +495,7 @@ function TesoreriaContratosPageContent() {
     try {
       if (editing) {
         await updateContrato(editing.id_contrato, {
+          sociedad: form.sociedad === SIN_SOCIEDAD ? "" : form.sociedad,
           categoria: form.categoria || undefined,
           tipo: form.tipo,
           fechaGeneracion: form.fechaGeneracion || undefined,
@@ -496,6 +503,7 @@ function TesoreriaContratosPageContent() {
           proyecto: form.proyecto || undefined,
           propiedad: form.propiedad || undefined,
           centro: form.centro || undefined,
+          concepto: form.concepto || undefined,
           tipoPago: form.tipoPago || undefined,
           frecuencia: form.frecuencia || undefined,
           duracion: form.duracion || undefined,
@@ -523,6 +531,7 @@ function TesoreriaContratosPageContent() {
           proyecto: form.proyecto || undefined,
           propiedad: form.propiedad || undefined,
           centro: form.centro || undefined,
+          concepto: form.concepto || undefined,
           tipoPago: form.tipoPago || undefined,
           frecuencia: form.frecuencia || undefined,
           duracion: form.duracion || undefined,
@@ -568,7 +577,7 @@ function TesoreriaContratosPageContent() {
       <FiltrosBar
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Buscar por ID de contrato o sociedad..."
+          searchPlaceholder="Buscar por ID, contraparte, concepto o sociedad..."
           actions={
             puedeCrear && (
               <Button
@@ -667,7 +676,7 @@ function TesoreriaContratosPageContent() {
               <TableRow>
                 <TableCell>ID de contrato</TableCell>
                 <TableCell>Sociedad</TableCell>
-                <TableCell>Contraparte</TableCell>
+                <TableCell>Referencia</TableCell>
                 <TableCell>Tipo</TableCell>
                 <TableCell>Vencimiento</TableCell>
                 <TableCell>Estado</TableCell>
@@ -694,7 +703,11 @@ function TesoreriaContratosPageContent() {
                   <TableRow key={c.id_contrato} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contrato}</TableCell>
                     <TableCell>{nombreSociedad(c.sociedad)}</TableCell>
-                    <TableCell>{c.contraparte_nombre}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {`${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto ? ` - ${c.concepto}` : ""}`}
+                      </Typography>
+                    </TableCell>
                     <TableCell>{c.tipo || "—"}</TableCell>
                     <TableCell>{c.fecha_vencimiento || "—"}</TableCell>
                     <TableCell>
@@ -745,8 +758,8 @@ function TesoreriaContratosPageContent() {
                     <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {c.id_contrato}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {c.contraparte_nombre}
+                    <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                      {`${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto ? ` - ${c.concepto}` : ""}`}
                     </Typography>
                   </Stack>
                   <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
@@ -857,7 +870,8 @@ function TesoreriaContratosPageContent() {
               {formError}
             </Alert>
           )}
-
+          
+          {/* DETALLES */}
           {tab === "Detalles" && (
             <>
             {/* "Ver proveedor" fuera del fieldset (17/Sep/2026: un
@@ -947,37 +961,33 @@ function TesoreriaContratosPageContent() {
                 </Select>
               </FormControl>
               {!editing && (
-                <>
-                  <ContraparteSelector
-                    value={contraparteSeleccionada}
-                    onChange={(seleccion) => {
-                      setContraparteSeleccionada(seleccion);
-                      setForm({ ...form, contraparte: seleccion?.id_contraparte || "" });
-                    }}
-                  />
-                  <FormControl size="small" fullWidth>
-                    <InputLabel id="sociedad-label">Sociedad</InputLabel>
-                    <Select
-                      labelId="sociedad-label"
-                      label="Sociedad"
-                      value={form.sociedad}
-                      onChange={(e) => setForm({ ...form, sociedad: e.target.value })}
-                    >
-                      {sociedades.map((s) => (
-                        <MenuItem key={s.rfc} value={s.rfc}>
-                          {s.razon_social || s.rfc}
-                        </MenuItem>
-                      ))}
-                      {/* "Sin sociedad" (23/Sep/2026, gasto corporativo
-                          compartido) - solo alcance GLOBAL vera despues este
-                          contrato (ver SIN_SOCIEDAD arriba). */}
-                      <MenuItem value={SIN_SOCIEDAD}>
-                        <em>Sin sociedad</em>
-                      </MenuItem>
-                    </Select>
-                  </FormControl>
-                </>
+                <ContraparteSelector
+                  value={contraparteSeleccionada}
+                  onChange={(seleccion) => {
+                    setContraparteSeleccionada(seleccion);
+                    setForm({ ...form, contraparte: seleccion?.id_contraparte || "" });
+                  }}
+                />
               )}
+              <FormControl size="small" fullWidth>
+                <InputLabel id="sociedad-label">Sociedad</InputLabel>
+                <Select
+                  labelId="sociedad-label"
+                  label="Sociedad"
+                  value={form.sociedad}
+                  onChange={(e) => setForm({ ...form, sociedad: e.target.value })}
+                  disabled={soloLectura}
+                >
+                  {sociedades.map((s) => (
+                    <MenuItem key={s.rfc} value={s.rfc}>
+                      {s.razon_social || s.rfc}
+                    </MenuItem>
+                  ))}
+                  <MenuItem value={SIN_SOCIEDAD}>
+                    <em>Sin sociedad</em>
+                  </MenuItem>
+                </Select>
+              </FormControl>
               {/* Proyecto/Propiedad/Centro no aplican a un gasto suelto
                   (07/Sep/2026) - son forma de ligar un contrato formal a
                   una obra/inmueble/area de costo especifica; un consumo
@@ -1047,10 +1057,31 @@ function TesoreriaContratosPageContent() {
                   />
                 </>
               )}
+              <TextField
+                size="small"
+                label="Concepto"
+                value={form.concepto}
+                onChange={(e) => setForm({ ...form, concepto: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Referencia"
+                value={(() => {
+                  const cp = editing?.contraparte_nombre || contraparteSeleccionada?.razon_social || "";
+                  const soc = form.sociedad === SIN_SOCIEDAD ? "" : aliasSociedad(form.sociedad);
+                  const base = `${cp}/${form.proyecto}//${soc}`;
+                  return form.concepto ? `${base} - ${form.concepto}` : base;
+                })()}
+                disabled
+                fullWidth
+                inputProps={{ style: { fontFamily: "var(--font-mono, monospace)", fontSize: "0.75rem" } }}
+              />
             </Stack>
             </>
           )}
 
+          {/* PAGO */}
           {tab === "Pago" && (
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <FormControl size="small" fullWidth>
@@ -1175,6 +1206,7 @@ function TesoreriaContratosPageContent() {
             </Stack>
           )}
 
+          {/* ENLACES */}
           {tab === "Enlaces" && (
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <TextField
@@ -1207,6 +1239,7 @@ function TesoreriaContratosPageContent() {
             </Stack>
           )}
 
+          {/* CONTROL */}
           {tab === "Control" && (
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <FormControl size="small" fullWidth>
@@ -1271,7 +1304,9 @@ function TesoreriaContratosPageContent() {
               )}
             </Stack>
           )}
-
+          
+          
+          {/* DOCUMENTOS */}
           {tab === "Documentos" && editing && (
             <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <Typography variant="body2" color="text.secondary">
