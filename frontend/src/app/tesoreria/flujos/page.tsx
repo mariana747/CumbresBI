@@ -1741,6 +1741,39 @@ function TesoreriaFlujosPageContent() {
                         </Button>
                       )}
                     </>
+                  ) : editing.link_referencia && !reemplazandoReferencia ? (
+                    <>
+                      <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <Link2 size={18} strokeWidth={1.5} />
+                          <Typography variant="body2">Referencia (link)</Typography>
+                        </Stack>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <IconButton
+                            size="small"
+                            aria-label="Abrir link"
+                            title="Abrir en nueva pestaña"
+                            component="a"
+                            href={editing.link_referencia}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ExternalLink size={16} strokeWidth={1.5} />
+                          </IconButton>
+                          <Chip size="small" label="Link externo" />
+                        </Stack>
+                      </Stack>
+                      {!soloLectura && (
+                        <Button
+                          size="small"
+                          startIcon={<Upload size={14} strokeWidth={1.5} />}
+                          sx={{ mt: 1.5 }}
+                          onClick={() => setReemplazandoReferencia(true)}
+                        >
+                          Reemplazar por archivo
+                        </Button>
+                      )}
+                    </>
                   ) : soloLectura ? (
                     <Alert severity="info">No hay documentos.</Alert>
                   ) : (
@@ -1963,6 +1996,39 @@ function TesoreriaFlujosPageContent() {
                             onClick={() => setReemplazandoComprobante(true)}
                           >
                             Reemplazar comprobante
+                          </Button>
+                        )}
+                      </>
+                    ) : editing.link_comprobante_banco && !reemplazandoComprobante ? (
+                      <>
+                        <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Link2 size={18} strokeWidth={1.5} />
+                            <Typography variant="body2">Comprobante (link)</Typography>
+                          </Stack>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <IconButton
+                              size="small"
+                              aria-label="Abrir link"
+                              title="Abrir en nueva pestaña"
+                              component="a"
+                              href={editing.link_comprobante_banco}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink size={16} strokeWidth={1.5} />
+                            </IconButton>
+                            <Chip size="small" label="Link externo" />
+                          </Stack>
+                        </Stack>
+                        {puedeEditar && !soloLectura && (
+                          <Button
+                            size="small"
+                            startIcon={<Upload size={14} strokeWidth={1.5} />}
+                            sx={{ mt: 1.5 }}
+                            onClick={() => setReemplazandoComprobante(true)}
+                          >
+                            Reemplazar por archivo
                           </Button>
                         )}
                       </>
