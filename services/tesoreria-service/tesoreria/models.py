@@ -425,6 +425,7 @@ class TesoreriaContrato(models.Model):
     proyecto = models.CharField(max_length=3, blank=True, null=True)
     propiedad = models.CharField(max_length=50, blank=True, null=True)
     centro = models.CharField(max_length=100, blank=True, null=True)
+    concepto = models.TextField(blank=True, null=True)
     tipo_pago = models.CharField(max_length=20, choices=TIPO_PAGO_CHOICES, blank=True, null=True)
     frecuencia = models.CharField(max_length=20, choices=FRECUENCIA_CHOICES, blank=True, null=True)
     duracion = models.DecimalField(max_digits=4, decimal_places=0, blank=True, null=True)

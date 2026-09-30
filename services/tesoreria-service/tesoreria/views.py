@@ -531,6 +531,7 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
             condicion = (
                 Q(id_contrato__icontains=search)
                 | Q(sociedad__icontains=search)
+                | Q(concepto__icontains=search)
                 | Q(contraparte__razon_social__icontains=search)
                 | Q(contraparte__apellido_paterno__icontains=search)
                 | Q(contraparte__apellido_materno__icontains=search)
@@ -962,6 +963,40 @@ def _aplicar_filtro_fecha_conciliacion(request, queryset):
     return queryset
 
 
+def _actualizar_disponible_ministrar(cuenta_credito, delta: Decimal, fecha: str, actor: str) -> None:
+    """Ajusta disponible_ministrar y saldo en el registro TesoreriaSaldo de la
+    cuenta de credito para `fecha`. Si ya existe un saldo ese dia, lo actualiza
+    en sitio; si no, crea uno arrastrando del anterior (o partiendo de 0 si no
+    hay ningun saldo previo, para que la franja de deuda aparezca desde el
+    primer movimiento). El delta es el mismo para saldo y para disponible:
+    negativo en ministracion (mas deuda, menos disponible), positivo en pago."""
+    saldo_hoy = TesoreriaSaldo.objects.filter(cuenta=cuenta_credito.id_cuenta_bancaria, fecha=fecha).first()
+    if saldo_hoy:
+        saldo_hoy.disponible_ministrar = (saldo_hoy.disponible_ministrar or Decimal("0")) + delta
+        saldo_hoy.saldo = (saldo_hoy.saldo or Decimal("0")) + delta
+        saldo_hoy.updated_by = actor[:8] if actor else None
+        saldo_hoy.save(update_fields=["disponible_ministrar", "saldo", "updated_by", "updated_at"])
+        return
+
+    anterior = (
+        TesoreriaSaldo.objects.filter(cuenta=cuenta_credito.id_cuenta_bancaria, fecha__lt=fecha)
+        .order_by("-fecha")
+        .first()
+    )
+    saldo_base = anterior.saldo if anterior else Decimal("0")
+    disp_base = (anterior.disponible_ministrar if anterior else None) or Decimal("0")
+    TesoreriaSaldo.objects.create(
+        id=_short_id(),
+        fecha=fecha,
+        cuenta=cuenta_credito.id_cuenta_bancaria,
+        saldo=saldo_base + delta,
+        cambio_dinero=Decimal("0"),
+        cambio_porcentual=Decimal("0"),
+        disponible_ministrar=disp_base + delta,
+        created_by=actor[:8] if actor else None,
+    )
+
+
 def _generar_id_flujo() -> str:
     # 8 hex minusculas (17/Sep/2026, "podemos dejar este FLJ-000001 atras?")
     # - mismo formato que los Flujos migrados del legacy (ej. "0ca3e654"),
@@ -1379,8 +1414,42 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
         serializer.save()
 
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError as exc:
+            nombres = sorted({obj.__class__.__name__ for obj in exc.protected_objects})
+            return Response(
+                {"detail": f"Este flujo está en uso por: {', '.join(nombres)}. Desvincúlalo antes de eliminar."},
+                status=400,
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("Error inesperado al eliminar flujo %s", kwargs.get("pk"))
+            return Response({"detail": f"Error al eliminar: {type(exc).__name__}: {exc}"}, status=400)
+
     def perform_destroy(self, instance):
         self._validar_nomina_editable(instance.periodo_nomina)
+        # Si es un flujo de una cuenta de credito, revertir el delta en el
+        # saldo antes de borrar (mismo mecanismo que registrar_movimiento_credito,
+        # pero con el signo opuesto para deshacer el efecto).
+        if (
+            instance.total_mxp is not None
+            and instance.cuenta_id
+            and instance.fecha_efectiva
+        ):
+            try:
+                cuenta = instance.cuenta
+                if cuenta.tipo == TesoreriaCuenta.TIPO_CREDITO:
+                    delta_original = Decimal(str(instance.total_mxp))
+                    _actualizar_disponible_ministrar(
+                        cuenta_credito=cuenta,
+                        delta=-delta_original,
+                        fecha=instance.fecha_efectiva.isoformat(),
+                        actor=getattr(self.request.effective_scope, "identity_user_id", "") or "",
+                    )
+            except Exception:
+                pass
         instance.delete()
 
     @action(detail=True, methods=["post"])
@@ -1746,6 +1815,17 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             fecha_efectiva=fecha_efectiva,
             created_by=actor,
         )
+
+        # Actualizar disponible_ministrar en TesoreriaSaldo (fecha de hoy o
+        # fecha_efectiva si se provee) - ministracion resta del disponible
+        # (se uso credito), pago suma (se devolvio capacidad).
+        _actualizar_disponible_ministrar(
+            cuenta_credito=cuenta_credito,
+            delta=(-monto if tipo == "ministracion" else monto),
+            fecha=fecha_efectiva or timezone.localdate().isoformat(),
+            actor=actor,
+        )
+
         return Response(
             {
                 "flujo_cheques": TesoreriaFlujoSerializer(flujo_cheques).data,
