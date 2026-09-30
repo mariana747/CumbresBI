@@ -1,14 +1,3 @@
-"""Primera suite del servicio (18/Ago/2026, arranque formal de Fase 4:
-/README.md sec. 11.2 #7/#9 - Contrapartes y Facturacion
-CFDI fusionadas de forma definitiva dentro de tesoreria-service, no
-microservicios propios). CRUD real de Contrapartes/Bancos/Cuentas - los
-tres catalogos sin dependencia de Contrato/Flujo/Factura, primer corte
-del modulo (Contratos/Flujos/Facturas quedan para despues).
-
-Sin ScopedManager a proposito - ninguno de estos 3 modelos tiene columna
-de sociedad en el ERD real (son catalogos compartidos entre sociedades,
-mismo criterio que GeneralSociedad en iam-service); el filtro real es por
-permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
 import json
 from datetime import date, datetime, timedelta
