@@ -881,6 +881,7 @@ export interface TesoreriaContrato {
   proyecto: string | null;
   propiedad: string | null;
   centro: string | null;
+  concepto: string | null;
   tipo_pago: TesoreriaTipoPago | null;
   frecuencia: TesoreriaFrecuencia | null;
   duracion: string | null;
@@ -1006,6 +1007,7 @@ export async function createContrato(params: {
   proyecto?: string;
   propiedad?: string;
   centro?: string;
+  concepto?: string;
   tipoPago?: TesoreriaTipoPago;
   frecuencia?: TesoreriaFrecuencia;
   duracion?: string;
@@ -1035,6 +1037,7 @@ export async function createContrato(params: {
       proyecto: params.proyecto || null,
       propiedad: params.propiedad || null,
       centro: params.centro || null,
+      concepto: params.concepto || null,
       tipo_pago: params.tipoPago || null,
       frecuencia: params.frecuencia || null,
       duracion: params.duracion || null,
@@ -1858,6 +1861,7 @@ export async function enviarAvisoSaldoPendiente(idFactura: number, mensaje?: str
 export async function updateContrato(
   idContrato: string,
   params: Partial<{
+    sociedad: string;
     categoria: TesoreriaContratoCategoria;
     tipo: TesoreriaContratoTipo;
     fechaGeneracion: string;
@@ -1865,6 +1869,7 @@ export async function updateContrato(
     proyecto: string;
     propiedad: string;
     centro: string;
+    concepto: string;
     tipoPago: TesoreriaTipoPago;
     frecuencia: TesoreriaFrecuencia;
     duracion: string;
@@ -1888,6 +1893,7 @@ export async function updateContrato(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      sociedad: params.sociedad,
       categoria: params.categoria,
       tipo: params.tipo,
       fecha_generacion: params.fechaGeneracion,
@@ -1895,6 +1901,7 @@ export async function updateContrato(
       proyecto: params.proyecto,
       propiedad: params.propiedad,
       centro: params.centro,
+      concepto: params.concepto,
       tipo_pago: params.tipoPago,
       frecuencia: params.frecuencia,
       duracion: params.duracion,

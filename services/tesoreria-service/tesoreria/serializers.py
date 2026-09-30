@@ -242,6 +242,7 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "contraparte",
             "contraparte_nombre",
             "categoria",
+            "concepto",
             "tipo",
             "fecha_generacion",
             "fecha_vencimiento",

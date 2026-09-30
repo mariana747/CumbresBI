@@ -531,6 +531,7 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
             condicion = (
                 Q(id_contrato__icontains=search)
                 | Q(sociedad__icontains=search)
+                | Q(concepto__icontains=search)
                 | Q(contraparte__razon_social__icontains=search)
                 | Q(contraparte__apellido_paterno__icontains=search)
                 | Q(contraparte__apellido_materno__icontains=search)
