@@ -1,14 +1,3 @@
-"""Primera suite del servicio (18/Ago/2026, arranque formal de Fase 4:
-/README.md sec. 11.2 #7/#9 - Contrapartes y Facturacion
-CFDI fusionadas de forma definitiva dentro de tesoreria-service, no
-microservicios propios). CRUD real de Contrapartes/Bancos/Cuentas - los
-tres catalogos sin dependencia de Contrato/Flujo/Factura, primer corte
-del modulo (Contratos/Flujos/Facturas quedan para despues).
-
-Sin ScopedManager a proposito - ninguno de estos 3 modelos tiene columna
-de sociedad en el ERD real (son catalogos compartidos entre sociedades,
-mismo criterio que GeneralSociedad en iam-service); el filtro real es por
-permiso (tesoreria.crear/.editar), no por alcance de fila."""
 
 import json
 from datetime import date, datetime, timedelta
@@ -3338,6 +3327,14 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         )
         parche_drive.start()
         self.addCleanup(parche_drive.stop)
+        # La ventana mensual de reembolso depende del dia/hora en que corre el
+        # CI - si corre despues de mediodia en el ultimo dia habil del mes la
+        # validacion rechaza todos los creates con 400. Los tests de CRUD no
+        # prueban esa logica (ya cubierta en TesoreriaFechaLimiteReembolsoTests),
+        # asi que se neutraliza aqui para que no interfiera.
+        parche_fecha = patch("tesoreria.views.validar_fecha_limite", return_value=None)
+        parche_fecha.start()
+        self.addCleanup(parche_fecha.stop)
 
     def _post_crear(self, campos):
         """Arma un POST multipart valido para create() - conceptos va como
