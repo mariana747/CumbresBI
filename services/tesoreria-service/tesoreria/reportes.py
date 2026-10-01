@@ -27,6 +27,16 @@ from .models import (
     TesoreriaSaldo,
 )
 
+def _referencia_contrato(contrato):
+    if not contrato:
+        return None
+    cp = contrato.contraparte.razon_social if contrato.contraparte_id else ""
+    proyecto = contrato.proyecto or ""
+    sociedad = contrato.sociedad or ""
+    base = f"{cp}/{proyecto}//{sociedad}"
+    return f"{base} - {contrato.concepto}" if contrato.concepto else base
+
+
 # Clasificacion CFDI de un Flujo. Distinta de
 # calcular_reporte_conciliacion (banco vs. interno) - esta clasifica cada
 # pago segun si ya tiene o necesita un comprobante fiscal (factura/
@@ -351,7 +361,7 @@ def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=Non
         movimientos = movimientos.filter(fecha__gte=fecha_inicio)
     if fecha_fin:
         movimientos = movimientos.filter(fecha__lte=fecha_fin)
-    movimientos = list(movimientos.select_related("flujo").order_by("fecha"))
+    movimientos = list(movimientos.select_related("flujo", "flujo__contrato", "flujo__contrato__contraparte").order_by("fecha"))
 
     conciliados = []
     sin_conciliar_banco = []
@@ -378,6 +388,7 @@ def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=Non
                     **fila_base,
                     "id_flujo": movimiento.flujo_id,
                     "concepto_flujo": movimiento.flujo.concepto,
+                    "contrato_referencia": _referencia_contrato(movimiento.flujo.contrato) if movimiento.flujo.contrato_id else None,
                     "total_flujo": total_flujo,
                     "diferencia": monto_banco - total_flujo,
                     "cuadra": abs(monto_banco) == abs(total_flujo),

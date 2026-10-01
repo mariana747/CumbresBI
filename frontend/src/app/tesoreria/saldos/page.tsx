@@ -32,6 +32,7 @@ import {
 } from "@mui/material";
 import { Copy, Pencil, PiggyBank, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
@@ -108,6 +109,7 @@ export default function TesoreriaSaldosPage() {
   const [pagina, setPagina] = useState(0);
   const [filasPorPagina, setFilasPorPagina] = useState(200);
   const [totalSaldos, setTotalSaldos] = useState(0);
+  const [confirmBorrar, setConfirmBorrar] = useState<TesoreriaSaldo | null>(null);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -285,14 +287,18 @@ export default function TesoreriaSaldosPage() {
   }
 
   async function handleBorrar(s: TesoreriaSaldo) {
-    if (!window.confirm(`¿Borrar el saldo de ${aliasCuenta(s.cuenta)} al ${s.fecha}? Esta acción no se puede deshacer.`)) {
-      return;
-    }
+    setConfirmBorrar(s);
+  }
+
+  async function handleConfirmBorrar() {
+    if (!confirmBorrar) return;
     try {
-      await deleteSaldo(s.id);
+      await deleteSaldo(confirmBorrar.id);
+      setConfirmBorrar(null);
       setDetalle(null);
       refresh();
     } catch (err) {
+      setConfirmBorrar(null);
       setError(err instanceof Error ? err.message : "Error desconocido");
     }
   }
@@ -310,6 +316,13 @@ export default function TesoreriaSaldosPage() {
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Buscar por ID de saldo o cuenta..."
+        onAplicarFiltros={refresh}
+        onLimpiarFiltros={() => {
+          setFiltroEmpresa("");
+          setFiltroCuenta("");
+          setFiltroFechaDesde("");
+          setFiltroFechaHasta("");
+        }}
         actions={
           puedeCrear ? (
             <Button
@@ -743,6 +756,18 @@ export default function TesoreriaSaldosPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!confirmBorrar}
+        title="Borrar saldo"
+        description={
+          confirmBorrar
+            ? `¿Borrar el saldo de ${aliasCuenta(confirmBorrar.cuenta)} al ${confirmBorrar.fecha}? Esta acción no se puede deshacer.`
+            : ""
+        }
+        onConfirm={handleConfirmBorrar}
+        onCancel={() => setConfirmBorrar(null)}
+      />
     </AppShell>
   );
 }

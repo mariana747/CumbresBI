@@ -131,10 +131,13 @@ export default function TesoreriaConciliacionPage() {
   const etiquetaCuenta = (c: TesoreriaCuenta) => {
     const soc = sociedades.find((s) => s.rfc === c.sociedad);
     const numero = c.cuenta || c.clabe;
-    const partes = [soc?.alias_sociedad || soc?.razon_social, c.alias, numero ? numero.slice(-4) : null].filter(
-      Boolean
-    );
-    return partes.length ? partes.join("_") : c.id_cuenta_bancaria;
+    const partes = [
+      soc?.alias_sociedad || soc?.razon_social,
+      c.banco_alias || c.banco_nombre,
+      numero ? numero.slice(-4) : null,
+      c.tipo,
+    ].filter(Boolean);
+    return partes.length ? partes.join("/") : c.id_cuenta_bancaria;
   };
 
   const [movimientos, setMovimientos] = useState<TesoreriaMovimientoBancario[]>([]);
@@ -452,6 +455,10 @@ export default function TesoreriaConciliacionPage() {
                 search={search}
                 onSearchChange={setSearch}
                 searchPlaceholder="Buscar por descripción o referencia..."
+                onAplicarFiltros={refreshMovimientos}
+                onLimpiarFiltros={() => {
+                  setFiltroCorteImportado(null);
+                }}
                 actions={
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     <Button
@@ -615,6 +622,11 @@ export default function TesoreriaConciliacionPage() {
                 hideSearch
                 search=""
                 onSearchChange={() => undefined}
+                onAplicarFiltros={() => {}}
+                onLimpiarFiltros={() => {
+                  setFechaInicioReporte("");
+                  setFechaFinReporte("");
+                }}
                 actions={
                   <Stack direction="row" spacing={1}>
                     <Button
@@ -758,7 +770,7 @@ export default function TesoreriaConciliacionPage() {
                                   <TableCell>{c.descripcion || "—"}</TableCell>
                                   <TableCell align="right">{formatMonto(c.monto)}</TableCell>
                                   <TableCell>
-                                    {c.id_flujo} — {c.concepto_flujo || ""}
+                                    {c.id_flujo} — {c.contrato_referencia || c.concepto_flujo || ""}
                                   </TableCell>
                                   <TableCell align="right">{formatMonto(c.total_flujo)}</TableCell>
                                   <TableCell align="right">
@@ -970,7 +982,7 @@ export default function TesoreriaConciliacionPage() {
                       <Stack direction="row" justifyContent="space-between" alignItems="center">
                         <Box>
                           <Typography variant="body2" fontWeight={600}>
-                            {s.id_flujo} — {s.concepto || "—"} — ${formatMonto(s.total_mxp)}
+                            {s.id_flujo} — {s.contrato_referencia || s.concepto || "—"}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             {s.motivos.join(" · ")}

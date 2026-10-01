@@ -563,6 +563,11 @@ function TesoreriaContrapartesPageContent() {
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Buscar por razón social, RFC o contacto..."
+          onAplicarFiltros={refresh}
+          onLimpiarFiltros={() => {
+            setFiltroSociedad("");
+            setSoloPendientesIA(false);
+          }}
           actions={
             puedeCrear ? (
               <Button

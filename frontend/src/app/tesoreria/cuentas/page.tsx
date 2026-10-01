@@ -160,8 +160,24 @@ export default function TesoreriaCuentasPage() {
     getSession().then(setSession);
   }, []);
 
+  useEffect(() => {
+    listSociedades().then(setSociedades).catch(() => {});
+  }, []);
+
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
+
+  function aliasCuenta(c: TesoreriaCuenta): string {
+    const soc = sociedades.find((s) => s.rfc === c.sociedad);
+    const numero = c.cuenta || c.clabe;
+    const partes = [
+      soc?.alias_sociedad || soc?.razon_social,
+      c.banco_alias || c.banco_nombre,
+      numero ? numero.slice(-4) : null,
+      c.tipo,
+    ].filter(Boolean);
+    return partes.length ? partes.join("/") : c.label || c.alias || c.id_cuenta_bancaria;
+  }
 
   // Buscador local (23/Sep/2026) - "bancos" ya trae el catalogo completo
   // (pageSize 200, ~90 reales, ver comentario del estado arriba), asi que
@@ -484,7 +500,12 @@ export default function TesoreriaCuentasPage() {
               <FiltrosBar
                 search={searchCuentas}
                 onSearchChange={setSearchCuentas}
-                searchPlaceholder="Buscar por cuenta, ID, alias o titular..."
+                searchPlaceholder="Buscar por cuenta, ID, alias, titular o banco..."
+                onAplicarFiltros={refreshCuentas}
+                onLimpiarFiltros={() => {
+                  setFiltroSociedadCuenta("");
+                  setFiltroBancoCuenta("");
+                }}
               >
                 <FormControl size="small" sx={{ minWidth: 200 }}>
                   <InputLabel id="filtro-sociedad-cuenta-label">Empresa</InputLabel>
@@ -554,7 +575,7 @@ export default function TesoreriaCuentasPage() {
                     cuentas.map((c) => (
                       <TableRow key={c.id_cuenta_bancaria} hover>
                         <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_cuenta_bancaria}</TableCell>
-                        <TableCell>{c.alias || c.label || "—"}</TableCell>
+                        <TableCell>{aliasCuenta(c)}</TableCell>
                         <TableCell>{c.banco_nombre || "—"}</TableCell>
                         <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.cuenta || "—"}</TableCell>
                         <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.clabe || "—"}</TableCell>
@@ -669,6 +690,10 @@ export default function TesoreriaCuentasPage() {
                 search={searchBancos}
                 onSearchChange={setSearchBancos}
                 searchPlaceholder="Buscar por nombre o alias..."
+                onAplicarFiltros={refreshBancos}
+                onLimpiarFiltros={() => {
+                  setFiltroBancoTabla("");
+                }}
               >
                 <Autocomplete
                   size="small"

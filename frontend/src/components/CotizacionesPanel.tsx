@@ -334,6 +334,10 @@ export default function CotizacionesPanel({
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Buscar por proveedor..."
+          onAplicarFiltros={recargar}
+          onLimpiarFiltros={() => {
+            setFiltroEstado("");
+          }}
           actions={
             // wrap en tablet/angosto (22/Sep/2026) - con Nueva Cotizacion +
             // Comparar cotizaciones juntos, la fila fija de FiltrosBar

@@ -713,6 +713,7 @@ export interface TesoreriaFlujoSugerido {
   fecha_pago: string | null;
   fecha_efectiva: string | null;
   contrato: string | null;
+  contrato_referencia: string | null;
   pagado: boolean | null;
   score: number;
   motivos: string[];
@@ -768,6 +769,7 @@ export interface ReporteConciliacionFila {
 export interface ReporteConciliacionConciliado extends ReporteConciliacionFila {
   id_flujo: string;
   concepto_flujo: string | null;
+  contrato_referencia: string | null;
   total_flujo: string;
   diferencia: string;
   cuadra: boolean;
@@ -1957,12 +1959,14 @@ export async function listNominas(filtros?: {
   proyecto?: string;
   centro?: string;
   tipo?: TesoreriaNominaTipo;
+  search?: string;
 }): Promise<TesoreriaNomina[]> {
   const params = new URLSearchParams();
   if (filtros?.sociedad) params.set("sociedad", filtros.sociedad);
   if (filtros?.proyecto) params.set("proyecto", filtros.proyecto);
   if (filtros?.centro) params.set("centro", filtros.centro);
   if (filtros?.tipo) params.set("tipo", filtros.tipo);
+  if (filtros?.search) params.set("search", filtros.search);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/nominas/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
