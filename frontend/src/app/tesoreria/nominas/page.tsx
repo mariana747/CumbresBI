@@ -339,6 +339,7 @@ export default function TesoreriaNominasPage() {
       proyecto: filtroProyecto && filtroProyecto !== SIN_PROYECTO ? filtroProyecto : undefined,
       centro: filtroCentro || undefined,
       tipo: filtroTipo || undefined,
+      search: search.trim() || undefined,
     })
       .then(setNominas)
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
@@ -348,7 +349,7 @@ export default function TesoreriaNominasPage() {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtroSociedad, filtroProyecto, filtroCentro, filtroTipo]);
+  }, [filtroSociedad, filtroProyecto, filtroCentro, filtroTipo, search]);
 
   const nominasFiltradas = useMemo(() => {
     let resultado = nominas;
@@ -358,12 +359,8 @@ export default function TesoreriaNominasPage() {
     if (filtroSerie) {
       resultado = resultado.filter((n) => n.serie === filtroSerie);
     }
-    const busqueda = search.trim().toLowerCase();
-    if (busqueda) {
-      resultado = resultado.filter((n) => `${n.id_nomina} ${n.serie}`.toLowerCase().includes(busqueda));
-    }
     return resultado;
-  }, [nominas, search, filtroSerie, filtroProyecto]);
+  }, [nominas, filtroSerie, filtroProyecto]);
 
   const opcionesSerie = useMemo(
     () => Array.from(new Set(nominas.map((n) => n.serie))).sort(),
@@ -522,7 +519,15 @@ export default function TesoreriaNominasPage() {
       <FiltrosBar
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Buscar por ID de nómina o serie..."
+          searchPlaceholder="Buscar por ID, serie, proyecto o centro..."
+          onAplicarFiltros={refresh}
+          onLimpiarFiltros={() => {
+            setFiltroSociedad("");
+            setFiltroProyecto("");
+            setFiltroCentro("");
+            setFiltroTipo("");
+            setFiltroSerie("");
+          }}
           actions={
             puedeCrear ? (
               <Button

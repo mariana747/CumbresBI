@@ -380,6 +380,10 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Buscar por ID de ticket o descripción..."
+        onAplicarFiltros={() => {}}
+        onLimpiarFiltros={() => {
+          setFiltroCategoriaGasto("");
+        }}
         actions={
           <Button
             size="small"

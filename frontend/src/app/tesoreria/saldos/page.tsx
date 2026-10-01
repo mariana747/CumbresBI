@@ -316,6 +316,13 @@ export default function TesoreriaSaldosPage() {
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Buscar por ID de saldo o cuenta..."
+        onAplicarFiltros={refresh}
+        onLimpiarFiltros={() => {
+          setFiltroEmpresa("");
+          setFiltroCuenta("");
+          setFiltroFechaDesde("");
+          setFiltroFechaHasta("");
+        }}
         actions={
           puedeCrear ? (
             <Button

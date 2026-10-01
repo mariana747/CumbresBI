@@ -973,7 +973,7 @@ export default function TesoreriaFacturasPage() {
       <FiltrosBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Buscar por folio, UUID o nombre..."
+        searchPlaceholder="Buscar por folio, UUID, nombre o RFC..."
         puedeEditar={puedeEditar}
         seleccionadas={seleccionadas.size}
         onEnviarMasivo={abrirEnvioMasivo}

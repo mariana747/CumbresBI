@@ -1016,7 +1016,17 @@ function TesoreriaFlujosPageContent() {
       <FiltrosBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Buscar por ID de flujo o concepto..."
+        searchPlaceholder="Buscar por ID, concepto, contrato o contraparte..."
+        onAplicarFiltros={refresh}
+        onLimpiarFiltros={() => {
+          setFiltroContrato("");
+          setFiltroEmpresa("");
+          setFiltroNomina("");
+          setFiltroCategoriaGasto("");
+          setFiltroEstado("");
+          setFiltroFechaDesde("");
+          setFiltroFechaHasta("");
+        }}
         actions={
           <Stack direction="row" spacing={1}>
             <Button
@@ -1101,7 +1111,15 @@ function TesoreriaFlujosPageContent() {
           type="date"
           label="Fecha desde"
           value={filtroFechaDesde}
-          onChange={(e) => setFiltroFechaDesde(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setFiltroFechaDesde(val);
+            if (val && !filtroFechaHasta) {
+              const [anio, mes] = val.split("-").map(Number);
+              const ultimoDia = new Date(anio, mes, 0).getDate();
+              setFiltroFechaHasta(`${anio}-${String(mes).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`);
+            }
+          }}
           InputLabelProps={{ shrink: true }}
           sx={{ minWidth: 160 }}
         />

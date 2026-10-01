@@ -377,7 +377,7 @@ export default function SolicitudesPagoPage() {
       <FiltrosBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Buscar por ID o descripción..."
+        searchPlaceholder="Buscar por ID, descripción, proyecto o sociedad..."
         onAplicarFiltros={cargar}
         onLimpiarFiltros={() => {
           setFiltroProyecto("");

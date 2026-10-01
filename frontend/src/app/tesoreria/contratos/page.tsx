@@ -577,7 +577,16 @@ function TesoreriaContratosPageContent() {
       <FiltrosBar
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Buscar por ID, contraparte, concepto o sociedad..."
+          searchPlaceholder="Buscar por ID, contraparte, concepto, proyecto o sociedad..."
+          onAplicarFiltros={refresh}
+          onLimpiarFiltros={() => {
+            setFiltroContraparteInput("");
+            setFiltroSociedad("");
+            setFiltroContraparte("");
+            setFiltroProyecto("");
+            setFiltroFechaDesde("");
+            setFiltroFechaHasta("");
+          }}
           actions={
             puedeCrear && (
               <Button
