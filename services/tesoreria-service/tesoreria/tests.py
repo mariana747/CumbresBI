@@ -3972,7 +3972,8 @@ class TesoreriaTicketProveedorScopeTests(TestCase):
         )
         request.effective_scope = scope or self.scope_crear
         view = TesoreriaTicketProveedorViewSet.as_view({"post": "create"})
-        return view(request)
+        with patch("tesoreria.views.enviar_correo_ticket_proveedor", return_value=False):
+            return view(request)
 
     def test_usuario_de_una_sociedad_no_ve_tickets_de_otra(self):
         self._crear_ticket(RFC_TIZARA)
