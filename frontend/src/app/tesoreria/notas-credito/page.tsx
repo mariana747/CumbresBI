@@ -458,7 +458,11 @@ export default function TesoreriaNotasCreditoPage() {
       <FiltrosBar
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Buscar por folio, UUID o nombre..."
+          searchPlaceholder="Buscar por folio, UUID, nombre o RFC..."
+          onAplicarFiltros={refresh}
+          onLimpiarFiltros={() => {
+            setFiltroReceptor("");
+          }}
           actions={
             puedeCrear ? (
               <Button

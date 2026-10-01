@@ -108,7 +108,7 @@ function OrdenesPageInner() {
         </Alert>
       )}
 
-      <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por folio o proveedor...">
+      <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por folio o proveedor..." onAplicarFiltros={recargar} onLimpiarFiltros={() => { setFiltroEstado(""); }}>
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <InputLabel id="filtro-estado-orden-label">Filtrar por estado</InputLabel>
           <Select

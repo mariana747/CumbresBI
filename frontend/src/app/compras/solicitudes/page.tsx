@@ -127,7 +127,7 @@ export default function SolicitudesCompraPage() {
         </Alert>
       )}
 
-      <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por proyecto, descripción o requisición...">
+      <FiltrosBar search={search} onSearchChange={setSearch} searchPlaceholder="Buscar por proyecto, descripción o requisición..." onAplicarFiltros={recargar} onLimpiarFiltros={() => { setFiltroEstado(""); }}>
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <InputLabel id="filtro-estado-solicitud-label">Filtrar por estado</InputLabel>
           <Select

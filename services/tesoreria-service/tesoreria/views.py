@@ -419,7 +419,7 @@ class TesoreriaCuentaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
 
     serializer_class = TesoreriaCuentaSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["id_cuenta_bancaria", "cuenta", "alias", "label", "rfc_razon_social"]
+    search_fields = ["id_cuenta_bancaria", "cuenta", "alias", "label", "rfc_razon_social", "banco__banco", "banco__alias"]
     pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
@@ -532,6 +532,7 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
                 Q(id_contrato__icontains=search)
                 | Q(sociedad__icontains=search)
                 | Q(concepto__icontains=search)
+                | Q(proyecto__icontains=search)
                 | Q(contraparte__razon_social__icontains=search)
                 | Q(contraparte__apellido_paterno__icontains=search)
                 | Q(contraparte__apellido_materno__icontains=search)
@@ -651,6 +652,8 @@ class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
     Filtros por query param: ?sociedad=, ?proyecto=, ?centro=, ?tipo=."""
 
     serializer_class = TesoreriaNominaSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["id_nomina", "serie", "proyecto", "centro"]
 
     def get_queryset(self):
         # .distinct() (14/Sep/2026, "pueden estar contratados por dos
@@ -1130,8 +1133,13 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             queryset = queryset.filter(validacion_estado=validacion_estado)
         search = self.request.query_params.get("search")
         if search:
-            condicion = Q(id_flujo__icontains=search) | Q(concepto__icontains=search) | Q(
-                contrato__sociedad__icontains=search
+            condicion = (
+                Q(id_flujo__icontains=search)
+                | Q(concepto__icontains=search)
+                | Q(contrato__sociedad__icontains=search)
+                | Q(contrato__id_contrato__icontains=search)
+                | Q(contrato__contraparte__razon_social__icontains=search)
+                | Q(contrato__contraparte__rfc__icontains=search)
             )
             rfcs_sociedad = _rfcs_sociedad_por_texto(self.request, search)
             if rfcs_sociedad:
@@ -2020,7 +2028,7 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
 
     serializer_class = TesoreriaTicketReembolsoSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["id_ticket", "descripcion"]
+    search_fields = ["id_ticket", "descripcion", "sociedad", "id_empleado"]
 
     def get_permissions(self):
         if self.action in ("create", "subir_ticket"):
@@ -2409,7 +2417,7 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
 
     serializer_class = TesoreriaSolicitudPagoSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["id_solicitud", "descripcion", "proyecto"]
+    search_fields = ["id_solicitud", "descripcion", "proyecto", "sociedad"]
 
     def get_permissions(self):
         if self.action in ("create", "subir_comprobante"):
@@ -3154,7 +3162,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
     serializer_class = TesoreriaFacturaSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc", "receptor_rfc"]
     pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
@@ -3660,7 +3668,7 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
 
     serializer_class = TesoreriaComplementoPagoSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+    search_fields = ["folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc", "receptor_rfc"]
     pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
@@ -3745,7 +3753,7 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
 
     serializer_class = TesoreriaNotaCreditoSerializer
     filter_backends = [SearchFilter]
-    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc"]
+    search_fields = ["comprobante_folio", "timbre_uuid", "emisor_nombre", "receptor_nombre", "emisor_rfc", "receptor_rfc"]
     pagination_class = ListadoGrandePagination
 
     def get_queryset(self):
@@ -4036,6 +4044,16 @@ def _monto_movimiento_bancario(movimiento) -> Decimal:
     return (movimiento.abono or Decimal("0")) - (movimiento.cargo or Decimal("0"))
 
 
+def _referencia_contrato(contrato):
+    if not contrato:
+        return None
+    cp = contrato.contraparte.razon_social if contrato.contraparte_id else ""
+    proyecto = contrato.proyecto or ""
+    sociedad = contrato.sociedad or ""
+    base = f"{cp}/{proyecto}//{sociedad}"
+    return f"{base} - {contrato.concepto}" if contrato.concepto else base
+
+
 def _sugerir_flujos_para_movimiento(movimiento, limite=5):
     """Propone candidatos de Flujo para un movimiento bancario por
     heuristica (monto en valor absoluto + fecha con tolerancia, ordenado
@@ -4127,6 +4145,7 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
                         "fecha_pago": flujo_sugerido.fecha_pago,
                         "fecha_efectiva": flujo_sugerido.fecha_efectiva,
                         "contrato": flujo_sugerido.contrato_id,
+                        "contrato_referencia": _referencia_contrato(flujo_sugerido.contrato),
                         "pagado": flujo_sugerido.pagado,
                         "score": 0,
                         "motivos": motivos,
@@ -4173,6 +4192,7 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
             "fecha_pago": flujo.fecha_pago,
             "fecha_efectiva": flujo.fecha_efectiva,
             "contrato": flujo.contrato_id,
+            "contrato_referencia": _referencia_contrato(flujo.contrato),
             "pagado": flujo.pagado,
             "score": score,
             "motivos": motivos,

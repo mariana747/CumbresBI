@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Autocomplete, CircularProgress, TextField } from "@mui/material";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { TesoreriaContrato, listContratos } from "@/lib/tesoreria";
 
 // Selector reusable de Contrato (23/Sep/2026, mismo hallazgo que
@@ -23,9 +24,18 @@ export default function ContratoSelector({
   // que CuentaBancariaSelector.sociedad.
   sociedad?: string;
 }) {
-  const [inputValue, setInputValue] = useState(value ? etiqueta(value) : "");
+  const [inputValue, setInputValue] = useState(value ? etiqueta(value, []) : "");
   const [opciones, setOpciones] = useState<TesoreriaContrato[]>([]);
   const [buscando, setBuscando] = useState(false);
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+
+  useEffect(() => {
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
+  }, []);
+
+  useEffect(() => {
+    if (value && sociedades.length > 0) setInputValue(etiqueta(value, sociedades));
+  }, [value, sociedades]);
 
   useEffect(() => {
     setBuscando(true);
@@ -51,14 +61,14 @@ export default function ContratoSelector({
       onInputChange={(_, nuevoValor) => setInputValue(nuevoValor)}
       onChange={(_, seleccion) => {
         onChange(seleccion);
-        setInputValue(seleccion ? etiqueta(seleccion) : "");
+        setInputValue(seleccion ? etiqueta(seleccion, sociedades) : "");
       }}
       options={opciones}
-      getOptionLabel={etiqueta}
+      getOptionLabel={(c) => etiqueta(c, sociedades)}
       isOptionEqualToValue={(a, b) => a.id_contrato === b.id_contrato}
       renderOption={(props, option) => (
         <li {...props} key={option.id_contrato}>
-          {etiqueta(option)}
+          {etiqueta(option, sociedades)}
         </li>
       )}
       renderInput={(params) => (
@@ -80,6 +90,9 @@ export default function ContratoSelector({
   );
 }
 
-function etiqueta(c: TesoreriaContrato): string {
-  return c.contraparte_nombre ? `${c.id_contrato} — ${c.contraparte_nombre}` : c.id_contrato;
+function etiqueta(c: TesoreriaContrato, sociedades: GeneralSociedad[]): string {
+  const s = sociedades.find((x) => x.rfc === c.sociedad);
+  const alias = s?.alias_sociedad || s?.razon_social || c.sociedad;
+  const ref = `${c.contraparte_nombre}/${c.proyecto ?? ""}//${alias}${c.concepto ? ` - ${c.concepto}` : ""}`;
+  return `${c.id_contrato} — ${ref}`;
 }
