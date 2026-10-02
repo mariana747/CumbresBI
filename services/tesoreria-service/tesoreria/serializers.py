@@ -623,9 +623,9 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
         ]
 
     def get_vinculada(self, obj):
-        vinculadas_ids = self.context.get("vinculadas_ids")
-        if vinculadas_ids is not None:
-            return obj.pk in vinculadas_ids
+        vinculadas_uuids = self.context.get("vinculadas_uuids")
+        if vinculadas_uuids is not None:
+            return obj.timbre_uuid in vinculadas_uuids
         return obj.flujos.exists()
 
     def get_conceptos(self, obj):
