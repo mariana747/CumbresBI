@@ -176,7 +176,7 @@ export default function TesoreriaCuentasPage() {
       numero ? numero.slice(-4) : null,
       c.tipo,
     ].filter(Boolean);
-    return partes.length ? partes.join("/") : c.label || c.alias || c.id_cuenta_bancaria;
+    return partes.length ? partes.join("/") : c.alias || c.label || c.id_cuenta_bancaria;
   }
 
   // Buscador local (23/Sep/2026) - "bancos" ya trae el catalogo completo

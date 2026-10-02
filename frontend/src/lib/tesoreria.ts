@@ -3657,6 +3657,10 @@ export interface ReporteDiarioTransaccion {
 export interface ReporteDiarioCuenta {
   id_cuenta_bancaria: string;
   alias: string;
+  banco_nombre: string | null;
+  banco_alias: string | null;
+  cuenta: string | null;
+  clabe: string | null;
   tipo: TesoreriaCuentaTipo;
   disponible_ministrar: string | null;
   saldo_anterior: string;

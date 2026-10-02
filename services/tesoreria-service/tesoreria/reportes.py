@@ -242,16 +242,15 @@ def _calcular_corte(cuentas, fecha) -> dict:
         # /tesoreria/saldos).
         numero_cuenta = cuenta.cuenta or cuenta.clabe
         ultimos_digitos = numero_cuenta[-4:] if numero_cuenta else None
-        alias_base = cuenta.alias or cuenta.id_cuenta_bancaria
+        alias_base = cuenta.alias or cuenta.label or cuenta.id_cuenta_bancaria
         alias_mostrado = f"{alias_base} ({ultimos_digitos})" if ultimos_digitos else alias_base
 
         fila = {
             "id_cuenta_bancaria": cuenta.id_cuenta_bancaria,
             "alias": alias_mostrado,
-            # El alias sigue siendo lo que usa la pantalla (mismo criterio
-            # de siempre); banco_nombre/clabe son solo para que el correo
-            # pueda mostrar banco real + CLABE en vez del alias libre.
             "banco_nombre": cuenta.banco.banco if cuenta.banco_id else None,
+            "banco_alias": cuenta.banco.alias if cuenta.banco_id else None,
+            "cuenta": cuenta.cuenta,
             "clabe": cuenta.clabe,
             "tipo": cuenta.tipo,
             # disponible_ministrar (28/Sep/2026, cuentas tipo CREDITO) - vive
