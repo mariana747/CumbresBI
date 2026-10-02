@@ -2408,7 +2408,7 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaSaldo.objects.create(id="s2", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10500.00")
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-000001", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="500.00",
+            fecha_efectiva="2026-08-24", fecha_pago="2026-08-25", total_mxp="500.00",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         fila = reporte["sociedades"][0]["cuentas"][0]
@@ -2422,7 +2422,7 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaSaldo.objects.create(id="s4", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10800.00")
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-000002", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="500.00",
+            fecha_efectiva="2026-08-24", fecha_pago="2026-08-25", total_mxp="500.00",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         fila = reporte["sociedades"][0]["cuentas"][0]
@@ -2452,15 +2452,15 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaNominaSociedad.objects.create(nomina=nomina_s, sociedad=RFC_TIZARA)
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-NOM-Q1", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="1000.00", periodo_nomina=nomina_q,
+            fecha_efectiva="2026-08-24", fecha_pago="2026-08-25", total_mxp="1000.00", periodo_nomina=nomina_q,
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-NOM-S1", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="300.00", periodo_nomina=nomina_s,
+            fecha_efectiva="2026-08-24", fecha_pago="2026-08-25", total_mxp="300.00", periodo_nomina=nomina_s,
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-NORMAL", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="200.00",
+            fecha_efectiva="2026-08-24", fecha_pago="2026-08-25", total_mxp="200.00",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         transacciones = {t["id_flujo"]: t["nomina_tipo"] for t in reporte["sociedades"][0]["cuentas"][0]["transacciones"]}
@@ -2479,7 +2479,7 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaSaldo.objects.create(id="s10", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10500.00")
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-000003", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="500.00", descripcion_pago="PARA IMPUESTOS",
+            fecha_efectiva="2026-08-24", fecha_pago="2026-08-25", total_mxp="500.00", descripcion_pago="PARA IMPUESTOS",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         fila_hoy = reporte["sociedades"][0]["cuentas"][0]

@@ -1195,11 +1195,8 @@ export type TesoreriaValidacionEstado = "PENDIENTE" | "APROBADA" | "RECHAZADA";
 // accion equivalente para vincularla (solo factura/complemento).
 //
 // estado_cfdi/requiere_complemento/comprobacion_asignada_a/aprobacion_lista/
-// permiso_enviar_pago/informacion_envio/ultimo_envio/permiso/
-// fecha_pago_original (25/Ago/2026): columnas del ERD heredadas del
-// AppSheet original sin accion propia todavia en el ViewSet - se agregan
-// aqui de escritura libre, como comentarios, para la pestaña
-// Referencias/CFDI/Control del formulario de creacion.
+// permiso_enviar_pago/informacion_envio/ultimo_envio/permiso: columnas
+// heredadas del ERD del AppSheet original sin accion propia todavia.
 export interface TesoreriaFlujo {
   id_flujo: string;
   contrato: string | null;
@@ -1224,7 +1221,6 @@ export interface TesoreriaFlujo {
   drive_file_id_referencia: string | null;
   pagado: boolean | null;
   fecha_pago: string | null;
-  fecha_pago_original: string | null;
   descripcion_pago: string | null;
   link_comprobante_banco: string | null;
   drive_file_id_comprobante: string | null;
@@ -1498,7 +1494,6 @@ export async function createFlujo(params: {
   permiso?: string;
   informacionEnvio?: string;
   comentarios?: string;
-  fechaPagoOriginal?: string;
   linkComprobanteBanco?: string;
   categoriaGasto?: TesoreriaCategoriaGasto;
 }): Promise<TesoreriaFlujo> {
@@ -1524,7 +1519,6 @@ export async function createFlujo(params: {
       permiso_enviar_pago: params.permisoEnviarPago || null,
       permiso: params.permiso || null,
       informacion_envio: params.informacionEnvio || null,
-      fecha_pago_original: params.fechaPagoOriginal || null,
       link_comprobante_banco: params.linkComprobanteBanco || null,
       comentarios: params.comentarios || null,
       categoria_gasto: params.categoriaGasto || null,
@@ -1544,7 +1538,6 @@ export async function updateFlujo(
     totalMxp: string;
     linkReferencia: string;
     comentarios: string;
-    fechaPagoOriginal: string;
     linkComprobanteBanco: string;
     categoriaGasto: TesoreriaCategoriaGasto | "";
     cuenta: string;
@@ -1559,7 +1552,6 @@ export async function updateFlujo(
       total_mxp: params.totalMxp,
       link_referencia: params.linkReferencia,
       comentarios: params.comentarios,
-      fecha_pago_original: params.fechaPagoOriginal,
       link_comprobante_banco: params.linkComprobanteBanco,
       ...(params.categoriaGasto !== undefined ? { categoria_gasto: params.categoriaGasto || null } : {}),
       ...(params.cuenta !== undefined ? { cuenta: params.cuenta } : {}),

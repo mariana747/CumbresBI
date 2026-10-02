@@ -1326,7 +1326,6 @@ class TesoreriaFlujo(models.Model):
     drive_file_id_referencia = models.TextField(blank=True, null=True)
     pagado = models.BooleanField(blank=True, null=True)
     fecha_pago = models.DateField(blank=True, null=True)
-    fecha_pago_original = models.DateField(blank=True, null=True)
     descripcion_pago = models.CharField(max_length=150, blank=True, null=True)
     # link_comprobante_banco se llenaba pegando la URL a mano; desde
     # subir_comprobante() (Finance Module, decision 26/Ago/2026: "upload
