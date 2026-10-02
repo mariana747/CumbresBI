@@ -714,7 +714,7 @@ function TesoreriaContratosPageContent() {
                     <TableCell>{nombreSociedad(c.sociedad)}</TableCell>
                     <TableCell>
                       <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                        {`${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto ? ` - ${c.concepto}` : ""}`}
+                        {`${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto_factura ? ` - ${c.concepto_factura}` : ""}`}
                       </Typography>
                     </TableCell>
                     <TableCell>{c.tipo || "—"}</TableCell>
@@ -768,7 +768,7 @@ function TesoreriaContratosPageContent() {
                       {c.id_contrato}
                     </Typography>
                     <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                      {`${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto ? ` - ${c.concepto}` : ""}`}
+                      {`${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto_factura ? ` - ${c.concepto_factura}` : ""}`}
                     </Typography>
                   </Stack>
                   <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
@@ -1069,8 +1069,8 @@ function TesoreriaContratosPageContent() {
               <TextField
                 size="small"
                 label="Concepto"
-                value={form.concepto}
-                onChange={(e) => setForm({ ...form, concepto: e.target.value })}
+                value={form.conceptoFactura}
+                onChange={(e) => setForm({ ...form, conceptoFactura: e.target.value })}
                 fullWidth
               />
               <TextField
