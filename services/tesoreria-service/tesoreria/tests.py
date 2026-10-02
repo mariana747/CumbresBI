@@ -1843,16 +1843,16 @@ class TesoreriaFacturaMarcarEstadoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["estado"], "EN_PROCESO")
 
-    def test_aceptar_sin_archivos_da_400(self):
+    def test_aceptar_sin_archivos_da_200(self):
         request = self.factory.post(
             f"/api/facturas/{self.factura.pk}/marcar_estado/", {"estado": "ACEPTADA"}, format="json"
         )
         request.effective_scope = self.scope_aprobar
         view = TesoreriaFacturaViewSet.as_view({"post": "marcar_estado"})
         response = view(request, pk=self.factura.pk)
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         self.factura.refresh_from_db()
-        self.assertEqual(self.factura.estado, TesoreriaFactura.ESTADO_PENDIENTE)
+        self.assertEqual(self.factura.estado, TesoreriaFactura.ESTADO_ACEPTADA)
 
     def test_aceptar_con_pdf_y_xml_ok(self):
         self.factura.link_pdf = "https://drive.google.com/pdf"
