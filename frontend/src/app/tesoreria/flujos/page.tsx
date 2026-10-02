@@ -125,7 +125,6 @@ const FORM_VACIO = {
   reembolso: false,
   idEmpleadoReembolso: "",
   comentarios: "",
-  fechaPagoOriginal: "",
   linkComprobanteBanco: "",
   categoriaGasto: "" as TesoreriaCategoriaGasto | "",
   // Referencias
@@ -719,7 +718,6 @@ function TesoreriaFlujosPageContent() {
       permisoEnviarPago: f.permiso_enviar_pago || "",
       permiso: f.permiso || "",
       informacionEnvio: f.informacion_envio || "",
-      fechaPagoOriginal: f.fecha_pago_original || "",
       linkComprobanteBanco: f.link_comprobante_banco || "",
       categoriaGasto: f.categoria_gasto || "",
     });
@@ -768,7 +766,6 @@ function TesoreriaFlujosPageContent() {
       permisoEnviarPago: f.permiso_enviar_pago || "",
       permiso: f.permiso || "",
       informacionEnvio: "",
-      fechaPagoOriginal: "",
       linkComprobanteBanco: "",
       categoriaGasto: f.categoria_gasto || "",
     });
@@ -799,7 +796,6 @@ function TesoreriaFlujosPageContent() {
           fechaEfectiva: form.fechaEfectiva || undefined,
           totalMxp: form.totalMxp || undefined,
           comentarios: form.comentarios || undefined,
-          fechaPagoOriginal: form.fechaPagoOriginal || undefined,
           linkComprobanteBanco: form.linkComprobanteBanco || undefined,
           categoriaGasto: form.categoriaGasto,
           cuenta: form.cuenta || undefined,
@@ -825,7 +821,6 @@ function TesoreriaFlujosPageContent() {
           permiso: form.permiso || undefined,
           informacionEnvio: form.informacionEnvio || undefined,
           comentarios: form.comentarios || undefined,
-          fechaPagoOriginal: form.fechaPagoOriginal || undefined,
           linkComprobanteBanco: form.linkComprobanteBanco || undefined,
           categoriaGasto: form.categoriaGasto || undefined,
         });
@@ -1610,35 +1605,19 @@ function TesoreriaFlujosPageContent() {
                 onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
                 fullWidth
               />
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  size="small"
-                  type="date"
-                  label={
-                    <LabelTip
-                      text="Fecha de pago original"
-                      tip="Fecha en que debía pagarse antes de cualquier reprogramación."
-                    />
-                  }
-                  value={form.fechaPagoOriginal}
-                  onChange={(e) => setForm({ ...form, fechaPagoOriginal: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                  fullWidth
-                />
-                <TextField
-                  size="small"
-                  label={
-                    <LabelTip
-                      text="Comprobante de banco (link)"
-                      tip='Campo heredado del sistema anterior (link a mano); el comprobante real se sube como archivo desde "Registrar pago".'
-                    />
-                  }
-                  value={form.linkComprobanteBanco}
-                  onChange={(e) => setForm({ ...form, linkComprobanteBanco: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                  fullWidth
-                />
-              </Stack>
+              <TextField
+                size="small"
+                label={
+                  <LabelTip
+                    text="Comprobante de banco (link)"
+                    tip='Campo heredado del sistema anterior (link a mano); el comprobante real se sube como archivo desde "Registrar pago".'
+                  />
+                }
+                value={form.linkComprobanteBanco}
+                onChange={(e) => setForm({ ...form, linkComprobanteBanco: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
               {editing ? (
                 <>
                   <Divider sx={{ my: 1 }} />
