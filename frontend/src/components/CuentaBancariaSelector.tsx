@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Autocomplete, CircularProgress, TextField } from "@mui/material";
 import { TesoreriaCuenta, listCuentas } from "@/lib/tesoreria";
+import { GeneralSociedad, listSociedades } from "@/lib/iam";
 
 // Selector reusable de Cuenta bancaria (23/Sep/2026, mismo hallazgo que
 // Contrapartes: el catalogo crece con cada empresa/proyecto nuevo y varias
@@ -25,9 +26,19 @@ export default function CuentaBancariaSelector({
   // ContraparteSelector.tipo.
   sociedad?: string;
 }) {
-  const [inputValue, setInputValue] = useState(value ? etiqueta(value) : "");
+  const [inputValue, setInputValue] = useState("");
   const [opciones, setOpciones] = useState<TesoreriaCuenta[]>([]);
   const [buscando, setBuscando] = useState(false);
+  const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+
+  useEffect(() => {
+    listSociedades().then(setSociedades).catch(() => setSociedades([]));
+  }, []);
+
+  useEffect(() => {
+    if (value) setInputValue(etiqueta(value, sociedades));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sociedades]);
 
   useEffect(() => {
     setBuscando(true);
@@ -53,14 +64,14 @@ export default function CuentaBancariaSelector({
       onInputChange={(_, nuevoValor) => setInputValue(nuevoValor)}
       onChange={(_, seleccion) => {
         onChange(seleccion);
-        setInputValue(seleccion ? etiqueta(seleccion) : "");
+        setInputValue(seleccion ? etiqueta(seleccion, sociedades) : "");
       }}
       options={opciones}
-      getOptionLabel={etiqueta}
+      getOptionLabel={(c) => etiqueta(c, sociedades)}
       isOptionEqualToValue={(a, b) => a.id_cuenta_bancaria === b.id_cuenta_bancaria}
       renderOption={(props, option) => (
         <li {...props} key={option.id_cuenta_bancaria}>
-          {etiqueta(option)}
+          {etiqueta(option, sociedades)}
         </li>
       )}
       renderInput={(params) => (
@@ -82,14 +93,17 @@ export default function CuentaBancariaSelector({
   );
 }
 
-// "{alias} — {numero de cuenta}" (23/Sep/2026, mismo criterio que
-// opcionCuenta() en tesoreria/saldos/page.tsx) - cae al id si no hay alias
-// ni numero capturado.
-function etiqueta(c: TesoreriaCuenta): string {
+// Mismo formato que aliasCuenta() en tesoreria/cuentas/page.tsx:
+// "Sociedad/Banco/últimos4/Tipo"
+function etiqueta(c: TesoreriaCuenta, sociedades: GeneralSociedad[]): string {
+  const soc = sociedades.find((s) => s.rfc === c.sociedad);
   const numero = c.cuenta || c.clabe;
-  // alias suele venir vacio (la migracion solo lleno label, ej.
-  // "TCC/BBVA/3257") - sin este fallback se mostraba el id_cuenta_bancaria
-  // en vez del nombre legible.
-  const nombre = c.alias || c.label || c.id_cuenta_bancaria;
-  return numero ? `${nombre} — ${numero}` : nombre;
+  const partes = [
+    soc?.alias_sociedad || soc?.razon_social,
+    c.banco_alias || c.banco_nombre,
+    numero ? numero.slice(-4) : null,
+    c.tipo,
+  ].filter(Boolean);
+  if (partes.length) return partes.join("/");
+  return c.label || c.alias || c.id_cuenta_bancaria;
 }

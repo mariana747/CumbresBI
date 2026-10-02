@@ -290,6 +290,7 @@ class TesoreriaNominaSerializer(serializers.ModelSerializer):
     # arma a mano to_representation de abajo, esto solo declara la forma
     # de ESCRITURA (create/update).
     sociedades = serializers.ListField(child=serializers.CharField(max_length=13), allow_empty=False, write_only=True)
+    num_flujos = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = TesoreriaNomina
@@ -304,6 +305,7 @@ class TesoreriaNominaSerializer(serializers.ModelSerializer):
             "fecha_fin",
             "status",
             "comentarios",
+            "num_flujos",
             "created_at",
             "created_by",
             "updated_at",
@@ -426,6 +428,13 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "cuenta_alias",
             "cuenta_ultimos_digitos",
             "total_mxp",
+            "nom_salario_diario",
+            "nom_dias",
+            "nom_ingreso_bruto",
+            "nom_isr",
+            "nom_sbc_diario",
+            "nom_imss_obrero",
+            "nom_total_deducciones",
             "autorizacion",
             "autorizado_por",
             "fecha_autorizacion",

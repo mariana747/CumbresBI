@@ -82,6 +82,7 @@ export default function RrhhEmpleadosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [puestosVigentes, setPuestosVigentes] = useState<RrhhPuesto[]>([]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formEmpleado, setFormEmpleado] = useState(FORM_EMPLEADO_VACIO);
@@ -108,8 +109,14 @@ export default function RrhhEmpleadosPage() {
 
   function refresh() {
     setLoading(true);
-    listEmpleados(search || undefined)
-      .then(setEmpleados)
+    Promise.all([
+      listEmpleados(search || undefined),
+      listPuestos({ vigente: true }),
+    ])
+      .then(([emps, puestos]) => {
+        setEmpleados(emps);
+        setPuestosVigentes(puestos);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
@@ -248,27 +255,34 @@ export default function RrhhEmpleadosPage() {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>ID</TableCell>
+                  <TableCell>Núm. empleado</TableCell>
                   <TableCell>Nombre</TableCell>
-                  <TableCell>CURP</TableCell>
-                  <TableCell>Email</TableCell>
+                  <TableCell>Empresa</TableCell>
+                  <TableCell>Puesto</TableCell>
+                  <TableCell>Sueldo diario</TableCell>
+                  <TableCell>RFC</TableCell>
                   <TableCell align="right">Acciones</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {empleados.map((e) => (
+                {empleados.map((e) => {
+                  const puesto = puestosVigentes.find((p) => p.empleado === e.id_empleado) ?? null;
+                  return (
                   <TableRow key={e.id_empleado} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{e.id_empleado}</TableCell>
                     <TableCell>{e.nombre_completo || "—"}</TableCell>
-                    <TableCell>{e.curp || "—"}</TableCell>
-                    <TableCell>{e.email || "—"}</TableCell>
+                    <TableCell>{puesto ? aliasSociedad(puesto.sociedad) : "—"}</TableCell>
+                    <TableCell>{puesto?.puesto || "—"}</TableCell>
+                    <TableCell>{puesto?.salario_diario ? `$${puesto.salario_diario}` : "—"}</TableCell>
+                    <TableCell>{e.rfc || "—"}</TableCell>
                     <TableCell align="right">
                       <IconButton size="small" aria-label="Ver" onClick={() => abrirDetalle(e)}>
                         <Eye size={16} strokeWidth={1.5} />
                       </IconButton>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>

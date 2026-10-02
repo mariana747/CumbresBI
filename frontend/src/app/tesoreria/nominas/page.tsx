@@ -44,10 +44,12 @@ import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { RrhhPuesto, listPuestos } from "@/lib/rrhh";
 import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
+  NominaCalculo,
   TesoreriaCuenta,
   TesoreriaNomina,
   TesoreriaNominaStatus,
   TesoreriaNominaTipo,
+  calcularNomina,
   createFlujo,
   createNomina,
   getContratoGenericoNomina,
@@ -227,6 +229,9 @@ export default function TesoreriaNominasPage() {
   const [generando, setGenerando] = useState(false);
   const [errorGeneracion, setErrorGeneracion] = useState<string | null>(null);
   const [resultadoGeneracion, setResultadoGeneracion] = useState<string | null>(null);
+  // Cálculo fiscal por puesto: id_puesto → NominaCalculo
+  const [calculosPorPuesto, setCalculosPorPuesto] = useState<Record<string, NominaCalculo>>({});
+  const [calculando, setCalculando] = useState(false);
 
   useEffect(() => {
     getSession().then(setSession);
@@ -240,11 +245,36 @@ export default function TesoreriaNominasPage() {
     return Math.round(ms / 86400000) + 1;
   }
 
+  async function calcularFiscal(puestosACalcular?: typeof puestosVigentes): Promise<Record<string, NominaCalculo>> {
+    if (!generandoPara) return {};
+    const puestos = (puestosACalcular ?? puestosVigentes).filter((p) => seleccionPuestos.has(p.id_puesto));
+    setCalculando(true);
+    const dias = diasDelPeriodo(generandoPara);
+    const resultados: Record<string, NominaCalculo> = {};
+    for (const p of puestos) {
+      if (!p.salario_diario) continue;
+      try {
+        const r = await calcularNomina({
+          idNomina: generandoPara.id_nomina,
+          salarioDiario: Number(p.salario_diario),
+          dias,
+        });
+        resultados[p.id_puesto] = r;
+      } catch {
+        // ignora errores individuales
+      }
+    }
+    setCalculosPorPuesto((prev) => ({ ...prev, ...resultados }));
+    setCalculando(false);
+    return resultados;
+  }
+
   function abrirGenerarLineas(n: TesoreriaNomina) {
     setGenerandoPara(n);
     setErrorGeneracion(null);
     setResultadoGeneracion(null);
     setCuentaGeneracion(null);
+    setCalculosPorPuesto({});
     setCargandoPuestos(true);
     Promise.all([
       // Una sociedad de la Nomina puede no tener listPuestos({sociedad:})
@@ -286,6 +316,14 @@ export default function TesoreriaNominasPage() {
     setGenerando(true);
     setErrorGeneracion(null);
     try {
+      // Calcular ISR/IMSS para seleccionados sin cálculo — devuelve el mapa
+      // para usarlo en el mismo render sin depender del estado actualizado.
+      const sinCalculo = puestosVigentes.filter(
+        (p) => seleccionPuestos.has(p.id_puesto) && p.salario_diario && !calculosPorPuesto[p.id_puesto]
+      );
+      const nuevosCalculos = sinCalculo.length > 0 ? await calcularFiscal(sinCalculo) : {};
+      const calculos = { ...calculosPorPuesto, ...nuevosCalculos };
+
       // Un contrato generico por sociedad, no uno solo (14/Sep/2026,
       // "pueden estar contratados por dos sociedades") - cada Puesto ya
       // trae su propia sociedad, se resuelve/cachea el contrato de cada
@@ -303,7 +341,13 @@ export default function TesoreriaNominasPage() {
       let creados = 0;
       for (const puesto of puestos) {
         const salario = puesto.salario_diario ? Number(puesto.salario_diario) : 0;
-        const total = dias > 0 && salario > 0 ? (salario * dias).toFixed(2) : undefined;
+        const calculo = calculos[puesto.id_puesto];
+        // Si hay cálculo fiscal: total_mxp = neto; si no, estimado bruto
+        const total = calculo
+          ? calculo.neto
+          : dias > 0 && salario > 0
+          ? (salario * dias).toFixed(2)
+          : undefined;
         const idContrato = await contratoDe(puesto.sociedad || generandoPara.sociedades[0]);
         await createFlujo({
           contrato: idContrato,
@@ -313,6 +357,15 @@ export default function TesoreriaNominasPage() {
           totalMxp: total,
           fechaEfectiva: generandoPara.fecha_fin || generandoPara.fecha_inicio || undefined,
           idEmpleado: puesto.empleado || undefined,
+          ...(calculo && {
+            nomSalarioDiario: calculo.salario_diario,
+            nomDias: calculo.dias,
+            nomIngresoBruto: calculo.ingreso_bruto,
+            nomIsr: calculo.isr,
+            nomSbcDiario: calculo.sbc_diario,
+            nomImssObrero: calculo.imss_obrero.total_imss_obrero,
+            nomTotalDeducciones: calculo.total_deducciones,
+          }),
         });
         creados += 1;
       }
@@ -320,6 +373,11 @@ export default function TesoreriaNominasPage() {
         `Se generaron ${creados} línea${creados === 1 ? "" : "s"}. Monto estimado (salario diario × días del periodo) — revisa y ajusta cada Flujo antes de pagar.`
       );
       setSeleccionPuestos(new Set());
+      setNominas((prev) =>
+        prev.map((n) =>
+          n.id_nomina === generandoPara!.id_nomina ? { ...n, num_flujos: n.num_flujos + creados } : n
+        )
+      );
     } catch (err) {
       setErrorGeneracion(err instanceof Error ? err.message : "Error al generar las líneas");
     } finally {
@@ -649,12 +707,17 @@ export default function TesoreriaNominasPage() {
                     <TableCell>{n.serie}</TableCell>
                     <TableCell>{formatoPeriodo(n.fecha_inicio, n.fecha_fin)}</TableCell>
                     <TableCell>
-                      <Chip
-                        size="small"
-                        label={n.status === "ACTIVO" ? "Activa" : "Cerrada"}
-                        color={n.status === "ACTIVO" ? "success" : "default"}
-                        variant="outlined"
-                      />
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                        <Chip
+                          size="small"
+                          label={n.status === "ACTIVO" ? "Activa" : "Cerrada"}
+                          color={n.status === "ACTIVO" ? "success" : "default"}
+                          variant="outlined"
+                        />
+                        {n.num_flujos > 0 && (
+                          <Chip size="small" label={`${n.num_flujos} línea${n.num_flujos !== 1 ? "s" : ""}`} color="info" variant="outlined" />
+                        )}
+                      </Stack>
                     </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
@@ -903,32 +966,84 @@ export default function TesoreriaNominasPage() {
               No hay Puestos vigentes para esta sociedad/proyecto en rrhh-service.
             </Typography>
           ) : (
-            <Stack spacing={0.5}>
-              {puestosVigentes.map((p) => {
-                const yaTiene = p.empleado ? empleadosConFlujo.has(p.empleado) : false;
-                const dias = diasDelPeriodo(generandoPara as TesoreriaNomina);
-                const estimado = p.salario_diario && dias > 0 ? (Number(p.salario_diario) * dias).toFixed(2) : "—";
-                return (
-                  <FormControlLabel
-                    key={p.id_puesto}
-                    control={
-                      <Checkbox
-                        size="small"
-                        checked={seleccionPuestos.has(p.id_puesto)}
-                        onChange={() => toggleSeleccionPuesto(p.id_puesto)}
-                        disabled={yaTiene}
+            <>
+              <Stack spacing={0.5} sx={{ mb: 1 }}>
+                {puestosVigentes.map((p) => {
+                  const yaTiene = p.empleado ? empleadosConFlujo.has(p.empleado) : false;
+                  const dias = generandoPara ? diasDelPeriodo(generandoPara) : 0;
+                  const calculo = calculosPorPuesto[p.id_puesto];
+                  const estimado = calculo
+                    ? calculo.ingreso_bruto
+                    : p.salario_diario && dias > 0
+                    ? (Number(p.salario_diario) * dias).toFixed(2)
+                    : "—";
+                  return (
+                    <Box key={p.id_puesto}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            size="small"
+                            checked={seleccionPuestos.has(p.id_puesto)}
+                            onChange={() => {
+                              toggleSeleccionPuesto(p.id_puesto);
+                              setCalculosPorPuesto((prev) => {
+                                const c = { ...prev };
+                                delete c[p.id_puesto];
+                                return c;
+                              });
+                            }}
+                            disabled={yaTiene}
+                          />
+                        }
+                        label={
+                          <Typography variant="body2">
+                            {p.empleado_nombre || p.empleado || "—"} — {p.puesto || "Sin puesto"} — Bruto ${estimado}
+                            {yaTiene && " (ya tiene un Flujo en esta nómina)"}
+                          </Typography>
+                        }
                       />
-                    }
-                    label={
-                      <Typography variant="body2">
-                        {p.empleado_nombre || p.empleado || "—"} — {p.puesto || "Sin puesto"} — ${estimado}
-                        {yaTiene && " (ya tiene un Flujo en esta nómina)"}
-                      </Typography>
-                    }
-                  />
-                );
-              })}
-            </Stack>
+                      {calculo && (
+                        <Box sx={{ ml: 4, mb: 0.5 }}>
+                          <Table size="small" sx={{ "& td, & th": { py: 0.25, px: 1, fontSize: "0.72rem" } }}>
+                            <TableBody>
+                              <TableRow>
+                                <TableCell>ISR</TableCell>
+                                <TableCell align="right">−${calculo.isr}</TableCell>
+                                <TableCell>IMSS obrero</TableCell>
+                                <TableCell align="right">−${calculo.imss_obrero.total_imss_obrero}</TableCell>
+                                <TableCell sx={{ fontWeight: 600 }}>Neto</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 600 }}>${calculo.neto}</TableCell>
+                              </TableRow>
+                              <TableRow>
+                                <TableCell colSpan={2} sx={{ color: "text.secondary" }}>
+                                  EM especie ${calculo.imss_obrero.em_especie} · EM dinero ${calculo.imss_obrero.em_dinero} · Inv/Vida ${calculo.imss_obrero.invalidez_vida} · CEAV ${calculo.imss_obrero.ceav}
+                                </TableCell>
+                                <TableCell colSpan={2} sx={{ color: "text.secondary" }}>
+                                  SBC diario ${calculo.sbc_diario}
+                                </TableCell>
+                                <TableCell colSpan={2} />
+                              </TableRow>
+                            </TableBody>
+                          </Table>
+                        </Box>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Stack>
+              {seleccionPuestos.size > 0 && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={calcularFiscal}
+                  disabled={calculando}
+                  sx={{ mt: 0.5 }}
+                >
+                  {calculando ? <CircularProgress size={14} sx={{ mr: 1 }} /> : null}
+                  Calcular ISR/IMSS ({seleccionPuestos.size} empleado{seleccionPuestos.size !== 1 ? "s" : ""})
+                </Button>
+              )}
+            </>
           )}
         </DialogContent>
         <DialogActions>

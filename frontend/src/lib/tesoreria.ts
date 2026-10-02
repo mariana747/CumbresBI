@@ -1499,6 +1499,14 @@ export async function createFlujo(params: {
   fechaPagoOriginal?: string;
   linkComprobanteBanco?: string;
   categoriaGasto?: TesoreriaCategoriaGasto;
+  // Desglose fiscal de nómina
+  nomSalarioDiario?: string;
+  nomDias?: number;
+  nomIngresoBruto?: string;
+  nomIsr?: string;
+  nomSbcDiario?: string;
+  nomImssObrero?: string;
+  nomTotalDeducciones?: string;
 }): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/`, {
     method: "POST",
@@ -1526,6 +1534,13 @@ export async function createFlujo(params: {
       link_comprobante_banco: params.linkComprobanteBanco || null,
       comentarios: params.comentarios || null,
       categoria_gasto: params.categoriaGasto || null,
+      nom_salario_diario: params.nomSalarioDiario || null,
+      nom_dias: params.nomDias ?? null,
+      nom_ingreso_bruto: params.nomIngresoBruto || null,
+      nom_isr: params.nomIsr || null,
+      nom_sbc_diario: params.nomSbcDiario || null,
+      nom_imss_obrero: params.nomImssObrero || null,
+      nom_total_deducciones: params.nomTotalDeducciones || null,
     }),
   });
   if (!response.ok) {
@@ -1941,6 +1956,7 @@ export interface TesoreriaNomina {
   // sociedades (14/Sep/2026, "pueden estar contratados por dos
   // sociedades") - lista de RFCs, ya no un CharField unico.
   sociedades: string[];
+  num_flujos: number;
   proyecto: string | null;
   centro: string | null;
   serie: string;
@@ -2109,6 +2125,55 @@ export async function getContratoGenericoNomina(
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/nominas/${encodeURIComponent(idNomina)}/contrato_generico/${params}`
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export interface NominaCalculoImssObrero {
+  em_especie: string;
+  em_dinero: string;
+  invalidez_vida: string;
+  ceav: string;
+  total_imss_obrero: string;
+}
+
+export interface NominaCalculo {
+  salario_diario: string;
+  dias: number;
+  periodicidad: string;
+  ingreso_bruto: string;
+  isr: string;
+  sbc_diario: string;
+  imss_obrero: NominaCalculoImssObrero;
+  total_deducciones: string;
+  neto: string;
+}
+
+export async function calcularNomina(params: {
+  idNomina: string;
+  salarioDiario: number;
+  dias: number;
+  factorIntegracion?: number;
+}): Promise<NominaCalculo> {
+  // periodicidad viene de la nómina en el backend (nomina.tipo)
+  const body: Record<string, unknown> = {
+    salario_diario: params.salarioDiario,
+    dias: params.dias,
+  };
+  if (params.factorIntegracion !== undefined) {
+    body.factor_integracion = params.factorIntegracion;
+  }
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/nominas/${encodeURIComponent(params.idNomina)}/calcular/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
   );
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

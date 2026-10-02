@@ -14,7 +14,7 @@ import xlrd
 from openpyxl import load_workbook
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
-from django.db.models import ProtectedError, Q
+from django.db.models import Count, ProtectedError, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -661,7 +661,12 @@ class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         # TesoreriaNominaSociedad (SCOPE_FIELD_SOCIEDAD =
         # "sociedades__sociedad"), que duplicaria filas si 2+ sociedades de
         # la misma Nomina caen dentro del alcance del usuario a la vez.
-        queryset = TesoreriaNomina.objects.for_scope(self.request.effective_scope).order_by("-created_at").distinct()
+        queryset = (
+            TesoreriaNomina.objects.for_scope(self.request.effective_scope)
+            .annotate(num_flujos=Count("flujos", distinct=True))
+            .order_by("-created_at")
+            .distinct()
+        )
         sociedad = self.request.query_params.get("sociedad")
         if sociedad:
             queryset = queryset.filter(sociedades__sociedad=sociedad)
@@ -719,6 +724,68 @@ class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
             return Response({"sociedad": ["Esa sociedad no pertenece a esta nómina."]}, status=400)
         contrato = contrato_generico_nomina(sociedad)
         return Response({"id_contrato": contrato.id_contrato})
+
+    @action(detail=True, methods=["post"], url_path="calcular")
+    def calcular(self, request, pk=None):
+        """Calcula ISR, SBC e IMSS obrero para un empleado de esta nómina.
+
+        La periodicidad se toma del campo `tipo` de la nómina (QUINCENAL/SEMANAL).
+        Body: { salario_diario, dias, factor_integracion? }
+        """
+        from datetime import date
+        from decimal import Decimal, InvalidOperation
+
+        from .models import TesoreriaTablaISR
+        from .nomina_calculos import (
+            FACTOR_INTEGRACION_MINIMO,
+            calcular_imss_obrero,
+            calcular_isr_con_tabla,
+            calcular_sbc_diario,
+            models_q_vigencia_fin_ok,
+        )
+
+        nomina = self.get_object()
+        periodicidad = nomina.tipo  # QUINCENAL | SEMANAL
+
+        try:
+            salario_diario = Decimal(str(request.data.get("salario_diario", 0)))
+            dias = int(request.data.get("dias", 0))
+            factor_integracion = Decimal(str(request.data.get("factor_integracion", FACTOR_INTEGRACION_MINIMO)))
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+        if salario_diario <= 0 or dias <= 0:
+            return Response({"detail": "salario_diario y dias deben ser positivos."}, status=400)
+
+        hoy = date.today()
+        renglones = TesoreriaTablaISR.objects.filter(
+            periodicidad=periodicidad,
+            vigencia_inicio__lte=hoy,
+        ).filter(models_q_vigencia_fin_ok(hoy)).order_by("limite_inferior")
+
+        from decimal import ROUND_HALF_UP
+
+        def _dos(v):
+            return v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        ingreso_bruto = _dos(salario_diario * dias)
+        isr = calcular_isr_con_tabla(ingreso_bruto, renglones)
+        sbc_diario = calcular_sbc_diario(salario_diario, factor_integracion)
+        imss = calcular_imss_obrero(sbc_diario, dias)
+        total_deducciones = _dos(isr + imss["total_imss_obrero"])
+        neto = _dos(ingreso_bruto - total_deducciones)
+
+        return Response({
+            "salario_diario": str(salario_diario),
+            "dias": dias,
+            "periodicidad": periodicidad,
+            "ingreso_bruto": str(ingreso_bruto),
+            "isr": str(isr),
+            "sbc_diario": str(sbc_diario),
+            "imss_obrero": {k: str(v) for k, v in imss.items()},
+            "total_deducciones": str(total_deducciones),
+            "neto": str(neto),
+        })
 
 
 class TesoreriaContratoDocumentoViewSet(ModelViewSet):
@@ -1904,10 +1971,14 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
         if timbre_uuid_nomina:
             try:
-                flujo.nomina = TesoreriaRecNomina.objects.get(timbre_uuid=timbre_uuid_nomina)
+                rec_nomina = TesoreriaRecNomina.objects.get(timbre_uuid=timbre_uuid_nomina)
             except TesoreriaRecNomina.DoesNotExist:
                 return Response({"nomina": ["No existe un recibo de nómina con ese UUID."]}, status=400)
+            flujo.nomina = rec_nomina
             update_fields.append("nomina")
+            if rec_nomina.nom_receptor_num_empleado and not flujo.id_empleado:
+                flujo.id_empleado = rec_nomina.nom_receptor_num_empleado
+                update_fields.append("id_empleado")
 
         if not update_fields:
             return Response({"detail": "Manda factura, complemento y/o nomina (timbre_uuid)."}, status=400)

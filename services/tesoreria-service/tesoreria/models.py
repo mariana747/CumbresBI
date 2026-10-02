@@ -1375,6 +1375,16 @@ class TesoreriaFlujo(models.Model):
         blank=True,
         null=True,
     )
+    # Desglose fiscal de nómina (02/Oct/2026) - se llena al generar líneas
+    # desde TesoreriaNominaViewSet.calcular; total_mxp queda como el neto
+    # a pagar (ingreso_bruto − isr − imss_obrero).
+    nom_salario_diario = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    nom_dias = models.PositiveSmallIntegerField(blank=True, null=True)
+    nom_ingreso_bruto = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    nom_isr = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    nom_sbc_diario = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    nom_imss_obrero = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    nom_total_deducciones = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
     estado_cfdi = models.CharField(max_length=50, blank=True, null=True)
     comprobacion_asignada_a = models.CharField(max_length=100, blank=True, null=True)
     aprobacion_lista = models.BooleanField(blank=True, null=True)
@@ -2054,3 +2064,32 @@ class TesoreriaTicketProveedor(models.Model):
 
     def __str__(self):
         return self.id_ticket
+
+
+class TesoreriaTablaISR(models.Model):
+    """Tarifa del ISR (DOF) por periodicidad de pago. Un renglón por
+    tramo de la tabla; las tablas del SAT incluyen limite_superior=None
+    en el último renglón ("En adelante")."""
+
+    PERIOD_QUINCENAL = "QUINCENAL"
+    PERIOD_SEMANAL = "SEMANAL"
+    PERIOD_CHOICES = [
+        (PERIOD_QUINCENAL, "Quincenal (15 días)"),
+        (PERIOD_SEMANAL, "Semanal (7 días)"),
+    ]
+
+    periodicidad = models.CharField(max_length=20, choices=PERIOD_CHOICES)
+    dias = models.PositiveSmallIntegerField()
+    limite_inferior = models.DecimalField(max_digits=14, decimal_places=2)
+    limite_superior = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)
+    cuota_fija = models.DecimalField(max_digits=14, decimal_places=2)
+    porcentaje = models.DecimalField(max_digits=7, decimal_places=6)
+    vigencia_inicio = models.DateField()
+    vigencia_fin = models.DateField(blank=True, null=True)
+
+    class Meta:
+        db_table = "tesoreria_tabla_isr"
+        ordering = ["periodicidad", "limite_inferior"]
+
+    def __str__(self):
+        return f"{self.periodicidad} {self.limite_inferior}-{self.limite_superior or '∞'}"
