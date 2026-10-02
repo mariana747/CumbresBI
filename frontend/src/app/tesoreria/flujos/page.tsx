@@ -1144,7 +1144,8 @@ function TesoreriaFlujosPageContent() {
             <TableHead>
               <TableRow>
                 <TableCell>ID Flujo</TableCell>
-                <TableCell>ID Contrato</TableCell>
+                <TableCell>Concepto Factura</TableCell>
+                <TableCell>Contraparte</TableCell>
                 {/* Sociedad_terminacion de cuenta (25/Sep/2026, "unir
                 sociedad con terminacion de cuenta") - ver
                 nombreSociedadCuenta() mas abajo. */}
@@ -1191,13 +1192,13 @@ function TesoreriaFlujosPageContent() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : flujosFiltrados.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin flujos registrados.
                     </Typography>
@@ -1207,7 +1208,8 @@ function TesoreriaFlujosPageContent() {
                 flujosFiltrados.map((f) => (
                   <TableRow key={f.id_flujo} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{f.id_flujo}</TableCell>
-                    <TableCell>{f.contrato || "—"}</TableCell>
+                    <TableCell>{f.contrato_concepto_factura || "—"}</TableCell>
+                    <TableCell>{f.contrato_contraparte_nombre || "—"}</TableCell>
                     <TableCell>{nombreSociedadCuenta(f)}</TableCell>
                     <TableCell>{f.descripcion_pago || "—"}</TableCell>
                     <TableCell>{f.fecha_efectiva || "—"}</TableCell>
