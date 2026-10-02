@@ -1437,7 +1437,7 @@ function TesoreriaFlujosPageContent() {
                 fullWidth
               />
               <ContratoSelector
-                disabled={!!editing}
+                disabled={soloLectura}
                 value={contratoForm}
                 onChange={(seleccion) => {
                   setContratoForm(seleccion);
