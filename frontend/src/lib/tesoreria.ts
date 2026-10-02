@@ -1204,6 +1204,8 @@ export interface TesoreriaFlujo {
   id_flujo: string;
   contrato: string | null;
   contrato_sociedad: string | null;
+  contrato_concepto_factura: string | null;
+  contrato_contraparte_nombre: string | null;
   categoria_gasto: TesoreriaCategoriaGasto | null;
   id_empleado: string | null;
   id_requisicion: string | null;

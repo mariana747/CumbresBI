@@ -390,6 +390,8 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
     formulario de creacion (frontend/src/app/tesoreria/flujos/page.tsx)."""
 
     contrato_sociedad = serializers.CharField(source="contrato.sociedad", read_only=True, default=None)
+    contrato_concepto_factura = serializers.CharField(source="contrato.concepto_factura", read_only=True, default=None)
+    contrato_contraparte_nombre = serializers.SerializerMethodField()
     cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
     # periodo_nomina_serie (10/Sep/2026, modulo de Nominas Fase 1) - mismo
     # criterio que contrato_sociedad arriba, para no obligar al frontend a
@@ -407,12 +409,21 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
         numero = (obj.cuenta.cuenta or obj.cuenta.clabe) if obj.cuenta_id else None
         return numero[-4:] if numero else None
 
+    def get_contrato_contraparte_nombre(self, obj):
+        if not obj.contrato_id or not obj.contrato.contraparte_id:
+            return None
+        cp = obj.contrato.contraparte
+        partes = [cp.razon_social, cp.apellido_paterno, cp.apellido_materno]
+        return " ".join(p for p in partes if p) or None
+
     class Meta:
         model = TesoreriaFlujo
         fields = [
             "id_flujo",
             "contrato",
             "contrato_sociedad",
+            "contrato_concepto_factura",
+            "contrato_contraparte_nombre",
             "periodo_nomina",
             "periodo_nomina_serie",
             "categoria_gasto",
