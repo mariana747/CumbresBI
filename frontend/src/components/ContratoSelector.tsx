@@ -93,6 +93,6 @@ export default function ContratoSelector({
 function etiqueta(c: TesoreriaContrato, sociedades: GeneralSociedad[]): string {
   const s = sociedades.find((x) => x.rfc === c.sociedad);
   const alias = s?.alias_sociedad || s?.razon_social || c.sociedad;
-  const ref = `${c.contraparte_nombre}/${c.proyecto ?? ""}//${alias}${c.concepto ? ` - ${c.concepto}` : ""}`;
+  const ref = `${c.contraparte_nombre}/${c.proyecto ?? ""}//${alias}${c.concepto_factura ? ` - ${c.concepto_factura}` : ""}`;
   return `${c.id_contrato} — ${ref}`;
 }
