@@ -186,6 +186,7 @@ export default function ConciliacionFacturasPage() {
         setLoteSugerencias(data);
         // Preseleccionadas las de confianza "alta" - las de "media" el
         // analista las revisa antes de marcarlas.
+        // Solo preseleccionar alta confianza; IA y media el analista las revisa
         setLoteSeleccion(new Set(data.filter((s) => s.confianza === "alta").map((s) => s.id_flujo)));
       })
       .catch((err) => setErrorLote(err instanceof Error ? err.message : "Error al buscar sugerencias"))
@@ -795,7 +796,7 @@ export default function ConciliacionFacturasPage() {
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                         Presiona "Buscar sugerencias" para ver candidatos.
                       </Typography>
-                    ) : cargandoSugerencias ? null : sugerencias && (sugerencias.facturas.length > 0 || sugerencias.complementos.length > 0) ? (
+                    ) : cargandoSugerencias ? null : sugerencias && (sugerencias.facturas.length > 0 || sugerencias.complementos.length > 0 || sugerencias.sugerencia_ia) ? (
                       <Stack spacing={1} sx={{ mb: 2 }}>
                         {sugerencias.facturas.map((s) => (
                           <Stack key={s.timbre_uuid} direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 1 }}>
@@ -831,10 +832,36 @@ export default function ConciliacionFacturasPage() {
                             </Button>
                           </Stack>
                         ))}
+                        {sugerencias.sugerencia_ia && sugerencias.facturas.length === 0 && sugerencias.complementos.length === 0 && (
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: "info.main", borderRadius: 1, p: 1 }}>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="body2">
+                                {sugerencias.sugerencia_ia.tipo === "complemento" ? "REP" : "Factura"}{" "}
+                                {sugerencias.sugerencia_ia.timbre_uuid_sugerido.slice(0, 8)}
+                              </Typography>
+                              {sugerencias.sugerencia_ia.razon && (
+                                <Typography variant="caption" color="text.secondary">
+                                  IA: {sugerencias.sugerencia_ia.razon}
+                                </Typography>
+                              )}
+                            </Box>
+                            <Chip size="small" label="Sugerido por IA" color="info" variant="outlined" />
+                            <Button
+                              size="small"
+                              variant={timbreUuid === sugerencias.sugerencia_ia.timbre_uuid_sugerido ? "contained" : "outlined"}
+                              onClick={() => {
+                                setTimbreUuid(sugerencias.sugerencia_ia!.timbre_uuid_sugerido);
+                                setEsComplemento(sugerencias.sugerencia_ia!.tipo === "complemento");
+                              }}
+                            >
+                              {timbreUuid === sugerencias.sugerencia_ia.timbre_uuid_sugerido ? "Elegida" : "Usar"}
+                            </Button>
+                          </Stack>
+                        )}
                       </Stack>
                     ) : (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Sin coincidencias por contraparte/monto — captúralo a mano abajo.
+                        Sin coincidencias por contraparte/monto ni por IA — captúralo a mano abajo.
                       </Typography>
                     )}
 
@@ -941,13 +968,13 @@ export default function ConciliacionFacturasPage() {
               </Stack>
             ) : loteSugerencias.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                Sin candidatos por contraparte/monto en este periodo.
+                Sin candidatos por heurística ni por IA en este periodo.
               </Typography>
             ) : (
               <Stack spacing={1}>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  Las de confianza alta (mismo monto exacto, único candidato) ya vienen marcadas. Revisa las demás
-                  antes de aprobar.
+                  Las de confianza alta (mismo monto exacto, único candidato) ya vienen marcadas. Las sugeridas por IA
+                  no se marcan automáticamente — revísalas antes de aprobar.
                 </Typography>
                 {loteSugerencias.map((s) => (
                   <Stack
@@ -969,11 +996,16 @@ export default function ConciliacionFacturasPage() {
                       <Typography variant="caption" color="text.secondary">
                         {s.concepto || "—"} → {s.tipo === "factura" ? "Factura" : "REP"} {s.folio || s.timbre_uuid.slice(0, 8)}
                       </Typography>
+                      {s.confianza === "ia" && s.razon_ia && (
+                        <Typography variant="caption" color="text.secondary" display="block">
+                          IA: {s.razon_ia}
+                        </Typography>
+                      )}
                     </Box>
                     <Chip
                       size="small"
-                      label={s.confianza === "alta" ? "Confianza alta" : "Confianza media"}
-                      color={s.confianza === "alta" ? "success" : "warning"}
+                      label={s.confianza === "alta" ? "Confianza alta" : s.confianza === "ia" ? "Sugerido por IA" : "Confianza media"}
+                      color={s.confianza === "alta" ? "success" : s.confianza === "ia" ? "info" : "warning"}
                       variant="outlined"
                     />
                     <IconButton

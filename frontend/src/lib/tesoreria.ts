@@ -1759,9 +1759,16 @@ export interface SugerenciaCfdi {
   diferencia: string;
 }
 
+export interface SugerenciaCfdiIa {
+  timbre_uuid_sugerido: string;
+  tipo: "factura" | "complemento" | null;
+  razon: string | null;
+}
+
 export interface SugerenciasCfdiResponse {
   facturas: SugerenciaCfdi[];
   complementos: SugerenciaCfdi[];
+  sugerencia_ia: SugerenciaCfdiIa | null;
 }
 
 // "La IA propone, el humano aprueba" (10/Sep/2026, Fase 5 de Conciliacion
@@ -1784,7 +1791,8 @@ export interface SugerenciaCfdiLote {
   id: number;
   timbre_uuid: string;
   folio: string | null;
-  confianza: "alta" | "media";
+  confianza: "alta" | "media" | "ia";
+  razon_ia: string | null;
 }
 
 // Sugerencias para TODOS los flujos "Sin CFDI" del filtro actual a la vez
