@@ -382,12 +382,10 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
 
     `estado_cfdi`/`requiere_complemento`/`comprobacion_asignada_a`/
     `aprobacion_lista`/`permiso_enviar_pago`/`informacion_envio`/
-    `ultimo_envio`/`permiso`/`fecha_pago_original` son columnas heredadas
-    del AppSheet original (20260727_Cumbres_ERD.sql) sin ninguna accion
-    del ViewSet que las llene todavia - se dejan de escritura libre (igual
-    que comentarios) hasta que exista esa automatizacion; por ahora las
-    llena quien captura, en las pestañas Referencias/CFDI/Control del
-    formulario de creacion (frontend/src/app/tesoreria/flujos/page.tsx)."""
+    `ultimo_envio`/`permiso` son columnas heredadas del AppSheet original
+    (20260727_Cumbres_ERD.sql) sin ninguna accion del ViewSet que las llene
+    todavia - se dejan de escritura libre (igual que comentarios) hasta que
+    exista esa automatizacion; por ahora las llena quien captura."""
 
     contrato_sociedad = serializers.CharField(source="contrato.sociedad", read_only=True, default=None)
     contrato_concepto_factura = serializers.CharField(source="contrato.concepto_factura", read_only=True, default=None)
@@ -444,7 +442,6 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "drive_file_id_referencia",
             "pagado",
             "fecha_pago",
-            "fecha_pago_original",
             "descripcion_pago",
             "link_comprobante_banco",
             "drive_file_id_comprobante",
