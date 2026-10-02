@@ -897,7 +897,10 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
 
     candidatos = TesoreriaFactura.objects.filter(comprobante_total__isnull=False)
     if contraparte and contraparte.rfc:
-        candidatos = candidatos.filter(emisor_rfc=contraparte.rfc)
+        from django.db.models import Q
+        candidatos = candidatos.filter(
+            Q(emisor_rfc=contraparte.rfc) | Q(receptor_rfc=contraparte.rfc)
+        )
     # Sin contraparte conocida, acotar solo por monto (dentro de tolerancia)
     # para no traer el catalogo completo de facturas sin filtro real.
     candidatos = candidatos.filter(
@@ -916,7 +919,9 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
         else:
             score += 1
             motivos.append("monto muy cercano")
-        if contraparte and factura.emisor_rfc == contraparte.rfc:
+        if contraparte and contraparte.rfc and (
+            factura.emisor_rfc == contraparte.rfc or factura.receptor_rfc == contraparte.rfc
+        ):
             score += 2
             motivos.append("mismo RFC de contraparte")
         if fecha and factura.comprobante_fecha:
