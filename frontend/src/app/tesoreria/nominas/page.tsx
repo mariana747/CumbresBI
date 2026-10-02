@@ -1035,7 +1035,7 @@ export default function TesoreriaNominasPage() {
                 <Button
                   size="small"
                   variant="outlined"
-                  onClick={calcularFiscal}
+                  onClick={() => calcularFiscal()}
                   disabled={calculando}
                   sx={{ mt: 0.5 }}
                 >
