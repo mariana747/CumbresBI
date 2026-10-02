@@ -3248,6 +3248,8 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         facturas = page if page is not None else list(queryset)
         uuids = [f.timbre_uuid for f in facturas if f.timbre_uuid]
 
+        ids = [f.pk for f in facturas]
+
         conceptos_por_uuid = defaultdict(list)
         for concepto in FacturaConcepto.objects.filter(uuid__in=uuids):
             conceptos_por_uuid[concepto.uuid].append(concepto)
@@ -3261,9 +3263,16 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         for docto in doctos:
             saldo_por_uuid.setdefault(docto.id_documento, docto.imp_saldo_insoluto)
 
+        vinculadas_ids = set(
+            TesoreriaFlujo.objects.filter(factura_id__in=ids)
+            .values_list("factura_id", flat=True)
+            .distinct()
+        )
+
         context = self.get_serializer_context()
         context["conceptos_por_uuid"] = conceptos_por_uuid
         context["saldo_por_uuid"] = saldo_por_uuid
+        context["vinculadas_ids"] = vinculadas_ids
         serializer = self.get_serializer(facturas, many=True, context=context)
         if page is not None:
             return self.get_paginated_response(serializer.data)

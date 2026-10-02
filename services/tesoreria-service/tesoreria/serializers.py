@@ -530,6 +530,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
     documentos/PldContraparteDocViewSet en pld-service."""
 
     conceptos = serializers.SerializerMethodField()
+    vinculada = serializers.SerializerMethodField()
     contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
     # Correo por defecto para envio masivo (26/Ago/2026, ver
     # TesoreriaFacturaViewSet.enviar_masivo) - el frontend lo usa para
@@ -599,6 +600,7 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "drive_file_id_xml",
             "mime_type_xml",
             "estado",
+            "vinculada",
             "conceptos",
             "saldo_pendiente_exhibiciones",
             "created_at",
@@ -619,6 +621,12 @@ class TesoreriaFacturaSerializer(serializers.ModelSerializer):
             "id", "contraparte", "estado", "created_at", "updated_at",
             "drive_file_id_pdf", "mime_type_pdf", "drive_file_id_xml", "mime_type_xml",
         ]
+
+    def get_vinculada(self, obj):
+        vinculadas_ids = self.context.get("vinculadas_ids")
+        if vinculadas_ids is not None:
+            return obj.pk in vinculadas_ids
+        return obj.flujos.exists()
 
     def get_conceptos(self, obj):
         # En list() el ViewSet precarga conceptos_por_uuid en el contexto

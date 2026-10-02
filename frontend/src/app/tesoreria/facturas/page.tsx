@@ -1194,9 +1194,12 @@ export default function TesoreriaFacturasPage() {
                     <TableCell align="right">{f.comprobante_iva || "—"}</TableCell>
                     <TableCell align="right">{f.comprobante_total || "—"}</TableCell>
                     <TableCell>
-                      {f.estado && (
-                        <Chip size="small" label={ESTADO_LABEL[f.estado]} color={ESTADO_COLOR[f.estado]} variant="outlined" />
-                      )}
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                        {f.estado && (
+                          <Chip size="small" label={ESTADO_LABEL[f.estado]} color={ESTADO_COLOR[f.estado]} variant="outlined" />
+                        )}
+                        <Chip size="small" label={f.vinculada ? "Vinculada" : "Sin vincular"} color={f.vinculada ? "success" : "error"} variant="outlined" />
+                      </Stack>
                     </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
@@ -1294,8 +1297,9 @@ export default function TesoreriaFacturasPage() {
                     <strong>Total:</strong> {f.comprobante_total || "—"}
                   </Typography>
                   {f.estado && (
-                    <Stack direction="row" spacing={0.5}>
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap">
                       <Chip size="small" label={ESTADO_LABEL[f.estado]} color={ESTADO_COLOR[f.estado]} variant="outlined" />
+                      <Chip size="small" label={f.vinculada ? "Vinculada" : "Sin vincular"} color={f.vinculada ? "success" : "error"} variant="outlined" />
                     </Stack>
                   )}
                 </Stack>
