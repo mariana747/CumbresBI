@@ -165,6 +165,18 @@ export default function TesoreriaReporteDiarioPage() {
     return cuentas.filter((c) => c.sociedad && rfcs.has(c.sociedad));
   }, [cuentas, sociedadesElegidas]);
 
+  function aliasCuenta(c: ReporteDiarioCuenta, sociedadRfc: string): string {
+    const soc = sociedades.find((s) => s.rfc === sociedadRfc);
+    const numero = c.cuenta || c.clabe;
+    const partes = [
+      soc?.alias_sociedad || soc?.razon_social,
+      c.banco_alias || c.banco_nombre,
+      numero ? numero.slice(-4) : null,
+      c.tipo,
+    ].filter(Boolean);
+    return partes.length ? partes.join("/") : c.alias || c.id_cuenta_bancaria;
+  }
+
   function filtrarSociedades(corte: ReporteDiarioCorte | undefined) {
     if (!corte) return [];
     if (!filtroCuenta) return corte.sociedades;
@@ -268,7 +280,7 @@ export default function TesoreriaReporteDiarioPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            {c.alias}
+                            {aliasCuenta(c, empresa.sociedad)}
                             {c.tipo === "INVERSION" && (
                               <Chip size="small" label="Inversión" variant="outlined" sx={{ ml: 1 }} />
                             )}
@@ -368,7 +380,7 @@ export default function TesoreriaReporteDiarioPage() {
                 <Paper key={idExpandible} variant="outlined" sx={{ p: 2 }}>
                   <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                     <Typography variant="subtitle2">
-                      {c.alias}
+                      {aliasCuenta(c, empresa.sociedad)}
                       {c.tipo === "INVERSION" && (
                         <Chip size="small" label="Inversión" variant="outlined" sx={{ ml: 1 }} />
                       )}
@@ -492,7 +504,7 @@ export default function TesoreriaReporteDiarioPage() {
                   const nombreEmpresa = sociedades.find((s) => s.rfc === c.sociedad)?.razon_social || c.sociedad || "Sin empresa";
                   return (
                     <TableRow key={c.id_cuenta_bancaria} hover>
-                      <TableCell>{c.alias}</TableCell>
+                      <TableCell>{aliasCuenta(c, c.sociedad)}</TableCell>
                       <TableCell>{nombreEmpresa}</TableCell>
                       <TableCell
                         align="right"
@@ -513,7 +525,7 @@ export default function TesoreriaReporteDiarioPage() {
             const nombreEmpresa = sociedades.find((s) => s.rfc === c.sociedad)?.razon_social || c.sociedad || "Sin empresa";
             return (
               <Paper key={c.id_cuenta_bancaria} variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2">{c.alias}</Typography>
+                <Typography variant="subtitle2">{aliasCuenta(c, c.sociedad)}</Typography>
                 <Typography variant="caption" color="text.secondary">
                   {nombreEmpresa}
                 </Typography>
