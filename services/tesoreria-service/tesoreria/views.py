@@ -897,7 +897,10 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
 
     candidatos = TesoreriaFactura.objects.filter(comprobante_total__isnull=False)
     if contraparte and contraparte.rfc:
-        candidatos = candidatos.filter(emisor_rfc=contraparte.rfc)
+        from django.db.models import Q
+        candidatos = candidatos.filter(
+            Q(emisor_rfc=contraparte.rfc) | Q(receptor_rfc=contraparte.rfc)
+        )
     # Sin contraparte conocida, acotar solo por monto (dentro de tolerancia)
     # para no traer el catalogo completo de facturas sin filtro real.
     candidatos = candidatos.filter(
@@ -916,7 +919,9 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
         else:
             score += 1
             motivos.append("monto muy cercano")
-        if contraparte and factura.emisor_rfc == contraparte.rfc:
+        if contraparte and contraparte.rfc and (
+            factura.emisor_rfc == contraparte.rfc or factura.receptor_rfc == contraparte.rfc
+        ):
             score += 2
             motivos.append("mismo RFC de contraparte")
         if fecha and factura.comprobante_fecha:
@@ -3261,9 +3266,16 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         for docto in doctos:
             saldo_por_uuid.setdefault(docto.id_documento, docto.imp_saldo_insoluto)
 
+        vinculadas_uuids = set(
+            TesoreriaFlujo.objects.filter(factura_id__in=uuids)
+            .values_list("factura_id", flat=True)
+            .distinct()
+        )
+
         context = self.get_serializer_context()
         context["conceptos_por_uuid"] = conceptos_por_uuid
         context["saldo_por_uuid"] = saldo_por_uuid
+        context["vinculadas_uuids"] = vinculadas_uuids
         serializer = self.get_serializer(facturas, many=True, context=context)
         if page is not None:
             return self.get_paginated_response(serializer.data)

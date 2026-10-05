@@ -2538,6 +2538,7 @@ export interface TesoreriaFactura {
   // De solo lectura en el backend (ver TesoreriaFacturaSerializer.read_only_fields)
   // - solo cambia via marcarEstadoFactura(), no via update/createFactura.
   estado: TesoreriaFacturaEstado | null;
+  vinculada: boolean;
   conceptos: FacturaConcepto[];
   // categoria_gasto (09/Sep/2026) - clasificacion de gasto compartida con
   // Flujos/Reembolsos/Solicitudes de Pago, ver TesoreriaCategoriaGasto.
