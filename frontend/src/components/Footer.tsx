@@ -1,9 +1,7 @@
-import { Box, Typography } from "@mui/material";
+import { Box, Link, Typography } from "@mui/material";
 import { BRAND } from "@/theme/theme";
-// Footer global - info de version/estado, sin datos dinamicos todavia.
-// Compartido entre AppShell (paginas autenticadas) y las paginas publicas
-// (ej. login) que no usan AppShell.
-export const FOOTER_HEIGHT = 40;
+// Footer global — compartido entre AppShell (paginas autenticadas) y paginas publicas.
+export const FOOTER_HEIGHT = 48;
 
 export function Footer() {
   return (
@@ -14,6 +12,9 @@ export function Footer() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        gap: 2,
+        flexWrap: "wrap",
+        px: 2,
         borderTop: "1px solid",
         borderColor: "divider",
         bgcolor: BRAND.charcoal,
@@ -22,6 +23,15 @@ export function Footer() {
       <Typography variant="caption" sx={{ color: "common.white", opacity: 0.7 }}>
         © 2026 Cumbres Consultoría y Proyectos
       </Typography>
+      <Link href="/privacidad" variant="caption" sx={{ color: "common.white", opacity: 0.7, textDecorationColor: "rgba(255,255,255,0.4)" }}>
+        Política de Privacidad
+      </Link>
+      <Link href="/terminos" variant="caption" sx={{ color: "common.white", opacity: 0.7, textDecorationColor: "rgba(255,255,255,0.4)" }}>
+        Términos y Condiciones
+      </Link>
+      <Link href="mailto:contacto@cypcumbres.mx" variant="caption" sx={{ color: "common.white", opacity: 0.7, textDecorationColor: "rgba(255,255,255,0.4)" }}>
+        contacto@cypcumbres.mx
+      </Link>
     </Box>
   );
 }
