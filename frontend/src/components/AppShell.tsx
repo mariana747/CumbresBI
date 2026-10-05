@@ -292,11 +292,12 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Reembolsos", href: "/tesoreria/reembolsos", icon: Receipt, group: "OPERACIONES" },
         { label: "Líneas de Crédito", href: "/tesoreria/credito", icon: Wallet, group: "OPERACIONES" },
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote, group: "OPERACIONES" },
-        // Nominas (10/Sep/2026, modulo de Nominas Fase 1) - el periodo/
-        // agrupador que se desglosa en Flujos, distinto de "Recibos de
-        // Nomina" (el CFDI individual, ver group FACTURACION Y COMPROBANTES
-        // abajo).
-        { label: "Nóminas", href: "/tesoreria/nominas", icon: Users, group: "OPERACIONES" },
+
+        { label: "Nóminas", href: "/tesoreria/nominas", icon: Users, group: "NÓMINA" },
+        { label: "Recibos de Nómina", href: "/tesoreria/rec-nominas", icon: Wallet2, group: "NÓMINA" },
+        // Conciliacion Nomina<->Recibo CFDI (14/Sep/2026) - mismo patron que
+        // Conciliacion de Facturas, pero contra TesoreriaRecNomina.
+        { label: "Conciliación de Nómina", href: "/tesoreria/conciliacion-nomina", icon: Wallet2, group: "NÓMINA" },
 
         {
           label: "Facturas",
@@ -316,30 +317,13 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
           icon: FileMinus,
           group: "FACTURACIÓN Y COMPROBANTES",
         },
-        {
-          label: "Recibos de Nómina",
-          href: "/tesoreria/rec-nominas",
-          icon: Wallet2,
-          group: "FACTURACIÓN Y COMPROBANTES",
-        },
         // Conciliacion de Facturas (10/Sep/2026) - distinta de la bancaria
         // de abajo: clasifica cada pago segun si ya tiene CFDI, no
-        // extracto vs. interno. Una sola pantalla con 3 tabs (pedido
-        // explicito, no 3 rutas separadas), ver tesoreria-service/tesoreria/
-        // reportes.py::calcular_conciliacion_cfdi.
+        // extracto vs. interno. Una sola pantalla con 3 tabs.
         {
           label: "Conciliación de Facturas",
           href: "/tesoreria/conciliacion-facturas",
           icon: FileText,
-          group: "FACTURACIÓN Y COMPROBANTES",
-        },
-        // Conciliacion Nomina<->Recibo CFDI (14/Sep/2026, siguiente
-        // pendiente tras el cierre real de Nomina) - mismo patron que la
-        // de Facturas de arriba, pero contra TesoreriaRecNomina.
-        {
-          label: "Conciliación de Nómina",
-          href: "/tesoreria/conciliacion-nomina",
-          icon: Wallet2,
           group: "FACTURACIÓN Y COMPROBANTES",
         },
 
