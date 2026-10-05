@@ -293,12 +293,6 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Líneas de Crédito", href: "/tesoreria/credito", icon: Wallet, group: "OPERACIONES" },
         { label: "Flujos", href: "/tesoreria/flujos", icon: Banknote, group: "OPERACIONES" },
 
-        { label: "Nóminas", href: "/tesoreria/nominas", icon: Users, group: "NÓMINA" },
-        { label: "Recibos de Nómina", href: "/tesoreria/rec-nominas", icon: Wallet2, group: "NÓMINA" },
-        // Conciliacion Nomina<->Recibo CFDI (14/Sep/2026) - mismo patron que
-        // Conciliacion de Facturas, pero contra TesoreriaRecNomina.
-        { label: "Conciliación de Nómina", href: "/tesoreria/conciliacion-nomina", icon: Wallet2, group: "NÓMINA" },
-
         {
           label: "Facturas",
           href: "/tesoreria/facturas",
@@ -339,6 +333,21 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         // automatico + reporte transaccion-por-transaccion, ver
         // tesoreria-service/tesoreria/reportes.py::calcular_reporte_conciliacion.
         { label: "Conciliación Bancaria", href: "/tesoreria/conciliacion", icon: Landmark, group: "CONFIGURACIÓN Y BANCOS" },
+      ],
+    });
+  }
+  if (tieneAlgunPermiso(session, ["tesoreria"])) {
+    items.push({
+      label: "Nómina",
+      href: "/tesoreria/nominas",
+      icon: Users,
+      enabled: true,
+      children: [
+        { label: "Nóminas", href: "/tesoreria/nominas", icon: Users },
+        { label: "Recibos de Nómina", href: "/tesoreria/rec-nominas", icon: Wallet2 },
+        // Conciliacion Nomina<->Recibo CFDI (14/Sep/2026) - mismo patron que
+        // Conciliacion de Facturas, pero contra TesoreriaRecNomina.
+        { label: "Conciliación de Nómina", href: "/tesoreria/conciliacion-nomina", icon: Wallet2 },
       ],
     });
   }
