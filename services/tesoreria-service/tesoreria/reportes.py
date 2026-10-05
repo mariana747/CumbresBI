@@ -201,7 +201,7 @@ def _calcular_corte(cuentas, fecha) -> dict:
             TesoreriaSaldo.objects.filter(cuenta=cuenta.id_cuenta_bancaria, fecha__lt=fecha).order_by("-fecha").first()
         )
         transacciones = (
-            TesoreriaFlujo.objects.filter(cuenta=cuenta, fecha_pago=fecha)
+            TesoreriaFlujo.objects.filter(cuenta=cuenta, fecha_efectiva=fecha)
             .select_related("periodo_nomina", "contrato", "contrato__contraparte")
             .order_by("id_flujo")
         )
