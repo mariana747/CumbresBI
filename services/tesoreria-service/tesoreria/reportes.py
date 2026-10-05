@@ -17,7 +17,6 @@ from decimal import Decimal
 
 from django.db.models.functions import Coalesce
 
-from .gemini_conciliacion_cfdi import sugerir_cfdi_por_ia
 from .models import (
     TesoreriaComplementoPago,
     TesoreriaCuenta,
@@ -243,15 +242,16 @@ def _calcular_corte(cuentas, fecha) -> dict:
         # /tesoreria/saldos).
         numero_cuenta = cuenta.cuenta or cuenta.clabe
         ultimos_digitos = numero_cuenta[-4:] if numero_cuenta else None
-        alias_base = cuenta.alias or cuenta.label or cuenta.id_cuenta_bancaria
+        alias_base = cuenta.alias or cuenta.id_cuenta_bancaria
         alias_mostrado = f"{alias_base} ({ultimos_digitos})" if ultimos_digitos else alias_base
 
         fila = {
             "id_cuenta_bancaria": cuenta.id_cuenta_bancaria,
             "alias": alias_mostrado,
+            # El alias sigue siendo lo que usa la pantalla (mismo criterio
+            # de siempre); banco_nombre/clabe son solo para que el correo
+            # pueda mostrar banco real + CLABE en vez del alias libre.
             "banco_nombre": cuenta.banco.banco if cuenta.banco_id else None,
-            "banco_alias": cuenta.banco.alias if cuenta.banco_id else None,
-            "cuenta": cuenta.cuenta,
             "clabe": cuenta.clabe,
             "tipo": cuenta.tipo,
             # disponible_ministrar (28/Sep/2026, cuentas tipo CREDITO) - vive
@@ -452,81 +452,51 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
 
     Heuristica: misma contraparte que el contrato del flujo + monto dentro
     de `tolerancia` MXP, excluyendo comprobantes que ya tienen otro flujo
-    ligado. Si la heuristica no encuentra nada, Gemini intenta el match
-    leyendo concepto/contraparte del flujo contra emisor/folio de todos los
-    comprobantes sin ligar (respaldo best-effort, igual que en bancaria)."""
-    contraparte_id = flujo.contrato.contraparte_id if flujo.contrato_id else None
+    ligado (para no proponer dos veces el mismo). Solo tiene sentido pedir
+    candidatos para lo que el flujo todavia NO tiene (si ya tiene factura,
+    solo se buscan complementos; si ya tiene complemento, solo facturas)."""
+    if not flujo.contrato_id or flujo.total_mxp is None:
+        return {"facturas": [], "complementos": []}
+
+    contraparte_id = flujo.contrato.contraparte_id
     monto = flujo.total_mxp
 
     candidatos_factura = []
-    todas_facturas_sin_ligar = []
     if not flujo.factura_id:
-        qs_facturas = TesoreriaFactura.objects.exclude(flujos__isnull=False).filter(
-            comprobante_total__isnull=False
-        )
-        if contraparte_id:
-            qs_facturas = qs_facturas.filter(contraparte_id=contraparte_id)
-        for f in qs_facturas.select_related("contraparte"):
-            entrada = {
-                "id": f.id,
-                "timbre_uuid": f.timbre_uuid,
-                "folio": f.comprobante_folio,
-                "total": f.comprobante_total,
-                "emisor": f.contraparte.razon_social if f.contraparte_id else None,
-                "metodo_pago": f.comprobante_metodo_pago,
-            }
-            todas_facturas_sin_ligar.append(entrada)
-            if monto is not None:
-                diferencia = abs(f.comprobante_total - monto)
-                if diferencia <= tolerancia:
-                    candidatos_factura.append({**entrada, "diferencia": diferencia})
+        facturas = TesoreriaFactura.objects.filter(contraparte_id=contraparte_id).exclude(flujos__isnull=False)
+        for f in facturas:
+            if f.comprobante_total is None:
+                continue
+            diferencia = abs(f.comprobante_total - monto)
+            if diferencia <= tolerancia:
+                candidatos_factura.append(
+                    {
+                        "id": f.id,
+                        "timbre_uuid": f.timbre_uuid,
+                        "folio": f.comprobante_folio,
+                        "total": f.comprobante_total,
+                        "metodo_pago": f.comprobante_metodo_pago,
+                        "diferencia": diferencia,
+                    }
+                )
         candidatos_factura.sort(key=lambda c: c["diferencia"])
 
     candidatos_complemento = []
-    todas_complementos_sin_ligar = []
     if not flujo.complemento_id:
-        qs_comp = TesoreriaComplementoPago.objects.exclude(flujos__isnull=False).filter(
-            total__isnull=False
+        complementos = TesoreriaComplementoPago.objects.filter(contraparte_id=contraparte_id).exclude(
+            flujos__isnull=False
         )
-        if contraparte_id:
-            qs_comp = qs_comp.filter(contraparte_id=contraparte_id)
-        for c in qs_comp.select_related("contraparte"):
-            entrada = {
-                "id": c.id,
-                "timbre_uuid": c.timbre_uuid,
-                "folio": c.folio,
-                "total": c.total,
-                "emisor": c.contraparte.razon_social if c.contraparte_id else None,
-            }
-            todas_complementos_sin_ligar.append(entrada)
-            if monto is not None:
-                diferencia = abs(c.total - monto)
-                if diferencia <= tolerancia:
-                    candidatos_complemento.append({**entrada, "diferencia": diferencia})
+        for c in complementos:
+            if c.total is None:
+                continue
+            diferencia = abs(c.total - monto)
+            if diferencia <= tolerancia:
+                candidatos_complemento.append(
+                    {"id": c.id, "timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total, "diferencia": diferencia}
+                )
         candidatos_complemento.sort(key=lambda c: c["diferencia"])
 
-    # Respaldo IA cuando la heuristica no encontro ningun candidato
-    sugerencia_ia = None
-    if not candidatos_factura and not candidatos_complemento:
-        contraparte_nombre = (
-            flujo.contrato.contraparte.razon_social
-            if flujo.contrato_id and flujo.contrato.contraparte_id
-            else None
-        )
-        sugerencia_ia = sugerir_cfdi_por_ia(
-            concepto=flujo.concepto,
-            contraparte_nombre=contraparte_nombre,
-            monto=monto,
-            fecha_efectiva=flujo.fecha_efectiva,
-            candidatos_factura=todas_facturas_sin_ligar,
-            candidatos_complemento=todas_complementos_sin_ligar,
-        )
-
-    return {
-        "facturas": candidatos_factura,
-        "complementos": candidatos_complemento,
-        "sugerencia_ia": sugerencia_ia,
-    }
+    return {"facturas": candidatos_factura, "complementos": candidatos_complemento}
 
 
 def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> list[dict]:
@@ -535,64 +505,53 @@ def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> lis
     de menor diferencia entre factura/complemento) y una `confianza`
     simple: 'alta' si el monto coincide exacto (diferencia = 0) y es el
     UNICO candidato encontrado (nada ambiguo que decidir), 'media' en
-    cualquier otro caso con candidato, 'ia' cuando el match lo propuso
-    Gemini (heuristica no encontro nada). Flujos sin ningun candidato no
-    aparecen en la lista.
+    cualquier otro caso con candidato. Flujos sin ningun candidato no
+    aparecen en la lista - "la IA propone, el humano aprueba" sigue
+    aplicando: esto solo ahorra abrir cada pago uno por uno, la aprobacion
+    real sigue siendo manual (ver TesoreriaFlujoViewSet.vincular_factura).
 
     23/Sep/2026 - fix real: la version anterior llamaba
     sugerir_cfdi_para_flujo() (2 queries por flujo) dentro de un for sobre
     TODOS los flujos "Sin CFDI" del mes - con datos reales (decenas/cientos
     de flujos) eso son cientos de queries y el request se cae con 502 en
     Cloud Run ("el servicio no respondio"). Aqui se cargan facturas y
-    complementos SIN LIGAR una sola vez y se hace el match en Python."""
+    complementos SIN LIGAR una sola vez (agrupados por contraparte_id) y
+    se hace el match en Python, sin volver a tocar la BD por flujo."""
     flujos = list(
         queryset.select_related("contrato", "contrato__contraparte").exclude(factura__isnull=False).exclude(
             complemento__isnull=False
         )
     )
-    if not flujos:
+    contraparte_ids = {f.contrato.contraparte_id for f in flujos if f.contrato_id}
+    if not contraparte_ids:
         return []
 
-    contraparte_ids = {f.contrato.contraparte_id for f in flujos if f.contrato_id}
-
-    # Carga todas las facturas/complementos sin ligar una sola vez
-    todas_facturas: list[dict] = []
     facturas_por_contraparte: dict[str, list[dict]] = {}
     for f in TesoreriaFactura.objects.filter(
-        comprobante_total__isnull=False
-    ).exclude(flujos__isnull=False).select_related("contraparte"):
-        entrada = {
-            "id": f.id,
-            "timbre_uuid": f.timbre_uuid,
-            "folio": f.comprobante_folio,
-            "total": f.comprobante_total,
-            "emisor": f.contraparte.razon_social if f.contraparte_id else None,
-        }
-        todas_facturas.append(entrada)
-        if f.contraparte_id in contraparte_ids:
-            facturas_por_contraparte.setdefault(f.contraparte_id, []).append(entrada)
+        contraparte_id__in=contraparte_ids, comprobante_total__isnull=False
+    ).exclude(flujos__isnull=False):
+        facturas_por_contraparte.setdefault(f.contraparte_id, []).append(
+            {
+                "id": f.id,
+                "timbre_uuid": f.timbre_uuid,
+                "folio": f.comprobante_folio,
+                "total": f.comprobante_total,
+            }
+        )
 
-    todas_complementos: list[dict] = []
     complementos_por_contraparte: dict[str, list[dict]] = {}
     for c in TesoreriaComplementoPago.objects.filter(
-        total__isnull=False
-    ).exclude(flujos__isnull=False).select_related("contraparte"):
-        entrada = {
-            "id": c.id,
-            "timbre_uuid": c.timbre_uuid,
-            "folio": c.folio,
-            "total": c.total,
-            "emisor": c.contraparte.razon_social if c.contraparte_id else None,
-        }
-        todas_complementos.append(entrada)
-        if c.contraparte_id in contraparte_ids:
-            complementos_por_contraparte.setdefault(c.contraparte_id, []).append(entrada)
+        contraparte_id__in=contraparte_ids, total__isnull=False
+    ).exclude(flujos__isnull=False):
+        complementos_por_contraparte.setdefault(c.contraparte_id, []).append(
+            {"id": c.id, "timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total}
+        )
 
     sugerencias = []
     for flujo in flujos:
-        if flujo.total_mxp is None:
+        if not flujo.contrato_id or flujo.total_mxp is None:
             continue
-        contraparte_id = flujo.contrato.contraparte_id if flujo.contrato_id else None
+        contraparte_id = flujo.contrato.contraparte_id
         monto = flujo.total_mxp
 
         candidatos = []
@@ -604,79 +563,23 @@ def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> lis
             diferencia = abs(c["total"] - monto)
             if diferencia <= tolerancia:
                 candidatos.append({**c, "tipo": "complemento", "diferencia": diferencia})
+        if not candidatos:
+            continue
 
-        if candidatos:
-            candidatos.sort(key=lambda c: c["diferencia"])
-            mejor = candidatos[0]
-            confianza = "alta" if len(candidatos) == 1 and mejor["diferencia"] == Decimal("0") else "media"
-            sugerencias.append(
-                {
-                    "id_flujo": flujo.id_flujo,
-                    "contraparte_nombre": flujo.contrato.contraparte.razon_social if flujo.contrato_id else None,
-                    "concepto": flujo.concepto,
-                    "total_mxp": flujo.total_mxp,
-                    "tipo": mejor["tipo"],
-                    "id": mejor["id"],
-                    "timbre_uuid": mejor["timbre_uuid"],
-                    "folio": mejor["folio"],
-                    "confianza": confianza,
-                    "razon_ia": None,
-                }
-            )
-        else:
-            # Respaldo IA para flujos sin match por heuristica
-            contraparte_nombre = (
-                flujo.contrato.contraparte.razon_social
-                if flujo.contrato_id and flujo.contrato.contraparte_id
-                else None
-            )
-            ia = sugerir_cfdi_por_ia(
-                concepto=flujo.concepto,
-                contraparte_nombre=contraparte_nombre,
-                monto=monto,
-                fecha_efectiva=flujo.fecha_efectiva,
-                candidatos_factura=todas_facturas,
-                candidatos_complemento=todas_complementos,
-            )
-            if not ia:
-                continue
-            # Resolver id del comprobante sugerido para devolver completo
-            uuid_ia = ia["timbre_uuid_sugerido"]
-            tipo_ia = ia.get("tipo") or "factura"
-            if tipo_ia == "complemento":
-                comp = next((c for c in todas_complementos if c["timbre_uuid"] == uuid_ia), None)
-                if not comp:
-                    continue
-                sugerencias.append(
-                    {
-                        "id_flujo": flujo.id_flujo,
-                        "contraparte_nombre": contraparte_nombre,
-                        "concepto": flujo.concepto,
-                        "total_mxp": flujo.total_mxp,
-                        "tipo": "complemento",
-                        "id": comp["id"],
-                        "timbre_uuid": uuid_ia,
-                        "folio": comp["folio"],
-                        "confianza": "ia",
-                        "razon_ia": ia.get("razon"),
-                    }
-                )
-            else:
-                fact = next((f for f in todas_facturas if f["timbre_uuid"] == uuid_ia), None)
-                if not fact:
-                    continue
-                sugerencias.append(
-                    {
-                        "id_flujo": flujo.id_flujo,
-                        "contraparte_nombre": contraparte_nombre,
-                        "concepto": flujo.concepto,
-                        "total_mxp": flujo.total_mxp,
-                        "tipo": "factura",
-                        "id": fact["id"],
-                        "timbre_uuid": uuid_ia,
-                        "folio": fact["folio"],
-                        "confianza": "ia",
-                        "razon_ia": ia.get("razon"),
-                    }
-                )
+        candidatos.sort(key=lambda c: c["diferencia"])
+        mejor = candidatos[0]
+        confianza = "alta" if len(candidatos) == 1 and mejor["diferencia"] == Decimal("0") else "media"
+        sugerencias.append(
+            {
+                "id_flujo": flujo.id_flujo,
+                "contraparte_nombre": flujo.contrato.contraparte.razon_social,
+                "concepto": flujo.concepto,
+                "total_mxp": flujo.total_mxp,
+                "tipo": mejor["tipo"],
+                "id": mejor["id"],
+                "timbre_uuid": mejor["timbre_uuid"],
+                "folio": mejor["folio"],
+                "confianza": confianza,
+            }
+        )
     return sugerencias
