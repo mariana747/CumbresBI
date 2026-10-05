@@ -1603,6 +1603,7 @@ function TesoreriaFlujosPageContent() {
                 label="Total (MXP)"
                 value={form.totalMxp}
                 onChange={(e) => setForm({ ...form, totalMxp: e.target.value })}
+                helperText="Egresos en negativo (ej. -1500.00)"
                 fullWidth
               />
               <TextField
