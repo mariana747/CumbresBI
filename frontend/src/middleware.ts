@@ -15,6 +15,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/pld-documento",
   "/privacidad",
   "/terminos",
+  "/about",
 ];
 
 // Prefijos del Gateway (proxeados por el Route Handler): nunca deben pasar
