@@ -3620,6 +3620,13 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             return Response({"estado": ["Estado inválido."]}, status=400)
 
         factura = self.get_object()
+        tiene_pdf = bool(factura.drive_file_id_pdf or factura.link_pdf)
+        tiene_xml = bool(factura.drive_file_id_xml or factura.link_xml)
+        if nuevo_estado == TesoreriaFactura.ESTADO_ACEPTADA and not (tiene_pdf and tiene_xml):
+            return Response(
+                {"detail": "Para aceptar la factura hace falta cargar el PDF y el XML."}, status=400
+            )
+
         factura.estado = nuevo_estado
         factura.save(update_fields=["estado"])
         return Response(self.get_serializer(factura).data)
