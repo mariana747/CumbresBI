@@ -3655,6 +3655,9 @@ export interface ReporteDiarioTransaccion {
   nomina_tipo: TesoreriaNominaTipo | null;
   contraparte: string | null;
   concepto_factura: string | null;
+  id_contrato: string | null;
+  contrato_proyecto: string | null;
+  contrato_sociedad: string | null;
 }
 
 export interface ReporteDiarioCuenta {
