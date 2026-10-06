@@ -702,6 +702,7 @@ function TesoreriaFlujosPageContent() {
     }
     setForm({
       contrato: f.contrato || "",
+      linkContrato: "",
       periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
@@ -750,6 +751,7 @@ function TesoreriaFlujosPageContent() {
     }
     setForm({
       contrato: f.contrato || "",
+      linkContrato: "",
       periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
