@@ -252,6 +252,8 @@ def _calcular_corte(cuentas, fecha) -> dict:
             # de siempre); banco_nombre/clabe son solo para que el correo
             # pueda mostrar banco real + CLABE en vez del alias libre.
             "banco_nombre": cuenta.banco.banco if cuenta.banco_id else None,
+            "banco_alias": cuenta.banco.alias if cuenta.banco_id else None,
+            "cuenta": cuenta.cuenta,
             "clabe": cuenta.clabe,
             "tipo": cuenta.tipo,
             # disponible_ministrar (28/Sep/2026, cuentas tipo CREDITO) - vive
