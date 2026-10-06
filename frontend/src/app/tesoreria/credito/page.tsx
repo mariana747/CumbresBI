@@ -139,15 +139,15 @@ export default function TesoreriaCreditoPage() {
   const cuentasCredito = useMemo(() => cuentas, [cuentas]);
 
   function etiquetaCuenta(c: TesoreriaCuenta): string {
-    const sociedad = sociedades.find((s) => s.rfc === c.sociedad);
+    const soc = sociedades.find((s) => s.rfc === c.sociedad);
+    const numero = c.cuenta || c.clabe;
     const partes = [
-      sociedad?.alias_sociedad,
+      soc?.alias_sociedad || soc?.razon_social,
       c.banco_alias || c.banco_nombre,
-      c.cuenta ? c.cuenta.slice(-4) : c.clabe ? c.clabe.slice(-4) : null,
-    ]
-      .filter(Boolean)
-      .join("/");
-    return partes ? `${partes} — ${c.alias || c.id_cuenta_bancaria}` : c.alias || c.id_cuenta_bancaria;
+      numero ? numero.slice(-4) : null,
+      c.tipo,
+    ].filter(Boolean);
+    return partes.length ? partes.join("/") : c.alias || c.id_cuenta_bancaria;
   }
 
   async function refreshFlujos(cuentaId: string) {
