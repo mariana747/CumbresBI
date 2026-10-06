@@ -24,6 +24,7 @@ export async function listBitacora({
   search,
   servicioOrigen,
   entidad,
+  accion,
   desde,
   hasta,
 }: {
@@ -35,6 +36,7 @@ export async function listBitacora({
   search?: string;
   servicioOrigen?: string;
   entidad?: string;
+  accion?: string;
   desde?: string;
   hasta?: string;
 } = {}): Promise<BitacoraEvento[]> {
@@ -42,6 +44,7 @@ export async function listBitacora({
   if (search) params.set("search", search);
   if (servicioOrigen) params.set("servicio_origen", servicioOrigen);
   if (entidad) params.set("entidad", entidad);
+  if (accion) params.set("accion", accion);
   if (desde) params.set("desde", desde);
   if (hasta) params.set("hasta", hasta);
 
@@ -166,6 +169,7 @@ const ACTION_VERB_LABELS: Record<string, string> = {
   eliminar: "Eliminó",
   eliminar_por_sincronia_drive: "Eliminó (ya no existía en Drive)",
   confirmar_extraccion: "Confirmó datos extraídos",
+  evaluar_riesgo: "Evaluó riesgo",
   actualizar_datos: "Actualizó sus datos",
   editar: "Editó",
 };

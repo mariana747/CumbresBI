@@ -54,11 +54,12 @@ import {
   X as CloseIcon,
 } from "lucide-react";
 import AppShell, { notifySolicitudEliminacionChanged } from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { BRAND } from "@/theme/theme";
 import { SessionUser, getSession, puedeVerBitacora } from "@/lib/auth";
-import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import { BitacoraEvento, friendlyActionName, friendlyServiceName, listBitacora } from "@/lib/audit";
 import {
   AUTORIDAD_POR_TIPO_IDENTIFICACION,
@@ -104,9 +105,11 @@ import {
 import {
   TesoreriaComplementoPago,
   TesoreriaFactura,
+  TesoreriaFlujo,
   TesoreriaNotaCredito,
   listComplementosPago,
   listFacturas,
+  listFlujos,
   listNotasCredito,
 } from "@/lib/tesoreria";
 
@@ -159,11 +162,12 @@ const FACULTADES_LABELS: Record<string, string> = {
 // cada tipo (eso ya vive en las pantallas propias de Tesoreria).
 type TransaccionUnificada = {
   id: string;
-  tipo: "Factura" | "Complemento de pago" | "Nota de crédito";
+  tipo: "Flujo" | "Factura" | "Complemento de pago" | "Nota de crédito";
   folio: string;
   fecha: string | null;
   monto: string | null;
   estado: string | null;
+  concepto?: string | null;
 };
 
 // Agrupado en secciones (combinando con KycDetalleDialog.tsx de
@@ -276,6 +280,11 @@ export default function PldExpedienteDetallePage() {
   const [historial, setHistorial] = useState<BitacoraEvento[] | null>(null);
   const [historialLoading, setHistorialLoading] = useState(false);
   const [historialError, setHistorialError] = useState<string | null>(null);
+  const [historialFiltroDesde, setHistorialFiltroDesde] = useState("");
+  const [historialFiltroHasta, setHistorialFiltroHasta] = useState("");
+  const [historialFiltroAccion, setHistorialFiltroAccion] = useState("");
+  const [historialBusqueda, setHistorialBusqueda] = useState("");
+  const [actorLabels, setActorLabels] = useState<Record<string, string>>({});
   // Representantes legales (02/Sep/2026, pedido explicito, solo aplica a
   // Moral - ver tab "Representantes legales"). Mismo patron de carga
   // perezosa que historial de auditoria arriba.
@@ -299,6 +308,9 @@ export default function PldExpedienteDetallePage() {
   const [transacciones, setTransacciones] = useState<TransaccionUnificada[] | null>(null);
   const [transaccionesLoading, setTransaccionesLoading] = useState(false);
   const [transaccionesError, setTransaccionesError] = useState<string | null>(null);
+  const [transFiltroDesde, setTransFiltroDesde] = useState("");
+  const [transFiltroHasta, setTransFiltroHasta] = useState("");
+  const [transFiltroTipo, setTransFiltroTipo] = useState("");
   // Edicion manual del expediente (18/Ago/2026) - ver
   // pld/audit_utils.py::contexto_kyc y views.py::update, ya auditado en el
   // backend; esto es la UI que faltaba. editandoCampos es null cuando no
@@ -461,16 +473,36 @@ export default function PldExpedienteDetallePage() {
   // audit-service/auditoria/views.py::get_queryset. Carga perezosa: solo
   // al abrir la pestana, y solo si el usuario tiene el mismo gate que la
   // bitacora general (GLOBAL o rol AUDITOR).
-  useEffect(() => {
-    if (tab !== 4 || !kyc || !puedeVerHistorial || historial !== null) return;
+  function cargarHistorial(params?: { desde?: string; hasta?: string; accion?: string; busqueda?: string }) {
+    if (!kyc || !puedeVerHistorial) return;
     setHistorialLoading(true);
     setHistorialError(null);
-    listBitacora({ search: kyc.id_contraparte })
+    setHistorial(null);
+    const textoBusqueda = params?.busqueda ?? historialBusqueda;
+    listBitacora({
+      search: textoBusqueda ? `${kyc.id_contraparte} ${textoBusqueda}` : kyc.id_contraparte,
+      ...(params?.desde && { desde: params.desde }),
+      ...(params?.hasta && { hasta: `${params.hasta}T23:59:59` }),
+      ...(params?.accion && { accion: params.accion }),
+    })
       .then(setHistorial)
       .catch((err) => setHistorialError(err instanceof Error ? err.message : "Error al cargar el historial"))
       .finally(() => setHistorialLoading(false));
+  }
+
+  useEffect(() => {
+    if (tab !== 4 || !kyc || !puedeVerHistorial || historial !== null) return;
+    cargarHistorial();
+    if (Object.keys(actorLabels).length === 0) {
+      listUsers().then((users: IamUser[]) => {
+        const labels: Record<string, string> = {};
+        users.forEach((u) => { labels[u.user_id] = u.display_name || u.primary_email; });
+        setActorLabels(labels);
+      }).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, kyc, puedeVerHistorial]);
+
 
   function cargarRepresentantes() {
     if (!kyc) return;
@@ -493,14 +525,25 @@ export default function PldExpedienteDetallePage() {
     setTransaccionesLoading(true);
     setTransaccionesError(null);
     Promise.all([
+      listFlujos({ contraparte: kyc.id_contraparte, pageSize: 200 }),
       listFacturas({ contraparte: kyc.id_contraparte, pageSize: 200 }),
       listComplementosPago(undefined, kyc.id_contraparte, undefined, undefined, 200),
       listNotasCredito(undefined, kyc.id_contraparte, undefined, undefined, 200),
     ])
-      .then(([facturasPage, complementosPage, notasPage]) => {
+      .then(([flujosPage, facturasPage, complementosPage, notasPage]) => {
+        const flujos = flujosPage.results;
         const facturas = facturasPage.results;
         const complementos = complementosPage.results;
         const notas = notasPage.results;
+        const filaFlujo = (f: TesoreriaFlujo): TransaccionUnificada => ({
+          id: `flujo-${f.id_flujo}`,
+          tipo: "Flujo",
+          folio: f.id_flujo,
+          fecha: f.fecha_efectiva,
+          monto: f.total_mxp,
+          estado: f.pagado ? "Pagado" : f.autorizacion ? "Autorizado" : "Pendiente",
+          concepto: f.concepto,
+        });
         const filaFactura = (f: TesoreriaFactura): TransaccionUnificada => ({
           id: `factura-${f.id}`,
           tipo: "Factura",
@@ -526,6 +569,7 @@ export default function PldExpedienteDetallePage() {
           estado: n.estado,
         });
         const filas = [
+          ...flujos.map(filaFlujo),
           ...facturas.map(filaFactura),
           ...complementos.map(filaComplemento),
           ...notas.map(filaNota),
@@ -2054,9 +2098,47 @@ export default function PldExpedienteDetallePage() {
                 {tab === 3 && (
                   <Stack spacing={2}>
                     <Typography variant="body2" color="text.secondary">
-                      Facturas, complementos de pago y notas de crédito de esta contraparte en
-                      tesoreria-service — lectura directa, en tiempo real, sin duplicar datos aquí.
+                      Flujos de tesorería, facturas, complementos de pago y notas de crédito de esta
+                      contraparte — lectura directa de tesoreria-service, sin duplicar datos aquí.
                     </Typography>
+                    {!transaccionesLoading && !!transacciones?.length && (
+                      <Box sx={{ mx: -2.5, mt: -3 }}>
+                        <FiltrosBar flush>
+                          <TextField
+                            size="small"
+                            label="Desde"
+                            type="date"
+                            value={transFiltroDesde}
+                            onChange={(e) => setTransFiltroDesde(e.target.value)}
+                            InputLabelProps={{ shrink: true }}
+                            sx={{ width: 160 }}
+                          />
+                          <TextField
+                            size="small"
+                            label="Hasta"
+                            type="date"
+                            value={transFiltroHasta}
+                            onChange={(e) => setTransFiltroHasta(e.target.value)}
+                            InputLabelProps={{ shrink: true }}
+                            sx={{ width: 160 }}
+                          />
+                          <TextField
+                            select
+                            size="small"
+                            label="Tipo"
+                            value={transFiltroTipo}
+                            onChange={(e) => setTransFiltroTipo(e.target.value)}
+                            sx={{ width: 200 }}
+                          >
+                            <MenuItem value="">Todos</MenuItem>
+                            <MenuItem value="Flujo">Flujo</MenuItem>
+                            <MenuItem value="Factura">Factura</MenuItem>
+                            <MenuItem value="Complemento de pago">Complemento de pago</MenuItem>
+                            <MenuItem value="Nota de crédito">Nota de crédito</MenuItem>
+                          </TextField>
+                        </FiltrosBar>
+                      </Box>
+                    )}
                     {transaccionesLoading && (
                       <Stack alignItems="center" sx={{ py: 4 }}>
                         <CircularProgress size={24} />
@@ -2065,55 +2147,127 @@ export default function PldExpedienteDetallePage() {
                     {transaccionesError && <Alert severity="error">{transaccionesError}</Alert>}
                     {!transaccionesLoading && !transaccionesError && transacciones?.length === 0 && (
                       <Alert severity="info">
-                        Todavía no hay facturas, complementos de pago ni notas de crédito para esta
-                        contraparte en Tesorería.
+                        Todavía no hay flujos ni documentos CFDI para esta contraparte en Tesorería.
                       </Alert>
                     )}
-                    {!transaccionesLoading && !!transacciones?.length && (
-                      <TableContainer>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Tipo</TableCell>
-                              <TableCell>Folio / UUID</TableCell>
-                              <TableCell>Fecha</TableCell>
-                              <TableCell align="right">Monto</TableCell>
-                              <TableCell>Estado</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {transacciones.map((t) => (
-                              <TableRow key={t.id}>
-                                <TableCell>{t.tipo}</TableCell>
-                                <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.folio}</TableCell>
-                                <TableCell>
-                                  {t.fecha ? new Date(t.fecha).toLocaleDateString("es-MX") : "—"}
-                                </TableCell>
-                                <TableCell align="right">
-                                  {t.monto
-                                    ? Number(t.monto).toLocaleString("es-MX", {
-                                        style: "currency",
-                                        currency: "MXN",
-                                      })
-                                    : "—"}
-                                </TableCell>
-                                <TableCell>{t.estado || "—"}</TableCell>
+                    {!transaccionesLoading && !!transacciones?.length && (() => {
+                      const filtradas = transacciones.filter((t) => {
+                        if (transFiltroTipo && t.tipo !== transFiltroTipo) return false;
+                        if (transFiltroDesde && t.fecha && t.fecha < transFiltroDesde) return false;
+                        if (transFiltroHasta && t.fecha && t.fecha > `${transFiltroHasta}T23:59:59`) return false;
+                        return true;
+                      });
+                      return filtradas.length === 0 ? (
+                        <Alert severity="info">
+                          No hay registros que coincidan con los filtros aplicados.
+                        </Alert>
+                      ) : (
+                        <TableContainer>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Tipo</TableCell>
+                                <TableCell>Folio / UUID</TableCell>
+                                <TableCell>Concepto</TableCell>
+                                <TableCell>Fecha</TableCell>
+                                <TableCell align="right">Monto (MXN)</TableCell>
+                                <TableCell>Estado</TableCell>
                               </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    )}
+                            </TableHead>
+                            <TableBody>
+                              {filtradas.map((t) => (
+                                <TableRow key={t.id}>
+                                  <TableCell>
+                                    <Chip
+                                      size="small"
+                                      label={t.tipo}
+                                      variant="outlined"
+                                      color={t.tipo === "Flujo" ? "primary" : "default"}
+                                    />
+                                  </TableCell>
+                                  <TableCell sx={{ fontFamily: "var(--font-mono, monospace)", fontSize: "0.75rem" }}>{t.folio}</TableCell>
+                                  <TableCell sx={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {t.concepto || "—"}
+                                  </TableCell>
+                                  <TableCell sx={{ whiteSpace: "nowrap" }}>
+                                    {t.fecha ? new Date(t.fecha).toLocaleDateString("es-MX") : "—"}
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    {t.monto
+                                      ? Number(t.monto).toLocaleString("es-MX", { style: "currency", currency: "MXN" })
+                                      : "—"}
+                                  </TableCell>
+                                  <TableCell>{t.estado || "—"}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      );
+                    })()}
                   </Stack>
                 )}
 
                 {tab === 4 && puedeVerHistorial && (
-                  <Stack spacing={2}>
-                    <Typography variant="body2" color="text.secondary">
-                      Todo lo que le ha pasado a este expediente y sus documentos, cruzando pld-service y el
-                      Motor Documental (docint) — quién aprobó, subió, eliminó o editó cada dato. Es la misma
-                      bitácora de Auditoría (Super Admin), filtrada solo a este cliente.
-                    </Typography>
+                  <Stack>
+                    <Box sx={{ mx: -2.5, mt: -3 }}>
+                    <FiltrosBar
+                      flush
+                      search={historialBusqueda}
+                      onSearchChange={setHistorialBusqueda}
+                      searchPlaceholder="Buscar por acción o actor..."
+                      onAplicarFiltros={() => cargarHistorial({
+                        desde: historialFiltroDesde || undefined,
+                        hasta: historialFiltroHasta || undefined,
+                        accion: historialFiltroAccion || undefined,
+                        busqueda: historialBusqueda || undefined,
+                      })}
+                      onLimpiarFiltros={() => {
+                        setHistorialFiltroDesde("");
+                        setHistorialFiltroHasta("");
+                        setHistorialFiltroAccion("");
+                        setHistorialBusqueda("");
+                        cargarHistorial({ busqueda: "" });
+                      }}
+                    >
+                      <TextField
+                        label="Desde"
+                        type="date"
+                        size="small"
+                        value={historialFiltroDesde}
+                        onChange={(e) => setHistorialFiltroDesde(e.target.value)}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                      <TextField
+                        label="Hasta"
+                        type="date"
+                        size="small"
+                        value={historialFiltroHasta}
+                        onChange={(e) => setHistorialFiltroHasta(e.target.value)}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                      <FormControl size="small">
+                        <InputLabel id="hist-filtro-accion-label">Acción</InputLabel>
+                        <Select
+                          labelId="hist-filtro-accion-label"
+                          label="Acción"
+                          value={historialFiltroAccion}
+                          onChange={(e) => setHistorialFiltroAccion(e.target.value)}
+                        >
+                          <MenuItem value="">Todas</MenuItem>
+                          <MenuItem value="pld_contrapartes_kyc.evaluar_riesgo">Evaluó riesgo</MenuItem>
+                          <MenuItem value="pld_contrapartes_kyc.aprobar">Aprobó expediente</MenuItem>
+                          <MenuItem value="pld_contrapartes_kyc.marcar_sospechoso">Marcó sospechoso</MenuItem>
+                          <MenuItem value="pld_contrapartes_kyc.congelar">Congeló cuenta</MenuItem>
+                          <MenuItem value="pld_contrapartes_kyc.reactivar_cuenta">Reactivó cuenta</MenuItem>
+                          <MenuItem value="pld_contrapartes_kyc.editar">Editó datos</MenuItem>
+                          <MenuItem value="pld_contrapartes_docs.subir">Subió documento</MenuItem>
+                          <MenuItem value="pld_contrapartes_docs.aprobar">Aprobó documento</MenuItem>
+                          <MenuItem value="pld_contrapartes_docs.eliminar">Eliminó documento</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </FiltrosBar>
+                    </Box>
 
                     {historialLoading && (
                       <Stack alignItems="center" sx={{ py: 4 }}>
@@ -2138,10 +2292,10 @@ export default function PldExpedienteDetallePage() {
                           <TableBody>
                             {historial.map((evento) => (
                               <TableRow key={evento.event_id}>
-                                <TableCell>{new Date(evento.ocurrido_en).toLocaleString("es-MX")}</TableCell>
+                                <TableCell sx={{ whiteSpace: "nowrap" }}>{new Date(evento.ocurrido_en).toLocaleString("es-MX")}</TableCell>
                                 <TableCell>{friendlyServiceName(evento.servicio_origen)}</TableCell>
                                 <TableCell>{friendlyActionName(evento.accion)}</TableCell>
-                                <TableCell>{evento.actor_user_id}</TableCell>
+                                <TableCell>{actorLabels[evento.actor_user_id] ?? evento.actor_user_id}</TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
@@ -2243,6 +2397,7 @@ export default function PldExpedienteDetallePage() {
                       ))}
                   </Stack>
                 )}
+
               </Box>
             </Paper>
           </Grid>

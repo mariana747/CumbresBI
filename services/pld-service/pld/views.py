@@ -711,17 +711,27 @@ class PldContraparteKycViewSet(ModelViewSet):
         self.check_permissions(request)
 
         recalcular = request.data.get("recalcular") is True
+        actor = request.effective_scope.identity_user_id
         if recalcular:
+            grado_anterior = kyc.grado_riesgo
             kyc.grado_riesgo_manual = False
             kyc.grado_riesgo = kyc.calcular_grado_riesgo()
             if "notas_riesgo" in request.data:
                 kyc.notas_riesgo = request.data["notas_riesgo"]
-            actor = request.effective_scope.identity_user_id
             kyc.updated_by = actor
             kyc.save(update_fields=["grado_riesgo_manual", "grado_riesgo", "notas_riesgo", "updated_by", "updated_at"])
+            emitir_evento_auditoria(
+                "pld_contrapartes_kyc.evaluar_riesgo",
+                "pld_contrapartes_kyc",
+                str(kyc.id_kyc),
+                actor_user_id=actor,
+                valores_previos={"grado_riesgo": grado_anterior},
+                valores_nuevos={"grado_riesgo": kyc.grado_riesgo, "origen": "AUTO", "notas_riesgo": kyc.notas_riesgo},
+            )
             return Response(self.get_serializer(kyc).data)
 
         campos = {}
+        grado_anterior = kyc.grado_riesgo
         if "es_pep" in request.data:
             kyc.es_pep = request.data["es_pep"]
             campos["es_pep"] = kyc.es_pep
@@ -738,9 +748,16 @@ class PldContraparteKycViewSet(ModelViewSet):
             campos["grado_riesgo"] = kyc.grado_riesgo
             campos["grado_riesgo_manual"] = True
 
-        actor = request.effective_scope.identity_user_id
         kyc.updated_by = actor
         kyc.save(update_fields=list(campos.keys()) + ["updated_by", "updated_at"])
+        emitir_evento_auditoria(
+            "pld_contrapartes_kyc.evaluar_riesgo",
+            "pld_contrapartes_kyc",
+            str(kyc.id_kyc),
+            actor_user_id=actor,
+            valores_previos={"grado_riesgo": grado_anterior},
+            valores_nuevos={"grado_riesgo": kyc.grado_riesgo, "origen": "MANUAL", "notas_riesgo": kyc.notas_riesgo},
+        )
         return Response(self.get_serializer(kyc).data)
 
     @action(detail=True, methods=["post"])
