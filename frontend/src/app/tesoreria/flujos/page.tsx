@@ -1597,6 +1597,7 @@ function TesoreriaFlujosPageContent() {
                   setCuentaSeleccionada(seleccion);
                   setForm({ ...form, cuenta: seleccion?.id_cuenta_bancaria || "" });
                 }}
+                sociedades={sociedades}
               />
               <TextField
                 size="small"
@@ -1653,18 +1654,20 @@ function TesoreriaFlujosPageContent() {
                     </Stack>
                   )}
                   <TextField size="small" label="Pagado" value={editing.pagado ? "Sí" : "No"} disabled fullWidth />
-                  <TextField
-                    size="small"
-                    label={
-                      <LabelTip
-                        text="Fecha de pago"
-                        tip='Se llena sola al "Registrar pago", no es editable aquí.'
-                      />
-                    }
-                    value={editing.fecha_pago || "—"}
-                    disabled
-                    fullWidth
-                  />
+                  {editing.pagado && (
+                    <TextField
+                      size="small"
+                      label={
+                        <LabelTip
+                          text="Fecha de pago"
+                          tip='Se llena sola al "Registrar pago", no es editable aquí.'
+                        />
+                      }
+                      value={editing.fecha_pago || "—"}
+                      disabled
+                      fullWidth
+                    />
+                  )}
                 </>
               ) : (
                 <Typography variant="caption" color="text.secondary">
