@@ -33,7 +33,7 @@ import ContratoSelector from "@/components/ContratoSelector";
 import FiltrosBar from "@/components/FiltrosBar";
 import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive";
 import { SessionUser, getSession } from "@/lib/auth";
-import { MIME_TYPES_EXTRACTO } from "@/lib/googleDriveFilePicker";
+import { MIME_TYPES_COMPROBANTE, MIME_TYPES_EXTRACTO } from "@/lib/googleDriveFilePicker";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import { useExportarSheets } from "@/lib/useExportarSheets";
 import {
@@ -53,7 +53,11 @@ import {
   listCuentas,
   listMovimientosBancarios,
   reporteConciliacion,
+  aprobarFlujo,
+  registrarPagoFlujo,
+  subirComprobanteFlujo,
   sugerenciasMovimientoBancario,
+  updateFlujo,
   vincularMovimientoBancario,
 } from "@/lib/tesoreria";
 
@@ -221,6 +225,8 @@ export default function TesoreriaConciliacionPage() {
   // vivo (23/Sep/2026, ContratoSelector) en vez de una lista fija de 200 -
   // hay 900+ contratos reales.
   const [contratoNuevoFlujo, setContratoNuevoFlujo] = useState<TesoreriaContrato | null>(null);
+  const [archivoComprobanteNuevoFlujo, setArchivoComprobanteNuevoFlujo] = useState<File | null>(null);
+  const [linkComprobanteNuevoFlujo, setLinkComprobanteNuevoFlujo] = useState("");
   const [creandoFlujo, setCreandoFlujo] = useState(false);
 
   useEffect(() => {
@@ -344,6 +350,8 @@ export default function TesoreriaConciliacionPage() {
   async function handleVerSugerencias(movimiento: TesoreriaMovimientoBancario) {
     setCargandoSugerencias(movimiento.id);
     setContratoNuevoFlujo(null);
+    setArchivoComprobanteNuevoFlujo(null);
+    setLinkComprobanteNuevoFlujo("");
     try {
       const opciones = await sugerenciasMovimientoBancario(movimiento.id);
       setSugerenciasDialog({ movimiento, opciones });
@@ -359,11 +367,17 @@ export default function TesoreriaConciliacionPage() {
     setCreandoFlujo(true);
     setError(null);
     try {
-      // 28/Sep/2026, "no cambie de pagina" - antes redirigia a Flujos; el
-      // backend ya crea el Flujo completo con los datos del movimiento
-      // (cuenta/concepto/monto/fecha), asi que solo hace falta refrescar
-      // la lista de conciliacion, sin salir de la pantalla.
-      await crearFlujoDesdeMovimiento(sugerenciasDialog.movimiento.id, contratoNuevoFlujo.id_contrato);
+      const flujo = await crearFlujoDesdeMovimiento(sugerenciasDialog.movimiento.id, contratoNuevoFlujo.id_contrato);
+      const tieneComprobante = !!archivoComprobanteNuevoFlujo || !!linkComprobanteNuevoFlujo;
+      if (archivoComprobanteNuevoFlujo) {
+        await subirComprobanteFlujo(flujo.id_flujo, archivoComprobanteNuevoFlujo, session?.user_id);
+      } else if (linkComprobanteNuevoFlujo) {
+        await updateFlujo(flujo.id_flujo, { linkComprobanteBanco: linkComprobanteNuevoFlujo });
+      }
+      if (tieneComprobante) {
+        await aprobarFlujo(flujo.id_flujo);
+        await registrarPagoFlujo(flujo.id_flujo);
+      }
       setSugerenciasDialog(null);
       refreshMovimientos();
     } catch (err) {
@@ -1008,13 +1022,42 @@ export default function TesoreriaConciliacionPage() {
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
                 Cuenta, concepto y monto ya vienen del estado de cuenta; solo falta el contrato.
               </Typography>
-              <Stack direction="row" spacing={1}>
+              <Stack spacing={1.5}>
                 <ContratoSelector value={contratoNuevoFlujo} onChange={setContratoNuevoFlujo} />
+                <Divider sx={{ mt: 1 }} />
+                <Typography variant="subtitle2">Comprobante de pago (opcional)</Typography>
+                <SelectorArchivoLocalODrive
+                  archivo={archivoComprobanteNuevoFlujo}
+                  onChange={(archivo) => {
+                    setArchivoComprobanteNuevoFlujo(archivo);
+                    if (archivo) setLinkComprobanteNuevoFlujo("");
+                  }}
+                  accept="image/*,application/pdf"
+                  mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+                  tituloDrive="Elige el comprobante"
+                />
+                <Typography variant="caption" color="text.secondary" align="center">
+                  — o pega el link —
+                </Typography>
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Link del comprobante"
+                  placeholder="https://..."
+                  value={linkComprobanteNuevoFlujo}
+                  disabled={!!archivoComprobanteNuevoFlujo}
+                  onChange={(e) => setLinkComprobanteNuevoFlujo(e.target.value)}
+                />
+                {(archivoComprobanteNuevoFlujo || linkComprobanteNuevoFlujo) && (
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    Al subir comprobante el flujo se aprobará y marcará como pagado automáticamente.
+                  </Alert>
+                )}
+                <Divider />
                 <Button
                   variant="contained"
                   disabled={!contratoNuevoFlujo || creandoFlujo}
                   onClick={handleCrearFlujo}
-                  sx={{ flexShrink: 0 }}
                 >
                   {creandoFlujo ? <CircularProgress size={16} /> : "Crear Flujo"}
                 </Button>
