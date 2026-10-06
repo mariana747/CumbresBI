@@ -32,6 +32,7 @@ import {
   ReporteDiario,
   ReporteDiarioCorte,
   ReporteDiarioCuenta,
+  ReporteDiarioTransaccion,
   TesoreriaCuenta,
   enviarReporteDiario,
   getReporteDiario,
