@@ -702,6 +702,47 @@ class PldContraparteKycViewSet(ModelViewSet):
         kyc.refresh_from_db()
         return Response(self.get_serializer(kyc).data)
 
+    @action(detail=True, methods=["patch"], url_path="evaluar-riesgo")
+    def evaluar_riesgo(self, request, pk=None):
+        """Guarda grado_riesgo/es_pep/notas_riesgo manualmente y prende
+        grado_riesgo_manual. Si se manda recalcular=true en el body, apaga
+        grado_riesgo_manual y recalcula automatico."""
+        kyc = self.get_object()
+        self.check_permissions(request)
+
+        recalcular = request.data.get("recalcular") is True
+        if recalcular:
+            kyc.grado_riesgo_manual = False
+            kyc.grado_riesgo = kyc.calcular_grado_riesgo()
+            if "notas_riesgo" in request.data:
+                kyc.notas_riesgo = request.data["notas_riesgo"]
+            actor = request.effective_scope.identity_user_id
+            kyc.updated_by = actor
+            kyc.save(update_fields=["grado_riesgo_manual", "grado_riesgo", "notas_riesgo", "updated_by", "updated_at"])
+            return Response(self.get_serializer(kyc).data)
+
+        campos = {}
+        if "es_pep" in request.data:
+            kyc.es_pep = request.data["es_pep"]
+            campos["es_pep"] = kyc.es_pep
+        if "notas_riesgo" in request.data:
+            kyc.notas_riesgo = request.data["notas_riesgo"]
+            campos["notas_riesgo"] = kyc.notas_riesgo
+        if "grado_riesgo" in request.data:
+            nuevo = request.data["grado_riesgo"]
+            opciones_validas = [c for c, _ in PldContraparteKyc.GRADO_RIESGO_CHOICES]
+            if nuevo not in opciones_validas:
+                return Response({"grado_riesgo": ["Valor no válido."]}, status=400)
+            kyc.grado_riesgo = nuevo
+            kyc.grado_riesgo_manual = True
+            campos["grado_riesgo"] = kyc.grado_riesgo
+            campos["grado_riesgo_manual"] = True
+
+        actor = request.effective_scope.identity_user_id
+        kyc.updated_by = actor
+        kyc.save(update_fields=list(campos.keys()) + ["updated_by", "updated_at"])
+        return Response(self.get_serializer(kyc).data)
+
     @action(detail=True, methods=["post"])
     def reactivar_auto_categoria(self, request, pk=None):
         """Apaga categoria_cumplimiento_manual y recalcula de inmediato

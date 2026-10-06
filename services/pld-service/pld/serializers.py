@@ -240,6 +240,10 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "fecha_vencimiento",
             "politicas_aceptadas_en",
             "veracidad_declarada_en",
+            "grado_riesgo",
+            "grado_riesgo_manual",
+            "es_pep",
+            "notas_riesgo",
         ]
         # estado_llenado_manual NO esta aqui a proposito: no se expone para
         # setear directo, solo se prende solo (ver update() abajo) cuando el
@@ -248,6 +252,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id_kyc",
             "estado_llenado_manual",
+            "grado_riesgo_manual",
             # categoria_cumplimiento_manual (04/Sep/2026): mismo criterio que
             # estado_llenado_manual arriba - se prende solo en update() al
             # detectar que llego categoria_cumplimiento en el PATCH, nunca a
