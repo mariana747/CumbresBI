@@ -34,6 +34,10 @@ const GATEWAY_PATH_PREFIXES = [
   "/drive",
   "/mail",
   "/obra",
+  "/about",
+  "/privacidad",
+  "/terminos"
+
 ];
 
 export function middleware(request: NextRequest) {
