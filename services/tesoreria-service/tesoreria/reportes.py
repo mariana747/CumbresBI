@@ -287,6 +287,9 @@ def _calcular_corte(cuentas, fecha) -> dict:
                         else None
                     ),
                     "concepto_factura": t.contrato.concepto_factura if t.contrato_id else None,
+                    "id_contrato": t.contrato_id,
+                    "contrato_proyecto": t.contrato.proyecto if t.contrato_id else None,
+                    "contrato_sociedad": t.contrato.sociedad if t.contrato_id else None,
                 }
                 for t in transacciones
             ],

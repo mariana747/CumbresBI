@@ -165,6 +165,16 @@ export default function TesoreriaReporteDiarioPage() {
     return cuentas.filter((c) => c.sociedad && rfcs.has(c.sociedad));
   }, [cuentas, sociedadesElegidas]);
 
+  function labelContrato(t: ReporteDiarioTransaccion): string | null {
+    if (!t.id_contrato) return null;
+    const soc = sociedades.find((s) => s.rfc === t.contrato_sociedad);
+    const aliasSoc = soc ? (soc.alias_sociedad || soc.razon_social) : null;
+    const partes = [t.contraparte, t.contrato_proyecto].filter(Boolean).join("/");
+    const sufSociedad = aliasSoc ? `//${aliasSoc}` : "";
+    const concepto = t.concepto_factura ? ` - ${t.concepto_factura}` : "";
+    return `${partes}${sufSociedad}${concepto}` || null;
+  }
+
   function aliasCuenta(c: ReporteDiarioCuenta, sociedadRfc: string): string {
     const soc = sociedades.find((s) => s.rfc === sociedadRfc);
     const numero = c.cuenta || c.clabe;
@@ -337,7 +347,12 @@ export default function TesoreriaReporteDiarioPage() {
                                   <TableBody>
                                     {c.transacciones.map((t) => (
                                       <TableRow key={t.id_flujo}>
-                                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{t.id_flujo}</TableCell>
+                                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                                          <div>{t.id_flujo}</div>
+                                          {labelContrato(t) && (
+                                            <div style={{ fontSize: "0.75em", color: "var(--mui-palette-text-secondary)" }}>{labelContrato(t)}</div>
+                                          )}
+                                        </TableCell>
                                         <TableCell>{t.contraparte || "—"}</TableCell>
                                         <TableCell>{t.concepto_factura || "—"}</TableCell>
                                         <TableCell>
@@ -433,6 +448,11 @@ export default function TesoreriaReporteDiarioPage() {
                               <Typography variant="caption" sx={{ fontFamily: "var(--font-mono, monospace)", display: "block" }}>
                                 {t.id_flujo}
                               </Typography>
+                              {labelContrato(t) && (
+                                <Typography variant="caption" sx={{ fontFamily: "var(--font-mono, monospace)", display: "block", color: "text.secondary" }}>
+                                  {labelContrato(t)}
+                                </Typography>
+                              )}
                               {t.contraparte && (
                                 <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                                   {t.contraparte}
