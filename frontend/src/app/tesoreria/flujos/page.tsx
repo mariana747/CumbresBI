@@ -88,6 +88,7 @@ import {
   confirmarConciliacionFlujo,
   createFlujo,
   createRecNomina,
+  updateContrato,
   exportarFlujosSheets,
   getContratoGenericoNomina,
   getContratoGenericoReembolsoPorSociedad,
@@ -114,6 +115,7 @@ import {
 const FORM_VACIO = {
   // Detalles
   contrato: "",
+  linkContrato: "",
   // periodoNomina (10/Sep/2026, modulo de Nominas Fase 1) - opcional, solo
   // presente si el Flujo es una linea de pago de una Nomina. Al elegirse
   // autocompleta contrato/concepto (ver onChange del selector en Detalles).
@@ -700,6 +702,7 @@ function TesoreriaFlujosPageContent() {
     }
     setForm({
       contrato: f.contrato || "",
+      linkContrato: "",
       periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
@@ -748,6 +751,7 @@ function TesoreriaFlujosPageContent() {
     }
     setForm({
       contrato: f.contrato || "",
+      linkContrato: "",
       periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
@@ -801,6 +805,9 @@ function TesoreriaFlujosPageContent() {
           cuenta: form.cuenta || undefined,
         });
       } else {
+        if (form.linkContrato && form.linkContrato !== (contratoForm?.link_contrato || "")) {
+          await updateContrato(form.contrato, { linkContrato: form.linkContrato });
+        }
         await createFlujo({
           contrato: form.contrato,
           periodoNomina: form.periodoNomina || undefined,
@@ -1436,9 +1443,19 @@ function TesoreriaFlujosPageContent() {
                 value={contratoForm}
                 onChange={(seleccion) => {
                   setContratoForm(seleccion);
-                  setForm({ ...form, contrato: seleccion?.id_contrato || "" });
+                  setForm({ ...form, contrato: seleccion?.id_contrato || "", linkContrato: seleccion?.link_contrato || "" });
                 }}
               />
+              {contratoForm && !editing && (
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Link del contrato"
+                  placeholder="https://..."
+                  value={form.linkContrato}
+                  onChange={(e) => setForm({ ...form, linkContrato: e.target.value })}
+                />
+              )}
               {form.reembolso && (
                 <Typography variant="caption" color="text.secondary">
                   Para reembolsos sin contrato de obra, elige la empresa abajo para usar su contrato genérico.
@@ -2008,11 +2025,33 @@ function TesoreriaFlujosPageContent() {
                     ) : editing.link_comprobante_banco && !reemplazandoComprobante ? (
                       <>
                         <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
-                          <Stack direction="row" spacing={1.5} alignItems="center">
-                            <Link2 size={18} strokeWidth={1.5} />
-                            <Typography variant="body2">Comprobante (link)</Typography>
+                          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+                            <Link2 size={18} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography variant="body2" fontWeight={500}>
+                                Comprobante (link)
+                              </Typography>
+                              <Typography
+                                variant="body2"
+                                component="a"
+                                href={editing.link_comprobante_banco}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  display: "block",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                  color: "primary.main",
+                                  textDecoration: "none",
+                                  "&:hover": { textDecoration: "underline" },
+                                }}
+                              >
+                                {editing.link_comprobante_banco}
+                              </Typography>
+                            </Box>
                           </Stack>
-                          <Stack direction="row" spacing={1} alignItems="center">
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
                             <IconButton
                               size="small"
                               aria-label="Abrir link"
