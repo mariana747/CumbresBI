@@ -1402,22 +1402,33 @@ export async function descargarFlujosCsv(opciones?: {
   search?: string;
   contrato?: string;
   sociedad?: string;
+  nomina?: string;
+  categoriaGasto?: TesoreriaCategoriaGasto;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  validacionEstado?: TesoreriaValidacionEstado;
+  titulo?: string;
 }): Promise<void> {
   const params = new URLSearchParams({ formato: "csv" });
   if (opciones?.search) params.set("search", opciones.search);
   if (opciones?.contrato) params.set("contrato", opciones.contrato);
   if (opciones?.sociedad) params.set("sociedad", opciones.sociedad);
+  if (opciones?.nomina) params.set("nomina", opciones.nomina);
+  if (opciones?.categoriaGasto) params.set("categoria_gasto", opciones.categoriaGasto);
+  if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
+  if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
+  if (opciones?.validacionEstado) params.set("validacion_estado", opciones.validacionEstado);
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/flujos/exportar_sheets/?${params.toString()}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ titulo: opciones?.titulo }) }
   );
   if (!response.ok) throw await friendlyApiError("TESORERIA", response);
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "flujos.csv";
+  link.download = `${opciones?.titulo ?? "flujos"}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -1439,22 +1450,30 @@ export async function exportarFlujosSheets(opciones?: {
   search?: string;
   contrato?: string;
   sociedad?: string;
+  nomina?: string;
+  categoriaGasto?: TesoreriaCategoriaGasto;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  validacionEstado?: TesoreriaValidacionEstado;
   carpetaId?: string;
+  titulo?: string;
 }): Promise<ExportarSheetsResultado> {
   const params = new URLSearchParams();
   if (opciones?.search) params.set("search", opciones.search);
   if (opciones?.contrato) params.set("contrato", opciones.contrato);
   if (opciones?.sociedad) params.set("sociedad", opciones.sociedad);
+  if (opciones?.nomina) params.set("nomina", opciones.nomina);
+  if (opciones?.categoriaGasto) params.set("categoria_gasto", opciones.categoriaGasto);
+  if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
+  if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
+  if (opciones?.validacionEstado) params.set("validacion_estado", opciones.validacionEstado);
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/flujos/exportar_sheets/?${params.toString()}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // carpeta_id (14/Sep/2026, "dejar que ellos puedan escoger donde
-      // guardar") - elegida con el Google Picker, ver
-      // lib/googleFolderPicker.ts; vacio = se queda en la raiz del Drive.
-      body: JSON.stringify({ carpeta_id: opciones?.carpetaId }),
+      body: JSON.stringify({ carpeta_id: opciones?.carpetaId, titulo: opciones?.titulo }),
     }
   );
   // 409 (no conectado) trae {conectado:false, url_autorizacion} - un
@@ -2702,6 +2721,7 @@ export async function listFacturas(opciones?: {
   fechaHasta?: string;
   estado?: TesoreriaFacturaEstado;
   categoriaGasto?: TesoreriaCategoriaGasto;
+  vinculada?: "true" | "false";
   page?: number;
   pageSize?: number;
 }): Promise<TesoreriaPaginado<TesoreriaFactura>> {
@@ -2713,6 +2733,7 @@ export async function listFacturas(opciones?: {
   if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
   if (opciones?.estado) params.set("estado", opciones.estado);
   if (opciones?.categoriaGasto) params.set("categoria_gasto", opciones.categoriaGasto);
+  if (opciones?.vinculada) params.set("vinculada", opciones.vinculada);
   params.set("page", String(opciones?.page ?? 1));
   params.set("page_size", String(opciones?.pageSize ?? 50));
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/?${params.toString()}`);
@@ -2916,6 +2937,32 @@ export async function createFactura(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...facturaBody(params), archivo, ticket_origen: idTicketOrigen || null }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function subirPdfFactura(id: number, archivo: File): Promise<TesoreriaFactura> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/subir_pdf/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+export async function subirXmlFactura(id: number, archivo: File): Promise<TesoreriaFactura> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/subir_xml/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);

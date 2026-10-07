@@ -305,6 +305,7 @@ export default function TesoreriaNotasCreditoPage() {
     try {
       const actualizada = await sincronizarDriveNotaCredito(editing.id);
       setEditing(actualizada);
+      if (actualizada.link_pdf) setForm((prev) => ({ ...prev, linkPdf: actualizada.link_pdf ?? "" }));
       refresh();
     } catch (err) {
       setErrorSincronizar(err instanceof Error ? err.message : "Error al sincronizar con Drive");

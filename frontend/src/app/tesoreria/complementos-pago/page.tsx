@@ -286,6 +286,7 @@ export default function TesoreriaComplementosPagoPage() {
     try {
       const actualizado = await sincronizarDriveComplementoPago(editing.id);
       setEditing(actualizado);
+      if (actualizado.link_pdf) setForm((prev) => ({ ...prev, linkPdf: actualizado.link_pdf ?? "" }));
       refresh();
     } catch (err) {
       setErrorSincronizar(err instanceof Error ? err.message : "Error al sincronizar con Drive");
