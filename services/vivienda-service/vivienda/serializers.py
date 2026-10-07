@@ -113,8 +113,14 @@ class ViviendaVentasExpedienteSerializer(serializers.ModelSerializer):
     `id_contrato` se queda como CharField plano (referencia laxa a
     tesoreria_contratos.id_contrato, servicio distinto, ver models.py)."""
 
-    vivienda_denominacion = serializers.CharField(source="vivienda.denominacion", read_only=True)
-    asesor_nombre = serializers.CharField(source="asesor.nombre", read_only=True)
+    vivienda_denominacion = serializers.SerializerMethodField()
+    asesor_nombre = serializers.SerializerMethodField()
+
+    def get_vivienda_denominacion(self, obj):
+        return obj.vivienda.denominacion if obj.vivienda_id else None
+
+    def get_asesor_nombre(self, obj):
+        return obj.asesor.nombre if obj.asesor_id else None
 
     class Meta:
         model = ViviendaVentasExpediente
