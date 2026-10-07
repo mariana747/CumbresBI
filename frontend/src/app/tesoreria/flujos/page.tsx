@@ -796,6 +796,7 @@ function TesoreriaFlujosPageContent() {
     try {
       if (editing) {
         await updateFlujo(editing.id_flujo, {
+          contrato: form.contrato || undefined,
           concepto: form.concepto || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
           totalMxp: form.totalMxp || undefined,
