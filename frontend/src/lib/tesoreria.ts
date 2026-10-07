@@ -818,6 +818,30 @@ export async function reporteConciliacion(params: {
   return response.json();
 }
 
+// Descarga CSV local de conciliacion bancaria - mismo endpoint que
+// exportarReporteConciliacionSheets pero con ?formato=csv.
+export async function descargarReporteConciliacionCsv(
+  params: { cuenta: string; corteEdc?: string; fechaInicio?: string; fechaFin?: string }
+): Promise<void> {
+  const query = new URLSearchParams({ cuenta: params.cuenta, formato: "csv" });
+  if (params.corteEdc) query.set("corte_edc", params.corteEdc);
+  if (params.fechaInicio) query.set("fecha_inicio", params.fechaInicio);
+  if (params.fechaFin) query.set("fecha_fin", params.fechaFin);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/reporte_conciliacion_sheets/?${query.toString()}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "conciliacion-bancaria.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 // Exportar a Google Sheets (14/Sep/2026, "en conciliacion bancaria,
 // reporte hay que agregar el exportar") - mismos filtros que
 // reporteConciliacion de arriba, ver exportarFlujosSheets para el patron
@@ -1372,6 +1396,32 @@ export function urlExportarFlujosCsv(opciones?: { search?: string; contrato?: st
   return `${TESORERIA_API_BASE_URL}/api/flujos/exportar_csv/?${params.toString()}`;
 }
 
+// Descarga CSV local de flujos (hotfix mientras Google verifica la app
+// OAuth) - mismo endpoint que exportarFlujosSheets pero con ?formato=csv.
+export async function descargarFlujosCsv(opciones?: {
+  search?: string;
+  contrato?: string;
+  sociedad?: string;
+}): Promise<void> {
+  const params = new URLSearchParams({ formato: "csv" });
+  if (opciones?.search) params.set("search", opciones.search);
+  if (opciones?.contrato) params.set("contrato", opciones.contrato);
+  if (opciones?.sociedad) params.set("sociedad", opciones.sociedad);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/exportar_sheets/?${params.toString()}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "flujos.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 // Exportar a Google Sheets, al Drive PERSONAL del usuario (14/Sep/2026,
 // "ya no se descargara ni CSV ni Excel, se guardara en su drive personal")
 // - reemplaza urlExportarFlujosCsv de arriba en el frontend (se deja el
@@ -1435,6 +1485,40 @@ export function urlExportarConciliacionCfdiCsv(params?: {
   if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
   if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
   return `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion_csv/?${query.toString()}`;
+}
+
+// Descarga CSV local de conciliacion CFDI - mismo endpoint que
+// exportarConciliacionCfdiSheets pero con ?formato=csv.
+export async function descargarConciliacionCfdiCsv(params?: {
+  desde?: string;
+  hasta?: string;
+  sociedad?: string;
+  contrato?: string;
+  contraparte?: string;
+  requiereFactura?: boolean;
+  tipoComprobante?: "I" | "E";
+}): Promise<void> {
+  const query = new URLSearchParams({ formato: "csv" });
+  if (params?.desde) query.set("desde", params.desde);
+  if (params?.hasta) query.set("hasta", params.hasta);
+  if (params?.sociedad) query.set("sociedad", params.sociedad);
+  if (params?.contrato) query.set("contrato", params.contrato);
+  if (params?.contraparte) query.set("contraparte", params.contraparte);
+  if (params?.requiereFactura !== undefined) query.set("requiere_factura", String(params.requiereFactura));
+  if (params?.tipoComprobante) query.set("tipo_comprobante", params.tipoComprobante);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/conciliacion_sheets/?${query.toString()}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "conciliacion-facturas.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 // Exportar a Google Sheets (14/Sep/2026, reemplaza urlExportarConciliacionCfdiCsv
@@ -2658,6 +2742,38 @@ export function urlExportarFacturasCsv(opciones?: {
   if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
   if (opciones?.estado) params.set("estado", opciones.estado);
   return `${TESORERIA_API_BASE_URL}/api/facturas/exportar_csv/?${params.toString()}`;
+}
+
+// Descarga CSV local de facturas - mismo endpoint que exportarFacturasSheets
+// pero con ?formato=csv.
+export async function descargarFacturasCsv(opciones?: {
+  search?: string;
+  contraparte?: string;
+  receptorRfc?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  estado?: TesoreriaFacturaEstado;
+}): Promise<void> {
+  const params = new URLSearchParams({ formato: "csv" });
+  if (opciones?.search) params.set("search", opciones.search);
+  if (opciones?.contraparte) params.set("contraparte", opciones.contraparte);
+  if (opciones?.receptorRfc) params.set("receptor_rfc", opciones.receptorRfc);
+  if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
+  if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
+  if (opciones?.estado) params.set("estado", opciones.estado);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/facturas/exportar_sheets/?${params.toString()}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "facturas.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 // Exportar a Google Sheets (14/Sep/2026, reemplaza urlExportarFacturasCsv

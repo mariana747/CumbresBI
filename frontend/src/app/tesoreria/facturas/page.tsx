@@ -91,6 +91,7 @@ import {
   TesoreriaTicketProveedor,
   urlVerFacturaPdf,
   exportarFacturasSheets,
+  descargarFacturasCsv,
   sincronizarDriveFactura,
 } from "@/lib/tesoreria";
 
@@ -656,6 +657,15 @@ export default function TesoreriaFacturasPage() {
       carpetaId
     )
   );
+  const [descargandoCsv, setDescargandoCsv] = useState(false);
+  const handleDescargarCsv = async () => {
+    setDescargandoCsv(true);
+    try {
+      await descargarFacturasCsv({ search: search || undefined, contraparte: filtroProveedor?.id_contraparte || undefined, receptorRfc: filtroReceptor || undefined, fechaDesde: filtroFechaDesde || undefined, fechaHasta: filtroFechaHasta || undefined, estado: filtroEstado || undefined });
+    } finally {
+      setDescargandoCsv(false);
+    }
+  };
 
   useEffect(() => {
     listSociedades()
@@ -1000,6 +1010,15 @@ export default function TesoreriaFacturasPage() {
             onClick={handleExportarSheets}
           >
             Exportar a Google Sheets
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+            disabled={descargandoCsv}
+            onClick={handleDescargarCsv}
+          >
+            Descargar CSV
           </Button>
           </Stack>
         }

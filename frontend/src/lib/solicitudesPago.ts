@@ -72,6 +72,31 @@ export async function listSolicitudesPago(params?: {
 }
 
 // Exportar a Google Sheets, al Drive PERSONAL del usuario - mismo patron
+// Descarga CSV local de solicitudes de pago - mismo endpoint que
+// exportarSolicitudesPagoSheets pero con ?formato=csv.
+export async function descargarSolicitudesPagoCsv(
+  params?: { proyecto?: string; sociedad?: string; search?: string; categoriaGasto?: TesoreriaCategoriaGasto }
+): Promise<void> {
+  const qs = new URLSearchParams({ formato: "csv" });
+  if (params?.proyecto) qs.set("proyecto", params.proyecto);
+  if (params?.sociedad) qs.set("sociedad", params.sociedad);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.categoriaGasto) qs.set("categoria_gasto", params.categoriaGasto);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/solicitudes-pago/exportar_sheets/?${qs.toString()}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "solicitudes-pago.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 // que exportarFlujosSheets (ver lib/tesoreria.ts).
 export async function exportarSolicitudesPagoSheets(
   params?: { proyecto?: string; sociedad?: string; search?: string; categoriaGasto?: TesoreriaCategoriaGasto },

@@ -48,6 +48,7 @@ import {
   crearFlujoDesdeMovimiento,
   detectarCuentaExtracto,
   exportarReporteConciliacionSheets,
+  descargarReporteConciliacionCsv,
   importarExtractoBancario,
   listCortesEdc,
   listCuentas,
@@ -218,6 +219,16 @@ export default function TesoreriaConciliacionPage() {
       carpetaId
     )
   );
+  const [descargandoCsvReporte, setDescargandoCsvReporte] = useState(false);
+  const handleDescargarCsvReporte = async () => {
+    if (!cuenta) return;
+    setDescargandoCsvReporte(true);
+    try {
+      await descargarReporteConciliacionCsv({ cuenta: cuenta.id_cuenta_bancaria, fechaInicio: fechaInicioReporte || undefined, fechaFin: fechaFinReporte || undefined });
+    } finally {
+      setDescargandoCsvReporte(false);
+    }
+  };
 
   // Precargar Flujo desde un movimiento sin match (11/Sep/2026, "Subida de
   // archivos CRCM para precargar Flujos") - contrato es lo unico que el
@@ -661,6 +672,18 @@ export default function TesoreriaConciliacionPage() {
                       sx={{ flexShrink: 0 }}
                     >
                       Exportar a Google Sheets
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={!reporte || descargandoCsvReporte}
+                      startIcon={
+                        descargandoCsvReporte ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />
+                      }
+                      onClick={handleDescargarCsvReporte}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      Descargar CSV
                     </Button>
                   </Stack>
                 }

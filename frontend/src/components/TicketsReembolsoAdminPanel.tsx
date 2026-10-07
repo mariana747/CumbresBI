@@ -53,6 +53,7 @@ import { GeneralSociedad, IamUser, listSociedades, listUsers } from "@/lib/iam";
 import {
   aprobarTicket,
   exportarTicketsReembolsoSheets,
+  descargarTicketsReembolsoCsv,
   urlVerFactura,
   urlVerTicket,
   CATEGORIA_GASTO_LABELS,
@@ -152,6 +153,15 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
     error: errorExportarSheets,
     exportar: handleExportarSheets,
   } = useExportarSheets((carpetaId) => exportarTicketsReembolsoSheets(search || undefined, carpetaId));
+  const [descargandoCsv, setDescargandoCsv] = useState(false);
+  const handleDescargarCsv = async () => {
+    setDescargandoCsv(true);
+    try {
+      await descargarTicketsReembolsoCsv(search || undefined);
+    } finally {
+      setDescargandoCsv(false);
+    }
+  };
 
   // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas")
   // - la categoria vive en cada concepto del ticket, no en el ticket
@@ -394,6 +404,16 @@ export default function TicketsReembolsoAdminPanel({ session }: { session: Sessi
             sx={{ flexShrink: 0 }}
           >
             Exportar a Google Sheets
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+            disabled={descargandoCsv}
+            onClick={handleDescargarCsv}
+            sx={{ flexShrink: 0 }}
+          >
+            Descargar CSV
           </Button>
         }
       >

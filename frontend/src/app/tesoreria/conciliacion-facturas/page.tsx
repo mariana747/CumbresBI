@@ -51,6 +51,7 @@ import {
   SugerenciasCfdiResponse,
   TesoreriaContrato,
   exportarConciliacionCfdiSheets,
+  descargarConciliacionCfdiCsv,
   urlVerComplementoPagoPdf,
   urlVerFacturaPdf,
   vincularFactura,
@@ -138,6 +139,15 @@ export default function ConciliacionFacturasPage() {
       carpetaId
     )
   );
+  const [descargandoCsv, setDescargandoCsv] = useState(false);
+  const handleDescargarCsv = async () => {
+    setDescargandoCsv(true);
+    try {
+      await descargarConciliacionCfdiCsv({ desde: desde || undefined, hasta: hasta || undefined, sociedad: filtroEmpresa || undefined, contrato: filtroContrato || undefined, tipoComprobante: filtroTipoComprobante || undefined });
+    } finally {
+      setDescargandoCsv(false);
+    }
+  };
 
   // Dialogo de detalle (un pago) con sus propios tabs internos.
   const [detalle, setDetalle] = useState<ConciliacionCfdiFila | null>(null);
@@ -372,6 +382,16 @@ export default function ConciliacionFacturasPage() {
               sx={{ flexShrink: 0 }}
             >
               Exportar a Google Sheets
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={descargandoCsv}
+              onClick={handleDescargarCsv}
+              sx={{ flexShrink: 0 }}
+            >
+              Descargar CSV
             </Button>
           }
         >
