@@ -89,10 +89,11 @@ import {
   vincularFlujoAFactura,
   TesoreriaContraparte,
   TesoreriaTicketProveedor,
-  urlVerFacturaPdf,
   exportarFacturasSheets,
   descargarFacturasCsv,
   sincronizarDriveFactura,
+  subirPdfFactura,
+  subirXmlFactura,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -636,6 +637,7 @@ export default function TesoreriaFacturasPage() {
   const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
   // Filtro por Categoria de gasto (11/Sep/2026, "filtro en las 4 pantallas")
   const [filtroCategoriaGasto, setFiltroCategoriaGasto] = useState<TesoreriaCategoriaGasto | "">("");
+  const [filtroVinculada, setFiltroVinculada] = useState<"true" | "false" | "">("");
   const [opcionesProveedor, setOpcionesProveedor] = useState<TesoreriaContraparte[]>([]);
 
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
@@ -689,6 +691,7 @@ export default function TesoreriaFacturasPage() {
       fechaHasta: filtroFechaHasta || undefined,
       estado: filtroEstado || undefined,
       categoriaGasto: filtroCategoriaGasto || undefined,
+      vinculada: filtroVinculada || undefined,
       page: pagina + 1,
       pageSize: filasPorPagina,
     })
@@ -712,17 +715,15 @@ export default function TesoreriaFacturasPage() {
     filtroFechaHasta,
     filtroEstado,
     filtroCategoriaGasto,
+    filtroVinculada,
     pagina,
     filasPorPagina,
   ]);
 
-  // Volver a la primera pagina cuando cambia cualquier filtro (20/Sep/2026,
-  // mismo motivo que en Flujos - una pagina que ya no existe con el nuevo
-  // total devolvia una lista vacia).
   useEffect(() => {
     setPagina(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroReceptor, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroEstado, filtroCategoriaGasto]);
+  }, [search, filtroReceptor, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroEstado, filtroCategoriaGasto, filtroVinculada]);
 
   function refrescarTicketsProveedor() {
     listTicketsProveedor()
@@ -857,6 +858,43 @@ export default function TesoreriaFacturasPage() {
     setEditing(actualizada);
     setForm(formDesdeFactura(actualizada));
     refresh();
+  }
+
+  const [subiendoPdf, setSubiendoPdf] = useState(false);
+  const [subiendoXml, setSubiendoXml] = useState(false);
+  const [errorSubidaPdf, setErrorSubidaPdf] = useState<string | null>(null);
+  const [errorSubidaXml, setErrorSubidaXml] = useState<string | null>(null);
+
+  async function handleSubirPdf(archivo: File) {
+    if (!editing) return;
+    setSubiendoPdf(true);
+    setErrorSubidaPdf(null);
+    try {
+      const actualizada = await subirPdfFactura(editing.id, archivo);
+      setEditing(actualizada);
+      if (actualizada.link_pdf) setForm((prev) => ({ ...prev, linkPdf: actualizada.link_pdf ?? "" }));
+      refresh();
+    } catch (err) {
+      setErrorSubidaPdf(err instanceof Error ? err.message : "Error al subir");
+    } finally {
+      setSubiendoPdf(false);
+    }
+  }
+
+  async function handleSubirXml(archivo: File) {
+    if (!editing) return;
+    setSubiendoXml(true);
+    setErrorSubidaXml(null);
+    try {
+      const actualizada = await subirXmlFactura(editing.id, archivo);
+      setEditing(actualizada);
+      if (actualizada.link_xml) setForm((prev) => ({ ...prev, linkXml: actualizada.link_xml ?? "" }));
+      refresh();
+    } catch (err) {
+      setErrorSubidaXml(err instanceof Error ? err.message : "Error al subir");
+    } finally {
+      setSubiendoXml(false);
+    }
   }
 
   // Archivo real analizado antes de que la factura exista
@@ -1108,6 +1146,22 @@ export default function TesoreriaFacturasPage() {
                   {CATEGORIA_GASTO_LABELS[c]}
                 </MenuItem>
               ))}
+            </Select>
+          </FormControl>
+        </Box>
+        <Box>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+            Vinculación
+          </Typography>
+          <FormControl size="small" fullWidth>
+            <Select
+              displayEmpty
+              value={filtroVinculada}
+              onChange={(e) => setFiltroVinculada(e.target.value as "true" | "false" | "")}
+            >
+              <MenuItem value=""><em>Todas</em></MenuItem>
+              <MenuItem value="true">Vinculadas</MenuItem>
+              <MenuItem value="false">Sin vincular</MenuItem>
             </Select>
           </FormControl>
         </Box>
@@ -1776,61 +1830,161 @@ export default function TesoreriaFacturasPage() {
                     {errorSincronizarFactura}
                   </Alert>
                 )}
-                {(["pdf", "xml"] as const).map((tipo) => {
-                  const driveFileId = tipo === "pdf" ? editing?.drive_file_id_pdf : editing?.drive_file_id_xml;
-                  const pendienteDeGuardar = !editing && tipo === "pdf" && Boolean(archivoNuevaFactura);
-                  return (
-                    <Paper key={tipo} variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
-                        <Stack direction="row" spacing={1.5} alignItems="center">
-                          {tipo === "pdf" ? (
-                            <FileText size={18} strokeWidth={1.5} />
-                          ) : (
-                            <FileCode2 size={18} strokeWidth={1.5} />
-                          )}
-                          <Typography variant="body2">{tipo === "pdf" ? "Factura (PDF)" : "Comprobante Fiscal (XML)"}</Typography>
-                        </Stack>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <IconButton
-                            size="small"
-                            aria-label={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
-                            title={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
-                            disabled={!driveFileId}
-                            onClick={() => {
-                              if (!editing || !driveFileId) return;
-                              if (tipo === "pdf") {
-                                setPreviewDoc({
-                                  url: urlVerFacturaPdf(editing.id),
-                                  titulo: `Factura ${editing.comprobante_folio || editing.timbre_uuid} — PDF`,
-                                  urlExterna: urlDriveWebView(driveFileId),
-                                });
-                              } else {
-                                window.open(urlDriveWebView(driveFileId), "_blank", "noopener,noreferrer");
-                              }
-                            }}
-                          >
-                            {tipo === "pdf" ? (
-                              <Eye size={16} strokeWidth={1.5} />
-                            ) : (
-                              <ExternalLink size={16} strokeWidth={1.5} />
-                            )}
-                          </IconButton>
-                          <Chip
-                            size="small"
-                            color={driveFileId ? "success" : pendienteDeGuardar ? "warning" : "default"}
-                            label={
-                              driveFileId
-                                ? "Disponible en Drive"
-                                : pendienteDeGuardar
-                                  ? "Analizado — se vincula al guardar"
-                                  : "Sin archivo"
-                            }
-                          />
-                        </Stack>
+                {/* PDF */}
+                <Paper variant="outlined" sx={{ p: 1.5 }}>
+                  <Stack spacing={1.5}>
+                    <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                      <Stack direction="row" spacing={1.5} alignItems="center">
+                        <FileText size={18} strokeWidth={1.5} />
+                        <Typography variant="body2">Factura (PDF)</Typography>
                       </Stack>
-                    </Paper>
-                  );
-                })}
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        {(() => {
+                          const url = editing?.drive_file_id_pdf
+                            ? urlDriveWebView(editing.drive_file_id_pdf)
+                            : (editing?.link_pdf || form.linkPdf || null);
+                          return url ? (
+                            <IconButton
+                              size="small"
+                              title="Abrir PDF"
+                              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                            >
+                              <ExternalLink size={16} strokeWidth={1.5} />
+                            </IconButton>
+                          ) : null;
+                        })()}
+                        {editing && !modoSoloLectura && (
+                          <>
+                            <input
+                              id="input-subir-pdf"
+                              type="file"
+                              accept=".pdf,application/pdf"
+                              style={{ display: "none" }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleSubirPdf(f);
+                                e.target.value = "";
+                              }}
+                            />
+                            <Button
+                              size="small"
+                              component="label"
+                              htmlFor="input-subir-pdf"
+                              disabled={subiendoPdf}
+                              startIcon={subiendoPdf ? <CircularProgress size={12} /> : undefined}
+                            >
+                              {subiendoPdf ? "Subiendo…" : editing.drive_file_id_pdf ? "Reemplazar" : "Subir PDF"}
+                            </Button>
+                          </>
+                        )}
+                        <Chip
+                          size="small"
+                          color={editing?.drive_file_id_pdf ? "success" : "default"}
+                          label={editing?.drive_file_id_pdf ? "En Drive" : "Sin archivo"}
+                        />
+                      </Stack>
+                    </Stack>
+                    {errorSubidaPdf && (
+                      <Alert severity="error" onClose={() => setErrorSubidaPdf(null)}>
+                        {errorSubidaPdf}
+                      </Alert>
+                    )}
+                    {!modoSoloLectura && (
+                      <TextField
+                        label="Link PDF (alternativo)"
+                        size="small"
+                        fullWidth
+                        value={form.linkPdf}
+                        onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
+                        placeholder="https://drive.google.com/..."
+                        helperText={editing?.drive_file_id_pdf ? "Ya hay un archivo en Drive; el link solo se usa si no hay archivo subido." : undefined}
+                      />
+                    )}
+                    {modoSoloLectura && editing?.link_pdf && !editing?.drive_file_id_pdf && (
+                      <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+                        {editing.link_pdf}
+                      </Typography>
+                    )}
+                  </Stack>
+                </Paper>
+
+                {/* XML */}
+                <Paper variant="outlined" sx={{ p: 1.5 }}>
+                  <Stack spacing={1.5}>
+                    <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                      <Stack direction="row" spacing={1.5} alignItems="center">
+                        <FileCode2 size={18} strokeWidth={1.5} />
+                        <Typography variant="body2">Comprobante Fiscal (XML)</Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        {(() => {
+                          const url = editing?.drive_file_id_xml
+                            ? urlDriveWebView(editing.drive_file_id_xml)
+                            : (editing?.link_xml || form.linkXml || null);
+                          return url ? (
+                            <IconButton
+                              size="small"
+                              title="Abrir XML"
+                              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                            >
+                              <ExternalLink size={16} strokeWidth={1.5} />
+                            </IconButton>
+                          ) : null;
+                        })()}
+                        {editing && !modoSoloLectura && (
+                          <>
+                            <input
+                              id="input-subir-xml"
+                              type="file"
+                              accept=".xml,text/xml,application/xml"
+                              style={{ display: "none" }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleSubirXml(f);
+                                e.target.value = "";
+                              }}
+                            />
+                            <Button
+                              size="small"
+                              component="label"
+                              htmlFor="input-subir-xml"
+                              disabled={subiendoXml}
+                              startIcon={subiendoXml ? <CircularProgress size={12} /> : undefined}
+                            >
+                              {subiendoXml ? "Subiendo…" : editing.drive_file_id_xml ? "Reemplazar" : "Subir XML"}
+                            </Button>
+                          </>
+                        )}
+                        <Chip
+                          size="small"
+                          color={editing?.drive_file_id_xml ? "success" : "default"}
+                          label={editing?.drive_file_id_xml ? "En Drive" : "Sin archivo"}
+                        />
+                      </Stack>
+                    </Stack>
+                    {errorSubidaXml && (
+                      <Alert severity="error" onClose={() => setErrorSubidaXml(null)}>
+                        {errorSubidaXml}
+                      </Alert>
+                    )}
+                    {!modoSoloLectura && (
+                      <TextField
+                        label="Link XML (alternativo)"
+                        size="small"
+                        fullWidth
+                        value={form.linkXml}
+                        onChange={(e) => setForm({ ...form, linkXml: e.target.value })}
+                        placeholder="https://drive.google.com/..."
+                        helperText={editing?.drive_file_id_xml ? "Ya hay un archivo en Drive; el link solo se usa si no hay archivo subido." : undefined}
+                      />
+                    )}
+                    {modoSoloLectura && editing?.link_xml && !editing?.drive_file_id_xml && (
+                      <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+                        {editing.link_xml}
+                      </Typography>
+                    )}
+                  </Stack>
+                </Paper>
               </Stack>
             )}
             {tabFactura === "Proceso" && editing && (

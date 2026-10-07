@@ -647,6 +647,22 @@ function TesoreriaFlujosPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flujos]);
 
+  // Nombre base para el archivo exportado, refleja los filtros activos.
+  // Se omite search (texto libre, no legible como nombre de archivo).
+  const tituloExport = (() => {
+    const partes: string[] = ["Flujos CumbresBI"];
+    if (filtroEmpresa) {
+      const s = sociedades.find((x) => x.rfc === filtroEmpresa);
+      partes.push(s?.alias_sociedad || s?.razon_social || filtroEmpresa);
+    }
+    if (contratoFiltro) partes.push(contratoFiltro.id_contrato);
+    if (filtroCategoriaGasto) partes.push(filtroCategoriaGasto);
+    if (filtroEstado) partes.push(filtroEstado);
+    if (filtroFechaDesde) partes.push(`desde ${filtroFechaDesde}`);
+    if (filtroFechaHasta) partes.push(`hasta ${filtroFechaHasta}`);
+    return partes.join(" — ");
+  })();
+
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
   // hook reusable en lib/useExportarSheets.ts.
   const {
@@ -658,14 +674,30 @@ function TesoreriaFlujosPageContent() {
       search: search || undefined,
       contrato: filtroContrato || undefined,
       sociedad: filtroEmpresa || undefined,
+      nomina: filtroNomina || undefined,
+      categoriaGasto: filtroCategoriaGasto || undefined,
+      fechaDesde: filtroFechaDesde || undefined,
+      fechaHasta: filtroFechaHasta || undefined,
+      validacionEstado: filtroEstado || undefined,
       carpetaId,
+      titulo: tituloExport,
     })
   );
   const [descargandoCsv, setDescargandoCsv] = useState(false);
   const handleDescargarCsv = async () => {
     setDescargandoCsv(true);
     try {
-      await descargarFlujosCsv({ search: search || undefined, contrato: filtroContrato || undefined, sociedad: filtroEmpresa || undefined });
+      await descargarFlujosCsv({
+        search: search || undefined,
+        contrato: filtroContrato || undefined,
+        sociedad: filtroEmpresa || undefined,
+        nomina: filtroNomina || undefined,
+        categoriaGasto: filtroCategoriaGasto || undefined,
+        fechaDesde: filtroFechaDesde || undefined,
+        fechaHasta: filtroFechaHasta || undefined,
+        validacionEstado: filtroEstado || undefined,
+        titulo: tituloExport,
+      });
     } finally {
       setDescargandoCsv(false);
     }
