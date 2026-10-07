@@ -6,13 +6,16 @@ import {
   Autocomplete,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
+  IconButton,
   Link as MuiLink,
   Paper,
   Stack,
@@ -27,7 +30,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileSpreadsheet, Landmark, RefreshCw, Sparkles, Upload, X as CloseIcon } from "lucide-react";
+import { ChevronDown, ChevronUp, FileSpreadsheet, Landmark, RefreshCw, Sparkles, Upload, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import ContratoSelector from "@/components/ContratoSelector";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -44,7 +47,8 @@ import {
   TesoreriaCuenta,
   TesoreriaFlujoSugerido,
   TesoreriaMovimientoBancario,
-  conciliarAutomatico,
+  conciliarAutomaticoConfirmar,
+  conciliarAutomaticoProponer,
   crearFlujoDesdeMovimiento,
   detectarCuentaExtracto,
   exportarReporteConciliacionSheets,
@@ -183,7 +187,12 @@ export default function TesoreriaConciliacionPage() {
   const [filtroCorteImportado, setFiltroCorteImportado] = useState<string | null>(null);
 
   const [conciliandoAuto, setConciliandoAuto] = useState(false);
-  const [resultadoAuto, setResultadoAuto] = useState<ConciliarAutomaticoResultado | null>(null);
+  const [propuestasAuto, setPropuestasAuto] = useState<ConciliarAutomaticoResultado | null>(null);
+  const [propuestasSeleccionadas, setPropuestasSeleccionadas] = useState<Set<string>>(new Set());
+  const [propuestaExpandida, setPropuestaExpandida] = useState<string | null>(null);
+  const [archivosLote, setArchivosLote] = useState<Record<string, { comprobante?: File; linkComprobante?: string; referencia?: File; linkReferencia?: string }>>({});
+  const [confirmandoAuto, setConfirmandoAuto] = useState(false);
+  const [resultadoAuto, setResultadoAuto] = useState<{ conciliados: number; ambiguos: number; sin_match: number } | null>(null);
 
   const [sugerenciasDialog, setSugerenciasDialog] = useState<{
     movimiento: TesoreriaMovimientoBancario;
@@ -435,13 +444,67 @@ export default function TesoreriaConciliacionPage() {
     setConciliandoAuto(true);
     setError(null);
     try {
-      const resultado = await conciliarAutomatico({ cuenta: cuenta.id_cuenta_bancaria, actorUserId: session?.email });
-      setResultadoAuto(resultado);
-      refreshMovimientos();
+      const resultado = await conciliarAutomaticoProponer({ cuenta: cuenta.id_cuenta_bancaria });
+      setPropuestasAuto(resultado);
+      setPropuestasSeleccionadas(new Set(resultado.propuestas.map((p) => p.movimiento)));
+      // Pre-llenar links existentes del flujo para que el analista no tenga que volver a capturarlos
+      const preexistentes: typeof archivosLote = {};
+      for (const p of resultado.propuestas) {
+        if (p.link_comprobante || p.link_referencia) {
+          preexistentes[p.movimiento] = {
+            linkComprobante: p.link_comprobante ?? undefined,
+            linkReferencia: p.link_referencia ?? undefined,
+          };
+        }
+      }
+      setArchivosLote(preexistentes);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al conciliar automáticamente");
+      setError(err instanceof Error ? err.message : "Error al calcular propuestas automáticas");
     } finally {
       setConciliandoAuto(false);
+    }
+  }
+
+  async function handleConfirmarAuto() {
+    if (!propuestasAuto) return;
+    setConfirmandoAuto(true);
+    setError(null);
+    try {
+      const aprobadas = propuestasAuto.propuestas.filter((p) => propuestasSeleccionadas.has(p.movimiento));
+      const resultado = await conciliarAutomaticoConfirmar({
+        propuestas: aprobadas.map((p) => ({ movimiento: p.movimiento, flujo: p.flujo })),
+        actorUserId: session?.email,
+      });
+      // Subir archivos/links por flujo vinculado
+      await Promise.allSettled(
+        aprobadas.map(async (p) => {
+          const arch = archivosLote[p.movimiento];
+          if (!arch) return;
+          if (arch.comprobante) {
+            await subirComprobanteFlujo(p.flujo, arch.comprobante, session?.user_id);
+          } else if (arch.linkComprobante) {
+            await updateFlujo(p.flujo, { linkComprobanteBanco: arch.linkComprobante });
+          }
+          if (arch.referencia) {
+            await subirReferenciaFlujo(p.flujo, arch.referencia, session?.user_id);
+          } else if (arch.linkReferencia) {
+            await updateFlujo(p.flujo, { linkReferencia: arch.linkReferencia });
+          }
+        })
+      );
+      setResultadoAuto({
+        conciliados: resultado.conciliados,
+        ambiguos: propuestasAuto.ambiguos,
+        sin_match: propuestasAuto.sin_match,
+      });
+      setPropuestasAuto(null);
+      setArchivosLote({});
+      setPropuestaExpandida(null);
+      refreshMovimientos();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al confirmar conciliación");
+    } finally {
+      setConfirmandoAuto(false);
     }
   }
 
@@ -517,7 +580,7 @@ export default function TesoreriaConciliacionPage() {
                       onClick={handleConciliarAutomatico}
                       sx={{ flexShrink: 0 }}
                     >
-                      Conciliar automático
+                      Proponer conciliación
                     </Button>
                     <Button
                       variant="text"
@@ -1010,6 +1073,185 @@ export default function TesoreriaConciliacionPage() {
         </DialogActions>
       </Dialog>
 
+      {/* Diálogo: revisión de propuestas de conciliación automática */}
+      <Dialog open={!!propuestasAuto} onClose={() => { setPropuestasAuto(null); setArchivosLote({}); setPropuestaExpandida(null); }} maxWidth="md" fullWidth disableEscapeKeyDown>
+        <DialogTitle>Revisar propuestas de conciliación automática</DialogTitle>
+        <DialogContent>
+          {propuestasAuto && (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Se encontraron <strong>{propuestasAuto.propuestas.length}</strong> match(es) de alta confianza (monto exacto + fecha ±1 día).
+                Desmarca los que no quieras aplicar y confirma.
+                {propuestasAuto.ambiguos > 0 && ` ${propuestasAuto.ambiguos} con candidatos ambiguos quedan pendientes.`}
+                {propuestasAuto.sin_match > 0 && ` ${propuestasAuto.sin_match} sin candidato.`}
+              </Typography>
+              {propuestasAuto.propuestas.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">No hay matches de alta confianza para esta cuenta.</Typography>
+              ) : (
+                <Stack spacing={1}>
+                  {propuestasAuto.propuestas.map((p) => {
+                    const expandida = propuestaExpandida === p.movimiento;
+                    const arch = archivosLote[p.movimiento] ?? {};
+                    return (
+                      <Paper key={p.movimiento} variant="outlined" sx={{ p: 1.5 }}>
+                        <Stack direction="row" alignItems="flex-start" spacing={1}>
+                          <Checkbox
+                            size="small"
+                            sx={{ mt: -0.5 }}
+                            checked={propuestasSeleccionadas.has(p.movimiento)}
+                            onChange={(e) => {
+                              setPropuestasSeleccionadas((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(p.movimiento);
+                                else next.delete(p.movimiento);
+                                return next;
+                              });
+                            }}
+                          />
+                          <Box sx={{ flex: 1 }}>
+                            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                              <Box sx={{ flex: 1 }}>
+                                <Table size="small" sx={{ mb: 0.5 }}>
+                                  <TableHead>
+                                    <TableRow>
+                                      <TableCell sx={{ py: 0.25, px: 1, width: 90, border: 0 }} />
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption" color="text.secondary">Banco</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption" color="text.secondary">Flujo registrado</Typography>
+                                      </TableCell>
+                                    </TableRow>
+                                  </TableHead>
+                                  <TableBody>
+                                    <TableRow>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption" color="text.secondary">Contrato</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption">—</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption">{p.contrato_referencia || "—"}</Typography>
+                                      </TableCell>
+                                    </TableRow>
+                                    <TableRow>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption" color="text.secondary">Concepto</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption">{p.mov_descripcion || "—"}</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption" fontWeight={600}>{p.concepto || "—"}</Typography>
+                                      </TableCell>
+                                    </TableRow>
+                                    <TableRow>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption" color="text.secondary">Monto</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption">${formatMonto(p.mov_monto)}</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Chip label={`$${formatMonto(p.total_mxp)}`} size="small" color="success" variant="outlined" sx={{ height: 18, fontSize: 11 }} />
+                                      </TableCell>
+                                    </TableRow>
+                                    <TableRow>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption" color="text.secondary">Fecha</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Typography variant="caption">{p.mov_fecha}</Typography>
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        <Chip label={p.fecha_pago || p.fecha_efectiva || "—"} size="small" color="success" variant="outlined" sx={{ height: 18, fontSize: 11 }} />
+                                      </TableCell>
+                                    </TableRow>
+                                  </TableBody>
+                                </Table>
+                              </Box>
+                              <IconButton size="small" onClick={() => setPropuestaExpandida(expandida ? null : p.movimiento)}>
+                                {expandida ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                              </IconButton>
+                            </Stack>
+                            <Collapse in={expandida} unmountOnExit>
+                              <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+                                <Divider />
+                                <Typography variant="subtitle2">Comprobante de pago (opcional)</Typography>
+                                <SelectorArchivoLocalODrive
+                                  archivo={arch.comprobante ?? null}
+                                  onChange={(archivo) =>
+                                    setArchivosLote((prev) => ({
+                                      ...prev,
+                                      [p.movimiento]: { ...prev[p.movimiento], comprobante: archivo ?? undefined, linkComprobante: archivo ? "" : prev[p.movimiento]?.linkComprobante },
+                                    }))
+                                  }
+                                  accept="image/*,application/pdf"
+                                  mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+                                  tituloDrive="Elige el comprobante"
+                                />
+                                <TextField
+                                  size="small"
+                                  fullWidth
+                                  label="Link del comprobante"
+                                  placeholder="https://..."
+                                  value={arch.linkComprobante ?? ""}
+                                  disabled={!!arch.comprobante}
+                                  onChange={(e) =>
+                                    setArchivosLote((prev) => ({ ...prev, [p.movimiento]: { ...prev[p.movimiento], linkComprobante: e.target.value } }))
+                                  }
+                                />
+                                <Divider />
+                                <Typography variant="subtitle2">Referencia (opcional)</Typography>
+                                <SelectorArchivoLocalODrive
+                                  archivo={arch.referencia ?? null}
+                                  onChange={(archivo) =>
+                                    setArchivosLote((prev) => ({
+                                      ...prev,
+                                      [p.movimiento]: { ...prev[p.movimiento], referencia: archivo ?? undefined, linkReferencia: archivo ? "" : prev[p.movimiento]?.linkReferencia },
+                                    }))
+                                  }
+                                  accept="image/*,application/pdf"
+                                  mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+                                  tituloDrive="Elige la referencia"
+                                />
+                                <TextField
+                                  size="small"
+                                  fullWidth
+                                  label="Link de referencia"
+                                  placeholder="https://..."
+                                  value={arch.linkReferencia ?? ""}
+                                  disabled={!!arch.referencia}
+                                  onChange={(e) =>
+                                    setArchivosLote((prev) => ({ ...prev, [p.movimiento]: { ...prev[p.movimiento], linkReferencia: e.target.value } }))
+                                  }
+                                />
+                              </Stack>
+                            </Collapse>
+                          </Box>
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              )}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setPropuestasAuto(null); setArchivosLote({}); setPropuestaExpandida(null); }}>Cancelar</Button>
+          <Button
+            variant="contained"
+            disabled={confirmandoAuto || propuestasSeleccionadas.size === 0}
+            onClick={handleConfirmarAuto}
+            startIcon={confirmandoAuto ? <CircularProgress size={16} /> : undefined}
+          >
+            Confirmar {propuestasSeleccionadas.size > 0 ? `(${propuestasSeleccionadas.size})` : ""}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Diálogo: sugerencias de flujo para un movimiento */}
       <Dialog open={!!sugerenciasDialog} onClose={() => setSugerenciasDialog(null)} maxWidth="sm" fullWidth>
         <DialogTitle>Candidatos para conciliar</DialogTitle>
@@ -1023,30 +1265,45 @@ export default function TesoreriaConciliacionPage() {
               {sugerenciasDialog.opciones.length === 0 ? (
                 <Alert severity="info">Sin candidatos por monto/fecha. Liga el flujo a mano si sabes cuál es.</Alert>
               ) : (
-                <Stack spacing={1}>
-                  {sugerenciasDialog.opciones.map((s) => (
-                    <Paper key={s.id_flujo} variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Box>
-                          <Typography variant="body2" fontWeight={600}>
-                            {s.id_flujo} — {s.contrato_referencia || s.concepto || "—"}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {s.motivos.join(" · ")}
-                          </Typography>
-                        </Box>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          disabled={vinculando === s.id_flujo}
-                          onClick={() => handleVincular(sugerenciasDialog.movimiento.id, s.id_flujo)}
-                        >
-                          {vinculando === s.id_flujo ? <CircularProgress size={14} /> : "Vincular"}
-                        </Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Stack>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Contrato</TableCell>
+                        <TableCell>Concepto</TableCell>
+                        <TableCell align="right">Monto</TableCell>
+                        <TableCell>Fecha</TableCell>
+                        <TableCell />
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {sugerenciasDialog.opciones.map((s) => (
+                        <TableRow key={s.id_flujo} hover>
+                          <TableCell>
+                            <Typography variant="body2">{s.contrato_referencia || "—"}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight={600}>{s.concepto || "—"}</Typography>
+                          </TableCell>
+                          <TableCell align="right">${formatMonto(s.total_mxp ?? null)}</TableCell>
+                          <TableCell>
+                            <Typography variant="body2">{s.fecha_pago || s.fecha_efectiva || "—"}</Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              disabled={vinculando === s.id_flujo}
+                              onClick={() => handleVincular(sugerenciasDialog.movimiento.id, s.id_flujo)}
+                            >
+                              {vinculando === s.id_flujo ? <CircularProgress size={14} /> : "Vincular"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               )}
               <Divider sx={{ my: 2 }} />
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
