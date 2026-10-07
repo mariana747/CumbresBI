@@ -373,26 +373,28 @@ export default function ConciliacionFacturasPage() {
             setPagina(0);
           }}
           actions={
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={exportando ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
-              disabled={exportando}
-              onClick={handleExportarSheets}
-              sx={{ flexShrink: 0 }}
-            >
-              Exportar a Google Sheets
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
-              disabled={descargandoCsv}
-              onClick={handleDescargarCsv}
-              sx={{ flexShrink: 0 }}
-            >
-              Descargar CSV
-            </Button>
+            <>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={exportando ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+                disabled={exportando}
+                onClick={handleExportarSheets}
+                sx={{ flexShrink: 0 }}
+              >
+                Exportar a Google Sheets
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+                disabled={descargandoCsv}
+                onClick={handleDescargarCsv}
+                sx={{ flexShrink: 0 }}
+              >
+                Descargar CSV
+              </Button>
+            </>
           }
         >
           <TextField
