@@ -90,6 +90,7 @@ import {
   createRecNomina,
   updateContrato,
   exportarFlujosSheets,
+  descargarFlujosCsv,
   getContratoGenericoNomina,
   getContratoGenericoReembolsoPorSociedad,
   listComplementosPago,
@@ -660,6 +661,15 @@ function TesoreriaFlujosPageContent() {
       carpetaId,
     })
   );
+  const [descargandoCsv, setDescargandoCsv] = useState(false);
+  const handleDescargarCsv = async () => {
+    setDescargandoCsv(true);
+    try {
+      await descargarFlujosCsv({ search: search || undefined, contrato: filtroContrato || undefined, sociedad: filtroEmpresa || undefined });
+    } finally {
+      setDescargandoCsv(false);
+    }
+  };
 
   // Filtro de fecha (25/Ago/2026, movido al servidor 20/Sep/2026 - con
   // paginacion el cliente ya no tiene todas las filas para filtrar
@@ -1041,6 +1051,16 @@ function TesoreriaFlujosPageContent() {
               sx={{ flexShrink: 0 }}
             >
               Exportar a Google Sheets
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={descargandoCsv}
+              onClick={handleDescargarCsv}
+              sx={{ flexShrink: 0 }}
+            >
+              Descargar CSV
             </Button>
             {puedeCrear && (
               <Button
