@@ -130,8 +130,9 @@ def _label_contrato(contrato) -> str:
     ref = "/".join(p for p in ref_partes if p)
     if contrato.sociedad:
         ref += f"//{contrato.sociedad}"
-    if contrato.concepto:
-        ref += f" - {contrato.concepto}"
+    concepto = contrato.concepto_factura or contrato.concepto
+    if concepto:
+        ref += f" - {concepto}"
     return f"{contrato.id_contrato} — {ref}" if ref else contrato.id_contrato
 
 
