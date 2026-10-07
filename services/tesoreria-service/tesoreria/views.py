@@ -118,6 +118,18 @@ from .reembolso_utils import (
 logger = logging.getLogger(__name__)
 
 
+def _csv_local(encabezados: list, filas: list, nombre_archivo: str) -> HttpResponse:
+    """Descarga CSV directa; alternativa local a exportar_sheets cuando
+    Google aun no ha verificado la app OAuth o el usuario prefiere CSV."""
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{nombre_archivo}"'
+    response.write("﻿")  # BOM para que Excel lo abra correctamente
+    writer = csv.writer(response)
+    writer.writerow(encabezados)
+    writer.writerows(filas)
+    return response
+
+
 def _rfcs_sociedad_por_texto(request, texto):
     """Resuelve los RFC de las sociedades cuyo nombre/alias/rfc contenga
     `texto` (25/Sep/2026, "el buscador... debe poder buscar tambien por
@@ -1220,17 +1232,6 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         Google, regresa 409 con la url de autorizacion para que el
         frontend redirija."""
         queryset = self.filter_queryset(self.get_queryset())
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         encabezados = [
             "ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP",
             "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría",
@@ -1249,6 +1250,18 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             ]
             for f in queryset
         ]
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "flujos.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Flujos CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -1388,17 +1401,6 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 | Q(complemento__tipo_de_comprobante=tipo_comprobante)
             )
 
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         resultado = calcular_conciliacion_cfdi(queryset)
         encabezados = [
             "Clasificación", "ID Flujo", "Contrato", "Proveedor", "Concepto", "Fecha efectiva",
@@ -1426,6 +1428,18 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             for clave, etiqueta in etiquetas.items()
             for fila in resultado[clave]
         ]
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "conciliacion-facturas.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Conciliación de Facturas CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -2128,17 +2142,6 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         TesoreriaFlujoViewSet.exportar_sheets. Una fila por CONCEPTO (no
         por ticket), ya que un ticket puede mezclar categorias/montos."""
         queryset = self.filter_queryset(self.get_queryset()).prefetch_related("conceptos")
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         encabezados = [
             "ID Ticket", "Empleado", "Sociedad", "Estado", "Fecha del gasto",
             "Monto total", "Moneda", "Concepto", "Monto del concepto", "Categoría",
@@ -2163,6 +2166,18 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
                         c.get_categoria_gasto_display() if c.categoria_gasto else "",
                     ]
                 )
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "tickets-reembolso.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Tickets de Reembolso CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -2550,17 +2565,6 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
         """Exporta a Google Sheets, mismo patron que
         TesoreriaFlujoViewSet.exportar_sheets."""
         queryset = self.filter_queryset(self.get_queryset())
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         encabezados = [
             "ID Solicitud", "Proyecto", "Sociedad", "Tipo", "Descripción",
             "Monto", "Moneda", "Estado", "Solicitado por", "Categoría",
@@ -2580,6 +2584,18 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
             ]
             for s in queryset
         ]
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "solicitudes-pago.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Solicitudes de Pago CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -3316,17 +3332,6 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         """Exporta a Google Sheets, reemplaza exportar_csv - ver mismo
         endpoint en TesoreriaFlujoViewSet."""
         queryset = self.filter_queryset(self.get_queryset())
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         encabezados = ["UUID", "Folio", "Emisor", "RFC Emisor", "Receptor", "Fecha", "Total", "Estado", "Categoría"]
         filas = [
             [
@@ -3342,6 +3347,18 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             ]
             for f in queryset
         ]
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "facturas.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Facturas CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -4551,17 +4568,6 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         if not cuenta_id:
             raise ValidationError("Se requiere '?cuenta='.")
 
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         reporte = calcular_reporte_conciliacion(
             cuenta_id,
             corte_edc_id=request.query_params.get("corte_edc"),
@@ -4597,6 +4603,18 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
                     "Sí" if fila["pagado"] else "No",
                 ]
             )
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "conciliacion-bancaria.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Conciliación Bancaria CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:

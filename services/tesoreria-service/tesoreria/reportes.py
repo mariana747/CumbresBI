@@ -464,7 +464,7 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
         return {"facturas": [], "complementos": []}
 
     contraparte_id = flujo.contrato.contraparte_id
-    monto = flujo.total_mxp
+    monto = abs(flujo.total_mxp)
 
     candidatos_factura = []
     if not flujo.factura_id:
@@ -557,7 +557,7 @@ def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> lis
         if not flujo.contrato_id or flujo.total_mxp is None:
             continue
         contraparte_id = flujo.contrato.contraparte_id
-        monto = flujo.total_mxp
+        monto = abs(flujo.total_mxp)
 
         candidatos = []
         for f in facturas_por_contraparte.get(contraparte_id, []):
