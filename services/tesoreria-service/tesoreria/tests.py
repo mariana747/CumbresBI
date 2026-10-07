@@ -4835,14 +4835,27 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
 
         self.assertEqual(response.data, [])
 
+    def _conciliar_y_confirmar(self, body=None):
+        """Propone y confirma todas las propuestas en un solo paso (helper de tests)."""
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
+        req = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", body or {}, format="json")
+        req.effective_scope = self.scope_editar
+        resp = view(req)
+        propuestas = resp.data.get("propuestas", [])
+        if not propuestas:
+            return resp
+        confirm_body = {"confirmar": True, "propuestas": [{"movimiento": p["movimiento"], "flujo": p["flujo"]} for p in propuestas]}
+        if body and "cuenta" in body:
+            confirm_body["cuenta"] = body["cuenta"]
+        req2 = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", confirm_body, format="json")
+        req2.effective_scope = self.scope_editar
+        return view(req2)
+
     def test_conciliar_automatico_liga_match_de_alta_confianza(self):
         flujo = self._crear_flujo("5000.00", "2026-09-02")
         movimiento = self._crear_movimiento(abono="5000.00", fecha="2026-09-02")
 
-        request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
-        request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
-        response = view(request)
+        response = self._conciliar_y_confirmar()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["conciliados"], 1)
@@ -4854,12 +4867,12 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         self._crear_flujo("1000.00", "2026-09-01")
         movimiento = self._crear_movimiento(cargo="1000.00", fecha="2026-09-01")
 
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
         request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         response = view(request)
 
-        self.assertEqual(response.data["conciliados"], 0)
+        self.assertEqual(len(response.data["propuestas"]), 0)
         self.assertEqual(response.data["ambiguos"], 1)
         movimiento.refresh_from_db()
         self.assertIsNone(movimiento.flujo)
@@ -4868,12 +4881,12 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         self._crear_flujo("1000.00", "2026-08-01")
         self._crear_movimiento(cargo="1000.00", fecha="2026-09-15")
 
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
         request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         response = view(request)
 
-        self.assertEqual(response.data["conciliados"], 0)
+        self.assertEqual(len(response.data["propuestas"]), 0)
         self.assertEqual(response.data["sin_match"], 1)
 
     def test_conciliar_automatico_respeta_filtro_de_cuenta(self):
@@ -4882,14 +4895,7 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         movimiento_cuenta_principal = self._crear_movimiento(cargo="2000.00", fecha="2026-09-01")
         self._crear_flujo("2000.00", "2026-09-01")
 
-        request = self.factory.post(
-            "/api/movimientos-bancarios/conciliar_automatico/",
-            {"cuenta": self.cuenta.id_cuenta_bancaria},
-            format="json",
-        )
-        request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
-        response = view(request)
+        response = self._conciliar_y_confirmar({"cuenta": self.cuenta.id_cuenta_bancaria})
 
         self.assertEqual(response.data["conciliados"], 1)
         movimiento_cuenta_principal.refresh_from_db()
