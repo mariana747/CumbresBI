@@ -99,5 +99,5 @@ services/materiales-service/*.json
 # Local Firebase / deploy tools
 .firebase/
 .firebaserc
-scripts/migrate_to_us_east1.sh
+scripts/*.sh
 services/public-pages/

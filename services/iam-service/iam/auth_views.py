@@ -91,7 +91,13 @@ def google_callback(request):
         tokens = exchange_code_for_tokens(code, pkce_data["code_verifier"])
         claims = verify_google_id_token(tokens["id_token"])
         if not dominio_aprobado(claims):
-            raise OidcError(f"Dominio no aprobado: {claims.get('hd')}")
+            # Colaboradores externos ya registrados (via magic link) pueden entrar con su Google personal
+            email = claims.get("email", "")
+            ya_registrado = IamUser.objects.filter(
+                primary_email__iexact=email
+            ).exclude(status=IamUser.STATUS_DELETED).exists()
+            if not ya_registrado:
+                raise OidcError(f"Dominio no aprobado: {claims.get('hd')}")
     except OidcError:
         logger.warning("Login OIDC rechazado", exc_info=True)
         response = redirect(settings.OIDC_FRONTEND_ERROR_URL)
