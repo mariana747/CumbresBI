@@ -135,6 +135,26 @@ export function urlVerFactura(idTicket: string): string {
   return `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/${idTicket}/ver_factura/`;
 }
 
+// Descarga CSV local de tickets de reembolso - mismo endpoint que
+// exportarTicketsReembolsoSheets pero con ?formato=csv.
+export async function descargarTicketsReembolsoCsv(search?: string): Promise<void> {
+  const params = new URLSearchParams({ formato: "csv" });
+  if (search) params.set("search", search);
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/tickets-reembolso/exportar_sheets/?${params.toString()}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "tickets-reembolso.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 // Exportar a Google Sheets, al Drive PERSONAL del usuario - mismo patron
 // que exportarFlujosSheets/exportarSolicitudesPagoSheets (ver lib/tesoreria.ts).
 export async function exportarTicketsReembolsoSheets(
