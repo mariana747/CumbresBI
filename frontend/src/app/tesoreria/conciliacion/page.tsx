@@ -57,6 +57,7 @@ import {
   aprobarFlujo,
   registrarPagoFlujo,
   subirComprobanteFlujo,
+  subirReferenciaFlujo,
   sugerenciasMovimientoBancario,
   updateFlujo,
   vincularMovimientoBancario,
@@ -238,6 +239,8 @@ export default function TesoreriaConciliacionPage() {
   const [contratoNuevoFlujo, setContratoNuevoFlujo] = useState<TesoreriaContrato | null>(null);
   const [archivoComprobanteNuevoFlujo, setArchivoComprobanteNuevoFlujo] = useState<File | null>(null);
   const [linkComprobanteNuevoFlujo, setLinkComprobanteNuevoFlujo] = useState("");
+  const [archivoReferenciaNuevoFlujo, setArchivoReferenciaNuevoFlujo] = useState<File | null>(null);
+  const [linkReferenciaNuevoFlujo, setLinkReferenciaNuevoFlujo] = useState("");
   const [creandoFlujo, setCreandoFlujo] = useState(false);
 
   useEffect(() => {
@@ -363,6 +366,8 @@ export default function TesoreriaConciliacionPage() {
     setContratoNuevoFlujo(null);
     setArchivoComprobanteNuevoFlujo(null);
     setLinkComprobanteNuevoFlujo("");
+    setArchivoReferenciaNuevoFlujo(null);
+    setLinkReferenciaNuevoFlujo("");
     try {
       const opciones = await sugerenciasMovimientoBancario(movimiento.id);
       setSugerenciasDialog({ movimiento, opciones });
@@ -384,6 +389,11 @@ export default function TesoreriaConciliacionPage() {
         await subirComprobanteFlujo(flujo.id_flujo, archivoComprobanteNuevoFlujo, session?.user_id);
       } else if (linkComprobanteNuevoFlujo) {
         await updateFlujo(flujo.id_flujo, { linkComprobanteBanco: linkComprobanteNuevoFlujo });
+      }
+      if (archivoReferenciaNuevoFlujo) {
+        await subirReferenciaFlujo(flujo.id_flujo, archivoReferenciaNuevoFlujo, session?.user_id);
+      } else if (linkReferenciaNuevoFlujo) {
+        await updateFlujo(flujo.id_flujo, { linkReferencia: linkReferenciaNuevoFlujo });
       }
       if (tieneComprobante) {
         await aprobarFlujo(flujo.id_flujo);
@@ -1076,6 +1086,30 @@ export default function TesoreriaConciliacionPage() {
                     Al subir comprobante el flujo se aprobará y marcará como pagado automáticamente.
                   </Alert>
                 )}
+                <Divider />
+                <Typography variant="subtitle2">Referencia (opcional)</Typography>
+                <SelectorArchivoLocalODrive
+                  archivo={archivoReferenciaNuevoFlujo}
+                  onChange={(archivo) => {
+                    setArchivoReferenciaNuevoFlujo(archivo);
+                    if (archivo) setLinkReferenciaNuevoFlujo("");
+                  }}
+                  accept="image/*,application/pdf"
+                  mimeTypesDrive={MIME_TYPES_COMPROBANTE}
+                  tituloDrive="Elige el documento de referencia"
+                />
+                <Typography variant="caption" color="text.secondary" align="center">
+                  — o pega el link —
+                </Typography>
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Link de referencia"
+                  placeholder="https://..."
+                  value={linkReferenciaNuevoFlujo}
+                  disabled={!!archivoReferenciaNuevoFlujo}
+                  onChange={(e) => setLinkReferenciaNuevoFlujo(e.target.value)}
+                />
                 <Divider />
                 <Button
                   variant="contained"

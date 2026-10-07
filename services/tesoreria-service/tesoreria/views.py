@@ -14,7 +14,7 @@ import xlrd
 from openpyxl import load_workbook
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
-from django.db.models import ProtectedError, Q
+from django.db.models import Exists, OuterRef, ProtectedError, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -116,6 +116,40 @@ from .reembolso_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _label_contrato(contrato) -> str:
+    """Replica el formato de ContratoSelector.tsx:etiqueta():
+    '{id} — {contraparte}/{proyecto}//{sociedad} - {concepto}'"""
+    if not contrato:
+        return ""
+    ref_partes = [
+        contrato.contraparte.razon_social if contrato.contraparte_id else "",
+        contrato.proyecto or "",
+    ]
+    ref = "/".join(p for p in ref_partes if p)
+    if contrato.sociedad:
+        ref += f"//{contrato.sociedad}"
+    if contrato.concepto:
+        ref += f" - {contrato.concepto}"
+    return f"{contrato.id_contrato} — {ref}" if ref else contrato.id_contrato
+
+
+def _label_cuenta(cuenta) -> str:
+    """Replica el formato de CuentaBancariaSelector.tsx:etiqueta():
+    '{sociedad}/{banco_alias}/{ultimos4}/{tipo}'"""
+    if not cuenta:
+        return ""
+    numero = cuenta.cuenta or cuenta.clabe
+    partes = [
+        cuenta.sociedad or "",
+        (cuenta.banco.alias if cuenta.banco_id and cuenta.banco.alias else
+         cuenta.banco.banco if cuenta.banco_id else ""),
+        numero[-4:] if numero else "",
+        cuenta.tipo or "",
+    ]
+    partes = [p for p in partes if p]
+    return "/".join(partes) if partes else cuenta.alias or cuenta.id_cuenta_bancaria
 
 
 def _csv_local(encabezados: list, filas: list, nombre_archivo: str) -> HttpResponse:
@@ -1126,7 +1160,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             # periodo_nomina (18/Sep/2026) - el serializer lo consulta via
             # periodo_nomina.serie, faltaba aqui (mismo hallazgo N+1 que
             # Facturas, ver TesoreriaFacturaViewSet.list()).
-            .select_related("contrato", "contrato__contraparte", "cuenta", "periodo_nomina")
+            .select_related("contrato", "contrato__contraparte", "cuenta", "cuenta__banco", "periodo_nomina")
             .order_by("-fecha_efectiva", "-created_at")
         )
         contrato_id = self.request.query_params.get("contrato")
@@ -1206,20 +1240,21 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         response["Content-Disposition"] = 'attachment; filename="flujos.csv"'
         writer = csv.writer(response)
         writer.writerow(
-            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría"]
+            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría", "Link comprobante"]
         )
         for f in queryset:
             writer.writerow(
                 [
                     f.id_flujo,
-                    f.contrato_id,
-                    f.cuenta_id,
+                    _label_contrato(f.contrato) if f.contrato_id else "",
+                    _label_cuenta(f.cuenta) if f.cuenta_id else "",
                     f.concepto or "",
                     f.total_mxp or "",
                     f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
                     f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
                     "Sí" if f.pagado else "No",
                     f.categoria_gasto or "",
+                    f.link_comprobante_banco or "",
                 ]
             )
         return response
@@ -1234,24 +1269,26 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         encabezados = [
             "ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP",
-            "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría",
+            "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría", "Link comprobante",
         ]
         filas = [
             [
                 f.id_flujo,
-                f.contrato_id or "",
-                f.cuenta_id or "",
+                _label_contrato(f.contrato) if f.contrato_id else "",
+                _label_cuenta(f.cuenta) if f.cuenta_id else "",
                 f.concepto or "",
                 str(f.total_mxp) if f.total_mxp is not None else "",
                 f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
                 f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
                 "Sí" if f.pagado else "No",
                 f.categoria_gasto or "",
+                f.link_comprobante_banco or "",
             ]
             for f in queryset
         ]
+        titulo = request.data.get("titulo") or f"Flujos CumbresBI — {timezone.now().date().isoformat()}"
         if request.query_params.get("formato") == "csv":
-            return _csv_local(encabezados, filas, "flujos.csv")
+            return _csv_local(encabezados, filas, f"{titulo}.csv")
         try:
             access_token = google_sheets_utils.obtener_access_token(request)
         except google_sheets_utils.GoogleSheetsNoConectado:
@@ -1262,7 +1299,6 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             return Response({"conectado": False, "url_autorizacion": url}, status=409)
         except requests.RequestException:
             return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-        titulo = f"Flujos CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
             url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
@@ -2698,7 +2734,7 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
         return Response(self.get_serializer(solicitud).data)
 
 
-def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, carpeta):
+def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, carpeta, link_fallback=None):
     """Sirve un archivo ya subido a Drive EN STREAMING a traves de este
     servicio (mismo patron que PldContraparteDocViewSet.ver en pld-service,
     "usa lo mismo que en pld" - 04/Sep/2026): antes el boton "Ver"
@@ -2709,8 +2745,14 @@ def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, c
     repite los 3 saltos (frontend -> tesoreria-service -> drive-service ->
     Google Drive) en cache-hit. Content-Security-Policy frame-ancestors
     permite embeberlo en un <iframe> del frontend, restringido a los
-    mismos origenes de CORS_ALLOWED_ORIGINS."""
+    mismos origenes de CORS_ALLOWED_ORIGINS.
+
+    `link_fallback`: si no hay drive_file_id pero si hay un link guardado,
+    redirige ahi en vez de devolver 404."""
     if not drive_file_id:
+        if link_fallback:
+            from django.http import HttpResponseRedirect
+            return HttpResponseRedirect(link_fallback)
         return Response({"detail": "Este documento todavía no tiene un archivo subido."}, status=404)
 
     # "-v2" (04/Sep/2026, hallazgo real): antes del fix de Content-Type
@@ -3252,6 +3294,10 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         estado = self.request.query_params.get("estado")
         if estado:
             queryset = queryset.filter(estado=estado)
+        vinculada = self.request.query_params.get("vinculada")
+        if vinculada in ("true", "false"):
+            tiene_flujo = Exists(TesoreriaFlujo.objects.filter(factura_id=OuterRef("timbre_uuid")))
+            queryset = queryset.filter(tiene_flujo) if vinculada == "true" else queryset.exclude(tiene_flujo)
         return queryset
 
     def list(self, request, *args, **kwargs):
@@ -3397,6 +3443,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=factura.mime_type_pdf,
             nombre_archivo=f"factura-{factura.timbre_uuid}",
             carpeta=self._carpeta_documento(factura, "pdf"),
+            link_fallback=factura.link_pdf,
         )
 
     @action(detail=True, methods=["get"])
@@ -3413,7 +3460,93 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=factura.mime_type_xml,
             nombre_archivo=f"factura-{factura.timbre_uuid}",
             carpeta=self._carpeta_documento(factura, "xml"),
+            link_fallback=factura.link_xml,
         )
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_pdf(self, request, pk=None):
+        """Sube el PDF de la factura directo a Drive sin pasar por el
+        Motor Documental. Mismo patron que
+        TesoreriaFlujoViewSet.subir_comprobante."""
+        factura = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "tesoreria.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir PDF de factura %s", factura.pk, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+        resultado = upstream.json()
+        factura.drive_file_id_pdf = resultado["file_id"]
+        factura.mime_type_pdf = archivo.content_type
+        factura.link_pdf = resultado["web_view_link"]
+        factura.save(update_fields=["drive_file_id_pdf", "mime_type_pdf", "link_pdf"])
+        emitir_evento_auditoria(
+            "tesoreria_facturas.subir_pdf",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(factura).data)
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_xml(self, request, pk=None):
+        """Sube el XML (comprobante fiscal) de la factura directo a
+        Drive sin pasar por el Motor Documental."""
+        factura = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "tesoreria.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir XML de factura %s", factura.pk, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+        resultado = upstream.json()
+        factura.drive_file_id_xml = resultado["file_id"]
+        factura.mime_type_xml = archivo.content_type
+        factura.link_xml = resultado["web_view_link"]
+        factura.save(update_fields=["drive_file_id_xml", "mime_type_xml", "link_xml"])
+        emitir_evento_auditoria(
+            "tesoreria_facturas.subir_xml",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(factura).data)
 
     @action(detail=True, methods=["post"])
     def sincronizar_drive(self, request, pk=None):
@@ -3761,6 +3894,7 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
             mime_type=complemento.mime_type_pdf,
             nombre_archivo=f"complemento-pago-{complemento.timbre_uuid}",
             carpeta=f"Tesoreria/ComplementosPago/{complemento.timbre_uuid}",
+            link_fallback=complemento.link_pdf,
         )
 
     @action(detail=True, methods=["get"])
@@ -3774,6 +3908,7 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
             mime_type=complemento.mime_type_xml,
             nombre_archivo=f"complemento-pago-{complemento.timbre_uuid}",
             carpeta=f"Tesoreria/ComplementosPago/{complemento.timbre_uuid}",
+            link_fallback=complemento.link_xml,
         )
 
     @action(detail=True, methods=["post"])
@@ -3848,6 +3983,7 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=nota.mime_type_pdf,
             nombre_archivo=f"nota-credito-{nota.timbre_uuid}",
             carpeta=f"Tesoreria/NotasCredito/{nota.timbre_uuid}",
+            link_fallback=nota.link_pdf,
         )
 
     @action(detail=True, methods=["get"])
@@ -3861,6 +3997,7 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=nota.mime_type_xml,
             nombre_archivo=f"nota-credito-{nota.timbre_uuid}",
             carpeta=f"Tesoreria/NotasCredito/{nota.timbre_uuid}",
+            link_fallback=nota.link_xml,
         )
 
     @action(detail=True, methods=["post"])
