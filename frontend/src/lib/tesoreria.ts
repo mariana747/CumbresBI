@@ -1533,6 +1533,7 @@ export async function createFlujo(params: {
 export async function updateFlujo(
   idFlujo: string,
   params: Partial<{
+    contrato: string;
     concepto: string;
     fechaEfectiva: string;
     totalMxp: string;
@@ -1547,6 +1548,7 @@ export async function updateFlujo(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      ...(params.contrato !== undefined ? { contrato: params.contrato } : {}),
       concepto: params.concepto,
       fecha_efectiva: params.fechaEfectiva,
       total_mxp: params.totalMxp,
