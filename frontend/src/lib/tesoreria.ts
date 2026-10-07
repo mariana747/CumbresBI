@@ -730,23 +730,37 @@ export async function sugerenciasMovimientoBancario(id: string): Promise<Tesorer
   return response.json();
 }
 
+export interface ConciliarAutomaticoPropuesta {
+  movimiento: string;
+  mov_descripcion: string | null;
+  mov_monto: string;
+  mov_fecha: string;
+  flujo: string;
+  concepto: string | null;
+  contrato_referencia: string | null;
+  total_mxp: string;
+  fecha_pago: string | null;
+  fecha_efectiva: string | null;
+  link_comprobante: string | null;
+  link_referencia: string | null;
+  motivos: string[];
+}
+
 export interface ConciliarAutomaticoResultado {
-  conciliados: number;
+  propuestas: ConciliarAutomaticoPropuesta[];
   ambiguos: number;
   sin_match: number;
   detalle_ambiguos: { movimiento: string; candidatos: number }[];
   detalle_sin_match: string[];
 }
 
-export async function conciliarAutomatico(params?: {
+export async function conciliarAutomaticoProponer(params?: {
   cuenta?: string;
   corteEdc?: string;
-  actorUserId?: string;
 }): Promise<ConciliarAutomaticoResultado> {
   const body: Record<string, string> = {};
   if (params?.cuenta) body.cuenta = params.cuenta;
   if (params?.corteEdc) body.corte_edc = params.corteEdc;
-  if (params?.actorUserId) body.actor_user_id = params.actorUserId;
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/conciliar_automatico/`,
@@ -756,6 +770,35 @@ export async function conciliarAutomatico(params?: {
     throw await friendlyApiError("TESORERIA", response);
   }
   return response.json();
+}
+
+export async function conciliarAutomaticoConfirmar(params: {
+  propuestas: { movimiento: string; flujo: string }[];
+  actorUserId?: string;
+}): Promise<{ conciliados: number }> {
+  const body: Record<string, unknown> = {
+    confirmar: true,
+    propuestas: params.propuestas,
+  };
+  if (params.actorUserId) body.actor_user_id = params.actorUserId;
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/movimientos-bancarios/conciliar_automatico/`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+  );
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+/** @deprecated Usar conciliarAutomaticoProponeronfirmar */
+export async function conciliarAutomatico(params?: {
+  cuenta?: string;
+  corteEdc?: string;
+  actorUserId?: string;
+}): Promise<ConciliarAutomaticoResultado> {
+  return conciliarAutomaticoProponer(params);
 }
 
 export interface ReporteConciliacionFila {

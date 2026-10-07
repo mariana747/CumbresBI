@@ -4255,7 +4255,7 @@ def _referencia_contrato(contrato):
     return f"{base} - {contrato.concepto}" if contrato.concepto else base
 
 
-def _sugerir_flujos_para_movimiento(movimiento, limite=5):
+def _sugerir_flujos_para_movimiento(movimiento, limite=5, skip_ia=False):
     """Propone candidatos de Flujo para un movimiento bancario por
     heuristica (monto en valor absoluto + fecha con tolerancia, ordenado
     por score), excluyendo flujos ya ligados a otro movimiento o de otra
@@ -4314,6 +4314,8 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
     # solo flujos sin conciliar de la misma cuenta, tope MAX_SIN_MATCH para
     # no mandarle a Gemini cientos de flujos.
     MAX_CANDIDATOS_SIN_MATCH = 30
+    if not sugerencias and skip_ia:
+        return []
     if not sugerencias:
         flujos_sin_match = (
             TesoreriaFlujo.objects.filter(cuenta=movimiento.cuenta, total_mxp__isnull=False)
@@ -4363,7 +4365,7 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
     es_ambiguo = len(sugerencias) > 1 and (
         sugerencias[0][0] < PUNTAJE_MAXIMO_CLARO or sugerencias[0][0] == sugerencias[1][0]
     )
-    if es_ambiguo:
+    if es_ambiguo and not skip_ia:
         candidatos_ia = [
             {
                 "id_flujo": flujo.id_flujo,
@@ -4589,10 +4591,47 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
 
     @action(detail=False, methods=["post"])
     def conciliar_automatico(self, request):
-        """Aplica solo matches de alta confianza (candidato unico, monto
-        exacto, fecha a lo mas 1 dia de diferencia); ambiguos quedan para
-        `sugerencias`. Body opcional: {"cuenta"} y/o {"corte_edc"} para
-        acotar el lote."""
+        """Matches de alta confianza (candidato unico, monto exacto, fecha a
+        lo mas 1 dia). Sin `confirmar`: devuelve propuestas para que el
+        analista las revise. Con `confirmar: true` y la lista `propuestas`
+        [{movimiento, flujo}] que el analista aprobo: aplica solo esas.
+        Body opcional: {"cuenta"} y/o {"corte_edc"} para acotar el lote,
+        {"limite"} (default 200)."""
+        LIMITE_DEFAULT = 200
+        confirmar = bool(request.data.get("confirmar", False))
+
+        # --- Fase de confirmacion: recibe propuestas ya revisadas por el analista ---
+        if confirmar:
+            propuestas = request.data.get("propuestas", [])
+            if not propuestas:
+                return Response({"detail": "Se requiere 'propuestas' para confirmar."}, status=400)
+            ids_mov = [p["movimiento"] for p in propuestas]
+            movimientos = {
+                m.id: m
+                for m in TesoreriaMovimientoBancario.objects.filter(id__in=ids_mov, flujo__isnull=True)
+            }
+            to_update = []
+            aplicados = []
+            for p in propuestas:
+                mov = movimientos.get(p["movimiento"])
+                if mov:
+                    mov.flujo_id = p["flujo"]
+                    to_update.append(mov)
+                    aplicados.append({"movimiento": mov.id, "flujo": mov.flujo_id})
+            if to_update:
+                TesoreriaMovimientoBancario.objects.bulk_update(to_update, ["flujo"])
+            if aplicados:
+                emitir_evento_auditoria(
+                    "tesoreria_movimientos_bancarios.conciliar_automatico",
+                    "tesoreria_movimientos_bancarios",
+                    f"{len(aplicados)} movimientos",
+                    actor_user_id=request.data.get("actor_user_id"),
+                    valores_nuevos={"conciliados": aplicados},
+                )
+            return Response({"conciliados": len(aplicados)})
+
+        # --- Fase de propuesta: calcula matches sin guardar nada ---
+        limite = min(int(request.data.get("limite", LIMITE_DEFAULT)), 500)
         queryset = TesoreriaMovimientoBancario.objects.filter(flujo__isnull=True)
         cuenta_id = request.data.get("cuenta")
         if cuenta_id:
@@ -4601,36 +4640,44 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         if corte_edc_id:
             queryset = queryset.filter(corte_edc_id=corte_edc_id)
 
-        conciliados = []
+        propuestas = []
         ambiguos = []
         sin_match = []
-        for movimiento in queryset.select_related("cuenta"):
-            candidatos = _sugerir_flujos_para_movimiento(movimiento, limite=2)
+        for movimiento in queryset.select_related("cuenta")[:limite]:
+            candidatos = _sugerir_flujos_para_movimiento(movimiento, limite=2, skip_ia=True)
             alta_confianza = [
                 c
                 for c in candidatos
                 if "mismo monto exacto" in c["motivos"] and "misma fecha (o un dia de diferencia)" in c["motivos"]
             ]
             if len(alta_confianza) == 1:
-                movimiento.flujo_id = alta_confianza[0]["id_flujo"]
-                movimiento.save(update_fields=["flujo"])
-                conciliados.append({"movimiento": movimiento.id, "flujo": movimiento.flujo_id})
+                id_flujo = alta_confianza[0]["id_flujo"]
+                flujo_obj = TesoreriaFlujo.objects.filter(id_flujo=id_flujo).values(
+                    "link_comprobante_banco", "link_referencia"
+                ).first() or {}
+                propuestas.append({
+                    "movimiento": movimiento.id,
+                    "mov_descripcion": movimiento.descripcion,
+                    "mov_monto": str(movimiento.abono or movimiento.cargo or 0),
+                    "mov_fecha": str(movimiento.fecha),
+                    "flujo": id_flujo,
+                    "concepto": alta_confianza[0]["concepto"],
+                    "contrato_referencia": alta_confianza[0].get("contrato_referencia"),
+                    "total_mxp": alta_confianza[0]["total_mxp"],
+                    "fecha_pago": alta_confianza[0].get("fecha_pago"),
+                    "fecha_efectiva": alta_confianza[0].get("fecha_efectiva"),
+                    "link_comprobante": flujo_obj.get("link_comprobante_banco"),
+                    "link_referencia": flujo_obj.get("link_referencia"),
+                    "motivos": alta_confianza[0]["motivos"],
+                })
             elif candidatos:
                 ambiguos.append({"movimiento": movimiento.id, "candidatos": len(candidatos)})
             else:
                 sin_match.append(movimiento.id)
 
-        if conciliados:
-            emitir_evento_auditoria(
-                "tesoreria_movimientos_bancarios.conciliar_automatico",
-                "tesoreria_movimientos_bancarios",
-                f"{len(conciliados)} movimientos",
-                actor_user_id=request.data.get("actor_user_id"),
-                valores_nuevos={"conciliados": conciliados},
-            )
         return Response(
             {
-                "conciliados": len(conciliados),
+                "propuestas": propuestas,
                 "ambiguos": len(ambiguos),
                 "sin_match": len(sin_match),
                 "detalle_ambiguos": ambiguos,

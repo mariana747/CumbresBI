@@ -13,6 +13,8 @@ import { NextRequest, NextResponse } from "next/server";
 // separado) explicitamente, sin depender de mecanismos internos de Next.js
 // que no garantizan reenviar cookies en un rewrite externo.
 
+const TIMEOUT_MS_POR_PREFIJO: Record<string, number> = { docint: 90_000, pld: 90_000, tesoreria: 90_000 };
+
 const GATEWAY_PREFIXES = [
   "iam",
   "pld",
@@ -72,6 +74,7 @@ async function proxy(request: NextRequest, params: { gateway: string; path: stri
       headers,
       body: hasBody ? await request.arrayBuffer() : undefined,
       redirect: "manual",
+      signal: AbortSignal.timeout(TIMEOUT_MS_POR_PREFIJO[params.gateway] ?? 20_000),
     });
   } catch {
     return NextResponse.json({ detail: "El servicio no respondio. Intenta de nuevo." }, { status: 502 });
