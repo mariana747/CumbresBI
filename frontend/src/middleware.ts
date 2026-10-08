@@ -15,7 +15,6 @@ const PUBLIC_PATH_PREFIXES = [
   "/pld-documento",
   "/privacidad",
   "/terminos",
-  "/about",
 ];
 
 // Prefijos del Gateway (proxeados por el Route Handler): nunca deben pasar
@@ -34,14 +33,15 @@ const GATEWAY_PATH_PREFIXES = [
   "/drive",
   "/mail",
   "/obra",
-  "/about",
   "/privacidad",
-  "/terminos"
-
+  "/terminos",
 ];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // / es publica: la renderiza el componente segun si hay sesion o no.
+  if (pathname === "/") return NextResponse.next();
 
   if (
     GATEWAY_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix)) ||
@@ -54,10 +54,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // No redirige directo a Google: un bounce 100% automatico dispara la
-  // Bounce Tracking Mitigation de Chrome y borra la cookie de sesion.
-  // Un clic real en /login cuenta como interaccion genuina y lo evita.
-  return NextResponse.redirect(new URL("/login", request.url));
+  // Sin sesion: manda a / (home publica con descripcion de la app + boton
+  // de login). /login sigue funcionando si se accede manualmente.
+  return NextResponse.redirect(new URL("/", request.url));
 }
 
 export const config = {
