@@ -1495,8 +1495,15 @@ function TesoreriaFlujosPageContent() {
                 disabled={soloLectura}
                 value={contratoForm}
                 onChange={(seleccion) => {
+                  const cambiaSociedad = seleccion?.sociedad !== contratoForm?.sociedad;
                   setContratoForm(seleccion);
-                  setForm({ ...form, contrato: seleccion?.id_contrato || "", linkContrato: seleccion?.link_contrato || "" });
+                  if (cambiaSociedad) setCuentaSeleccionada(null);
+                  setForm((f) => ({
+                    ...f,
+                    contrato: seleccion?.id_contrato || "",
+                    linkContrato: seleccion?.link_contrato || "",
+                    ...(cambiaSociedad ? { cuenta: "" } : {}),
+                  }));
                 }}
               />
               {contratoForm && !editing && (
@@ -1668,6 +1675,7 @@ function TesoreriaFlujosPageContent() {
                   setForm({ ...form, cuenta: seleccion?.id_cuenta_bancaria || "" });
                 }}
                 sociedades={sociedades}
+                sociedad={contratoForm?.sociedad || undefined}
               />
               <TextField
                 size="small"
