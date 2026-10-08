@@ -43,6 +43,7 @@ from . import mail_utils
 from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
 from .reportes import calcular_reporte_diario
 from .ticket_utils import generate_token
+from .models import TesoreriaNotificacion
 from .views import (
     FacturaConceptoViewSet,
     FacturaDoctoRelacionadoViewSet,
@@ -60,6 +61,7 @@ from .views import (
     TesoreriaMovimientoBancarioViewSet,
     TesoreriaNominaViewSet,
     TesoreriaNotaCreditoViewSet,
+    TesoreriaNotificacionViewSet,
     TesoreriaContratoDocumentoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
@@ -5005,3 +5007,127 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "crear_flujo"})
         response = view(request, pk=movimiento.id)
         self.assertEqual(response.status_code, 400)
+
+
+RFC_OTRA = "OTR900101ABC"
+
+
+class TesoreriaNotificacionTests(TestCase):
+    """Campana: verificar_sociedad detecta flujos con contrato/cuenta de
+    distinta sociedad y crea notificaciones para cada destinatario."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Empresa Test", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="t@t.com"
+        )
+        self.banco = TesoreriaBanco.objects.create(id_banxico="99999", banco="BancoTest", alias="BT")
+        self.contrato_a = TesoreriaContrato.objects.create(
+            id_contrato="CTR-TEST-A",
+            sociedad=RFC_TIZARA,
+            contraparte=self.contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.cuenta_otra = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000009999", alias="Cuenta otra empresa",
+            apertura="2026-01-01", sociedad=RFC_OTRA,
+        )
+        self.cuenta_misma = TesoreriaCuenta.objects.create(
+            banco=self.banco, clabe="002180000000008888", alias="Cuenta misma empresa",
+            apertura="2026-01-01", sociedad=RFC_TIZARA,
+        )
+        self.scope_aprobar = EffectiveScope(
+            is_global=True, perm_keys=("tesoreria.aprobar",), identity_user_id="u001"
+        )
+
+    @patch("tesoreria.views._usuarios_por_roles", return_value=["u001", "u002"])
+    def test_detecta_mismatch_y_crea_notificaciones(self, _mock):
+        TesoreriaFlujo.objects.create(
+            contrato=self.contrato_a,
+            cuenta=self.cuenta_otra,
+            total_mxp="1000.00",
+        )
+        request = self.factory.post("/api/flujos/verificar_sociedad/")
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFlujoViewSet.as_view({"post": "verificar_sociedad"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["flujos"], 1)
+        self.assertEqual(response.data["creadas"], 2)  # una por cada destinatario
+        self.assertEqual(TesoreriaNotificacion.objects.count(), 2)
+
+    @patch("tesoreria.views._usuarios_por_roles", return_value=["u001"])
+    def test_no_detecta_flujo_con_sociedad_correcta(self, _mock):
+        TesoreriaFlujo.objects.create(
+            contrato=self.contrato_a,
+            cuenta=self.cuenta_misma,
+            total_mxp="1000.00",
+        )
+        request = self.factory.post("/api/flujos/verificar_sociedad/")
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFlujoViewSet.as_view({"post": "verificar_sociedad"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["flujos"], 0)
+        self.assertEqual(TesoreriaNotificacion.objects.count(), 0)
+
+    @patch("tesoreria.views._usuarios_por_roles", return_value=["u001"])
+    def test_no_duplica_notificacion_no_leida(self, _mock):
+        flujo = TesoreriaFlujo.objects.create(
+            contrato=self.contrato_a,
+            cuenta=self.cuenta_otra,
+            total_mxp="500.00",
+        )
+        # Primera ejecución
+        request = self.factory.post("/api/flujos/verificar_sociedad/")
+        request.effective_scope = self.scope_aprobar
+        view = TesoreriaFlujoViewSet.as_view({"post": "verificar_sociedad"})
+        view(request)
+        # Segunda ejecución: no debe duplicar
+        request2 = self.factory.post("/api/flujos/verificar_sociedad/")
+        request2.effective_scope = self.scope_aprobar
+        view(request2)
+        self.assertEqual(TesoreriaNotificacion.objects.count(), 1)
+
+    def test_listar_notificaciones_solo_propias(self):
+        TesoreriaNotificacion.objects.create(
+            destinatario="u001", tipo="SOCIEDAD_MISMATCH",
+            mensaje="Flujo X: empresa A vs empresa B.", link_url="/tesoreria/flujos?id=X",
+        )
+        TesoreriaNotificacion.objects.create(
+            destinatario="u002", tipo="SOCIEDAD_MISMATCH",
+            mensaje="Flujo Y: empresa A vs empresa B.", link_url="/tesoreria/flujos?id=Y",
+        )
+        request = self.factory.get("/api/notificaciones/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=(), identity_user_id="u001")
+        view = TesoreriaNotificacionViewSet.as_view({"get": "list"})
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        ids = [n["id_notificacion"] for n in response.data]
+        self.assertTrue(all(TesoreriaNotificacion.objects.get(id_notificacion=i).destinatario == "u001" for i in ids))
+
+    @patch("tesoreria.views._usuarios_por_roles", return_value=["u001"])
+    def test_on_save_crea_notificacion_automaticamente(self, _mock):
+        """Al crear un flujo con mismatch, la notificación se genera sin
+        llamar a verificar_sociedad."""
+        request = self.factory.post(
+            "/api/flujos/",
+            {"contrato": self.contrato_a.id_contrato, "cuenta": self.cuenta_otra.id_cuenta_bancaria, "total_mxp": "2000.00"},
+            format="json",
+        )
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.crear",), identity_user_id="u001")
+        TesoreriaFlujoViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(TesoreriaNotificacion.objects.count(), 1)
+
+    def test_marcar_leida(self):
+        n = TesoreriaNotificacion.objects.create(
+            destinatario="u001", tipo="SOCIEDAD_MISMATCH",
+            mensaje="Flujo Z: mismatch.", link_url="/tesoreria/flujos?id=Z",
+        )
+        request = self.factory.post(f"/api/notificaciones/{n.id_notificacion}/marcar_leida/")
+        request.effective_scope = EffectiveScope(is_global=True, perm_keys=(), identity_user_id="u001")
+        view = TesoreriaNotificacionViewSet.as_view({"post": "marcar_leida"})
+        response = view(request, pk=n.id_notificacion)
+        self.assertEqual(response.status_code, 200)
+        n.refresh_from_db()
+        self.assertTrue(n.leida)
