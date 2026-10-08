@@ -149,6 +149,9 @@ export interface PldContraparteKyc {
   nombre_completo: string | null;
   curp: string | null;
   nacionalidad: string | null;
+  tipo_persona: "fisica" | "moral" | "fideicomiso" | null;
+  pais_nac_const: string | null;
+  dom_pais: string | null;
   categoria_cumplimiento: PldCategoriaCumplimiento | null;
   categoria_cumplimiento_manual: boolean;
   estado_cuenta: "ACTIVA" | "SOSPECHOSA" | "CONGELADA";

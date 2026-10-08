@@ -2103,7 +2103,7 @@ export default function PldExpedienteDetallePage() {
                     </Typography>
                     {!transaccionesLoading && !!transacciones?.length && (
                       <Box sx={{ mx: -2.5, mt: -3 }}>
-                        <FiltrosBar flush>
+                        <FiltrosBar search="" onSearchChange={() => undefined} hideSearch flush>
                           <TextField
                             size="small"
                             label="Desde"
