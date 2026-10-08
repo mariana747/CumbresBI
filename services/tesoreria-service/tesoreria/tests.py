@@ -5073,7 +5073,7 @@ class TesoreriaNotificacionTests(TestCase):
 
     @patch("tesoreria.views._usuarios_por_roles", return_value=["u001"])
     def test_no_duplica_notificacion_no_leida(self, _mock):
-        flujo = TesoreriaFlujo.objects.create(
+        TesoreriaFlujo.objects.create(
             contrato=self.contrato_a,
             cuenta=self.cuenta_otra,
             total_mxp="500.00",
