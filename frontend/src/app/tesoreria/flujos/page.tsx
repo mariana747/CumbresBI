@@ -1110,7 +1110,7 @@ function TesoreriaFlujosPageContent() {
       >
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={sociedades}
           value={sociedades.find((s) => s.rfc === filtroEmpresa) || null}
           onChange={(_, seleccion) => {
@@ -1124,14 +1124,14 @@ function TesoreriaFlujosPageContent() {
         />
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]}
           value={filtroCategoriaGasto || null}
           onChange={(_, seleccion) => setFiltroCategoriaGasto(seleccion || "")}
           getOptionLabel={(c) => CATEGORIA_GASTO_LABELS[c]}
           renderInput={(params) => <TextField {...params} label="Categoría de gasto" />}
         />
-        <Box sx={{ minWidth: 200 }}>
+        <Box sx={{ width: "100%" }}>
           <ContratoSelector
             label="Filtrar por contrato"
             sociedad={filtroEmpresa || undefined}
@@ -1144,7 +1144,7 @@ function TesoreriaFlujosPageContent() {
         </Box>
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={nominas}
           value={nominas.find((n) => n.id_nomina === filtroNomina) || null}
           onChange={(_, seleccion) => setFiltroNomina(seleccion?.id_nomina || "")}
@@ -1154,7 +1154,7 @@ function TesoreriaFlujosPageContent() {
         />
         <Autocomplete
           size="small"
-          sx={{ minWidth: 160 }}
+          sx={{ width: "100%" }}
           options={Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]}
           value={filtroEstado || null}
           onChange={(_, seleccion) => setFiltroEstado(seleccion || "")}
@@ -1176,7 +1176,7 @@ function TesoreriaFlujosPageContent() {
             }
           }}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
         <TextField
           size="small"
@@ -1185,7 +1185,7 @@ function TesoreriaFlujosPageContent() {
           value={filtroFechaHasta}
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
       </FiltrosBar>
 
