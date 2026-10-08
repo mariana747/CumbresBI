@@ -111,6 +111,7 @@ import {
   urlVerReferenciaFlujo,
   updateFlujo,
   vincularFactura,
+  verificarSociedadMismatch,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -434,6 +435,7 @@ function TesoreriaFlujosPageContent() {
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
   const puedeAprobar = session?.perm_keys.includes("tesoreria.aprobar") ?? false;
+  const [verificando, setVerificando] = React.useState(false);
 
   // Muestra el folio de la factura/complemento ya vinculado en vez del
   // timbre_uuid crudo - busca en las listas ya cargadas arriba (mismo
@@ -1094,6 +1096,27 @@ function TesoreriaFlujosPageContent() {
             >
               Descargar CSV
             </Button>
+            {puedeAprobar && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                disabled={verificando}
+                startIcon={verificando ? <CircularProgress size={14} /> : undefined}
+                onClick={async () => {
+                  setVerificando(true);
+                  try {
+                    const r = await verificarSociedadMismatch();
+                    alert(`Flujos con mismatch: ${r.flujos}\nNotificaciones creadas: ${r.creadas}`);
+                  } finally {
+                    setVerificando(false);
+                  }
+                }}
+                sx={{ flexShrink: 0 }}
+              >
+                Verificar sociedades
+              </Button>
+            )}
             {puedeCrear && (
               <Button
                 size="small"
