@@ -244,6 +244,27 @@ class PldContraparteKyc(models.Model):
     # de esa decision manual (hasta que alguien lo apague, ver
     # PldContraparteKycViewSet.reactivar_auto_estado).
     estado_llenado_manual = models.BooleanField(default=False)
+
+    # Grado de riesgo (EBR - Enfoque Basado en Riesgo).
+    # Se calcula automático con calcular_grado_riesgo(); el analista puede
+    # sobreescribirlo manualmente (mismo patron hibrido que estado_llenado).
+    RIESGO_BAJO = "BAJO"
+    RIESGO_MEDIO = "MEDIO"
+    RIESGO_ALTO = "ALTO"
+    RIESGO_SIN_EVALUAR = "SIN_EVALUAR"
+    GRADO_RIESGO_CHOICES = [
+        (RIESGO_BAJO, "Bajo"),
+        (RIESGO_MEDIO, "Medio"),
+        (RIESGO_ALTO, "Alto"),
+        (RIESGO_SIN_EVALUAR, "Sin evaluar"),
+    ]
+    grado_riesgo = models.CharField(
+        max_length=20, choices=GRADO_RIESGO_CHOICES, default=RIESGO_SIN_EVALUAR
+    )
+    grado_riesgo_manual = models.BooleanField(default=False)
+    es_pep = models.BooleanField(null=True, blank=True)
+    notas_riesgo = models.TextField(blank=True, null=True)
+
     # FK real a iam_users.user_id (iam-service) - referencia laxa, ver nota arriba.
     aprobado_por = models.CharField(max_length=8)
     aprobado_en = models.DateTimeField(blank=True, null=True)
@@ -295,9 +316,56 @@ class PldContraparteKyc(models.Model):
             return PldContraparteKyc.CATEGORIA_KYB
         return PldContraparteKyc.CATEGORIA_PENDIENTE
 
+    # Paises de alto riesgo segun GAFI/FATF (lista negra y gris relevante
+    # para actividad inmobiliaria en Mexico).
+    PAISES_ALTO_RIESGO = {
+        "Corea del Norte", "Irán", "Myanmar", "Rusia", "Bielorrusia",
+        "Siria", "Cuba", "Venezuela", "Afganistán", "Haití", "Sudán",
+        "Yemen", "Nicaragua", "Palestina",
+    }
+
+    def calcular_grado_riesgo(self):
+        """Scoring EBR sin proveedor externo. Retorna BAJO/MEDIO/ALTO."""
+        puntos = 0
+
+        if self.es_pep:
+            puntos += 3
+        if self.tipo_persona == self.TIPO_FIDEICOMISO:
+            puntos += 2
+        if self.tipo_persona == self.TIPO_MORAL:
+            puntos += 1
+
+        pais = (self.pais_nac_const or self.dom_pais or "").strip()
+        if pais and pais in self.PAISES_ALTO_RIESGO:
+            puntos += 3
+        elif pais and pais.lower() not in ("méxico", "mexico", ""):
+            puntos += 1
+
+        if self.estado_cuenta in ("SOSPECHOSA", "CONGELADA"):
+            puntos += 3
+
+        docs = list(self.documentos.all()) if self.pk else []
+        total = len(docs)
+        aprobados = sum(1 for d in docs if d.status == "APROBADO")
+        if total > 0 and aprobados == 0:
+            puntos += 1
+        elif total == 0:
+            puntos += 1
+
+        if puntos >= 4:
+            return self.RIESGO_ALTO
+        if puntos >= 2:
+            return self.RIESGO_MEDIO
+        return self.RIESGO_BAJO
+
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
         if not self.categoria_cumplimiento_manual:
-            self.categoria_cumplimiento = self.categoria_por_tipo_persona(self.tipo_persona)
+            if update_fields is None or "categoria_cumplimiento" in update_fields:
+                self.categoria_cumplimiento = self.categoria_por_tipo_persona(self.tipo_persona)
+        if not self.grado_riesgo_manual and self.pk:
+            if update_fields is None or "grado_riesgo" in update_fields:
+                self.grado_riesgo = self.calcular_grado_riesgo()
         super().save(*args, **kwargs)
 
 
