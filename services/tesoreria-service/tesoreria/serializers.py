@@ -20,6 +20,7 @@ from .models import (
     TesoreriaNomina,
     TesoreriaNominaSociedad,
     TesoreriaNotaCredito,
+    TesoreriaNotificacion,
     TesoreriaProyectoCodigo,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -1241,3 +1242,11 @@ class TesoreriaTicketProveedorSerializer(serializers.ModelSerializer):
             "last_used_at",
             "revoked_at",
         ]
+
+
+
+class TesoreriaNotificacionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TesoreriaNotificacion
+        fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "leida", "created_at"]
+        read_only_fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "created_at"]

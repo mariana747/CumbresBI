@@ -4126,3 +4126,52 @@ export async function subirDocumentoTicket(params: {
   }
   return response.json();
 }
+
+// ── Notificaciones de tesorería (campana) ──────────────────────────────────
+
+export interface TesoreriaNotificacion {
+  id_notificacion: string;
+  destinatario: string;
+  tipo: string;
+  mensaje: string;
+  link_url: string | null;
+  leida: boolean;
+  created_at: string;
+}
+
+export async function listNotificacionesTesoreria(
+  soloNoLeidas?: boolean
+): Promise<TesoreriaNotificacion[]> {
+  const params = new URLSearchParams();
+  if (soloNoLeidas) params.set("solo_no_leidas", "true");
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/notificaciones/${params.toString() ? `?${params}` : ""}`
+  );
+  if (!response.ok) return [];
+  const data = await response.json();
+  return Array.isArray(data) ? data : (data.results ?? []);
+}
+
+export async function marcarNotificacionTesoreriaLeida(
+  idNotificacion: string
+): Promise<void> {
+  await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/notificaciones/${idNotificacion}/marcar_leida/`,
+    { method: "POST" }
+  );
+}
+
+export async function verificarSociedadMismatch(): Promise<{
+  creadas: number;
+  flujos: number;
+}> {
+  const response = await apiFetch(
+    "TESORERIA",
+    `${TESORERIA_API_BASE_URL}/api/flujos/verificar_sociedad/`,
+    { method: "POST" }
+  );
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  return response.json();
+}
