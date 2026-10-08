@@ -728,7 +728,7 @@ class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         # id_nomina = "NOM-{consecutivo global de 6 digitos}", mismo
         # criterio que TesoreriaFlujo.id_flujo (ver
         # TesoreriaFlujoViewSet.perform_create).
-        sociedades = [s.sociedad for s in serializer.validated_data.get("sociedades", [])]
+        sociedades = serializer.validated_data.get("sociedades", [])
         scope = self.request.effective_scope
         if not scope.is_global and sociedades:
             fuera = [s for s in sociedades if s not in scope.sociedad_rfcs]
@@ -2117,7 +2117,9 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         genera notificaciones nuevas (no duplica si ya existe una no leída
         del mismo flujo para ese destinatario). Requiere tesoreria.aprobar
         (mismo gate que otras acciones administrativas del viewset)."""
-        require_permission(request, "tesoreria.aprobar")
+        if not require_permission("tesoreria.aprobar")().has_permission(request, self):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied()
 
         flujos_mismatch = (
             TesoreriaFlujo.objects.filter(
