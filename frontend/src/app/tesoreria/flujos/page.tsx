@@ -435,7 +435,7 @@ function TesoreriaFlujosPageContent() {
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
   const puedeAprobar = session?.perm_keys.includes("tesoreria.aprobar") ?? false;
-  const [verificando, setVerificando] = React.useState(false);
+  const [verificando, setVerificando] = useState(false);
 
   // Muestra el folio de la factura/complemento ya vinculado en vez del
   // timbre_uuid crudo - busca en las listas ya cargadas arriba (mismo
