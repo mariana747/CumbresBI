@@ -18,14 +18,12 @@ import {
   Paper,
   Select,
   Stack,
-  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -275,16 +273,20 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         </Stack>
       </Dialog>
 
-      <Tabs
-        value={tabCategoria}
-        onChange={(_, valor) => setTabCategoria(valor)}
-        sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}
-      >
-        <Tab value="KYC" label={CATEGORIA_CUMPLIMIENTO_LABELS.KYC} />
-        <Tab value="KYB" label={CATEGORIA_CUMPLIMIENTO_LABELS.KYB} />
-      </Tabs>
-
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="categoria-filter-label">Categoría</InputLabel>
+          <Select
+            labelId="categoria-filter-label"
+            label="Categoría"
+            value={tabCategoria}
+            onChange={(e) => setTabCategoria(e.target.value as Extract<PldCategoriaCumplimiento, "KYC" | "KYB">)}
+            MenuProps={{ PaperProps: { style: { width: "fit-content" } } }}
+          >
+            <MenuItem value="KYC">KYC — persona física</MenuItem>
+            <MenuItem value="KYB">KYB — persona moral</MenuItem>
+          </Select>
+        </FormControl>
         <TextField
           size="small"
           placeholder="Buscar por contraparte o CURP..."
