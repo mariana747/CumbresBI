@@ -5,12 +5,7 @@ código, mismo criterio que se usó para `roles-y-permisos.md` — evitar
 construir sobre supuestos equivocados. Rama de trabajo:
 `feature/pld-drive-integracion`.
 
-> **Estado al 11/Ago/2026: Fase 2 al ~55%.** Seis pendientes quedan para
-> llegar a 100% (ver `Estado del proyecto`). Este documento cubre los
-> seis, pero prioriza el primero — **integración real con Google Drive** —
-> porque es el bloqueo explícito para subir el proyecto a Cloud Run
-> (decisión de Mariana, 11/Ago/2026: "no podemos subir al proyecto a cloud
-> hasta que esté la conexión a Drive").
+> **Estado al 08/Oct/2026: Fase 2 completa (secciones 1–3 y 5–6 cerradas).** Las seis pendientes originales quedaron resueltas. Lo que sigue abierto es backlog regulatorio nuevo (monitoreo transaccional, UIF, validación externa KYC) — ver `pendiente.md` sección PLD.
 
 ## 0. Hallazgo importante antes de empezar
 
@@ -27,7 +22,11 @@ comentario viejo en el código nuevo.
 
 ## 1. Integración real con Google Drive
 
-### 1.1 Qué existe hoy (todo simulado/stub)
+### ✅ RESUELTO (ago–sep/2026)
+
+Drive real funciona con domain-wide delegation. `docint/drive.py` implementado (`upload_bytes`/`download_bytes`/`list_files`). Subida real de documentos en `PldContraparteDocViewSet` (acción `subir`). `PldContraparteDoc` tiene `drive_file_id`, `mime_type`, `tamano_bytes`. Formularios públicos (`PldTicketCliente`) suben a Drive con reCAPTCHA v2. Carpeta `PLD/Nuevos Clientes/<id_contraparte>/` sin subcarpeta por tipo (decisión 07/Sep/2026).
+
+### 1.1 Qué existía antes (todo simulado/stub — referencia histórica)
 
 - `docint/drive.py` — función `fetch_bytes(file_id)` que **siempre lanza
   `NotImplementedError`**. Nunca se llama desde ningún lado.
@@ -54,7 +53,7 @@ comentario viejo en el código nuevo.
 **Conclusión: hay que construir esto desde cero, no hay nada real que
 extender.**
 
-### 1.2 Decisiones ya tomadas (Mariana, 11/Ago/2026)
+### 1.2 Decisiones ya tomadas ( 11/Ago/2026)
 
 | # | Pregunta | Decisión |
 |---|---|---|
@@ -117,106 +116,98 @@ Excels), no solo en el caso de hoy:
   por la subida real — la confirmación en bitácora se puede quedar como
   auditoría *adicional*, no como reemplazo de la subida real.
 
-## 2. Formularios públicos con reCAPTCHA + Drive API
+## 2. Formularios públicos con reCAPTCHA + Drive API ✅ RESUELTO (sep/2026)
 
-Hoy `pld-ticket/[token]/page.tsx` y `magic-link/[token]/page.tsx` **solo
-validan el token y muestran una confirmación** — no existe ningún
-formulario, campo de archivo, ni widget de reCAPTCHA en ningún lado del
-frontend.
+`pld-ticket/[token]/page.tsx`: formulario completo — subida de documentos y edición de datos KYC (`actualizar_datos`). reCAPTCHA v2. Subida real a Drive vía `docint`. Rate limiting no implementado (se dejó pendiente, no bloqueó). `PldTicketClienteViewSet.subir_documento` y `actualizar_datos` son los endpoints públicos; no consumen `uses_count` al subir (solo al validar el link).
 
-**Decisiones que hacen falta:**
-1. ¿Qué campos lleva el formulario público? (¿solo subir documentos, o
-   también datos personales del expediente KYC — nombre, CURP, etc.?)
-2. reCAPTCHA v2 ("no soy un robot") o v3 (score invisible)? — `README.md`
-   sec. 11.3 ya reserva un lugar para el secret key, pero no dice cuál.
-3. ¿El archivo subido aquí va al mismo flujo de Drive de la sección 1, o
-   es una superficie separada? (Debería ser la misma, reutilizando el
-   endpoint de subida — evita construir dos veces la misma lógica.)
-4. Rate limiting del lado del servidor (mencionado para Vivienda en
-   `Estado del proyecto` línea 129 como patrón a replicar) — ¿aplica
-   igual aquí, dado que es acceso público sin cuenta?
+## 3. Workflow de estados del expediente KYC ✅ RESUELTO (ago/2026)
 
-**Depende de la sección 1** (necesita el endpoint de subida real primero).
+Patrón híbrido implementado para `estado_llenado` y `categoria_cumplimiento`:
+- Se recalculan automáticamente en `post_save` de `PldContraparteDoc` y en `save()` del KYC.
+- Un PATCH manual prende el flag `*_manual`; a partir de ahí el recálculo se suspende hasta que el analista use `reactivar_auto_estado` / `reactivar_auto_categoria`.
+- `grado_riesgo` usa el mismo patrón desde oct/2026 (scoring EBR + `grado_riesgo_manual` + acción `evaluar_riesgo`).
 
-## 3. Workflow de estados del expediente KYC
+Estados vigentes: `PENDIENTE → INCOMPLETO → ENTREGADO` (expediente); `PENDIENTE → INCOMPLETO → ENTREGADO → APROBADO` (documento). 18 tests cubren el workflow.
 
-- `PldContraparteKyc.estado_llenado`: `PENDIENTE` → `INCOMPLETO` →
-  `ENTREGADO` (3 estados, sin `APROBADO` a este nivel — la aprobación es
-  un campo aparte, `aprobado_por`/`aprobado_en`).
-- `PldContraparteDoc.status`: `PENDIENTE` → `INCOMPLETO` → `ENTREGADO` →
-  `APROBADO` (4 estados, uno más que el expediente).
-- Hoy el modelo/API soportan estos valores pero **nada los orquesta
-  automáticamente** — cambiar de estado es manual (PATCH directo), no hay
-  reglas de "cuándo pasa de PENDIENTE a ENTREGADO" (¿automático al subir
-  todos los documentos requeridos? ¿manual, el analista lo marca?).
+## 4. Reportes de cumplimiento PLD/AML ⚠️ PARCIAL
 
-**Pregunta abierta:** ¿el estado del expediente (`estado_llenado`) debería
-derivarse automáticamente del estado de sus documentos (`PldContraparteDoc.
-status` de todos los documentos asociados), o seguir siendo independiente
-y manual? Afecta si hace falta una señal (`post_save` o similar) que
-recalcule el expediente cuando cambia un documento.
+Bitácora de auditoría (`/admin/reportes`) cubre los eventos de PLD vía `audit-service`. Tab "Historial de auditoría" en el expediente (tab 4) con filtros Desde/Hasta/Acción/búsqueda. Exportar a CSV/PDF específico de PLD: sin construir. Reporte regulatorio UIF: sin construir (ver `pendiente.md`).
 
-## 4. Reportes de cumplimiento PLD/AML
+## 5. Auditoría específica del Motor Documental dentro de PLD ✅ RESUELTO (ago–oct/2026)
 
-No existe nada construido todavía. Preguntas abiertas:
-1. ¿Qué reportes exactos pide el negocio? (¿expedientes por estado,
-   por sociedad, por analista, por antigüedad? ¿algún reporte regulatorio
-   específico de AML en México — ej. formato de la UIF?)
-2. ¿Exportable a CSV/PDF, igual que la Bitácora de Auditoría
-   (`/admin/reportes`)? Mismo patrón ya construido ahí, se podría
-   reutilizar el componente.
+Todos los eventos clave emiten a `audit-service` (bitácora general, sin tabla propia en `pld-service`):
 
-## 5. Auditoría específica del Motor Documental dentro de PLD
+| Acción | Cuándo |
+|---|---|
+| `pld_contrapartes_kyc.confirmar_extraccion` | Al confirmar campos extraídos por IA |
+| `pld_contrapartes_kyc.editar` | PATCH de campos del expediente |
+| `pld_contrapartes_kyc.evaluar_riesgo` | Al guardar grado de riesgo (manual o recalculado) |
+| `pld_contrapartes_docs.subir` | Subida de documento (actor "externo" si es ticket público) |
+| `pld_contrapartes_docs.eliminar_por_solicitud` | Al aprobar solicitud de eliminación |
+| `pld_solicitudes_eliminacion_doc.solicitar` | Al crear solicitud de eliminación |
+| `pld_solicitudes_eliminacion_doc.rechazar` | Al rechazar solicitud de eliminación |
 
-Hoy la bitácora general (`audit-service`) ya registra el "confirmar envío
-a Drive" simulado. Falta decidir:
-1. ¿Qué eventos adicionales, específicos de PLD + Motor Documental, hacen
-   falta más allá de lo que ya cubre la bitácora general? (ej. "documento
-   clasificado automáticamente como X con Y% de confianza", "extracción
-   de datos falló", etc.)
-2. ¿Vive en `audit-service` (bitácora general) o en un log propio de
-   `pld-service`?
+Filtro `?accion=` exacto añadido a `audit-service` para que el tab 4 del expediente filtre por tipo de evento.
 
-## 6. Módulo Contrapartes (catálogo propio)
+## 6. Módulo Contrapartes (catálogo propio) ✅ RESUELTO (sep/2026)
 
-`pld_contrapartes_kyc.id_contraparte` ya referencia un "dueño real:
-`contrapartes-service`" en un comentario del modelo, pero ese servicio no
-existe. Hoy es un `CharField` libre, sin catálogo ni validación.
+`id_contraparte` se reconcilió con `tesoreria-service` (no se creó un servicio aparte). Flujo:
+- **Alta con `id_contraparte` existente:** PLD valida contra `tesoreria-service` y toma el `id_contraparte` sobreviviente (en caso de fusión).
+- **Alta autónoma (sin id):** `_crear_contraparte_minima_en_tesoreria` crea la contraparte en Tesorería y usa su id real; si `TESORERIA_INTERNAL_SECRET` está vacío o el servicio está caído, cae al id local (fail-open).
+- `nombre_completo` se llena desde los datos de Tesorería al crear (persona física = nombre+apellidos, moral = razón social; se descarta el placeholder "Pendiente de completar (alta autónoma PLD)").
+- `sociedad_rfc` obligatorio; se valida contra `iam-service` y guarda `sociedad_nombre` como snapshot de solo lectura.
 
-**Preguntas abiertas:**
-1. ¿Contrapartes es un servicio nuevo aparte (como sugiere el comentario),
-   o un módulo dentro de `pld-service`?
-2. ¿Qué datos lleva una contraparte más allá del `id_contraparte` que ya
-   se usa? (¿nombre, tipo de persona física/moral, RFC/CURP, contacto?)
-3. ¿Se comparte entre PLD y el futuro `tesoreria_contrapartes` de Fase 4
-   (`Estado del proyecto` línea 132 ya anota esta reconciliación pendiente)
-   o son catálogos independientes?
+## Estado al 08/Oct/2026
 
-Es el pendiente más grande y menos definido de los seis — probablemente
-merece su propio documento de alcance cuando le toque el turno, en vez de
-resolverse aquí de pasada.
+| Sección | Estado |
+|---|---|
+| 1. Drive | ✅ Resuelto |
+| 2. Formularios públicos + reCAPTCHA | ✅ Resuelto |
+| 3. Workflow de estados | ✅ Resuelto |
+| 4. Reportes AML/UIF | ⚠️ Parcial (bitácora general sí, reporte regulatorio no) |
+| 5. Auditoría Motor Documental | ✅ Resuelto |
+| 6. Módulo Contrapartes | ✅ Resuelto |
+| Evaluación de riesgo EBR | ✅ Nuevo — oct/2026 (`grado_riesgo`, `evaluar_riesgo`, migración 0026) |
 
-## Orden sugerido de trabajo
+## Backlog regulatorio abierto — análisis de brechas (06/Oct/2026)
 
-1. **Confirmar las 6 decisiones de la sección 1.2** (con Mariana/cliente)
-   — nada de código hasta tener esto.
-2. Integración real de Drive (sección 1) — desbloquea el deploy.
-3. Workflow de estados (sección 3) — es barato una vez que ya hay
-   documentos reales fluyendo por Drive.
-4. Formularios públicos (sección 2) — reutiliza el endpoint de subida de
-   la sección 1.
-5. Auditoría específica (sección 5) y Reportes (sección 4) — encima de lo
-   anterior, relativamente mecánico.
-6. Módulo Contrapartes (sección 6) — el más grande, se separa a su propio
-   documento de alcance cuando le toque.
+Fuera del alcance original de Fase 2. Ver `pendiente.md` sección PLD.
 
-## Preguntas abiertas para el cliente (resumen, todas las secciones)
+### 1. Validación en listas — NO construido
 
-1. Drive: ¿cuenta de servicio o Workspace delegado? ¿Estructura de
-   carpetas?
-2. Formulario público: ¿qué campos lleva, más allá de subir documentos?
-3. Workflow: ¿el estado del expediente se deriva automático de sus
-   documentos, o sigue siendo manual?
-4. Reportes: ¿cuáles exactamente pide el negocio (¿formato UIF)?
-5. Contrapartes: ¿servicio nuevo o módulo dentro de pld-service?
-   ¿Comparte catálogo con Tesorería (Fase 4)?
+La norma exige cruzar PEP, listas vinculadas y REFIPRES/jurisdicciones antes de iniciar la relación comercial. Hoy `es_pep` es un boolean manual que llena el analista. No hay integración con ninguna lista ni proveedor externo.
+
+### 2. Identificación e integración de expedientes — Parcial
+
+Campos de identidad y documentos por categoría: ✅. Lo que falta:
+- Cuestionario KYC estructurado (preguntas/respuestas en BD, no PDF a subir)
+- Cuestionario Beneficiario Controlador estructurado — `PldRepresentanteLegal` tiene los campos del representante pero no el formato de cuestionario que exige la norma como documento estructurado separado
+
+### 3. Perfil transaccional y matriz de riesgo — Parcial
+
+| Requisito | Estado |
+|---|---|
+| Clasificación BAJO/MEDIO/ALTO automática | ✅ Construido (scoring por atributos) |
+| Perfil operativo inicial | ✅ Construido |
+| Monitoreo/seguimiento continuo | ❌ NO construido |
+| Histórico de cambios en `grado_riesgo` (10 años) | ❌ NO — no hay tabla de historial |
+| Metodología formal de evaluación de riesgos | ❌ NO — scoring actual es heurístico simple |
+
+### 4. Alertas, avisos y acumulación — TODO sin construir
+
+| Requisito | Estado |
+|---|---|
+| Alertas por umbrales de aviso | ❌ NO |
+| Acumulación 6 meses por cliente | ❌ NO |
+| Monitoreo de operaciones fuera de perfil | ❌ NO |
+| Monitoreo de efectivo / metales preciosos | ❌ NO |
+| Alertas automáticas por alto riesgo / PEP / jurisdicción | ❌ NO |
+| Generación de Avisos (general + 24h) | ❌ NO |
+| Evidencia de presentación de avisos | ❌ NO |
+| Control de vencimientos de documentos | ✅ Construido (manual) |
+
+### Conclusión
+
+Lo construido cubre bien el **expediente digital** (KYC/KYB, documentos, Drive, auditoría, magic link). El scoring de riesgo existe pero es básico y heurístico.
+
+La mitad del documento regulatorio — transacciones reales, acumulación, alertas automáticas y avisos a la UIF — requiere construirse desde cero, y probablemente un **proveedor externo KYC/AML** para las listas (PEP/OFAC/REFIPRES).
