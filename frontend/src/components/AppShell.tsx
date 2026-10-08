@@ -73,6 +73,7 @@ import {
 } from "@/lib/auth";
 import { IamUser, listUsers } from "@/lib/iam";
 import { MaterialesNotificacion, listNotificacionesMateriales } from "@/lib/materiales";
+import { TesoreriaNotificacion, listNotificacionesTesoreria, marcarNotificacionTesoreriaLeida } from "@/lib/tesoreria";
 import { PldSolicitudEliminacionDoc, listSolicitudesEliminacion } from "@/lib/pld";
 import { Footer } from "@/components/Footer";
 import { BRAND } from "@/theme/theme";
@@ -669,6 +670,8 @@ function Header({
   onVerTodos,
   solicitudesEliminacion,
   notificacionesMateriales,
+  notificacionesTesoreria,
+  setNotificacionesTesoreria,
   session,
 }: {
   onMenuClick: () => void;
@@ -683,11 +686,13 @@ function Header({
   // 22/Sep/2026, terreno preparado para "recordatorios de pedido de
   // material" - hoy siempre vacio (ver AppShell).
   notificacionesMateriales: MaterialesNotificacion[];
+  notificacionesTesoreria: TesoreriaNotificacion[];
+  setNotificacionesTesoreria: React.Dispatch<React.SetStateAction<TesoreriaNotificacion[]>>;
   session: SessionUser | null;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [avatarAnchorEl, setAvatarAnchorEl] = useState<HTMLElement | null>(null);
-  const count = sinRolUsers.length + solicitudesEliminacion.length + notificacionesMateriales.length;
+  const count = sinRolUsers.length + solicitudesEliminacion.length + notificacionesMateriales.length + notificacionesTesoreria.length;
 
   return (
     <AppBar
@@ -784,6 +789,33 @@ function Header({
               // Campana de materiales-service (22/Sep/2026, terreno
               // preparado para "recordatorios de pedido de material" -
               // ver docstring de MaterialesNotificacion en el backend).
+              ...(notificacionesTesoreria.length > 0
+                ? [
+                    (sinRolUsers.length > 0 || solicitudesEliminacion.length > 0 || notificacionesMateriales.length > 0) && (
+                      <Divider key="divider-tesoreria" />
+                    ),
+                    <MenuItem key="titulo-tesoreria" disabled sx={{ opacity: "1 !important" }}>
+                      <Typography variant="caption" fontWeight={600} color="text.primary">
+                        {notificacionesTesoreria.length} alerta(s) de tesorería
+                      </Typography>
+                    </MenuItem>,
+                    ...notificacionesTesoreria.slice(0, 5).map((n) => (
+                      <MenuItem
+                        key={n.id_notificacion}
+                        component={n.link_url ? "a" : "li"}
+                        href={n.link_url || undefined}
+                        onClick={() => {
+                          setAnchorEl(null);
+                          marcarNotificacionTesoreriaLeida(n.id_notificacion)
+                            .then(() => setNotificacionesTesoreria((prev) => prev.filter((x) => x.id_notificacion !== n.id_notificacion)))
+                            .catch(() => undefined);
+                        }}
+                      >
+                        {n.mensaje}
+                      </MenuItem>
+                    )),
+                  ].filter(Boolean)
+                : []),
               ...(notificacionesMateriales.length > 0
                 ? [
                     (sinRolUsers.length > 0 || solicitudesEliminacion.length > 0) && (
@@ -873,6 +905,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [sinRolUsers, setSinRolUsers] = useState<IamUser[]>([]);
   const [solicitudesEliminacion, setSolicitudesEliminacion] = useState<PldSolicitudEliminacionDoc[]>([]);
   const [notificacionesMateriales, setNotificacionesMateriales] = useState<MaterialesNotificacion[]>([]);
+  const [notificacionesTesoreria, setNotificacionesTesoreria] = useState<TesoreriaNotificacion[]>([]);
 
   useEffect(() => {
     getSession().then((session) => {
@@ -965,6 +998,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, [checked]);
 
+  useEffect(() => {
+    if (!checked) return;
+    function refreshNotificacionesTesoreria() {
+      listNotificacionesTesoreria(true)
+        .then(setNotificacionesTesoreria)
+        .catch(() => undefined);
+    }
+    refreshNotificacionesTesoreria();
+    const interval = setInterval(refreshNotificacionesTesoreria, 60_000);
+    return () => clearInterval(interval);
+  }, [checked]);
+
   if (!checked) {
     return null;
   }
@@ -990,6 +1035,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         onVerTodos={() => router.push("/admin/usuarios?sinRol=true")}
         solicitudesEliminacion={solicitudesEliminacion}
         notificacionesMateriales={notificacionesMateriales}
+        notificacionesTesoreria={notificacionesTesoreria}
+        setNotificacionesTesoreria={setNotificacionesTesoreria}
         session={session}
       />
 

@@ -474,6 +474,11 @@ class PldContraparteKycViewSet(ModelViewSet):
         sociedad_rfc = request.data.get("sociedad_rfc")
         if not sociedad_rfc:
             return Response({"sociedad_rfc": "Este campo es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+        scope = request.effective_scope
+        if not scope.is_global and sociedad_rfc not in scope.sociedad_rfcs:
+            return Response(
+                {"sociedad_rfc": "No tienes acceso a esa sociedad."}, status=status.HTTP_403_FORBIDDEN
+            )
         existe, sociedad_nombre = _obtener_sociedad_en_iam(sociedad_rfc, headers, cookies)
         if not existe:
             return Response(
@@ -525,6 +530,11 @@ class PldContraparteKycViewSet(ModelViewSet):
         nuevo_sociedad_rfc = request.data.get("sociedad_rfc")
         sociedad_nombre_nueva = None
         if nuevo_sociedad_rfc and nuevo_sociedad_rfc != instance.sociedad_rfc:
+            scope = request.effective_scope
+            if not scope.is_global and nuevo_sociedad_rfc not in scope.sociedad_rfcs:
+                return Response(
+                    {"sociedad_rfc": "No tienes acceso a esa sociedad."}, status=status.HTTP_403_FORBIDDEN
+                )
             headers, cookies = forward_auth_headers(request)
             existe, sociedad_nombre_nueva = _obtener_sociedad_en_iam(nuevo_sociedad_rfc, headers, cookies)
             if not existe:
@@ -1126,6 +1136,12 @@ class PldRepresentanteLegalViewSet(ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        kyc = serializer.validated_data.get("kyc")
+        if kyc and not PldContraparteKyc.objects.for_scope(self.request.effective_scope).filter(
+            pk=kyc.pk
+        ).exists():
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("No tienes acceso al expediente KYC indicado.")
         actor = self.request.effective_scope.identity_user_id
         serializer.save(created_by=actor, updated_by=actor)
 
@@ -1188,6 +1204,15 @@ class PldContraparteDocViewSet(ModelViewSet):
         if kyc_param:
             queryset = queryset.filter(kyc_id=kyc_param)
         return queryset
+
+    def perform_create(self, serializer):
+        kyc = serializer.validated_data.get("kyc")
+        if kyc and not PldContraparteKyc.objects.for_scope(self.request.effective_scope).filter(
+            pk=kyc.pk
+        ).exists():
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("No tienes acceso al expediente KYC indicado.")
+        serializer.save()
 
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir(self, request, pk=None):
