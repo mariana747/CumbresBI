@@ -113,6 +113,7 @@ import {
   vincularFactura,
   verificarSociedadMismatch,
   FlujoMismatch,
+  getFlujo,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -2696,9 +2697,14 @@ function TesoreriaFlujosPageContent() {
                     key={f.id_flujo}
                     hover
                     sx={{ cursor: "pointer" }}
-                    onClick={() => {
+                    onClick={async () => {
                       setMismatchDialog(null);
-                      router.push(`/tesoreria/flujos?abrir=${f.id_flujo}`);
+                      try {
+                        const flujo = await getFlujo(f.id_flujo);
+                        abrirEdicion(flujo);
+                      } catch {
+                        router.push(`/tesoreria/flujos?abrir=${f.id_flujo}`);
+                      }
                     }}
                   >
                     <TableCell>{f.id_flujo}</TableCell>

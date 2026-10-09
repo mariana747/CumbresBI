@@ -1711,6 +1711,12 @@ export async function updateFlujo(
   return response.json();
 }
 
+export async function getFlujo(idFlujo: string): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`);
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  return response.json();
+}
+
 export async function deleteFlujo(idFlujo: string): Promise<void> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`, {
     method: "DELETE",
