@@ -27,7 +27,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet, ViewSet
+from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from . import google_sheets_utils, recaptcha
 from .audit_utils import emitir_evento_auditoria
@@ -72,7 +72,6 @@ from .models import (
     TesoreriaMovimientoBancario,
     TesoreriaNomina,
     TesoreriaNotaCredito,
-    TesoreriaNotificacion,
     TesoreriaProyectoCodigo,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -102,7 +101,6 @@ from .serializers import (
     TesoreriaMovimientoBancarioSerializer,
     TesoreriaNominaSerializer,
     TesoreriaNotaCreditoSerializer,
-    TesoreriaNotificacionSerializer,
     TesoreriaProyectoCodigoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
@@ -1512,8 +1510,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         # "FLJ-{consecutivo:06d}", cambiado a hash corto para verse igual
         # que los Flujos migrados del legacy (ej. "0ca3e654").
         self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
-        flujo = serializer.save(id_flujo=_generar_id_flujo())
-        _notificar_mismatch_si_aplica(flujo, self.request)
+        serializer.save(id_flujo=_generar_id_flujo())
 
     def perform_update(self, serializer):
         # El estado "cerrado" vive en la Nomina, no en el Flujo - se valida
@@ -1522,8 +1519,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         # una que ya este cerrada).
         self._validar_nomina_editable(serializer.instance.periodo_nomina)
         self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
-        flujo = serializer.save()
-        _notificar_mismatch_si_aplica(flujo, self.request)
+        serializer.save()
 
     def destroy(self, request, *args, **kwargs):
         try:
@@ -2110,58 +2106,35 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         data["sugerencias_factura"] = sugerencias_factura
         return Response(data)
 
-    @action(detail=False, methods=["post"])
+    @action(detail=False, methods=["get"])
     def verificar_sociedad(self, request):
-        """Detecta flujos donde contrato.sociedad != cuenta.sociedad y crea
-        una TesoreriaNotificacion por flujo para cada admin/tesorería. Solo
-        genera notificaciones nuevas (no duplica si ya existe una no leída
-        del mismo flujo para ese destinatario). Requiere tesoreria.aprobar
-        (mismo gate que otras acciones administrativas del viewset)."""
+        """Devuelve la lista de flujos donde contrato.sociedad != cuenta.sociedad.
+        Requiere tesoreria.aprobar."""
         if not require_permission("tesoreria.aprobar")().has_permission(request, self):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied()
 
-        flujos_mismatch = (
+        flujos = (
             TesoreriaFlujo.objects.filter(
                 contrato__sociedad__isnull=False,
                 cuenta__sociedad__isnull=False,
             )
             .exclude(contrato__sociedad=F("cuenta__sociedad"))
             .select_related("contrato", "cuenta")
+            .order_by("id_flujo")
         )
 
-        if not flujos_mismatch.exists():
-            return Response({"creadas": 0, "flujos": 0})
-
-        headers, cookies = forward_auth_headers(request)
-        user_ids = _usuarios_por_roles(headers, cookies)
-
-        creadas = 0
-        for flujo in flujos_mismatch:
-            sociedad_contrato = flujo.contrato.sociedad if flujo.contrato else "?"
-            sociedad_cuenta = flujo.cuenta.sociedad if flujo.cuenta else "?"
-            mensaje = (
-                f"Flujo {flujo.id_flujo}: contrato de {sociedad_contrato} "
-                f"pero cuenta de {sociedad_cuenta}."
-            )
-            link_url = f"/tesoreria/flujos?id={flujo.id_flujo}"
-            for uid in user_ids:
-                ya_existe = TesoreriaNotificacion.objects.filter(
-                    destinatario=uid,
-                    tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                    link_url=link_url,
-                    leida=False,
-                ).exists()
-                if not ya_existe:
-                    TesoreriaNotificacion.objects.create(
-                        destinatario=uid,
-                        tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                        mensaje=mensaje,
-                        link_url=link_url,
-                    )
-                    creadas += 1
-
-        return Response({"creadas": creadas, "flujos": flujos_mismatch.count()})
+        data = [
+            {
+                "id_flujo": f.id_flujo,
+                "contrato": f.contrato_id,
+                "sociedad_contrato": f.contrato.sociedad if f.contrato else None,
+                "cuenta": f.cuenta_id,
+                "sociedad_cuenta": f.cuenta.sociedad if f.cuenta else None,
+            }
+            for f in flujos
+        ]
+        return Response({"flujos": data})
 
 
 class TesoreriaTicketReembolsoViewSet(ModelViewSet):
@@ -5129,88 +5102,3 @@ class TesoreriaRecNominaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         )
 
 
-# ── Alertas de sociedad mismatch ────────────────────────────────────────────
-
-def _notificar_mismatch_si_aplica(flujo, request) -> None:
-    """Crea notificaciones de campana si el flujo recién guardado tiene
-    contrato y cuenta de distinta sociedad. Fail-open: un error al crear
-    la notificación no revierta el guardado del flujo."""
-    try:
-        contrato_sociedad = flujo.contrato.sociedad if flujo.contrato_id and flujo.contrato else None
-        cuenta_sociedad = flujo.cuenta.sociedad if flujo.cuenta_id and flujo.cuenta else None
-        if not contrato_sociedad or not cuenta_sociedad or contrato_sociedad == cuenta_sociedad:
-            return
-        link_url = f"/tesoreria/flujos?id={flujo.id_flujo}"
-        mensaje = (
-            f"Flujo {flujo.id_flujo}: contrato de {contrato_sociedad} "
-            f"pero cuenta de {cuenta_sociedad}."
-        )
-        headers, cookies = forward_auth_headers(request)
-        for uid in _usuarios_por_roles(headers, cookies):
-            ya_existe = TesoreriaNotificacion.objects.filter(
-                destinatario=uid,
-                tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                link_url=link_url,
-                leida=False,
-            ).exists()
-            if not ya_existe:
-                TesoreriaNotificacion.objects.create(
-                    destinatario=uid,
-                    tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                    mensaje=mensaje,
-                    link_url=link_url,
-                )
-    except Exception:
-        logger.warning("Error al crear notificacion de mismatch para flujo %s", getattr(flujo, "id_flujo", "?"), exc_info=True)
-
-
-# ── Roles que reciben alertas de tesorería ──────────────────────────────────
-_ROLES_ALERTA_TESORERIA = ["SUPER_ADMIN", "IAM_ADMIN", "FINANZAS_MANAGER", "TESORERIA_ANALISTA"]
-_TIMEOUT_IAM = 10
-
-
-def _usuarios_por_roles(headers, cookies) -> list[str]:
-    """Lista de identity_user_id de todos los usuarios con alguno de los
-    roles de alerta, via iam-service GET /api/usuarios/?role=<role_key>.
-    Fail-open: si iam no responde devuelve lista vacía."""
-    user_ids: set[str] = set()
-    for role_key in _ROLES_ALERTA_TESORERIA:
-        try:
-            resp = requests.get(
-                f"{settings.IAM_SERVICE_URL}/api/usuarios/",
-                params={"role": role_key},
-                headers=headers,
-                cookies=cookies,
-                timeout=_TIMEOUT_IAM,
-            )
-        except requests.RequestException:
-            logger.warning("iam-service no respondio al listar usuarios con rol %s", role_key, exc_info=True)
-            continue
-        if resp.status_code == 200:
-            for u in resp.json():
-                uid = u.get("user_id")
-                if uid:
-                    user_ids.add(uid)
-    return list(user_ids)
-
-
-class TesoreriaNotificacionViewSet(ReadOnlyModelViewSet):
-    """Campana de tesoreria-service (mismo patron que MaterialesNotificacionViewSet).
-    Solo lectura de las propias del usuario autenticado; el alta la hace
-    verificar_sociedad en TesoreriaFlujoViewSet."""
-
-    serializer_class = TesoreriaNotificacionSerializer
-
-    def get_queryset(self):
-        destinatario = getattr(self.request.effective_scope, "identity_user_id", None)
-        qs = TesoreriaNotificacion.objects.filter(destinatario=destinatario)
-        if self.request.query_params.get("solo_no_leidas") == "true":
-            qs = qs.filter(leida=False)
-        return qs
-
-    @action(detail=True, methods=["post"])
-    def marcar_leida(self, request, pk=None):
-        notificacion = self.get_object()
-        notificacion.leida = True
-        notificacion.save(update_fields=["leida"])
-        return Response(self.get_serializer(notificacion).data)

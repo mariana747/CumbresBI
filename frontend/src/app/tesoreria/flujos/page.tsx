@@ -112,6 +112,7 @@ import {
   updateFlujo,
   vincularFactura,
   verificarSociedadMismatch,
+  FlujoMismatch,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -436,6 +437,7 @@ function TesoreriaFlujosPageContent() {
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
   const puedeAprobar = session?.perm_keys.includes("tesoreria.aprobar") ?? false;
   const [verificando, setVerificando] = useState(false);
+  const [mismatchDialog, setMismatchDialog] = useState<FlujoMismatch[] | null>(null);
 
   // Muestra el folio de la factura/complemento ya vinculado en vez del
   // timbre_uuid crudo - busca en las listas ya cargadas arriba (mismo
@@ -1106,8 +1108,8 @@ function TesoreriaFlujosPageContent() {
                 onClick={async () => {
                   setVerificando(true);
                   try {
-                    const r = await verificarSociedadMismatch();
-                    alert(`Flujos con mismatch: ${r.flujos}\nNotificaciones creadas: ${r.creadas}`);
+                    const flujos = await verificarSociedadMismatch();
+                    setMismatchDialog(flujos);
                   } finally {
                     setVerificando(false);
                   }
@@ -2663,6 +2665,54 @@ function TesoreriaFlujosPageContent() {
         urlExterna={previewDoc?.urlExterna}
       />
       <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
+
+      {/* Dialog de mismatch de sociedad */}
+      <Dialog open={mismatchDialog !== null} onClose={() => setMismatchDialog(null)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Flujos con sociedad incorrecta
+          <IconButton onClick={() => setMismatchDialog(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {mismatchDialog && mismatchDialog.length === 0 ? (
+            <Box sx={{ p: 3, textAlign: "center" }}>
+              <Typography color="text.secondary">No se encontraron flujos con mismatch de sociedad.</Typography>
+            </Box>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Flujo</TableCell>
+                  <TableCell>Contrato</TableCell>
+                  <TableCell>Sociedad contrato</TableCell>
+                  <TableCell>Cuenta</TableCell>
+                  <TableCell>Sociedad cuenta</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(mismatchDialog ?? []).map((f) => (
+                  <TableRow
+                    key={f.id_flujo}
+                    hover
+                    sx={{ cursor: "pointer" }}
+                    onClick={() => {
+                      setMismatchDialog(null);
+                      router.push(`/tesoreria/flujos?id=${f.id_flujo}`);
+                    }}
+                  >
+                    <TableCell>{f.id_flujo}</TableCell>
+                    <TableCell>{f.contrato}</TableCell>
+                    <TableCell>{f.sociedad_contrato ?? "—"}</TableCell>
+                    <TableCell>{f.cuenta}</TableCell>
+                    <TableCell sx={{ color: "warning.main", fontWeight: 600 }}>{f.sociedad_cuenta ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }
