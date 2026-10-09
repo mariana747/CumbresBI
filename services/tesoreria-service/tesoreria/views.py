@@ -4524,7 +4524,6 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
                 import xml.etree.ElementTree as ET
                 texto_xml = contenido.decode("utf-8", errors="ignore")
                 root = ET.fromstring(texto_xml)
-                ns = {k: v for _, (k, v) in ET.iterparse(io.BytesIO(contenido), events=["start-ns"])}
                 # Busca todos los elementos <Data> o <Cell> sin importar namespace
                 filas = []
                 fila_actual = []
