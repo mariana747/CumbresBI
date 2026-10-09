@@ -268,7 +268,7 @@ class IamUserGroup(ScopedAuditMixin):
 
     class Meta:
         db_table = "iam_user_groups"
-        unique_together = ("user", "group")
+        unique_together = ("user", "group", "alcance_tipo", "alcance_id")
 
 
 class IamMagicLink(models.Model):
