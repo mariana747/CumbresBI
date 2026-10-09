@@ -4502,23 +4502,112 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         if not archivo:
             raise ValidationError("Se requiere 'file'.")
         contenido = archivo.read()
-        texto = contenido.decode("utf-8", errors="ignore")
-        numeros_encontrados = set(re.findall(r"\d{8,20}", texto))
+        nombre = archivo.name or ""
+        numeros_cuenta_header = set()
+        numeros_encontrados = set()
 
-        cuentas = TesoreriaCuenta.objects.select_related("banco").all()
+        def _leer_filas_spreadsheet(contenido, nombre):
+            """Devuelve lista de listas de strings detectando formato por magic bytes."""
+            import io
+            header = contenido[:8]
+            # ZIP magic → xlsx (OOXML)
+            if header[:2] == b"PK":
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(contenido), data_only=True)
+                filas = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        filas.append([str(c) if c is not None else "" for c in row])
+                return filas
+            # XML magic → SpreadsheetML (.xls guardado como XML)
+            if contenido[:5] in (b"<?xml", b"\xef\xbb\xbf<?") or b"<?xml" in contenido[:100]:
+                import xml.etree.ElementTree as ET
+                texto_xml = contenido.decode("utf-8", errors="ignore")
+                root = ET.fromstring(texto_xml)
+                ns = {k: v for _, (k, v) in ET.iterparse(io.BytesIO(contenido), events=["start-ns"])}
+                # Busca todos los elementos <Data> o <Cell> sin importar namespace
+                filas = []
+                fila_actual = []
+                for elem in root.iter():
+                    tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                    if tag == "Row":
+                        if fila_actual:
+                            filas.append(fila_actual)
+                        fila_actual = []
+                    elif tag == "Data" and elem.text:
+                        fila_actual.append(elem.text.strip())
+                if fila_actual:
+                    filas.append(fila_actual)
+                return filas
+            # BIFF magic → xls binario clásico
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=contenido)
+            filas = []
+            for ws in wb.sheets():
+                for i in range(ws.nrows):
+                    filas.append([str(ws.cell_value(i, j)) for j in range(ws.ncols)])
+            return filas
+
+        try:
+            filas = _leer_filas_spreadsheet(contenido, nombre)
+        except Exception:
+            filas = []
+        if filas:
+            for i, row in enumerate(filas):
+                for j, val in enumerate(row):
+                    numeros_encontrados.update(re.findall(r"\d{4,20}", val))
+                    if i < 30 and re.search(r"cuenta|n[uú]m(ero)?\.?\s*(de\s*)?cuenta", val, re.IGNORECASE):
+                        for dj in (1, 2, -1):
+                            if 0 <= j + dj < len(row):
+                                numeros_cuenta_header.update(re.findall(r"\d{4,20}", row[j + dj]))
+                        if i + 1 < len(filas):
+                            for v in filas[i + 1]:
+                                numeros_cuenta_header.update(re.findall(r"\d{4,20}", v))
+        if not filas:
+            # Fallback: leer como texto (CSV o binario con errores ignorados)
+            texto = contenido.decode("utf-8", errors="ignore")
+            numeros_encontrados = set(re.findall(r"\d{4,20}", texto))
+
+        numeros_para_buscar = numeros_cuenta_header if numeros_cuenta_header else numeros_encontrados
+
+        cuentas = TesoreriaCuenta.objects.select_related("banco").all().order_by("id_cuenta_bancaria")
+
+        def _score_coincidencia(cuenta, numeros, todos_numeros=None):
+            # Mayor puntaje = match más específico; 0 = sin coincidencia.
+            # Prioridades: match exacto de cuenta > sufijo de cuenta > CLABE.
+            # Tiebreaker: +1 si la forma corta también aparece en el archivo completo.
+            todos = todos_numeros or numeros
+            if cuenta.cuenta:
+                for n in numeros:
+                    if n == cuenta.cuenta:
+                        bonus = 1 if (cuenta.cuenta[-4:] in todos and cuenta.cuenta[-4:] != cuenta.cuenta) else 0
+                        return (4, bonus, len(n))
+                for n in numeros:
+                    if n.endswith(cuenta.cuenta) and len(cuenta.cuenta) >= 4:
+                        bonus = 1 if (cuenta.cuenta[-4:] in todos and cuenta.cuenta[-4:] != cuenta.cuenta) else 0
+                        return (3, bonus, len(n))
+            if cuenta.clabe:
+                for n in numeros:
+                    if n == cuenta.clabe:
+                        return (2, 0, len(n))
+                for n in numeros:
+                    if n.endswith(cuenta.clabe) or cuenta.clabe.endswith(n):
+                        return (1, 0, len(n))
+            return (0, 0, 0)
 
         def _buscar_coincidencia(numeros):
+            mejor, mejor_score = None, (0, 0, 0)
             for cuenta in cuentas:
-                coincide = (cuenta.cuenta and cuenta.cuenta in numeros) or (
-                    cuenta.clabe and any(n in cuenta.clabe or cuenta.clabe in n for n in numeros)
-                )
-                if coincide:
-                    return cuenta
-            return None
+                score = _score_coincidencia(cuenta, numeros, numeros_encontrados)
+                if score > mejor_score:
+                    mejor, mejor_score = cuenta, score
+            return mejor if mejor_score[0] > 0 else None
 
-        cuenta_encontrada = _buscar_coincidencia(numeros_encontrados) if numeros_encontrados else None
+        cuenta_encontrada = _buscar_coincidencia(numeros_para_buscar) if numeros_para_buscar else None
         if cuenta_encontrada is None:
-            numero_ia = detectar_numero_cuenta_por_ia(texto)
+            # Fallback IA: solo aplica para CSV/TXT (xlsx ya se leyó correctamente arriba)
+            texto_ia = locals().get("texto", " ".join(str(c) for c in numeros_encontrados))
+            numero_ia = detectar_numero_cuenta_por_ia(texto_ia)
             if numero_ia:
                 cuenta_encontrada = _buscar_coincidencia({numero_ia})
 
