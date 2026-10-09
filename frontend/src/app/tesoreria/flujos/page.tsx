@@ -2698,7 +2698,7 @@ function TesoreriaFlujosPageContent() {
                     sx={{ cursor: "pointer" }}
                     onClick={() => {
                       setMismatchDialog(null);
-                      router.push(`/tesoreria/flujos?id=${f.id_flujo}`);
+                      router.push(`/tesoreria/flujos?abrir=${f.id_flujo}`);
                     }}
                   >
                     <TableCell>{f.id_flujo}</TableCell>
