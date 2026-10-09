@@ -59,9 +59,6 @@ jobs:
       # los 9, cada uno crea su propia test_<db> via el usuario root.
       mysql:
         image: public.ecr.aws/docker/library/mysql:8.0
-        credentials:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: yes
         ports:
