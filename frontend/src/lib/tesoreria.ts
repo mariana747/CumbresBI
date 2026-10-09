@@ -1711,6 +1711,12 @@ export async function updateFlujo(
   return response.json();
 }
 
+export async function getFlujo(idFlujo: string): Promise<TesoreriaFlujo> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`);
+  if (!response.ok) throw await friendlyApiError("TESORERIA", response);
+  return response.json();
+}
+
 export async function deleteFlujo(idFlujo: string): Promise<void> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/`, {
     method: "DELETE",
@@ -4127,51 +4133,22 @@ export async function subirDocumentoTicket(params: {
   return response.json();
 }
 
-// ── Notificaciones de tesorería (campana) ──────────────────────────────────
+// ── Verificación de mismatch sociedad/cuenta en flujos ─────────────────────
 
-export interface TesoreriaNotificacion {
-  id_notificacion: string;
-  destinatario: string;
-  tipo: string;
-  mensaje: string;
-  link_url: string | null;
-  leida: boolean;
-  created_at: string;
+export interface FlujoMismatch {
+  id_flujo: string;
+  contrato: string;
+  sociedad_contrato: string | null;
+  cuenta: string;
+  sociedad_cuenta: string | null;
 }
 
-export async function listNotificacionesTesoreria(
-  soloNoLeidas?: boolean
-): Promise<TesoreriaNotificacion[]> {
-  const params = new URLSearchParams();
-  if (soloNoLeidas) params.set("solo_no_leidas", "true");
+export async function verificarSociedadMismatch(): Promise<FlujoMismatch[]> {
   const response = await apiFetch(
     "TESORERIA",
-    `${TESORERIA_API_BASE_URL}/api/notificaciones/${params.toString() ? `?${params}` : ""}`
-  );
-  if (!response.ok) return [];
-  const data = await response.json();
-  return Array.isArray(data) ? data : (data.results ?? []);
-}
-
-export async function marcarNotificacionTesoreriaLeida(
-  idNotificacion: string
-): Promise<void> {
-  await apiFetch(
-    "TESORERIA",
-    `${TESORERIA_API_BASE_URL}/api/notificaciones/${idNotificacion}/marcar_leida/`,
-    { method: "POST" }
-  );
-}
-
-export async function verificarSociedadMismatch(): Promise<{
-  creadas: number;
-  flujos: number;
-}> {
-  const response = await apiFetch(
-    "TESORERIA",
-    `${TESORERIA_API_BASE_URL}/api/flujos/verificar_sociedad/`,
-    { method: "POST" }
+    `${TESORERIA_API_BASE_URL}/api/flujos/verificar_sociedad/`
   );
   if (!response.ok) throw await friendlyApiError("TESORERIA", response);
-  return response.json();
+  const data = await response.json();
+  return data.flujos ?? [];
 }
