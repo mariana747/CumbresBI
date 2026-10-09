@@ -74,7 +74,7 @@ import {
 import { IamUser, listUsers } from "@/lib/iam";
 import { MaterialesNotificacion, listNotificacionesMateriales } from "@/lib/materiales";
 import { TesoreriaNotificacion, listNotificacionesTesoreria, marcarNotificacionTesoreriaLeida } from "@/lib/tesoreria";
-import { PldSolicitudEliminacionDoc, listSolicitudesEliminacion } from "@/lib/pld";
+import { PldNotificacion, PldSolicitudEliminacionDoc, listNotificacionesPld, listSolicitudesEliminacion, marcarNotificacionPldLeida } from "@/lib/pld";
 import { Footer } from "@/components/Footer";
 import { BRAND } from "@/theme/theme";
 
@@ -672,6 +672,8 @@ function Header({
   notificacionesMateriales,
   notificacionesTesoreria,
   setNotificacionesTesoreria,
+  notificacionesPld,
+  setNotificacionesPld,
   session,
 }: {
   onMenuClick: () => void;
@@ -688,11 +690,13 @@ function Header({
   notificacionesMateriales: MaterialesNotificacion[];
   notificacionesTesoreria: TesoreriaNotificacion[];
   setNotificacionesTesoreria: React.Dispatch<React.SetStateAction<TesoreriaNotificacion[]>>;
+  notificacionesPld: PldNotificacion[];
+  setNotificacionesPld: React.Dispatch<React.SetStateAction<PldNotificacion[]>>;
   session: SessionUser | null;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [avatarAnchorEl, setAvatarAnchorEl] = useState<HTMLElement | null>(null);
-  const count = sinRolUsers.length + solicitudesEliminacion.length + notificacionesMateriales.length + notificacionesTesoreria.length;
+  const count = sinRolUsers.length + solicitudesEliminacion.length + notificacionesMateriales.length + notificacionesTesoreria.length + notificacionesPld.length;
 
   return (
     <AppBar
@@ -838,6 +842,33 @@ function Header({
                     )),
                   ].filter(Boolean)
                 : []),
+              ...(notificacionesPld.length > 0
+                ? [
+                    (sinRolUsers.length > 0 || solicitudesEliminacion.length > 0 || notificacionesMateriales.length > 0 || notificacionesTesoreria.length > 0) && (
+                      <Divider key="divider-pld" />
+                    ),
+                    <MenuItem key="titulo-pld" disabled sx={{ opacity: "1 !important" }}>
+                      <Typography variant="caption" fontWeight={600} color="text.primary">
+                        {notificacionesPld.length} alerta(s) PLD
+                      </Typography>
+                    </MenuItem>,
+                    ...notificacionesPld.slice(0, 5).map((n) => (
+                      <MenuItem
+                        key={n.id_notificacion}
+                        component={n.link_url ? "a" : "li"}
+                        href={n.link_url || undefined}
+                        onClick={() => {
+                          setAnchorEl(null);
+                          marcarNotificacionPldLeida(n.id_notificacion)
+                            .then(() => setNotificacionesPld((prev) => prev.filter((x) => x.id_notificacion !== n.id_notificacion)))
+                            .catch(() => undefined);
+                        }}
+                      >
+                        {n.mensaje}
+                      </MenuItem>
+                    )),
+                  ].filter(Boolean)
+                : []),
             ]
           )}
         </Menu>
@@ -906,6 +937,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [solicitudesEliminacion, setSolicitudesEliminacion] = useState<PldSolicitudEliminacionDoc[]>([]);
   const [notificacionesMateriales, setNotificacionesMateriales] = useState<MaterialesNotificacion[]>([]);
   const [notificacionesTesoreria, setNotificacionesTesoreria] = useState<TesoreriaNotificacion[]>([]);
+  const [notificacionesPld, setNotificacionesPld] = useState<PldNotificacion[]>([]);
 
   useEffect(() => {
     getSession().then((session) => {
@@ -1010,6 +1042,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, [checked]);
 
+  useEffect(() => {
+    if (!checked) return;
+    function refreshNotificacionesPld() {
+      listNotificacionesPld(true)
+        .then(setNotificacionesPld)
+        .catch(() => undefined);
+    }
+    refreshNotificacionesPld();
+    const interval = setInterval(refreshNotificacionesPld, 60_000);
+    return () => clearInterval(interval);
+  }, [checked]);
+
   if (!checked) {
     return null;
   }
@@ -1037,6 +1081,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         notificacionesMateriales={notificacionesMateriales}
         notificacionesTesoreria={notificacionesTesoreria}
         setNotificacionesTesoreria={setNotificacionesTesoreria}
+        notificacionesPld={notificacionesPld}
+        setNotificacionesPld={setNotificacionesPld}
         session={session}
       />
 

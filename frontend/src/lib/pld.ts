@@ -841,6 +841,29 @@ export async function aprobarKyc(idKyc: string, aprobadoPor: string): Promise<Pl
   return response.json();
 }
 
+export interface PldNotificacion {
+  id_notificacion: string;
+  destinatario: string;
+  tipo: string;
+  mensaje: string;
+  link_url: string | null;
+  leida: boolean;
+  created_at: string;
+}
+
+export async function listNotificacionesPld(soloNoLeidas = false): Promise<PldNotificacion[]> {
+  const params = soloNoLeidas ? "?solo_no_leidas=true" : "";
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/notificaciones/${params}`);
+  if (!response.ok) return [];
+  return response.json();
+}
+
+export async function marcarNotificacionPldLeida(idNotificacion: string): Promise<void> {
+  await apiFetch("PLD", `${PLD_API_BASE_URL}/api/notificaciones/${idNotificacion}/marcar_leida/`, {
+    method: "POST",
+  });
+}
+
 // Activa requiere_revision_pld si algún proyecto de esta contraparte supera
 // $948,000 MXN. Idempotente — si ya estaba activo no hace nada. El backend
 // consulta tesoreria-service internamente; el flag solo se apaga manualmente.

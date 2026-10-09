@@ -775,3 +775,26 @@ class PldDocumentoTicket(models.Model):
 
     def __str__(self):
         return self.id_ticket
+
+
+class PldNotificacion(models.Model):
+    """Campana de pld-service. Mismo patron que TesoreriaNotificacion.
+    Hoy solo se usa para avisar del cruce del umbral transaccional PLD
+    ($948,000 MXN); el modelo es generico para futuros avisos."""
+
+    TIPO_UMBRAL_PLD = "UMBRAL_PLD"
+
+    id_notificacion = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    destinatario = models.CharField(max_length=8)
+    tipo = models.CharField(max_length=50)
+    mensaje = models.CharField(max_length=500)
+    link_url = models.CharField(max_length=500, blank=True, null=True)
+    leida = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "pld_notificacion"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.id_notificacion
