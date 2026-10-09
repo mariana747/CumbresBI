@@ -242,10 +242,6 @@ jobs:
           ]
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build image
         run: docker build -f services/${{ matrix.service }}/Dockerfile -t cumbresbi-${{ matrix.service }}:ci .
 
@@ -254,9 +250,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build image (produccion, misma imagen que Cloud Run)
         run: docker build -f frontend/Dockerfile -t cumbresbi-frontend:ci frontend
