@@ -244,6 +244,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "grado_riesgo_manual",
             "es_pep",
             "notas_riesgo",
+            "requiere_revision_pld",
         ]
         # estado_llenado_manual NO esta aqui a proposito: no se expone para
         # setear directo, solo se prende solo (ver update() abajo) cuando el

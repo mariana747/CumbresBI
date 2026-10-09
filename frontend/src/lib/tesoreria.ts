@@ -1268,6 +1268,7 @@ export interface TesoreriaFlujo {
   id_flujo: string;
   contrato: string | null;
   contrato_sociedad: string | null;
+  contrato_proyecto: string | null;
   contrato_concepto_factura: string | null;
   contrato_contraparte_nombre: string | null;
   categoria_gasto: TesoreriaCategoriaGasto | null;
@@ -1844,6 +1845,25 @@ export async function subirReferenciaFlujo(
     method: "POST",
     body: formData,
   });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
+// Acumulado de ingresos por proyecto+sociedad para una contraparte (09/Oct/2026,
+// monitoreo transaccional PLD). El ScopedManager ya filtra por sociedad segun
+// el token: un usuario GLOBAL ve todas las sociedades de la contraparte.
+export interface AcumuladoContraparte {
+  proyecto: string;
+  sociedad: string;
+  acumulado: string;
+  flujos_count: number;
+  supera_umbral: boolean;
+}
+
+export async function getAcumuladoContraparte(idContraparte: string): Promise<AcumuladoContraparte[]> {
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/acumulado-contraparte/?contraparte=${encodeURIComponent(idContraparte)}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
   }

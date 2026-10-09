@@ -264,6 +264,12 @@ class PldContraparteKyc(models.Model):
     grado_riesgo_manual = models.BooleanField(default=False)
     es_pep = models.BooleanField(null=True, blank=True)
     notas_riesgo = models.TextField(blank=True, null=True)
+    # Monitoreo transaccional (09/Oct/2026): se activa automaticamente cuando
+    # el acumulado de ingresos de la contraparte en algun proyecto supera
+    # $948,000 MXN (umbral regulatorio). Se calcula en tesoreria-service y lo
+    # prende el endpoint acumulado-contraparte; el analista puede apagarlo
+    # manualmente solo tras documentar la revision.
+    requiere_revision_pld = models.BooleanField(default=False)
 
     # FK real a iam_users.user_id (iam-service) - referencia laxa, ver nota arriba.
     aprobado_por = models.CharField(max_length=8)

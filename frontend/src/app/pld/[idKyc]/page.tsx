@@ -105,8 +105,10 @@ import {
 import {
   TesoreriaComplementoPago,
   TesoreriaFactura,
+  AcumuladoContraparte,
   TesoreriaFlujo,
   TesoreriaNotaCredito,
+  getAcumuladoContraparte,
   listComplementosPago,
   listFacturas,
   listFlujos,
@@ -168,6 +170,8 @@ type TransaccionUnificada = {
   monto: string | null;
   estado: string | null;
   concepto?: string | null;
+  // Solo para Flujos: "proyecto|sociedad" — permite filtrar desde las cards de acumulado.
+  proyectoSociedad?: string;
 };
 
 // Agrupado en secciones (combinando con KycDetalleDialog.tsx de
@@ -311,6 +315,8 @@ export default function PldExpedienteDetallePage() {
   const [transFiltroDesde, setTransFiltroDesde] = useState("");
   const [transFiltroHasta, setTransFiltroHasta] = useState("");
   const [transFiltroTipo, setTransFiltroTipo] = useState("");
+  const [transFiltroProjSociedad, setTransFiltroProjSociedad] = useState("");
+  const [acumulado, setAcumulado] = useState<AcumuladoContraparte[] | null>(null);
   // Edicion manual del expediente (18/Ago/2026) - ver
   // pld/audit_utils.py::contexto_kyc y views.py::update, ya auditado en el
   // backend; esto es la UI que faltaba. editandoCampos es null cuando no
@@ -529,8 +535,10 @@ export default function PldExpedienteDetallePage() {
       listFacturas({ contraparte: kyc.id_contraparte, pageSize: 200 }),
       listComplementosPago(undefined, kyc.id_contraparte, undefined, undefined, 200),
       listNotasCredito(undefined, kyc.id_contraparte, undefined, undefined, 200),
+      getAcumuladoContraparte(kyc.id_contraparte),
     ])
-      .then(([flujosPage, facturasPage, complementosPage, notasPage]) => {
+      .then(([flujosPage, facturasPage, complementosPage, notasPage, acumuladoData]) => {
+        setAcumulado(acumuladoData);
         const flujos = flujosPage.results;
         const facturas = facturasPage.results;
         const complementos = complementosPage.results;
@@ -543,6 +551,7 @@ export default function PldExpedienteDetallePage() {
           monto: f.total_mxp,
           estado: f.pagado ? "Pagado" : f.autorizacion ? "Autorizado" : "Pendiente",
           concepto: f.concepto,
+          proyectoSociedad: `${f.contrato_proyecto ?? ""}|${f.contrato_sociedad ?? ""}`,
         });
         const filaFactura = (f: TesoreriaFactura): TransaccionUnificada => ({
           id: `factura-${f.id}`,
@@ -568,8 +577,12 @@ export default function PldExpedienteDetallePage() {
           monto: n.comprobante_total,
           estado: n.estado,
         });
+        const CONCEPTOS_PLD = ["CASA", "VENTA DE TERRENO", "RENTA"];
+        const flujosPld = flujos.filter((f) =>
+          CONCEPTOS_PLD.some((c) => (f.concepto ?? "").toUpperCase().includes(c))
+        );
         const filas = [
-          ...flujos.map(filaFlujo),
+          ...flujosPld.map(filaFlujo),
           ...facturas.map(filaFactura),
           ...complementos.map(filaComplemento),
           ...notas.map(filaNota),
@@ -2097,12 +2110,68 @@ export default function PldExpedienteDetallePage() {
 
                 {tab === 3 && (
                   <Stack spacing={2}>
-                    <Typography variant="body2" color="text.secondary">
-                      Flujos de tesorería, facturas, complementos de pago y notas de crédito de esta
-                      contraparte — lectura directa de tesoreria-service, sin duplicar datos aquí.
-                    </Typography>
+                    {/* Cards de acumulado por proyecto — umbral PLD $948,000 */}
+                    {acumulado && acumulado.length > 0 && (
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Acumulado por proyecto (umbral PLD: $948,000 MXN)
+                        </Typography>
+                        {acumulado.map((row) => {
+                          const acum = Number(row.acumulado);
+                          const UMBRAL = 948_000;
+                          const pct = Math.min((acum / UMBRAL) * 100, 100);
+                          const clave = `${row.proyecto}|${row.sociedad}`;
+                          return (
+                            <Paper
+                              key={clave}
+                              variant="outlined"
+                              sx={{
+                                p: 1.5,
+                                borderColor: row.supera_umbral ? "error.main" : "divider",
+                                cursor: "pointer",
+                                bgcolor: transFiltroProjSociedad === clave ? "action.selected" : undefined,
+                              }}
+                              onClick={() =>
+                                setTransFiltroProjSociedad(transFiltroProjSociedad === clave ? "" : clave)
+                              }
+                            >
+                              <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.5}>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {row.proyecto || "Sin proyecto"}
+                                  </Typography>
+                                  <Chip size="small" label={row.sociedad || "Sin sociedad"} variant="outlined" />
+                                  {row.supera_umbral && (
+                                    <Chip size="small" label="⚠ Supera umbral" color="error" />
+                                  )}
+                                </Stack>
+                                <Typography variant="body2" fontWeight={600} color={row.supera_umbral ? "error.main" : "text.primary"}>
+                                  {acum.toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
+                                </Typography>
+                              </Stack>
+                              <Box sx={{ width: "100%", height: 6, borderRadius: 3, bgcolor: "action.hover", overflow: "hidden" }}>
+                                <Box
+                                  sx={{
+                                    width: `${pct}%`,
+                                    height: "100%",
+                                    bgcolor: row.supera_umbral ? "error.main" : pct >= 80 ? "warning.main" : "success.main",
+                                    borderRadius: 3,
+                                    transition: "width 0.4s",
+                                  }}
+                                />
+                              </Box>
+                              <Typography variant="caption" color="text.secondary">
+                                {row.flujos_count} flujo{row.flujos_count !== 1 ? "s" : ""} · {pct.toFixed(0)}% del umbral
+                              </Typography>
+                            </Paper>
+                          );
+                        })}
+                      </Stack>
+                    )}
+
+                    {/* Filtros de la tabla */}
                     {!transaccionesLoading && !!transacciones?.length && (
-                      <Box sx={{ mx: -2.5, mt: -3 }}>
+                      <Box sx={{ mx: -2.5, mt: acumulado?.length ? 0 : -3 }}>
                         <FiltrosBar search="" onSearchChange={() => undefined} hideSearch flush>
                           <TextField
                             size="small"
@@ -2151,10 +2220,14 @@ export default function PldExpedienteDetallePage() {
                       </Alert>
                     )}
                     {!transaccionesLoading && !!transacciones?.length && (() => {
+                      // El filtro por proyecto+sociedad aplica solo a Flujos
+                      // (las Facturas/Complementos/Notas no tienen esa dimensión
+                      // en la unión unificada — siguen visibles sin filtrar).
                       const filtradas = transacciones.filter((t) => {
                         if (transFiltroTipo && t.tipo !== transFiltroTipo) return false;
                         if (transFiltroDesde && t.fecha && t.fecha < transFiltroDesde) return false;
                         if (transFiltroHasta && t.fecha && t.fecha > `${transFiltroHasta}T23:59:59`) return false;
+                        if (transFiltroProjSociedad && t.tipo === "Flujo" && t.proyectoSociedad && t.proyectoSociedad !== transFiltroProjSociedad) return false;
                         return true;
                       });
                       return filtradas.length === 0 ? (

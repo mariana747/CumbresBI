@@ -387,6 +387,13 @@ export async function assignGroup(userId: string, groupId: string): Promise<IamU
     body: JSON.stringify({ user: userId, group: groupId }),
   });
   if (!response.ok) {
+    if (response.status === 400) {
+      const body = await response.json().catch(() => ({}));
+      const msg = JSON.stringify(body);
+      if (msg.includes("conjunto") || msg.includes("unique") || msg.includes("non_field")) {
+        throw new Error("Esta empresa ya está asignada a este usuario.");
+      }
+    }
     throw await friendlyApiError("IAM", response);
   }
   return response.json();

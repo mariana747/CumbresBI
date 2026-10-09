@@ -1244,6 +1244,56 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             queryset = queryset.filter(condicion)
         return queryset
 
+    @action(detail=False, methods=["get"], url_path="acumulado-contraparte")
+    def acumulado_contraparte(self, request):
+        """Acumulado de ingresos por proyecto para una contraparte (09/Oct/2026,
+        monitoreo transaccional PLD). Suma total_mxp > 0 (ingresos) agrupado
+        por contrato__proyecto + contrato__sociedad.
+
+        Pendiente de negocio: si el umbral aplica solo a ingresos, solo a
+        egresos o a ambos. Por ahora se suman solo los positivos (ingresos),
+        que coincide con el ejemplo de rentas del pendiente.md.
+
+        El ScopedManager ya restringe por sociedad segun el token del usuario:
+        un analista de sociedad CTZ solo ve flujos de CTZ; un usuario GLOBAL
+        ve ambas sociedades de la contraparte en el mismo proyecto (caso
+        ZOE VIDA - CTZ construye, Cumbres vende).
+
+        ?contraparte=<id_contraparte> es obligatorio.
+        """
+        from django.db.models import Count, Sum
+        contraparte_id = request.query_params.get("contraparte")
+        if not contraparte_id:
+            return Response({"detail": "Se requiere ?contraparte=<id>"}, status=400)
+
+        CONCEPTOS_PLD = ["CASA", "VENTA DE TERRENO", "RENTA"]
+        concepto_q = Q()
+        for c in CONCEPTOS_PLD:
+            concepto_q |= Q(concepto__icontains=c)
+        qs = (
+            self.get_queryset()
+            .filter(
+                contrato__contraparte_id=contraparte_id,
+                total_mxp__gt=0,
+            )
+            .filter(concepto_q)
+            .values("contrato__proyecto", "contrato__sociedad")
+            .annotate(acumulado=Sum("total_mxp"), flujos_count=Count("id_flujo"))
+            .order_by("-acumulado")
+        )
+        UMBRAL_PLD = 948_000
+        resultado = [
+            {
+                "proyecto": row["contrato__proyecto"] or "",
+                "sociedad": row["contrato__sociedad"] or "",
+                "acumulado": str(row["acumulado"]),
+                "flujos_count": row["flujos_count"],
+                "supera_umbral": row["acumulado"] >= UMBRAL_PLD,
+            }
+            for row in qs
+        ]
+        return Response(resultado)
+
     @action(detail=False, methods=["get"])
     def exportar_csv(self, request):
         """Exportar a CSV (09/Sep/2026, pendiente real de negocio) - mismo
