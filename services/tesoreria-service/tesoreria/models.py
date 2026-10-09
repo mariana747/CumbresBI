@@ -2055,24 +2055,3 @@ class TesoreriaTicketProveedor(models.Model):
         return self.id_ticket
 
 
-class TesoreriaNotificacion(models.Model):
-    """Campana de tesoreria-service. Mismo patron que MaterialesNotificacion.
-    Hoy solo se usa para avisar de flujos con cuenta/contrato de distinta
-    sociedad (SOCIEDAD_MISMATCH); el modelo es generico para futuros avisos."""
-
-    TIPO_SOCIEDAD_MISMATCH = "SOCIEDAD_MISMATCH"
-
-    id_notificacion = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
-    destinatario = models.CharField(max_length=8)
-    tipo = models.CharField(max_length=50)
-    mensaje = models.CharField(max_length=500)
-    link_url = models.CharField(max_length=500, blank=True, null=True)
-    leida = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "tesoreria_notificaciones"
-        ordering = ["-created_at"]
-
-    def __str__(self):
-        return f"{self.tipo} → {self.destinatario}"
