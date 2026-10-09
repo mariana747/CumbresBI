@@ -4569,7 +4569,6 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
             numeros_encontrados = set(re.findall(r"\d{4,20}", texto))
 
         numeros_para_buscar = numeros_cuenta_header if numeros_cuenta_header else numeros_encontrados
-        _log.warning("DETECTAR_CUENTA nombre=%s filas=%d header=%s encontrados_count=%d", nombre, len(filas), sorted(numeros_cuenta_header), len(numeros_encontrados))
 
         cuentas = TesoreriaCuenta.objects.select_related("banco").all().order_by("id_cuenta_bancaria")
 
