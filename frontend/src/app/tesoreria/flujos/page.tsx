@@ -649,7 +649,7 @@ function TesoreriaFlujosPageContent() {
       router.replace("/tesoreria/flujos");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flujos]);
+  }, [flujos, searchParams]);
 
   // Nombre base para el archivo exportado, refleja los filtros activos.
   // Se omite search (texto libre, no legible como nombre de archivo).
