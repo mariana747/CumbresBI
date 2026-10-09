@@ -306,7 +306,7 @@ export default function TesoreriaConciliacionPage() {
     detectarCuentaExtracto(archivo)
       .then((detectada) => {
         setCuentaDetectada(detectada);
-        if (detectada) {
+        if (detectada && !cuenta) {
           setCuenta(detectada);
           guardarCuentaSeleccionada(detectada.id_cuenta_bancaria);
         }
@@ -1003,8 +1003,7 @@ export default function TesoreriaConciliacionPage() {
           )}
           {!detectandoCuenta && cuentaDetectada && (
             <Alert severity="success" sx={{ mt: 2 }}>
-              Detectamos que este extracto es de: {etiquetaCuenta(cuentaDetectada)}. Si no es correcto, corrígela
-              abajo antes de importar.
+              Cuenta detectada automáticamente: {etiquetaCuenta(cuentaDetectada)}.
             </Alert>
           )}
           {!detectandoCuenta && archivo && !cuentaDetectada && !cuenta && (
@@ -1023,6 +1022,7 @@ export default function TesoreriaConciliacionPage() {
               size="small"
               options={cuentas}
               value={cuenta}
+              disabled={!!cuentaDetectada}
               onChange={(_, v) => {
                     setCuenta(v);
                     guardarCuentaSeleccionada(v?.id_cuenta_bancaria || null);
