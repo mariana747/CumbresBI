@@ -306,7 +306,7 @@ export default function TesoreriaConciliacionPage() {
     detectarCuentaExtracto(archivo)
       .then((detectada) => {
         setCuentaDetectada(detectada);
-        if (detectada) {
+        if (detectada && !cuenta) {
           setCuenta(detectada);
           guardarCuentaSeleccionada(detectada.id_cuenta_bancaria);
         }
