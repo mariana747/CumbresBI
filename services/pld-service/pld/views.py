@@ -1107,6 +1107,48 @@ class PldContraparteKycViewSet(ModelViewSet):
         """Deshace marcar_sospechoso/congelar - vuelve la cuenta a ACTIVA."""
         return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_ACTIVA, "pld_contrapartes_kyc.reactivar_cuenta")
 
+    @action(detail=True, methods=["post"], url_path="activar-umbral")
+    def activar_umbral(self, request, pk=None):
+        """Consulta el acumulado de ingresos de esta contraparte en
+        tesoreria-service. Si algún proyecto supera $948,000 MXN y el flag
+        requiere_revision_pld estaba en False, lo activa y emite auditoría.
+        Idempotente: si ya estaba activo no hace nada. No desactiva el flag
+        — eso lo hace el analista manualmente tras documentar la revisión."""
+        kyc = self.get_object()
+        actor = request.effective_scope.identity_user_id
+
+        try:
+            resp = requests.get(
+                f"{settings.TESORERIA_SERVICE_URL}/api/flujos/acumulado-contraparte/",
+                params={"contraparte": kyc.id_contraparte},
+                headers={k: v for k, v in request.headers.items() if k.lower() in ("authorization", "cookie", "x-scope")},
+                cookies=request.COOKIES,
+                timeout=5,
+            )
+        except requests.exceptions.Timeout:
+            return Response({"detail": "Timeout al consultar tesorería."}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+        except requests.exceptions.RequestException:
+            return Response({"detail": "Error de red al consultar tesorería."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        if resp.status_code != 200:
+            return Response({"detail": "No se pudo consultar el acumulado."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        supera = any(item.get("supera_umbral") for item in resp.json())
+        if supera and not kyc.requiere_revision_pld:
+            kyc.requiere_revision_pld = True
+            kyc.updated_by = actor
+            kyc.save(update_fields=["requiere_revision_pld", "updated_by", "updated_at"])
+            emitir_evento_auditoria(
+                "pld_contrapartes_kyc.umbral_alcanzado",
+                "pld_contrapartes_kyc",
+                str(kyc.id_kyc),
+                actor_user_id=actor,
+                valores_previos={"requiere_revision_pld": False},
+                valores_nuevos={"requiere_revision_pld": True},
+            )
+
+        return Response(self.get_serializer(kyc).data)
+
 
 class PldRepresentanteLegalViewSet(ModelViewSet):
     """Representante legal / apoderado de una contraparte Moral (02/Sep/2026,

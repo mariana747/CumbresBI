@@ -173,6 +173,7 @@ export interface PldContraparteKyc {
   grado_riesgo_manual: boolean;
   es_pep: boolean | null;
   notas_riesgo: string | null;
+  requiere_revision_pld: boolean;
 }
 
 const PLD_API_BASE_URL = `${GATEWAY_URL}/pld`;
@@ -833,6 +834,19 @@ export async function aprobarKyc(idKyc: string, aprobadoPor: string): Promise<Pl
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ aprobado_por: aprobadoPor }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
+// Activa requiere_revision_pld si algún proyecto de esta contraparte supera
+// $948,000 MXN. Idempotente — si ya estaba activo no hace nada. El backend
+// consulta tesoreria-service internamente; el flag solo se apaga manualmente.
+export async function activarUmbralKyc(idKyc: string): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/activar-umbral/`, {
+    method: "POST",
   });
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);

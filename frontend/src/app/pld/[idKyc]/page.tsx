@@ -73,6 +73,7 @@ import {
   PldRepresentanteLegal,
   PldTipoDocumento,
   PldSolicitudEliminacionDoc,
+  activarUmbralKyc,
   aprobarKyc,
   aprobarSolicitudEliminacion,
   catalogoOcupacionPorTipoPersona,
@@ -539,6 +540,9 @@ export default function PldExpedienteDetallePage() {
     ])
       .then(([flujosPage, facturasPage, complementosPage, notasPage, acumuladoData]) => {
         setAcumulado(acumuladoData);
+        if (acumuladoData.some((a) => a.supera_umbral) && !kyc.requiere_revision_pld) {
+          activarUmbralKyc(kyc.id_kyc).then(setKyc).catch(() => {});
+        }
         const flujos = flujosPage.results;
         const facturas = facturasPage.results;
         const complementos = complementosPage.results;
@@ -1121,6 +1125,20 @@ export default function PldExpedienteDetallePage() {
                     {ESTADO_CUENTA_LABELS[kyc.estado_cuenta] ?? kyc.estado_cuenta}
                   </Typography>
                 </Box>
+                {kyc.requiere_revision_pld && (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      REVISIÓN PLD
+                    </Typography>
+                    <Chip
+                      size="small"
+                      color="warning"
+                      icon={<ShieldQuestion size={14} strokeWidth={1.5} />}
+                      label="Requiere revisión"
+                      sx={{ mt: 0.5 }}
+                    />
+                  </Box>
+                )}
               </Stack>
 
               <Divider sx={{ my: 2.5 }} />
