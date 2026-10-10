@@ -1574,7 +1574,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         flujo = self.get_object()
         flujo.autorizacion = True
         flujo.autorizado_por = autorizado_por
-        flujo.fecha_autorizacion = timezone.now().date()
+        flujo.fecha_autorizacion = timezone.localdate()
         flujo.validacion_estado = TesoreriaFlujo.VALIDACION_APROBADA
         flujo.save(
             update_fields=["autorizacion", "autorizado_por", "fecha_autorizacion", "validacion_estado"]
@@ -1639,7 +1639,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 status=400,
             )
         flujo.pagado = True
-        flujo.fecha_pago = timezone.now().date()
+        flujo.fecha_pago = timezone.localdate()
         flujo.descripcion_pago = request.data.get("descripcion_pago", flujo.descripcion_pago)
         flujo.link_comprobante_banco = request.data.get(
             "link_comprobante_banco", flujo.link_comprobante_banco
@@ -2372,7 +2372,7 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             return Response({"estado": ["Solo se puede aprobar un ticket Pendiente."]}, status=400)
         ticket.estado = TesoreriaTicketReembolso.ESTADO_APROBADO
         ticket.autorizado_por = request.effective_scope.identity_user_id
-        ticket.fecha_autorizacion = timezone.now().date()
+        ticket.fecha_autorizacion = timezone.localdate()
         ticket.comentarios = request.data.get("comentarios", ticket.comentarios)
         ticket.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion", "comentarios"])
         emitir_evento_auditoria(
@@ -2693,7 +2693,7 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
             return Response({"estado": ["Solo se puede aprobar una solicitud Pendiente."]}, status=400)
         solicitud.estado = TesoreriaSolicitudPago.ESTADO_APROBADO
         solicitud.autorizado_por = request.effective_scope.identity_user_id
-        solicitud.fecha_autorizacion = timezone.now().date()
+        solicitud.fecha_autorizacion = timezone.localdate()
         solicitud.comentarios = request.data.get("comentarios", solicitud.comentarios)
         solicitud.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion", "comentarios"])
         emitir_evento_auditoria(
