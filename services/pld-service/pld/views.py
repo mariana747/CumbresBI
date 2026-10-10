@@ -474,6 +474,11 @@ class PldContraparteKycViewSet(ModelViewSet):
         sociedad_rfc = request.data.get("sociedad_rfc")
         if not sociedad_rfc:
             return Response({"sociedad_rfc": "Este campo es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+        scope = request.effective_scope
+        if not scope.is_global and sociedad_rfc not in scope.sociedad_rfcs:
+            return Response(
+                {"sociedad_rfc": "No tienes acceso a esa sociedad."}, status=status.HTTP_403_FORBIDDEN
+            )
         existe, sociedad_nombre = _obtener_sociedad_en_iam(sociedad_rfc, headers, cookies)
         if not existe:
             return Response(
@@ -525,6 +530,11 @@ class PldContraparteKycViewSet(ModelViewSet):
         nuevo_sociedad_rfc = request.data.get("sociedad_rfc")
         sociedad_nombre_nueva = None
         if nuevo_sociedad_rfc and nuevo_sociedad_rfc != instance.sociedad_rfc:
+            scope = request.effective_scope
+            if not scope.is_global and nuevo_sociedad_rfc not in scope.sociedad_rfcs:
+                return Response(
+                    {"sociedad_rfc": "No tienes acceso a esa sociedad."}, status=status.HTTP_403_FORBIDDEN
+                )
             headers, cookies = forward_auth_headers(request)
             existe, sociedad_nombre_nueva = _obtener_sociedad_en_iam(nuevo_sociedad_rfc, headers, cookies)
             if not existe:
@@ -700,6 +710,64 @@ class PldContraparteKycViewSet(ModelViewSet):
         kyc.save(update_fields=["estado_llenado_manual"])
         recalcular_estado_llenado(kyc)
         kyc.refresh_from_db()
+        return Response(self.get_serializer(kyc).data)
+
+    @action(detail=True, methods=["patch"], url_path="evaluar-riesgo")
+    def evaluar_riesgo(self, request, pk=None):
+        """Guarda grado_riesgo/es_pep/notas_riesgo manualmente y prende
+        grado_riesgo_manual. Si se manda recalcular=true en el body, apaga
+        grado_riesgo_manual y recalcula automatico."""
+        kyc = self.get_object()
+        self.check_permissions(request)
+
+        recalcular = request.data.get("recalcular") is True
+        actor = request.effective_scope.identity_user_id
+        if recalcular:
+            grado_anterior = kyc.grado_riesgo
+            kyc.grado_riesgo_manual = False
+            kyc.grado_riesgo = kyc.calcular_grado_riesgo()
+            if "notas_riesgo" in request.data:
+                kyc.notas_riesgo = request.data["notas_riesgo"]
+            kyc.updated_by = actor
+            kyc.save(update_fields=["grado_riesgo_manual", "grado_riesgo", "notas_riesgo", "updated_by", "updated_at"])
+            emitir_evento_auditoria(
+                "pld_contrapartes_kyc.evaluar_riesgo",
+                "pld_contrapartes_kyc",
+                str(kyc.id_kyc),
+                actor_user_id=actor,
+                valores_previos={"grado_riesgo": grado_anterior},
+                valores_nuevos={"grado_riesgo": kyc.grado_riesgo, "origen": "AUTO", "notas_riesgo": kyc.notas_riesgo},
+            )
+            return Response(self.get_serializer(kyc).data)
+
+        campos = {}
+        grado_anterior = kyc.grado_riesgo
+        if "es_pep" in request.data:
+            kyc.es_pep = request.data["es_pep"]
+            campos["es_pep"] = kyc.es_pep
+        if "notas_riesgo" in request.data:
+            kyc.notas_riesgo = request.data["notas_riesgo"]
+            campos["notas_riesgo"] = kyc.notas_riesgo
+        if "grado_riesgo" in request.data:
+            nuevo = request.data["grado_riesgo"]
+            opciones_validas = [c for c, _ in PldContraparteKyc.GRADO_RIESGO_CHOICES]
+            if nuevo not in opciones_validas:
+                return Response({"grado_riesgo": ["Valor no válido."]}, status=400)
+            kyc.grado_riesgo = nuevo
+            kyc.grado_riesgo_manual = True
+            campos["grado_riesgo"] = kyc.grado_riesgo
+            campos["grado_riesgo_manual"] = True
+
+        kyc.updated_by = actor
+        kyc.save(update_fields=list(campos.keys()) + ["updated_by", "updated_at"])
+        emitir_evento_auditoria(
+            "pld_contrapartes_kyc.evaluar_riesgo",
+            "pld_contrapartes_kyc",
+            str(kyc.id_kyc),
+            actor_user_id=actor,
+            valores_previos={"grado_riesgo": grado_anterior},
+            valores_nuevos={"grado_riesgo": kyc.grado_riesgo, "origen": "MANUAL", "notas_riesgo": kyc.notas_riesgo},
+        )
         return Response(self.get_serializer(kyc).data)
 
     @action(detail=True, methods=["post"])
@@ -1068,6 +1136,12 @@ class PldRepresentanteLegalViewSet(ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        kyc = serializer.validated_data.get("kyc")
+        if kyc and not PldContraparteKyc.objects.for_scope(self.request.effective_scope).filter(
+            pk=kyc.pk
+        ).exists():
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("No tienes acceso al expediente KYC indicado.")
         actor = self.request.effective_scope.identity_user_id
         serializer.save(created_by=actor, updated_by=actor)
 
@@ -1130,6 +1204,15 @@ class PldContraparteDocViewSet(ModelViewSet):
         if kyc_param:
             queryset = queryset.filter(kyc_id=kyc_param)
         return queryset
+
+    def perform_create(self, serializer):
+        kyc = serializer.validated_data.get("kyc")
+        if kyc and not PldContraparteKyc.objects.for_scope(self.request.effective_scope).filter(
+            pk=kyc.pk
+        ).exists():
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("No tienes acceso al expediente KYC indicado.")
+        serializer.save()
 
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir(self, request, pk=None):

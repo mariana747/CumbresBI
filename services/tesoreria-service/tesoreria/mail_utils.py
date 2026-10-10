@@ -107,6 +107,16 @@ def _nombre_completo_cuenta(fila: dict) -> str:
     return fila["alias"]
 
 
+def _contrato_span_html(t: dict) -> str:
+    if not t.get("id_contrato"):
+        return ""
+    bits = [x for x in [t.get("contraparte"), t.get("contrato_proyecto")] if x]
+    label = "/".join(bits)
+    if t.get("concepto_factura"):
+        label += f" - {t['concepto_factura']}"
+    return f"<br><span style='font-size:11px;opacity:0.7;font-family:monospace;'>{escape(label)}</span>"
+
+
 def _fila_cuenta_html(numero: int, fila: dict) -> str:
     cambio_texto = f"{fila['cambio']:,.2f}" if fila["cambio"] is not None else "—"
     # cambio_pct (11/Sep/2026, formato del reporte legado de Wall-E Homes) -
@@ -133,7 +143,7 @@ def _fila_cuenta_html(numero: int, fila: dict) -> str:
         color_monto = _ROJO if monto is not None and monto < 0 else _VERDE
         filas_html += f"""
     <tr>
-      <td style="padding:4px 10px 4px 24px;border-bottom:1px solid #EEEFF1;color:{_INK_MUTED};font-size:12px;">{escape(t['concepto'] or t['id_flujo'])}</td>
+      <td style="padding:4px 10px 4px 24px;border-bottom:1px solid #EEEFF1;color:{_INK_MUTED};font-size:12px;">{escape(t['concepto'] or t['id_flujo'])}{_contrato_span_html(t)}</td>
       <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;"></td>
       <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;text-align:right;font-size:12px;color:{color_monto};font-weight:600;">{monto_texto}</td>
       <td style="padding:4px 10px;border-bottom:1px solid #EEEFF1;">{_chip_tipo_movimiento_html(monto)}</td>

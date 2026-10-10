@@ -26,4 +26,4 @@ COPY services/obra-service/ .
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2"]

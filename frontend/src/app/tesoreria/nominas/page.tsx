@@ -892,7 +892,7 @@ export default function TesoreriaNominasPage() {
             </Alert>
           )}
           <Box sx={{ mb: 2 }}>
-            <CuentaBancariaSelector value={cuentaGeneracion} onChange={setCuentaGeneracion} />
+            <CuentaBancariaSelector value={cuentaGeneracion} onChange={setCuentaGeneracion} sociedades={sociedades} />
           </Box>
           {cargandoPuestos ? (
             <Stack alignItems="center" sx={{ py: 3 }}>

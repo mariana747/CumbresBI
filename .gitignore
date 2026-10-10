@@ -96,3 +96,8 @@ docs/*.sql
 services/materiales-service/*.json
 /*.json
 /*.yaml
+# Local Firebase / deploy tools
+.firebase/
+.firebaserc
+scripts/*.sh
+services/public-pages/

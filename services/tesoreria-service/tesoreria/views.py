@@ -14,7 +14,7 @@ import xlrd
 from openpyxl import load_workbook
 from cumbresbi_scope import forward_auth_headers
 from django.conf import settings
-from django.db.models import ProtectedError, Q
+from django.db.models import Exists, F, OuterRef, ProtectedError, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -116,6 +116,53 @@ from .reembolso_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _label_contrato(contrato) -> str:
+    """Replica el formato de ContratoSelector.tsx:etiqueta():
+    '{id} — {contraparte}/{proyecto}//{sociedad} - {concepto}'"""
+    if not contrato:
+        return ""
+    ref_partes = [
+        contrato.contraparte.razon_social if contrato.contraparte_id else "",
+        contrato.proyecto or "",
+    ]
+    ref = "/".join(p for p in ref_partes if p)
+    if contrato.sociedad:
+        ref += f"//{contrato.sociedad}"
+    concepto = contrato.concepto_factura or contrato.concepto
+    if concepto:
+        ref += f" - {concepto}"
+    return f"{contrato.id_contrato} — {ref}" if ref else contrato.id_contrato
+
+
+def _label_cuenta(cuenta) -> str:
+    """Replica el formato de CuentaBancariaSelector.tsx:etiqueta():
+    '{sociedad}/{banco_alias}/{ultimos4}/{tipo}'"""
+    if not cuenta:
+        return ""
+    numero = cuenta.cuenta or cuenta.clabe
+    partes = [
+        cuenta.sociedad or "",
+        (cuenta.banco.alias if cuenta.banco_id and cuenta.banco.alias else
+         cuenta.banco.banco if cuenta.banco_id else ""),
+        numero[-4:] if numero else "",
+        cuenta.tipo or "",
+    ]
+    partes = [p for p in partes if p]
+    return "/".join(partes) if partes else cuenta.alias or cuenta.id_cuenta_bancaria
+
+
+def _csv_local(encabezados: list, filas: list, nombre_archivo: str) -> HttpResponse:
+    """Descarga CSV directa; alternativa local a exportar_sheets cuando
+    Google aun no ha verificado la app OAuth o el usuario prefiere CSV."""
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{nombre_archivo}"'
+    response.write("﻿")  # BOM para que Excel lo abra correctamente
+    writer = csv.writer(response)
+    writer.writerow(encabezados)
+    writer.writerows(filas)
+    return response
 
 
 def _rfcs_sociedad_por_texto(request, texto):
@@ -573,6 +620,10 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         # aceptable para el volumen esperado de esta pantalla (alta manual
         # por un analista, no un flujo de alta frecuencia).
         sociedad = serializer.validated_data.get("sociedad")
+        scope = self.request.effective_scope
+        if sociedad and not scope.is_global and sociedad not in scope.sociedad_rfcs:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("No tienes acceso a esa sociedad.")
         contraparte = serializer.validated_data["contraparte"]
         consecutivo = TesoreriaContrato.objects.filter(sociedad=sociedad, contraparte=contraparte).count() + 1
         # "Sin sociedad" (23/Sep/2026) - prefijo legible en vez de dejar el
@@ -675,6 +726,13 @@ class TesoreriaNominaViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         # id_nomina = "NOM-{consecutivo global de 6 digitos}", mismo
         # criterio que TesoreriaFlujo.id_flujo (ver
         # TesoreriaFlujoViewSet.perform_create).
+        sociedades = serializer.validated_data.get("sociedades", [])
+        scope = self.request.effective_scope
+        if not scope.is_global and sociedades:
+            fuera = [s for s in sociedades if s not in scope.sociedad_rfcs]
+            if fuera:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied(f"No tienes acceso a: {', '.join(fuera)}.")
         consecutivo = TesoreriaNomina.objects.count() + 1
         serializer.save(id_nomina=f"NOM-{consecutivo:06d}")
 
@@ -1114,7 +1172,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             # periodo_nomina (18/Sep/2026) - el serializer lo consulta via
             # periodo_nomina.serie, faltaba aqui (mismo hallazgo N+1 que
             # Facturas, ver TesoreriaFacturaViewSet.list()).
-            .select_related("contrato", "contrato__contraparte", "cuenta", "periodo_nomina")
+            .select_related("contrato", "contrato__contraparte", "cuenta", "cuenta__banco", "periodo_nomina")
             .order_by("-fecha_efectiva", "-created_at")
         )
         contrato_id = self.request.query_params.get("contrato")
@@ -1194,20 +1252,21 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         response["Content-Disposition"] = 'attachment; filename="flujos.csv"'
         writer = csv.writer(response)
         writer.writerow(
-            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría"]
+            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría", "Link comprobante"]
         )
         for f in queryset:
             writer.writerow(
                 [
                     f.id_flujo,
-                    f.contrato_id,
-                    f.cuenta_id,
+                    _label_contrato(f.contrato) if f.contrato_id else "",
+                    _label_cuenta(f.cuenta) if f.cuenta_id else "",
                     f.concepto or "",
                     f.total_mxp or "",
                     f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
                     f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
                     "Sí" if f.pagado else "No",
                     f.categoria_gasto or "",
+                    f.link_comprobante_banco or "",
                 ]
             )
         return response
@@ -1220,6 +1279,28 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         Google, regresa 409 con la url de autorizacion para que el
         frontend redirija."""
         queryset = self.filter_queryset(self.get_queryset())
+        encabezados = [
+            "ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP",
+            "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría", "Link comprobante",
+        ]
+        filas = [
+            [
+                f.id_flujo,
+                _label_contrato(f.contrato) if f.contrato_id else "",
+                _label_cuenta(f.cuenta) if f.cuenta_id else "",
+                f.concepto or "",
+                str(f.total_mxp) if f.total_mxp is not None else "",
+                f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
+                f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
+                "Sí" if f.pagado else "No",
+                f.categoria_gasto or "",
+                f.link_comprobante_banco or "",
+            ]
+            for f in queryset
+        ]
+        titulo = request.data.get("titulo") or f"Flujos CumbresBI — {timezone.now().date().isoformat()}"
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, f"{titulo}.csv")
         try:
             access_token = google_sheets_utils.obtener_access_token(request)
         except google_sheets_utils.GoogleSheetsNoConectado:
@@ -1230,26 +1311,6 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             return Response({"conectado": False, "url_autorizacion": url}, status=409)
         except requests.RequestException:
             return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
-        encabezados = [
-            "ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP",
-            "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría",
-        ]
-        filas = [
-            [
-                f.id_flujo,
-                f.contrato_id or "",
-                f.cuenta_id or "",
-                f.concepto or "",
-                str(f.total_mxp) if f.total_mxp is not None else "",
-                f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
-                f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
-                "Sí" if f.pagado else "No",
-                f.categoria_gasto or "",
-            ]
-            for f in queryset
-        ]
-        titulo = f"Flujos CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
             url = google_sheets_utils.crear_hoja(access_token, titulo, encabezados, filas, carpeta_id)
@@ -1388,17 +1449,6 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 | Q(complemento__tipo_de_comprobante=tipo_comprobante)
             )
 
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         resultado = calcular_conciliacion_cfdi(queryset)
         encabezados = [
             "Clasificación", "ID Flujo", "Contrato", "Proveedor", "Concepto", "Fecha efectiva",
@@ -1426,6 +1476,18 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             for clave, etiqueta in etiquetas.items()
             for fila in resultado[clave]
         ]
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "conciliacion-facturas.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Conciliación de Facturas CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -2044,6 +2106,36 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         data["sugerencias_factura"] = sugerencias_factura
         return Response(data)
 
+    @action(detail=False, methods=["get"])
+    def verificar_sociedad(self, request):
+        """Devuelve la lista de flujos donde contrato.sociedad != cuenta.sociedad.
+        Requiere tesoreria.aprobar."""
+        if not require_permission("tesoreria.aprobar")().has_permission(request, self):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied()
+
+        flujos = (
+            TesoreriaFlujo.objects.filter(
+                contrato__sociedad__isnull=False,
+                cuenta__sociedad__isnull=False,
+            )
+            .exclude(contrato__sociedad=F("cuenta__sociedad"))
+            .select_related("contrato", "cuenta")
+            .order_by("id_flujo")
+        )
+
+        data = [
+            {
+                "id_flujo": f.id_flujo,
+                "contrato": f.contrato_id,
+                "sociedad_contrato": f.contrato.sociedad if f.contrato else None,
+                "cuenta": f.cuenta_id,
+                "sociedad_cuenta": f.cuenta.sociedad if f.cuenta else None,
+            }
+            for f in flujos
+        ]
+        return Response({"flujos": data})
+
 
 class TesoreriaTicketReembolsoViewSet(ModelViewSet):
     """Tickets de reembolso de MiCumbres (pantalla PROVISIONAL
@@ -2128,17 +2220,6 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
         TesoreriaFlujoViewSet.exportar_sheets. Una fila por CONCEPTO (no
         por ticket), ya que un ticket puede mezclar categorias/montos."""
         queryset = self.filter_queryset(self.get_queryset()).prefetch_related("conceptos")
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         encabezados = [
             "ID Ticket", "Empleado", "Sociedad", "Estado", "Fecha del gasto",
             "Monto total", "Moneda", "Concepto", "Monto del concepto", "Categoría",
@@ -2163,6 +2244,18 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
                         c.get_categoria_gasto_display() if c.categoria_gasto else "",
                     ]
                 )
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "tickets-reembolso.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Tickets de Reembolso CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -2550,17 +2643,6 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
         """Exporta a Google Sheets, mismo patron que
         TesoreriaFlujoViewSet.exportar_sheets."""
         queryset = self.filter_queryset(self.get_queryset())
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         encabezados = [
             "ID Solicitud", "Proyecto", "Sociedad", "Tipo", "Descripción",
             "Monto", "Moneda", "Estado", "Solicitado por", "Categoría",
@@ -2580,6 +2662,18 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
             ]
             for s in queryset
         ]
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "solicitudes-pago.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Solicitudes de Pago CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -2682,7 +2776,7 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
         return Response(self.get_serializer(solicitud).data)
 
 
-def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, carpeta):
+def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, carpeta, link_fallback=None):
     """Sirve un archivo ya subido a Drive EN STREAMING a traves de este
     servicio (mismo patron que PldContraparteDocViewSet.ver en pld-service,
     "usa lo mismo que en pld" - 04/Sep/2026): antes el boton "Ver"
@@ -2693,8 +2787,14 @@ def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, c
     repite los 3 saltos (frontend -> tesoreria-service -> drive-service ->
     Google Drive) en cache-hit. Content-Security-Policy frame-ancestors
     permite embeberlo en un <iframe> del frontend, restringido a los
-    mismos origenes de CORS_ALLOWED_ORIGINS."""
+    mismos origenes de CORS_ALLOWED_ORIGINS.
+
+    `link_fallback`: si no hay drive_file_id pero si hay un link guardado,
+    redirige ahi en vez de devolver 404."""
     if not drive_file_id:
+        if link_fallback:
+            from django.http import HttpResponseRedirect
+            return HttpResponseRedirect(link_fallback)
         return Response({"detail": "Este documento todavía no tiene un archivo subido."}, status=404)
 
     # "-v2" (04/Sep/2026, hallazgo real): antes del fix de Content-Type
@@ -3236,6 +3336,10 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         estado = self.request.query_params.get("estado")
         if estado:
             queryset = queryset.filter(estado=estado)
+        vinculada = self.request.query_params.get("vinculada")
+        if vinculada in ("true", "false"):
+            tiene_flujo = Exists(TesoreriaFlujo.objects.filter(factura_id=OuterRef("timbre_uuid")))
+            queryset = queryset.filter(tiene_flujo) if vinculada == "true" else queryset.exclude(tiene_flujo)
         return queryset
 
     def list(self, request, *args, **kwargs):
@@ -3316,17 +3420,6 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         """Exporta a Google Sheets, reemplaza exportar_csv - ver mismo
         endpoint en TesoreriaFlujoViewSet."""
         queryset = self.filter_queryset(self.get_queryset())
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         encabezados = ["UUID", "Folio", "Emisor", "RFC Emisor", "Receptor", "Fecha", "Total", "Estado", "Categoría"]
         filas = [
             [
@@ -3342,6 +3435,18 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             ]
             for f in queryset
         ]
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "facturas.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Facturas CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -3380,6 +3485,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=factura.mime_type_pdf,
             nombre_archivo=f"factura-{factura.timbre_uuid}",
             carpeta=self._carpeta_documento(factura, "pdf"),
+            link_fallback=factura.link_pdf,
         )
 
     @action(detail=True, methods=["get"])
@@ -3396,7 +3502,93 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=factura.mime_type_xml,
             nombre_archivo=f"factura-{factura.timbre_uuid}",
             carpeta=self._carpeta_documento(factura, "xml"),
+            link_fallback=factura.link_xml,
         )
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_pdf(self, request, pk=None):
+        """Sube el PDF de la factura directo a Drive sin pasar por el
+        Motor Documental. Mismo patron que
+        TesoreriaFlujoViewSet.subir_comprobante."""
+        factura = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "tesoreria.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir PDF de factura %s", factura.pk, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+        resultado = upstream.json()
+        factura.drive_file_id_pdf = resultado["file_id"]
+        factura.mime_type_pdf = archivo.content_type
+        factura.link_pdf = resultado["web_view_link"]
+        factura.save(update_fields=["drive_file_id_pdf", "mime_type_pdf", "link_pdf"])
+        emitir_evento_auditoria(
+            "tesoreria_facturas.subir_pdf",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(factura).data)
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_xml(self, request, pk=None):
+        """Sube el XML (comprobante fiscal) de la factura directo a
+        Drive sin pasar por el Motor Documental."""
+        factura = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+        headers, cookies = forward_auth_headers(request)
+        carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "tesoreria.editar"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir XML de factura %s", factura.pk, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+        resultado = upstream.json()
+        factura.drive_file_id_xml = resultado["file_id"]
+        factura.mime_type_xml = archivo.content_type
+        factura.link_xml = resultado["web_view_link"]
+        factura.save(update_fields=["drive_file_id_xml", "mime_type_xml", "link_xml"])
+        emitir_evento_auditoria(
+            "tesoreria_facturas.subir_xml",
+            "tesoreria_facturas",
+            factura.timbre_uuid,
+            actor_user_id=request.data.get("actor_user_id"),
+            valores_nuevos={"nombre_archivo": archivo.name},
+        )
+        return Response(self.get_serializer(factura).data)
 
     @action(detail=True, methods=["post"])
     def sincronizar_drive(self, request, pk=None):
@@ -3744,6 +3936,7 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
             mime_type=complemento.mime_type_pdf,
             nombre_archivo=f"complemento-pago-{complemento.timbre_uuid}",
             carpeta=f"Tesoreria/ComplementosPago/{complemento.timbre_uuid}",
+            link_fallback=complemento.link_pdf,
         )
 
     @action(detail=True, methods=["get"])
@@ -3757,6 +3950,7 @@ class TesoreriaComplementoPagoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSe
             mime_type=complemento.mime_type_xml,
             nombre_archivo=f"complemento-pago-{complemento.timbre_uuid}",
             carpeta=f"Tesoreria/ComplementosPago/{complemento.timbre_uuid}",
+            link_fallback=complemento.link_xml,
         )
 
     @action(detail=True, methods=["post"])
@@ -3831,6 +4025,7 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=nota.mime_type_pdf,
             nombre_archivo=f"nota-credito-{nota.timbre_uuid}",
             carpeta=f"Tesoreria/NotasCredito/{nota.timbre_uuid}",
+            link_fallback=nota.link_pdf,
         )
 
     @action(detail=True, methods=["get"])
@@ -3844,6 +4039,7 @@ class TesoreriaNotaCreditoViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             mime_type=nota.mime_type_xml,
             nombre_archivo=f"nota-credito-{nota.timbre_uuid}",
             carpeta=f"Tesoreria/NotasCredito/{nota.timbre_uuid}",
+            link_fallback=nota.link_xml,
         )
 
     @action(detail=True, methods=["post"])
@@ -4100,7 +4296,7 @@ def _referencia_contrato(contrato):
     return f"{base} - {contrato.concepto}" if contrato.concepto else base
 
 
-def _sugerir_flujos_para_movimiento(movimiento, limite=5):
+def _sugerir_flujos_para_movimiento(movimiento, limite=5, skip_ia=False):
     """Propone candidatos de Flujo para un movimiento bancario por
     heuristica (monto en valor absoluto + fecha con tolerancia, ordenado
     por score), excluyendo flujos ya ligados a otro movimiento o de otra
@@ -4159,6 +4355,8 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
     # solo flujos sin conciliar de la misma cuenta, tope MAX_SIN_MATCH para
     # no mandarle a Gemini cientos de flujos.
     MAX_CANDIDATOS_SIN_MATCH = 30
+    if not sugerencias and skip_ia:
+        return []
     if not sugerencias:
         flujos_sin_match = (
             TesoreriaFlujo.objects.filter(cuenta=movimiento.cuenta, total_mxp__isnull=False)
@@ -4208,7 +4406,7 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5):
     es_ambiguo = len(sugerencias) > 1 and (
         sugerencias[0][0] < PUNTAJE_MAXIMO_CLARO or sugerencias[0][0] == sugerencias[1][0]
     )
-    if es_ambiguo:
+    if es_ambiguo and not skip_ia:
         candidatos_ia = [
             {
                 "id_flujo": flujo.id_flujo,
@@ -4268,7 +4466,11 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         return super().get_permissions()
 
     def get_queryset(self):
-        queryset = TesoreriaMovimientoBancario.objects.select_related("cuenta", "flujo").order_by("-fecha")
+        queryset = (
+            TesoreriaMovimientoBancario.objects.for_scope(self.request.effective_scope)
+            .select_related("cuenta", "flujo")
+            .order_by("-fecha")
+        )
         cuenta_id = self.request.query_params.get("cuenta")
         if cuenta_id:
             queryset = queryset.filter(cuenta_id=cuenta_id)
@@ -4300,23 +4502,111 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         if not archivo:
             raise ValidationError("Se requiere 'file'.")
         contenido = archivo.read()
-        texto = contenido.decode("utf-8", errors="ignore")
-        numeros_encontrados = set(re.findall(r"\d{8,20}", texto))
+        nombre = archivo.name or ""
+        numeros_cuenta_header = set()
+        numeros_encontrados = set()
 
-        cuentas = TesoreriaCuenta.objects.select_related("banco").all()
+        def _leer_filas_spreadsheet(contenido, nombre):
+            """Devuelve lista de listas de strings detectando formato por magic bytes."""
+            import io
+            header = contenido[:8]
+            # ZIP magic → xlsx (OOXML)
+            if header[:2] == b"PK":
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(contenido), data_only=True)
+                filas = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        filas.append([str(c) if c is not None else "" for c in row])
+                return filas
+            # XML magic → SpreadsheetML (.xls guardado como XML)
+            if contenido[:5] in (b"<?xml", b"\xef\xbb\xbf<?") or b"<?xml" in contenido[:100]:
+                import xml.etree.ElementTree as ET
+                texto_xml = contenido.decode("utf-8", errors="ignore")
+                root = ET.fromstring(texto_xml)
+                # Busca todos los elementos <Data> o <Cell> sin importar namespace
+                filas = []
+                fila_actual = []
+                for elem in root.iter():
+                    tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                    if tag == "Row":
+                        if fila_actual:
+                            filas.append(fila_actual)
+                        fila_actual = []
+                    elif tag == "Data" and elem.text:
+                        fila_actual.append(elem.text.strip())
+                if fila_actual:
+                    filas.append(fila_actual)
+                return filas
+            # BIFF magic → xls binario clásico
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=contenido)
+            filas = []
+            for ws in wb.sheets():
+                for i in range(ws.nrows):
+                    filas.append([str(ws.cell_value(i, j)) for j in range(ws.ncols)])
+            return filas
+
+        try:
+            filas = _leer_filas_spreadsheet(contenido, nombre)
+        except Exception:
+            filas = []
+        if filas:
+            for i, row in enumerate(filas):
+                for j, val in enumerate(row):
+                    numeros_encontrados.update(re.findall(r"\d{4,20}", val))
+                    if i < 30 and re.search(r"cuenta|n[uú]m(ero)?\.?\s*(de\s*)?cuenta", val, re.IGNORECASE):
+                        for dj in (1, 2, -1):
+                            if 0 <= j + dj < len(row):
+                                numeros_cuenta_header.update(re.findall(r"\d{4,20}", row[j + dj]))
+                        if i + 1 < len(filas):
+                            for v in filas[i + 1]:
+                                numeros_cuenta_header.update(re.findall(r"\d{4,20}", v))
+        if not filas:
+            # Fallback: leer como texto (CSV o binario con errores ignorados)
+            texto = contenido.decode("utf-8", errors="ignore")
+            numeros_encontrados = set(re.findall(r"\d{4,20}", texto))
+
+        numeros_para_buscar = numeros_cuenta_header if numeros_cuenta_header else numeros_encontrados
+
+        cuentas = TesoreriaCuenta.objects.select_related("banco").all().order_by("id_cuenta_bancaria")
+
+        def _score_coincidencia(cuenta, numeros, todos_numeros=None):
+            # Mayor puntaje = match más específico; 0 = sin coincidencia.
+            # Prioridades: match exacto de cuenta > sufijo de cuenta > CLABE.
+            # Tiebreaker: +1 si la forma corta también aparece en el archivo completo.
+            todos = todos_numeros or numeros
+            if cuenta.cuenta:
+                for n in numeros:
+                    if n == cuenta.cuenta:
+                        bonus = 1 if (cuenta.cuenta[-4:] in todos and cuenta.cuenta[-4:] != cuenta.cuenta) else 0
+                        return (4, bonus, len(n))
+                for n in numeros:
+                    if n.endswith(cuenta.cuenta) and len(cuenta.cuenta) >= 4:
+                        bonus = 1 if (cuenta.cuenta[-4:] in todos and cuenta.cuenta[-4:] != cuenta.cuenta) else 0
+                        return (3, bonus, len(n))
+            if cuenta.clabe:
+                for n in numeros:
+                    if n == cuenta.clabe:
+                        return (2, 0, len(n))
+                for n in numeros:
+                    if n.endswith(cuenta.clabe) or cuenta.clabe.endswith(n):
+                        return (1, 0, len(n))
+            return (0, 0, 0)
 
         def _buscar_coincidencia(numeros):
+            mejor, mejor_score = None, (0, 0, 0)
             for cuenta in cuentas:
-                coincide = (cuenta.cuenta and cuenta.cuenta in numeros) or (
-                    cuenta.clabe and any(n in cuenta.clabe or cuenta.clabe in n for n in numeros)
-                )
-                if coincide:
-                    return cuenta
-            return None
+                score = _score_coincidencia(cuenta, numeros, numeros_encontrados)
+                if score > mejor_score:
+                    mejor, mejor_score = cuenta, score
+            return mejor if mejor_score[0] > 0 else None
 
-        cuenta_encontrada = _buscar_coincidencia(numeros_encontrados) if numeros_encontrados else None
+        cuenta_encontrada = _buscar_coincidencia(numeros_para_buscar) if numeros_para_buscar else None
         if cuenta_encontrada is None:
-            numero_ia = detectar_numero_cuenta_por_ia(texto)
+            # Fallback IA: solo aplica para CSV/TXT (xlsx ya se leyó correctamente arriba)
+            texto_ia = locals().get("texto", " ".join(str(c) for c in numeros_encontrados))
+            numero_ia = detectar_numero_cuenta_por_ia(texto_ia)
             if numero_ia:
                 cuenta_encontrada = _buscar_coincidencia({numero_ia})
 
@@ -4434,10 +4724,47 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
 
     @action(detail=False, methods=["post"])
     def conciliar_automatico(self, request):
-        """Aplica solo matches de alta confianza (candidato unico, monto
-        exacto, fecha a lo mas 1 dia de diferencia); ambiguos quedan para
-        `sugerencias`. Body opcional: {"cuenta"} y/o {"corte_edc"} para
-        acotar el lote."""
+        """Matches de alta confianza (candidato unico, monto exacto, fecha a
+        lo mas 1 dia). Sin `confirmar`: devuelve propuestas para que el
+        analista las revise. Con `confirmar: true` y la lista `propuestas`
+        [{movimiento, flujo}] que el analista aprobo: aplica solo esas.
+        Body opcional: {"cuenta"} y/o {"corte_edc"} para acotar el lote,
+        {"limite"} (default 200)."""
+        LIMITE_DEFAULT = 200
+        confirmar = bool(request.data.get("confirmar", False))
+
+        # --- Fase de confirmacion: recibe propuestas ya revisadas por el analista ---
+        if confirmar:
+            propuestas = request.data.get("propuestas", [])
+            if not propuestas:
+                return Response({"detail": "Se requiere 'propuestas' para confirmar."}, status=400)
+            ids_mov = [p["movimiento"] for p in propuestas]
+            movimientos = {
+                m.id: m
+                for m in TesoreriaMovimientoBancario.objects.filter(id__in=ids_mov, flujo__isnull=True)
+            }
+            to_update = []
+            aplicados = []
+            for p in propuestas:
+                mov = movimientos.get(p["movimiento"])
+                if mov:
+                    mov.flujo_id = p["flujo"]
+                    to_update.append(mov)
+                    aplicados.append({"movimiento": mov.id, "flujo": mov.flujo_id})
+            if to_update:
+                TesoreriaMovimientoBancario.objects.bulk_update(to_update, ["flujo"])
+            if aplicados:
+                emitir_evento_auditoria(
+                    "tesoreria_movimientos_bancarios.conciliar_automatico",
+                    "tesoreria_movimientos_bancarios",
+                    f"{len(aplicados)} movimientos",
+                    actor_user_id=request.data.get("actor_user_id"),
+                    valores_nuevos={"conciliados": aplicados},
+                )
+            return Response({"conciliados": len(aplicados)})
+
+        # --- Fase de propuesta: calcula matches sin guardar nada ---
+        limite = min(int(request.data.get("limite", LIMITE_DEFAULT)), 500)
         queryset = TesoreriaMovimientoBancario.objects.filter(flujo__isnull=True)
         cuenta_id = request.data.get("cuenta")
         if cuenta_id:
@@ -4446,36 +4773,44 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         if corte_edc_id:
             queryset = queryset.filter(corte_edc_id=corte_edc_id)
 
-        conciliados = []
+        propuestas = []
         ambiguos = []
         sin_match = []
-        for movimiento in queryset.select_related("cuenta"):
-            candidatos = _sugerir_flujos_para_movimiento(movimiento, limite=2)
+        for movimiento in queryset.select_related("cuenta")[:limite]:
+            candidatos = _sugerir_flujos_para_movimiento(movimiento, limite=2, skip_ia=True)
             alta_confianza = [
                 c
                 for c in candidatos
                 if "mismo monto exacto" in c["motivos"] and "misma fecha (o un dia de diferencia)" in c["motivos"]
             ]
             if len(alta_confianza) == 1:
-                movimiento.flujo_id = alta_confianza[0]["id_flujo"]
-                movimiento.save(update_fields=["flujo"])
-                conciliados.append({"movimiento": movimiento.id, "flujo": movimiento.flujo_id})
+                id_flujo = alta_confianza[0]["id_flujo"]
+                flujo_obj = TesoreriaFlujo.objects.filter(id_flujo=id_flujo).values(
+                    "link_comprobante_banco", "link_referencia"
+                ).first() or {}
+                propuestas.append({
+                    "movimiento": movimiento.id,
+                    "mov_descripcion": movimiento.descripcion,
+                    "mov_monto": str(movimiento.abono or movimiento.cargo or 0),
+                    "mov_fecha": str(movimiento.fecha),
+                    "flujo": id_flujo,
+                    "concepto": alta_confianza[0]["concepto"],
+                    "contrato_referencia": alta_confianza[0].get("contrato_referencia"),
+                    "total_mxp": alta_confianza[0]["total_mxp"],
+                    "fecha_pago": alta_confianza[0].get("fecha_pago"),
+                    "fecha_efectiva": alta_confianza[0].get("fecha_efectiva"),
+                    "link_comprobante": flujo_obj.get("link_comprobante_banco"),
+                    "link_referencia": flujo_obj.get("link_referencia"),
+                    "motivos": alta_confianza[0]["motivos"],
+                })
             elif candidatos:
                 ambiguos.append({"movimiento": movimiento.id, "candidatos": len(candidatos)})
             else:
                 sin_match.append(movimiento.id)
 
-        if conciliados:
-            emitir_evento_auditoria(
-                "tesoreria_movimientos_bancarios.conciliar_automatico",
-                "tesoreria_movimientos_bancarios",
-                f"{len(conciliados)} movimientos",
-                actor_user_id=request.data.get("actor_user_id"),
-                valores_nuevos={"conciliados": conciliados},
-            )
         return Response(
             {
-                "conciliados": len(conciliados),
+                "propuestas": propuestas,
                 "ambiguos": len(ambiguos),
                 "sin_match": len(sin_match),
                 "detalle_ambiguos": ambiguos,
@@ -4551,17 +4886,6 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         if not cuenta_id:
             raise ValidationError("Se requiere '?cuenta='.")
 
-        try:
-            access_token = google_sheets_utils.obtener_access_token(request)
-        except google_sheets_utils.GoogleSheetsNoConectado:
-            try:
-                url = google_sheets_utils.url_autorizacion(request)
-            except requests.RequestException:
-                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
-            return Response({"conectado": False, "url_autorizacion": url}, status=409)
-        except requests.RequestException:
-            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
-
         reporte = calcular_reporte_conciliacion(
             cuenta_id,
             corte_edc_id=request.query_params.get("corte_edc"),
@@ -4597,6 +4921,18 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
                     "Sí" if fila["pagado"] else "No",
                 ]
             )
+        if request.query_params.get("formato") == "csv":
+            return _csv_local(encabezados, filas, "conciliacion-bancaria.csv")
+        try:
+            access_token = google_sheets_utils.obtener_access_token(request)
+        except google_sheets_utils.GoogleSheetsNoConectado:
+            try:
+                url = google_sheets_utils.url_autorizacion(request)
+            except requests.RequestException:
+                return Response({"detail": "No se pudo iniciar la conexión con Google."}, status=502)
+            return Response({"conectado": False, "url_autorizacion": url}, status=409)
+        except requests.RequestException:
+            return Response({"detail": "No se pudo validar la conexión con Google."}, status=502)
         titulo = f"Conciliación Bancaria CumbresBI — {timezone.now().date().isoformat()}"
         carpeta_id = request.data.get("carpeta_id") or None
         try:
@@ -4852,3 +5188,5 @@ class TesoreriaRecNominaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             nombre_archivo=f"comprobante-{rec_nomina.timbre_uuid or rec_nomina.id}",
             carpeta=f"Tesoreria/RecibosNomina/{rec_nomina.timbre_uuid or rec_nomina.id}",
         )
+
+

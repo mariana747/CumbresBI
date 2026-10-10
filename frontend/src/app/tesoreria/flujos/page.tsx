@@ -88,7 +88,9 @@ import {
   confirmarConciliacionFlujo,
   createFlujo,
   createRecNomina,
+  updateContrato,
   exportarFlujosSheets,
+  descargarFlujosCsv,
   getContratoGenericoNomina,
   getContratoGenericoReembolsoPorSociedad,
   listComplementosPago,
@@ -109,11 +111,15 @@ import {
   urlVerReferenciaFlujo,
   updateFlujo,
   vincularFactura,
+  verificarSociedadMismatch,
+  FlujoMismatch,
+  getFlujo,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
   // Detalles
   contrato: "",
+  linkContrato: "",
   // periodoNomina (10/Sep/2026, modulo de Nominas Fase 1) - opcional, solo
   // presente si el Flujo es una linea de pago de una Nomina. Al elegirse
   // autocompleta contrato/concepto (ver onChange del selector en Detalles).
@@ -431,6 +437,8 @@ function TesoreriaFlujosPageContent() {
   const puedeCrear = session?.perm_keys.includes("tesoreria.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
   const puedeAprobar = session?.perm_keys.includes("tesoreria.aprobar") ?? false;
+  const [verificando, setVerificando] = useState(false);
+  const [mismatchDialog, setMismatchDialog] = useState<FlujoMismatch[] | null>(null);
 
   // Muestra el folio de la factura/complemento ya vinculado en vez del
   // timbre_uuid crudo - busca en las listas ya cargadas arriba (mismo
@@ -642,7 +650,23 @@ function TesoreriaFlujosPageContent() {
       router.replace("/tesoreria/flujos");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flujos]);
+  }, [flujos, searchParams]);
+
+  // Nombre base para el archivo exportado, refleja los filtros activos.
+  // Se omite search (texto libre, no legible como nombre de archivo).
+  const tituloExport = (() => {
+    const partes: string[] = ["Flujos CumbresBI"];
+    if (filtroEmpresa) {
+      const s = sociedades.find((x) => x.rfc === filtroEmpresa);
+      partes.push(s?.alias_sociedad || s?.razon_social || filtroEmpresa);
+    }
+    if (contratoFiltro) partes.push(contratoFiltro.id_contrato);
+    if (filtroCategoriaGasto) partes.push(filtroCategoriaGasto);
+    if (filtroEstado) partes.push(filtroEstado);
+    if (filtroFechaDesde) partes.push(`desde ${filtroFechaDesde}`);
+    if (filtroFechaHasta) partes.push(`hasta ${filtroFechaHasta}`);
+    return partes.join(" — ");
+  })();
 
   // Exportar a Google Sheets (14/Sep/2026, reemplaza "Exportar CSV") - ver
   // hook reusable en lib/useExportarSheets.ts.
@@ -655,9 +679,34 @@ function TesoreriaFlujosPageContent() {
       search: search || undefined,
       contrato: filtroContrato || undefined,
       sociedad: filtroEmpresa || undefined,
+      nomina: filtroNomina || undefined,
+      categoriaGasto: filtroCategoriaGasto || undefined,
+      fechaDesde: filtroFechaDesde || undefined,
+      fechaHasta: filtroFechaHasta || undefined,
+      validacionEstado: filtroEstado || undefined,
       carpetaId,
+      titulo: tituloExport,
     })
   );
+  const [descargandoCsv, setDescargandoCsv] = useState(false);
+  const handleDescargarCsv = async () => {
+    setDescargandoCsv(true);
+    try {
+      await descargarFlujosCsv({
+        search: search || undefined,
+        contrato: filtroContrato || undefined,
+        sociedad: filtroEmpresa || undefined,
+        nomina: filtroNomina || undefined,
+        categoriaGasto: filtroCategoriaGasto || undefined,
+        fechaDesde: filtroFechaDesde || undefined,
+        fechaHasta: filtroFechaHasta || undefined,
+        validacionEstado: filtroEstado || undefined,
+        titulo: tituloExport,
+      });
+    } finally {
+      setDescargandoCsv(false);
+    }
+  };
 
   // Filtro de fecha (25/Ago/2026, movido al servidor 20/Sep/2026 - con
   // paginacion el cliente ya no tiene todas las filas para filtrar
@@ -700,6 +749,7 @@ function TesoreriaFlujosPageContent() {
     }
     setForm({
       contrato: f.contrato || "",
+      linkContrato: "",
       periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
@@ -748,6 +798,7 @@ function TesoreriaFlujosPageContent() {
     }
     setForm({
       contrato: f.contrato || "",
+      linkContrato: "",
       periodoNomina: f.periodo_nomina || "",
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
@@ -792,6 +843,7 @@ function TesoreriaFlujosPageContent() {
     try {
       if (editing) {
         await updateFlujo(editing.id_flujo, {
+          contrato: form.contrato || undefined,
           concepto: form.concepto || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
           totalMxp: form.totalMxp || undefined,
@@ -801,6 +853,9 @@ function TesoreriaFlujosPageContent() {
           cuenta: form.cuenta || undefined,
         });
       } else {
+        if (form.linkContrato && form.linkContrato !== (contratoForm?.link_contrato || "")) {
+          await updateContrato(form.contrato, { linkContrato: form.linkContrato });
+        }
         await createFlujo({
           contrato: form.contrato,
           periodoNomina: form.periodoNomina || undefined,
@@ -1034,6 +1089,37 @@ function TesoreriaFlujosPageContent() {
             >
               Exportar a Google Sheets
             </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={descargandoCsv}
+              onClick={handleDescargarCsv}
+              sx={{ flexShrink: 0 }}
+            >
+              Descargar CSV
+            </Button>
+            {puedeAprobar && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                disabled={verificando}
+                startIcon={verificando ? <CircularProgress size={14} /> : undefined}
+                onClick={async () => {
+                  setVerificando(true);
+                  try {
+                    const flujos = await verificarSociedadMismatch();
+                    setMismatchDialog(flujos);
+                  } finally {
+                    setVerificando(false);
+                  }
+                }}
+                sx={{ flexShrink: 0 }}
+              >
+                Verificar sociedades
+              </Button>
+            )}
             {puedeCrear && (
               <Button
                 size="small"
@@ -1050,7 +1136,7 @@ function TesoreriaFlujosPageContent() {
       >
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={sociedades}
           value={sociedades.find((s) => s.rfc === filtroEmpresa) || null}
           onChange={(_, seleccion) => {
@@ -1064,14 +1150,14 @@ function TesoreriaFlujosPageContent() {
         />
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]}
           value={filtroCategoriaGasto || null}
           onChange={(_, seleccion) => setFiltroCategoriaGasto(seleccion || "")}
           getOptionLabel={(c) => CATEGORIA_GASTO_LABELS[c]}
           renderInput={(params) => <TextField {...params} label="Categoría de gasto" />}
         />
-        <Box sx={{ minWidth: 200 }}>
+        <Box sx={{ width: "100%" }}>
           <ContratoSelector
             label="Filtrar por contrato"
             sociedad={filtroEmpresa || undefined}
@@ -1084,7 +1170,7 @@ function TesoreriaFlujosPageContent() {
         </Box>
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={nominas}
           value={nominas.find((n) => n.id_nomina === filtroNomina) || null}
           onChange={(_, seleccion) => setFiltroNomina(seleccion?.id_nomina || "")}
@@ -1094,7 +1180,7 @@ function TesoreriaFlujosPageContent() {
         />
         <Autocomplete
           size="small"
-          sx={{ minWidth: 160 }}
+          sx={{ width: "100%" }}
           options={Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]}
           value={filtroEstado || null}
           onChange={(_, seleccion) => setFiltroEstado(seleccion || "")}
@@ -1116,7 +1202,7 @@ function TesoreriaFlujosPageContent() {
             }
           }}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
         <TextField
           size="small"
@@ -1125,7 +1211,7 @@ function TesoreriaFlujosPageContent() {
           value={filtroFechaHasta}
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
       </FiltrosBar>
 
@@ -1435,10 +1521,27 @@ function TesoreriaFlujosPageContent() {
                 disabled={soloLectura}
                 value={contratoForm}
                 onChange={(seleccion) => {
+                  const cambiaSociedad = seleccion?.sociedad !== contratoForm?.sociedad;
                   setContratoForm(seleccion);
-                  setForm({ ...form, contrato: seleccion?.id_contrato || "" });
+                  if (cambiaSociedad) setCuentaSeleccionada(null);
+                  setForm((f) => ({
+                    ...f,
+                    contrato: seleccion?.id_contrato || "",
+                    linkContrato: seleccion?.link_contrato || "",
+                    ...(cambiaSociedad ? { cuenta: "" } : {}),
+                  }));
                 }}
               />
+              {contratoForm && !editing && (
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Link del contrato"
+                  placeholder="https://..."
+                  value={form.linkContrato}
+                  onChange={(e) => setForm({ ...form, linkContrato: e.target.value })}
+                />
+              )}
               {form.reembolso && (
                 <Typography variant="caption" color="text.secondary">
                   Para reembolsos sin contrato de obra, elige la empresa abajo para usar su contrato genérico.
@@ -1597,6 +1700,8 @@ function TesoreriaFlujosPageContent() {
                   setCuentaSeleccionada(seleccion);
                   setForm({ ...form, cuenta: seleccion?.id_cuenta_bancaria || "" });
                 }}
+                sociedades={sociedades}
+                sociedad={contratoForm?.sociedad || undefined}
               />
               <TextField
                 size="small"
@@ -1653,18 +1758,20 @@ function TesoreriaFlujosPageContent() {
                     </Stack>
                   )}
                   <TextField size="small" label="Pagado" value={editing.pagado ? "Sí" : "No"} disabled fullWidth />
-                  <TextField
-                    size="small"
-                    label={
-                      <LabelTip
-                        text="Fecha de pago"
-                        tip='Se llena sola al "Registrar pago", no es editable aquí.'
-                      />
-                    }
-                    value={editing.fecha_pago || "—"}
-                    disabled
-                    fullWidth
-                  />
+                  {editing.pagado && (
+                    <TextField
+                      size="small"
+                      label={
+                        <LabelTip
+                          text="Fecha de pago"
+                          tip='Se llena sola al "Registrar pago", no es editable aquí.'
+                        />
+                      }
+                      value={editing.fecha_pago || "—"}
+                      disabled
+                      fullWidth
+                    />
+                  )}
                 </>
               ) : (
                 <Typography variant="caption" color="text.secondary">
@@ -2005,11 +2112,33 @@ function TesoreriaFlujosPageContent() {
                     ) : editing.link_comprobante_banco && !reemplazandoComprobante ? (
                       <>
                         <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
-                          <Stack direction="row" spacing={1.5} alignItems="center">
-                            <Link2 size={18} strokeWidth={1.5} />
-                            <Typography variant="body2">Comprobante (link)</Typography>
+                          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+                            <Link2 size={18} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography variant="body2" fontWeight={500}>
+                                Comprobante (link)
+                              </Typography>
+                              <Typography
+                                variant="body2"
+                                component="a"
+                                href={editing.link_comprobante_banco}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  display: "block",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                  color: "primary.main",
+                                  textDecoration: "none",
+                                  "&:hover": { textDecoration: "underline" },
+                                }}
+                              >
+                                {editing.link_comprobante_banco}
+                              </Typography>
+                            </Box>
                           </Stack>
-                          <Stack direction="row" spacing={1} alignItems="center">
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
                             <IconButton
                               size="small"
                               aria-label="Abrir link"
@@ -2537,6 +2666,59 @@ function TesoreriaFlujosPageContent() {
         urlExterna={previewDoc?.urlExterna}
       />
       <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
+
+      {/* Dialog de mismatch de sociedad */}
+      <Dialog open={mismatchDialog !== null} onClose={() => setMismatchDialog(null)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Flujos con sociedad incorrecta
+          <IconButton onClick={() => setMismatchDialog(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {mismatchDialog && mismatchDialog.length === 0 ? (
+            <Box sx={{ p: 3, textAlign: "center" }}>
+              <Typography color="text.secondary">No se encontraron flujos con mismatch de sociedad.</Typography>
+            </Box>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Flujo</TableCell>
+                  <TableCell>Contrato</TableCell>
+                  <TableCell>Sociedad contrato</TableCell>
+                  <TableCell>Cuenta</TableCell>
+                  <TableCell>Sociedad cuenta</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(mismatchDialog ?? []).map((f) => (
+                  <TableRow
+                    key={f.id_flujo}
+                    hover
+                    sx={{ cursor: "pointer" }}
+                    onClick={async () => {
+                      setMismatchDialog(null);
+                      try {
+                        const flujo = await getFlujo(f.id_flujo);
+                        abrirEdicion(flujo);
+                      } catch {
+                        router.push(`/tesoreria/flujos?abrir=${f.id_flujo}`);
+                      }
+                    }}
+                  >
+                    <TableCell>{f.id_flujo}</TableCell>
+                    <TableCell>{f.contrato}</TableCell>
+                    <TableCell>{f.sociedad_contrato ?? "—"}</TableCell>
+                    <TableCell>{f.cuenta}</TableCell>
+                    <TableCell sx={{ color: "warning.main", fontWeight: 600 }}>{f.sociedad_cuenta ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

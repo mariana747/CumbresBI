@@ -252,6 +252,8 @@ def _calcular_corte(cuentas, fecha) -> dict:
             # de siempre); banco_nombre/clabe son solo para que el correo
             # pueda mostrar banco real + CLABE en vez del alias libre.
             "banco_nombre": cuenta.banco.banco if cuenta.banco_id else None,
+            "banco_alias": cuenta.banco.alias if cuenta.banco_id else None,
+            "cuenta": cuenta.cuenta,
             "clabe": cuenta.clabe,
             "tipo": cuenta.tipo,
             # disponible_ministrar (28/Sep/2026, cuentas tipo CREDITO) - vive
@@ -285,6 +287,9 @@ def _calcular_corte(cuentas, fecha) -> dict:
                         else None
                     ),
                     "concepto_factura": t.contrato.concepto_factura if t.contrato_id else None,
+                    "id_contrato": t.contrato_id,
+                    "contrato_proyecto": t.contrato.proyecto if t.contrato_id else None,
+                    "contrato_sociedad": t.contrato.sociedad if t.contrato_id else None,
                 }
                 for t in transacciones
             ],
@@ -459,7 +464,7 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
         return {"facturas": [], "complementos": []}
 
     contraparte_id = flujo.contrato.contraparte_id
-    monto = flujo.total_mxp
+    monto = abs(flujo.total_mxp)
 
     candidatos_factura = []
     if not flujo.factura_id:
@@ -552,7 +557,7 @@ def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> lis
         if not flujo.contrato_id or flujo.total_mxp is None:
             continue
         contraparte_id = flujo.contrato.contraparte_id
-        monto = flujo.total_mxp
+        monto = abs(flujo.total_mxp)
 
         candidatos = []
         for f in facturas_por_contraparte.get(contraparte_id, []):

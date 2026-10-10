@@ -23,6 +23,9 @@ export function Footer() {
       <Typography variant="caption" sx={{ color: "common.white", opacity: 0.7 }}>
         © 2026 Cumbres Consultoría y Proyectos
       </Typography>
+      <Link href="/about" variant="caption" sx={{ color: "common.white", opacity: 0.7, textDecorationColor: "rgba(255,255,255,0.4)" }}>
+        Acerca de
+      </Link>
       <Link href="/privacidad" variant="caption" sx={{ color: "common.white", opacity: 0.7, textDecorationColor: "rgba(255,255,255,0.4)" }}>
         Política de Privacidad
       </Link>

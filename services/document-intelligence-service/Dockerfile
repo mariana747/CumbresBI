@@ -34,4 +34,4 @@ EXPOSE 8080
 # worker a medio analisis (SystemExit, conexion cortada sin respuesta al
 # cliente). Parche temporal mientras la Fase 3 (async con Cloud Tasks, ver
 # plan) deja de correr el analisis dentro del ciclo de vida del worker HTTP.
-CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2 --timeout 120"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2 --timeout 120"]

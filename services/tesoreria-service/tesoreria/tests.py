@@ -43,6 +43,7 @@ from . import mail_utils
 from .reembolso_utils import ultimos_dos_dias_habiles, validar_fecha_limite
 from .reportes import calcular_reporte_diario
 from .ticket_utils import generate_token
+
 from .views import (
     FacturaConceptoViewSet,
     FacturaDoctoRelacionadoViewSet,
@@ -60,6 +61,7 @@ from .views import (
     TesoreriaMovimientoBancarioViewSet,
     TesoreriaNominaViewSet,
     TesoreriaNotaCreditoViewSet,
+
     TesoreriaContratoDocumentoViewSet,
     TesoreriaRecNominaViewSet,
     TesoreriaSaldoViewSet,
@@ -4835,14 +4837,27 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
 
         self.assertEqual(response.data, [])
 
+    def _conciliar_y_confirmar(self, body=None):
+        """Propone y confirma todas las propuestas en un solo paso (helper de tests)."""
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
+        req = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", body or {}, format="json")
+        req.effective_scope = self.scope_editar
+        resp = view(req)
+        propuestas = resp.data.get("propuestas", [])
+        if not propuestas:
+            return resp
+        confirm_body = {"confirmar": True, "propuestas": [{"movimiento": p["movimiento"], "flujo": p["flujo"]} for p in propuestas]}
+        if body and "cuenta" in body:
+            confirm_body["cuenta"] = body["cuenta"]
+        req2 = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", confirm_body, format="json")
+        req2.effective_scope = self.scope_editar
+        return view(req2)
+
     def test_conciliar_automatico_liga_match_de_alta_confianza(self):
         flujo = self._crear_flujo("5000.00", "2026-09-02")
         movimiento = self._crear_movimiento(abono="5000.00", fecha="2026-09-02")
 
-        request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
-        request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
-        response = view(request)
+        response = self._conciliar_y_confirmar()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["conciliados"], 1)
@@ -4854,12 +4869,12 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         self._crear_flujo("1000.00", "2026-09-01")
         movimiento = self._crear_movimiento(cargo="1000.00", fecha="2026-09-01")
 
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
         request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         response = view(request)
 
-        self.assertEqual(response.data["conciliados"], 0)
+        self.assertEqual(len(response.data["propuestas"]), 0)
         self.assertEqual(response.data["ambiguos"], 1)
         movimiento.refresh_from_db()
         self.assertIsNone(movimiento.flujo)
@@ -4868,12 +4883,12 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         self._crear_flujo("1000.00", "2026-08-01")
         self._crear_movimiento(cargo="1000.00", fecha="2026-09-15")
 
+        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         request = self.factory.post("/api/movimientos-bancarios/conciliar_automatico/", {}, format="json")
         request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
         response = view(request)
 
-        self.assertEqual(response.data["conciliados"], 0)
+        self.assertEqual(len(response.data["propuestas"]), 0)
         self.assertEqual(response.data["sin_match"], 1)
 
     def test_conciliar_automatico_respeta_filtro_de_cuenta(self):
@@ -4882,14 +4897,7 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         movimiento_cuenta_principal = self._crear_movimiento(cargo="2000.00", fecha="2026-09-01")
         self._crear_flujo("2000.00", "2026-09-01")
 
-        request = self.factory.post(
-            "/api/movimientos-bancarios/conciliar_automatico/",
-            {"cuenta": self.cuenta.id_cuenta_bancaria},
-            format="json",
-        )
-        request.effective_scope = self.scope_editar
-        view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "conciliar_automatico"})
-        response = view(request)
+        response = self._conciliar_y_confirmar({"cuenta": self.cuenta.id_cuenta_bancaria})
 
         self.assertEqual(response.data["conciliados"], 1)
         movimiento_cuenta_principal.refresh_from_db()
@@ -4999,3 +5007,51 @@ class TesoreriaMovimientoBancarioConciliacionTests(TestCase):
         view = TesoreriaMovimientoBancarioViewSet.as_view({"post": "crear_flujo"})
         response = view(request, pk=movimiento.id)
         self.assertEqual(response.status_code, 400)
+
+
+RFC_OTRA = "OTR900101ABC"
+
+
+class VerificarSociedadTests(TestCase):
+    """GET /api/flujos/verificar_sociedad/ devuelve lista de flujos con mismatch."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Empresa Test", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="t@t.com"
+        )
+        banco = TesoreriaBanco.objects.create(id_banxico="99999", banco="BancoTest", alias="BT")
+        self.contrato_a = TesoreriaContrato.objects.create(
+            id_contrato="CTR-TEST-A", sociedad=RFC_TIZARA, contraparte=contraparte,
+            tipo=TesoreriaContrato.TIPO_INTERNO,
+        )
+        self.cuenta_otra = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000009999", alias="Cuenta otra empresa",
+            apertura="2026-01-01", sociedad=RFC_OTRA,
+        )
+        self.cuenta_misma = TesoreriaCuenta.objects.create(
+            banco=banco, clabe="002180000000008888", alias="Cuenta misma empresa",
+            apertura="2026-01-01", sociedad=RFC_TIZARA,
+        )
+        self.scope_aprobar = EffectiveScope(
+            is_global=True, perm_keys=("tesoreria.aprobar",), identity_user_id="u001"
+        )
+
+    def _get(self, scope=None):
+        request = self.factory.get("/api/flujos/verificar_sociedad/")
+        request.effective_scope = scope or self.scope_aprobar
+        return TesoreriaFlujoViewSet.as_view({"get": "verificar_sociedad"})(request)
+
+    def test_detecta_flujo_con_mismatch(self):
+        TesoreriaFlujo.objects.create(contrato=self.contrato_a, cuenta=self.cuenta_otra, total_mxp="1000.00")
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["flujos"]), 1)
+        self.assertEqual(response.data["flujos"][0]["sociedad_contrato"], RFC_TIZARA)
+        self.assertEqual(response.data["flujos"][0]["sociedad_cuenta"], RFC_OTRA)
+
+    def test_no_incluye_flujo_con_sociedad_correcta(self):
+        TesoreriaFlujo.objects.create(contrato=self.contrato_a, cuenta=self.cuenta_misma, total_mxp="1000.00")
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["flujos"]), 0)

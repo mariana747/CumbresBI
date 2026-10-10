@@ -59,6 +59,9 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
         entidad = self.request.query_params.get("entidad")
         if entidad:
             queryset = queryset.filter(entidad=entidad)
+        accion = self.request.query_params.get("accion")
+        if accion:
+            queryset = queryset.filter(accion=accion)
         search = self.request.query_params.get("search")
         if search:
             queryset = queryset.filter(

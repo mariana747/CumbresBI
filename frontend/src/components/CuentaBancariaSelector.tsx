@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Autocomplete, CircularProgress, TextField } from "@mui/material";
 import { TesoreriaCuenta, listCuentas } from "@/lib/tesoreria";
+import { GeneralSociedad } from "@/lib/iam";
 
 // Selector reusable de Cuenta bancaria (23/Sep/2026, mismo hallazgo que
 // Contrapartes: el catalogo crece con cada empresa/proyecto nuevo y varias
@@ -16,6 +17,7 @@ export default function CuentaBancariaSelector({
   label = "Cuenta bancaria",
   disabled,
   sociedad,
+  sociedades = [],
 }: {
   value: TesoreriaCuenta | null;
   onChange: (cuenta: TesoreriaCuenta | null) => void;
@@ -24,8 +26,12 @@ export default function CuentaBancariaSelector({
   // Filtra a las cuentas de una sola empresa (opcional) - mismo patron que
   // ContraparteSelector.tipo.
   sociedad?: string;
+  // Para armar la etiqueta EMPRESA/BANCO/XXXX/TIPO igual que el resto de
+  // pantallas de Tesorería.
+  sociedades?: GeneralSociedad[];
 }) {
-  const [inputValue, setInputValue] = useState(value ? etiqueta(value) : "");
+  const mkEtiqueta = (c: TesoreriaCuenta) => etiqueta(c, sociedades);
+  const [inputValue, setInputValue] = useState(value ? mkEtiqueta(value) : "");
   const [opciones, setOpciones] = useState<TesoreriaCuenta[]>([]);
   const [buscando, setBuscando] = useState(false);
 
@@ -53,14 +59,14 @@ export default function CuentaBancariaSelector({
       onInputChange={(_, nuevoValor) => setInputValue(nuevoValor)}
       onChange={(_, seleccion) => {
         onChange(seleccion);
-        setInputValue(seleccion ? etiqueta(seleccion) : "");
+        setInputValue(seleccion ? mkEtiqueta(seleccion) : "");
       }}
       options={opciones}
-      getOptionLabel={etiqueta}
+      getOptionLabel={mkEtiqueta}
       isOptionEqualToValue={(a, b) => a.id_cuenta_bancaria === b.id_cuenta_bancaria}
       renderOption={(props, option) => (
         <li {...props} key={option.id_cuenta_bancaria}>
-          {etiqueta(option)}
+          {mkEtiqueta(option)}
         </li>
       )}
       renderInput={(params) => (
@@ -82,14 +88,16 @@ export default function CuentaBancariaSelector({
   );
 }
 
-// "{alias} — {numero de cuenta}" (23/Sep/2026, mismo criterio que
-// opcionCuenta() en tesoreria/saldos/page.tsx) - cae al id si no hay alias
-// ni numero capturado.
-function etiqueta(c: TesoreriaCuenta): string {
+// EMPRESA/BANCO/XXXX/TIPO - mismo orden que aliasCuenta() en cuentas/saldos/
+// reportes/conciliacion. Cae al id si no hay ninguna parte disponible.
+function etiqueta(c: TesoreriaCuenta, sociedades: GeneralSociedad[]): string {
+  const soc = sociedades.find((s) => s.rfc === c.sociedad);
   const numero = c.cuenta || c.clabe;
-  // alias suele venir vacio (la migracion solo lleno label, ej.
-  // "TCC/BBVA/3257") - sin este fallback se mostraba el id_cuenta_bancaria
-  // en vez del nombre legible.
-  const nombre = c.alias || c.label || c.id_cuenta_bancaria;
-  return numero ? `${nombre} — ${numero}` : nombre;
+  const partes = [
+    soc?.alias_sociedad || soc?.razon_social,
+    c.banco_alias || c.banco_nombre,
+    numero ? numero.slice(-4) : null,
+    c.tipo,
+  ].filter(Boolean);
+  return partes.length ? partes.join("/") : c.alias || c.label || c.id_cuenta_bancaria;
 }

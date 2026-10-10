@@ -20,6 +20,7 @@ from .models import (
     TesoreriaNomina,
     TesoreriaNominaSociedad,
     TesoreriaNotaCredito,
+
     TesoreriaProyectoCodigo,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -1241,3 +1242,4 @@ class TesoreriaTicketProveedorSerializer(serializers.ModelSerializer):
             "last_used_at",
             "revoked_at",
         ]
+

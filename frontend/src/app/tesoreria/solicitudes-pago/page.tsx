@@ -51,6 +51,7 @@ import {
   aprobarSolicitudPago,
   crearSolicitudPago,
   exportarSolicitudesPagoSheets,
+  descargarSolicitudesPagoCsv,
   listSolicitudesPago,
   rechazarSolicitudPago,
   subirComprobanteSolicitudPago,
@@ -137,6 +138,15 @@ export default function SolicitudesPagoPage() {
       carpetaId
     )
   );
+  const [descargandoCsv, setDescargandoCsv] = useState(false);
+  const handleDescargarCsv = async () => {
+    setDescargandoCsv(true);
+    try {
+      await descargarSolicitudesPagoCsv({ proyecto: filtroProyecto || undefined, sociedad: filtroSociedad || undefined, search: search || undefined });
+    } finally {
+      setDescargandoCsv(false);
+    }
+  };
 
   const solicitudesFiltradas = useMemo(
     () =>
@@ -396,6 +406,16 @@ export default function SolicitudesPagoPage() {
               sx={{ flexShrink: 0 }}
             >
               Exportar a Google Sheets
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={descargandoCsv ? <CircularProgress size={14} /> : <FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={descargandoCsv}
+              onClick={handleDescargarCsv}
+              sx={{ flexShrink: 0 }}
+            >
+              Descargar CSV
             </Button>
             {puedeCrear && (
               <Button

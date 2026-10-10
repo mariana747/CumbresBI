@@ -348,6 +348,56 @@ class ValidacionSociedadAlCrearTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertIsNone(response.data["sociedad_nombre"])
 
+    def test_usuario_de_tizara_no_puede_crear_expediente_de_capital(self):
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,), perm_keys=("pld-compliance.crear",))
+        request = self.factory.post("/api/kyc/", {"sociedad_rfc": RFC_CAPITAL, "created_by": "usr00001", "updated_by": "usr00001"}, format="json")
+        request.effective_scope = scope
+        response = PldContraparteKycViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_global_puede_crear_cualquier_sociedad(self):
+        with patch(
+            "pld.views.requests.get",
+            return_value=Mock(status_code=200, json=lambda: {"razon_social": "Capital SA de CV"}),
+        ):
+            response = self._crear(RFC_CAPITAL)
+        self.assertEqual(response.status_code, 201)
+
+    def test_usuario_de_tizara_no_puede_reasignar_expediente_a_capital(self):
+        kyc = _kyc("cp000099", RFC_TIZARA)
+        scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,), perm_keys=("pld-compliance.editar",))
+        request = self.factory.patch(f"/api/kyc/{kyc.id_kyc}/", {"sociedad_rfc": RFC_CAPITAL}, format="json")
+        request.effective_scope = scope
+        response = PldContraparteKycViewSet.as_view({"patch": "partial_update"})(request, pk=kyc.id_kyc)
+        self.assertEqual(response.status_code, 403)
+
+
+class EscriturahijoFueraDeScope(TestCase):
+    """Un usuario con acceso a Tizara no puede crear documentos ni
+    representantes sobre expedientes de Capital aunque conozca el id_kyc."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc_capital = _kyc("cp000090", RFC_CAPITAL)
+        self.scope_tizara = EffectiveScope(
+            is_global=False, sociedad_rfcs=(RFC_TIZARA,),
+            perm_keys=("pld-compliance.crear", "pld-documentos.crear"),
+        )
+
+    def test_no_puede_crear_documento_en_kyc_ajeno(self):
+        body = {"kyc": self.kyc_capital.id_kyc, "denominacion": "INE", "created_by": "usr00001", "updated_by": "usr00001"}
+        request = self.factory.post("/api/kyc-docs/", body, format="json")
+        request.effective_scope = self.scope_tizara
+        response = PldContraparteDocViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_no_puede_crear_representante_en_kyc_ajeno(self):
+        body = {"kyc": self.kyc_capital.id_kyc, "nombre_completo": "Juan Pérez", "created_by": "usr00001", "updated_by": "usr00001"}
+        request = self.factory.post("/api/representantes/", body, format="json")
+        request.effective_scope = self.scope_tizara
+        response = PldRepresentanteLegalViewSet.as_view({"post": "create"})(request)
+        self.assertEqual(response.status_code, 403)
+
 
 class ReasignarSociedadTests(TestCase):
     """07/Sep/2026, "donde puedo asignar una sociedad" - reasignar

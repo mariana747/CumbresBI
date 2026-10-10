@@ -27,7 +27,7 @@ _TIMEOUT_SEGUNDOS = 20
 # ticket unificado por documento) - mismo tipo de llamada lenta que docint,
 # detectado 07/Sep/2026 con el mismo sintoma ("PLD-502") al subir un
 # documento desde el link publico del cliente.
-_TIMEOUT_SEGUNDOS_POR_PREFIJO = {"docint": 90, "pld": 90}
+_TIMEOUT_SEGUNDOS_POR_PREFIJO = {"docint": 90, "pld": 90, "tesoreria": 90}
 
 
 @csrf_exempt

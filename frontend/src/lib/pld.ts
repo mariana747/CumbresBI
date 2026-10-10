@@ -149,6 +149,9 @@ export interface PldContraparteKyc {
   nombre_completo: string | null;
   curp: string | null;
   nacionalidad: string | null;
+  tipo_persona: "fisica" | "moral" | "fideicomiso" | null;
+  pais_nac_const: string | null;
+  dom_pais: string | null;
   categoria_cumplimiento: PldCategoriaCumplimiento | null;
   categoria_cumplimiento_manual: boolean;
   estado_cuenta: "ACTIVA" | "SOSPECHOSA" | "CONGELADA";
@@ -166,6 +169,10 @@ export interface PldContraparteKyc {
   updated_at: string;
   updated_by: string;
   fecha_vencimiento: string | null;
+  grado_riesgo: "BAJO" | "MEDIO" | "ALTO" | "SIN_EVALUAR";
+  grado_riesgo_manual: boolean;
+  es_pep: boolean | null;
+  notas_riesgo: string | null;
 }
 
 const PLD_API_BASE_URL = `${GATEWAY_URL}/pld`;
@@ -724,6 +731,19 @@ export async function reactivarAutoCategoriaKyc(idKyc: string): Promise<PldContr
   if (!response.ok) {
     throw await friendlyApiError("PLD", response);
   }
+  return response.json();
+}
+
+export async function evaluarRiesgo(
+  idKyc: string,
+  datos: { grado_riesgo?: string; es_pep?: boolean | null; notas_riesgo?: string; recalcular?: boolean }
+): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/evaluar-riesgo/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(datos),
+  });
+  if (!response.ok) throw await friendlyApiError("PLD", response);
   return response.json();
 }
 

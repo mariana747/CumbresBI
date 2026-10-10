@@ -781,9 +781,6 @@ function Header({
                     )),
                   ].filter(Boolean)
                 : []),
-              // Campana de materiales-service (22/Sep/2026, terreno
-              // preparado para "recordatorios de pedido de material" -
-              // ver docstring de MaterialesNotificacion en el backend).
               ...(notificacionesMateriales.length > 0
                 ? [
                     (sinRolUsers.length > 0 || solicitudesEliminacion.length > 0) && (
@@ -873,6 +870,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [sinRolUsers, setSinRolUsers] = useState<IamUser[]>([]);
   const [solicitudesEliminacion, setSolicitudesEliminacion] = useState<PldSolicitudEliminacionDoc[]>([]);
   const [notificacionesMateriales, setNotificacionesMateriales] = useState<MaterialesNotificacion[]>([]);
+
 
   useEffect(() => {
     getSession().then((session) => {
