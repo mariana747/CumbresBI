@@ -3512,7 +3512,7 @@ class TesoreriaTicketReembolsoCrudTests(TestCase):
         response = TesoreriaTicketReembolsoViewSet.as_view({"post": "aprobar"})(aprobar, pk=creado.data["id_ticket"])
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["autorizado_por"], "tesorero1")
-        self.assertEqual(response.data["fecha_autorizacion"], date.today().isoformat())
+        self.assertEqual(response.data["fecha_autorizacion"], timezone.localdate().isoformat())
 
     def test_sociedad_no_se_puede_corregir_despues_de_crear(self):
         # Regla de minuta 03/Sep/2026: "si se equivoca de sociedad ya
@@ -3776,7 +3776,7 @@ class TesoreriaSolicitudPagoCrudTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["estado"], "APROBADO")
         self.assertEqual(response.data["autorizado_por"], "manager1")
-        self.assertEqual(response.data["fecha_autorizacion"], date.today().isoformat())
+        self.assertEqual(response.data["fecha_autorizacion"], timezone.localdate().isoformat())
 
     def test_vincular_flujo_sin_factura_pasa_a_pagado(self):
         # Comprobante OPCIONAL (pagos a gobierno a veces sin CFDI formal) -
