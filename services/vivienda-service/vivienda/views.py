@@ -205,17 +205,21 @@ class ViviendaRelExpedienteClienteViewSet(_PermisosVentasViviendaMixin, ModelVie
 
 class ViviendaVentasExpedienteItemViewSet(_PermisosVentasViviendaMixin, ModelViewSet):
     """Checklist de documentos de un expediente. Filtrable por
-    ?expediente=<id> desde la vista de detalle del expediente."""
+    ?expediente=<id> (vista de checklist individual) o ?denominacion=<texto>
+    (vistas cross-cutting: firmas de escrituras / entregas de vivienda)."""
 
     serializer_class = ViviendaVentasExpedienteItemSerializer
 
     def get_queryset(self):
         queryset = (
             ViviendaVentasExpedienteItem.objects.for_scope(self.request.effective_scope)
-            .select_related("expediente")
+            .select_related("expediente", "expediente__vivienda")
             .order_by("-created_at")
         )
         expediente_id = self.request.query_params.get("expediente")
         if expediente_id:
             queryset = queryset.filter(expediente_id=expediente_id)
+        denominacion = self.request.query_params.get("denominacion")
+        if denominacion:
+            queryset = queryset.filter(denominacion=denominacion)
         return queryset

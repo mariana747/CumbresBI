@@ -28,6 +28,7 @@ import {
   LayoutDashboard,
   ShieldCheck,
   KeyRound,
+  FileSignature,
   FileSearch,
   FileText,
   ClipboardList,
@@ -266,10 +267,8 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
         { label: "Viviendas", href: "/ventas-vivienda/viviendas", icon: Home },
         { label: "Asesores", href: "/ventas-vivienda/asesores", icon: Users },
         { label: "Expedientes", href: "/ventas-vivienda/expedientes", icon: ClipboardList },
-        // Materiales se movio a Obra - ver children de Obra abajo.
-        // Presupuestos sigue en desarrollo (EnDesarrolloPage) - el motor
-        // etapa->concepto no esta construido todavia.
-        { label: "Presupuestos", href: "/ventas-vivienda/presupuestos", icon: Calculator },
+        { label: "Firmas de Escrituras", href: "/ventas-vivienda/firmas-escrituras", icon: FileSignature },
+        { label: "Entregas de Vivienda", href: "/ventas-vivienda/entregas-vivienda", icon: KeyRound },
       ],
     });
   }

@@ -10,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   IconButton,
   InputLabel,
@@ -17,12 +18,14 @@ import {
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -658,6 +661,7 @@ export default function ExpedientesTab({
   const [formError, setFormError] = useState<string | null>(null);
   const [clientesDe, setClientesDe] = useState<ViviendaExpediente | null>(null);
   const [itemsDe, setItemsDe] = useState<ViviendaExpediente | null>(null);
+  const [tabEstado, setTabEstado] = useState<"PENDIENTE" | "EN PROCESO" | "FIRMADO" | "">("EN PROCESO");
 
   useEffect(() => {
     listViviendas().then(setViviendas).catch(() => undefined);
@@ -736,22 +740,31 @@ export default function ExpedientesTab({
       )}
 
       <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            Expedientes de venta (vivienda + asesor + contrato de Tesorería).
-          </Typography>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ px: 2, pt: 1.5, pb: 0 }}>
+          <Tabs
+            value={tabEstado}
+            onChange={(_, v) => setTabEstado(v)}
+            sx={{ borderBottom: "none", minHeight: 36 }}
+            TabIndicatorProps={{ style: { bottom: 0 } }}
+          >
+            <Tab label="En proceso" value="EN PROCESO" sx={{ minHeight: 36, py: 0.5 }} />
+            <Tab label="Pendientes" value="PENDIENTE" sx={{ minHeight: 36, py: 0.5 }} />
+            <Tab label="Firmados" value="FIRMADO" sx={{ minHeight: 36, py: 0.5 }} />
+            <Tab label="Todos" value="" sx={{ minHeight: 36, py: 0.5 }} />
+          </Tabs>
           {puedeCrear && (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
+              sx={{ ml: { sm: "auto" }, mb: 0.5 }}
             >
               Nuevo Expediente
             </Button>
           )}
         </Stack>
+        <Divider />
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -770,7 +783,7 @@ export default function ExpedientesTab({
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : expedientes.length === 0 ? (
+              ) : expedientes.filter((e) => !tabEstado || e.estado === tabEstado).length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -779,7 +792,7 @@ export default function ExpedientesTab({
                   </TableCell>
                 </TableRow>
               ) : (
-                expedientes.map((e) => (
+                expedientes.filter((e) => !tabEstado || e.estado === tabEstado).map((e) => (
                   <TableRow key={e.id_expediente} hover>
                     <TableCell>{e.vivienda_denominacion || "—"}</TableCell>
                     <TableCell>{e.asesor_nombre}</TableCell>
