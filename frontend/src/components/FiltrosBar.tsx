@@ -71,14 +71,14 @@ export default function FiltrosBar({
         justifyContent="space-between"
         sx={{ p: 2 }}
       >
-        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
           {!hideSearch && (
             <TextField
               size="small"
               placeholder={searchPlaceholder}
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
-              sx={{ flex: 1, minWidth: { sm: 360 } }}
+              sx={{ flex: 1, minWidth: 0 }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -92,7 +92,7 @@ export default function FiltrosBar({
         </Stack>
 
         {actions && (
-          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+          <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
             {actions}
           </Stack>
         )}

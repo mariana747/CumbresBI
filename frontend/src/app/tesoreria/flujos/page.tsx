@@ -112,6 +112,8 @@ import {
   updateFlujo,
   vincularFactura,
   verificarSociedadMismatch,
+  FlujoMismatch,
+  getFlujo,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -436,6 +438,7 @@ function TesoreriaFlujosPageContent() {
   const puedeEditar = session?.perm_keys.includes("tesoreria.editar") ?? false;
   const puedeAprobar = session?.perm_keys.includes("tesoreria.aprobar") ?? false;
   const [verificando, setVerificando] = useState(false);
+  const [mismatchDialog, setMismatchDialog] = useState<FlujoMismatch[] | null>(null);
 
   // Muestra el folio de la factura/complemento ya vinculado en vez del
   // timbre_uuid crudo - busca en las listas ya cargadas arriba (mismo
@@ -647,7 +650,7 @@ function TesoreriaFlujosPageContent() {
       router.replace("/tesoreria/flujos");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flujos]);
+  }, [flujos, searchParams]);
 
   // Nombre base para el archivo exportado, refleja los filtros activos.
   // Se omite search (texto libre, no legible como nombre de archivo).
@@ -1106,8 +1109,8 @@ function TesoreriaFlujosPageContent() {
                 onClick={async () => {
                   setVerificando(true);
                   try {
-                    const r = await verificarSociedadMismatch();
-                    alert(`Flujos con mismatch: ${r.flujos}\nNotificaciones creadas: ${r.creadas}`);
+                    const flujos = await verificarSociedadMismatch();
+                    setMismatchDialog(flujos);
                   } finally {
                     setVerificando(false);
                   }
@@ -1133,7 +1136,7 @@ function TesoreriaFlujosPageContent() {
       >
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={sociedades}
           value={sociedades.find((s) => s.rfc === filtroEmpresa) || null}
           onChange={(_, seleccion) => {
@@ -1147,14 +1150,14 @@ function TesoreriaFlujosPageContent() {
         />
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]}
           value={filtroCategoriaGasto || null}
           onChange={(_, seleccion) => setFiltroCategoriaGasto(seleccion || "")}
           getOptionLabel={(c) => CATEGORIA_GASTO_LABELS[c]}
           renderInput={(params) => <TextField {...params} label="Categoría de gasto" />}
         />
-        <Box sx={{ minWidth: 200 }}>
+        <Box sx={{ width: "100%" }}>
           <ContratoSelector
             label="Filtrar por contrato"
             sociedad={filtroEmpresa || undefined}
@@ -1167,7 +1170,7 @@ function TesoreriaFlujosPageContent() {
         </Box>
         <Autocomplete
           size="small"
-          sx={{ minWidth: 180 }}
+          sx={{ width: "100%" }}
           options={nominas}
           value={nominas.find((n) => n.id_nomina === filtroNomina) || null}
           onChange={(_, seleccion) => setFiltroNomina(seleccion?.id_nomina || "")}
@@ -1177,7 +1180,7 @@ function TesoreriaFlujosPageContent() {
         />
         <Autocomplete
           size="small"
-          sx={{ minWidth: 160 }}
+          sx={{ width: "100%" }}
           options={Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]}
           value={filtroEstado || null}
           onChange={(_, seleccion) => setFiltroEstado(seleccion || "")}
@@ -1199,7 +1202,7 @@ function TesoreriaFlujosPageContent() {
             }
           }}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
         <TextField
           size="small"
@@ -1208,7 +1211,7 @@ function TesoreriaFlujosPageContent() {
           value={filtroFechaHasta}
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
       </FiltrosBar>
 
@@ -2663,6 +2666,59 @@ function TesoreriaFlujosPageContent() {
         urlExterna={previewDoc?.urlExterna}
       />
       <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
+
+      {/* Dialog de mismatch de sociedad */}
+      <Dialog open={mismatchDialog !== null} onClose={() => setMismatchDialog(null)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Flujos con sociedad incorrecta
+          <IconButton onClick={() => setMismatchDialog(null)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {mismatchDialog && mismatchDialog.length === 0 ? (
+            <Box sx={{ p: 3, textAlign: "center" }}>
+              <Typography color="text.secondary">No se encontraron flujos con mismatch de sociedad.</Typography>
+            </Box>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Flujo</TableCell>
+                  <TableCell>Contrato</TableCell>
+                  <TableCell>Sociedad contrato</TableCell>
+                  <TableCell>Cuenta</TableCell>
+                  <TableCell>Sociedad cuenta</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(mismatchDialog ?? []).map((f) => (
+                  <TableRow
+                    key={f.id_flujo}
+                    hover
+                    sx={{ cursor: "pointer" }}
+                    onClick={async () => {
+                      setMismatchDialog(null);
+                      try {
+                        const flujo = await getFlujo(f.id_flujo);
+                        abrirEdicion(flujo);
+                      } catch {
+                        router.push(`/tesoreria/flujos?abrir=${f.id_flujo}`);
+                      }
+                    }}
+                  >
+                    <TableCell>{f.id_flujo}</TableCell>
+                    <TableCell>{f.contrato}</TableCell>
+                    <TableCell>{f.sociedad_contrato ?? "—"}</TableCell>
+                    <TableCell>{f.cuenta}</TableCell>
+                    <TableCell sx={{ color: "warning.main", fontWeight: 600 }}>{f.sociedad_cuenta ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

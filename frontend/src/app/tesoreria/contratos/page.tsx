@@ -66,6 +66,7 @@ import {
   TesoreriaContratoDocumentoNombre,
   TesoreriaContratoStatus,
   TesoreriaContratoTipo,
+  TesoreriaFlujo,
   TesoreriaFrecuencia,
   TesoreriaMoneda,
   TesoreriaTipoPago,
@@ -77,6 +78,7 @@ import {
   listContrapartes,
   listContratoDocumentos,
   listContratos,
+  listFlujos,
   updateContrato,
 } from "@/lib/tesoreria";
 
@@ -135,7 +137,7 @@ const STATUS_COLOR: Record<TesoreriaContratoStatus, "success" | "default"> = {
 // poco amigable (feedback directo), se agrupan segun a que le sirven.
 // Detalles = quien/que/cuando; Pago = condiciones de cobro/pago; Enlaces =
 // documentos y comentarios; Control = estado interno.
-const TABS_CONTRATO = ["Detalles", "Pago", "Enlaces", "Control", "Documentos"] as const;
+const TABS_CONTRATO = ["Detalles", "Pago", "Enlaces", "Control", "Documentos", "Historial"] as const;
 type TabContrato = (typeof TABS_CONTRATO)[number];
 
 // Contratos (arranque formal de Fase 4, 18/Ago/2026, tercer corte tras
@@ -230,6 +232,14 @@ function TesoreriaContratosPageContent() {
   // pendientes incluir, no se manda automatico por todos los pendientes.
   const [documentosSeleccionados, setDocumentosSeleccionados] = useState<number[]>([]);
   const [recordatorioMensaje, setRecordatorioMensaje] = useState<string | null>(null);
+
+  // Historial de pago por contrato
+  const [historialFlujos, setHistorialFlujos] = useState<TesoreriaFlujo[]>([]);
+  const [historialLoading, setHistorialLoading] = useState(false);
+  const [historialError, setHistorialError] = useState<string | null>(null);
+  const [historialFiltroFechaDesde, setHistorialFiltroFechaDesde] = useState("");
+  const [historialFiltroFechaHasta, setHistorialFiltroFechaHasta] = useState("");
+  const [historialFiltroPagado, setHistorialFiltroPagado] = useState<"" | "si" | "no">("");
 
   // Menu compacto de acciones por fila (28/Ago/2026, mismo patron que
   // Flujos/Contrapartes).
@@ -345,6 +355,10 @@ function TesoreriaContratosPageContent() {
     setNuevoDocumentoNombre("");
     setRecordatorioMensaje(null);
     setDocumentosSeleccionados([]);
+    setHistorialFlujos([]);
+    setHistorialFiltroFechaDesde("");
+    setHistorialFiltroFechaHasta("");
+    setHistorialFiltroPagado("");
     setDialogOpen(true);
   }
 
@@ -369,6 +383,31 @@ function TesoreriaContratosPageContent() {
       })
       .catch(() => setIdContratoPrevio(""));
   }, [dialogOpen, editing, form.sociedad, form.contraparte]);
+
+  useEffect(() => {
+    if (tab !== "Historial" || !editing) return;
+    setHistorialLoading(true);
+    setHistorialError(null);
+    listFlujos({
+      contrato: editing.id_contrato,
+      fechaDesde: historialFiltroFechaDesde || undefined,
+      fechaHasta: historialFiltroFechaHasta || undefined,
+      pageSize: 200,
+    })
+      .then((res) => {
+        let flujos = res.results;
+        if (historialFiltroPagado === "si") flujos = flujos.filter((f) => f.pagado);
+        if (historialFiltroPagado === "no") flujos = flujos.filter((f) => !f.pagado);
+        flujos.sort((a, b) => {
+          const fa = a.fecha_efectiva ?? a.created_at;
+          const fb = b.fecha_efectiva ?? b.created_at;
+          return fb.localeCompare(fa);
+        });
+        setHistorialFlujos(flujos);
+      })
+      .catch((err) => setHistorialError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setHistorialLoading(false));
+  }, [tab, editing, historialFiltroFechaDesde, historialFiltroFechaHasta, historialFiltroPagado]);
 
   function refreshDocumentos(idContrato: string) {
     setDocumentosLoading(true);
@@ -438,6 +477,10 @@ function TesoreriaContratosPageContent() {
     setDocumentos([]);
     setRecordatorioMensaje(null);
     setDocumentosSeleccionados([]);
+    setHistorialFlujos([]);
+    setHistorialFiltroFechaDesde("");
+    setHistorialFiltroFechaHasta("");
+    setHistorialFiltroPagado("");
     refreshDocumentos(c.id_contrato);
     setForm({
       sociedad: c.sociedad,
@@ -586,7 +629,7 @@ function TesoreriaContratosPageContent() {
             )
           }
         >
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+          <FormControl size="small" fullWidth>
             <InputLabel id="filtro-sociedad-label">Filtrar por sociedad</InputLabel>
             <Select
               labelId="filtro-sociedad-label"
@@ -607,7 +650,7 @@ function TesoreriaContratosPageContent() {
           <Autocomplete
             size="small"
             openOnFocus
-            sx={{ minWidth: 220 }}
+            sx={{ width: "100%" }}
             loading={buscandoContrapartesFiltro}
             options={contrapartes}
             value={contrapartes.find((c) => c.id_contraparte === filtroContraparte) || null}
@@ -637,7 +680,7 @@ function TesoreriaContratosPageContent() {
             label="Filtrar por proyecto"
             value={filtroProyecto}
             onChange={(e) => setFiltroProyecto(e.target.value)}
-            sx={{ minWidth: 160 }}
+            fullWidth
           />
           <TextField
             size="small"
@@ -646,7 +689,7 @@ function TesoreriaContratosPageContent() {
             value={filtroFechaDesde}
             onChange={(e) => setFiltroFechaDesde(e.target.value)}
             InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 160 }}
+            fullWidth
           />
           <TextField
             size="small"
@@ -655,7 +698,7 @@ function TesoreriaContratosPageContent() {
             value={filtroFechaHasta}
             onChange={(e) => setFiltroFechaHasta(e.target.value)}
             InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 160 }}
+            fullWidth
           />
         </FiltrosBar>
 
@@ -854,7 +897,7 @@ function TesoreriaContratosPageContent() {
           allowScrollButtonsMobile
           sx={{ borderBottom: 1, borderColor: "divider" }}
         >
-          {TABS_CONTRATO.filter((t) => t !== "Documentos" || editing).map((t) => (
+          {TABS_CONTRATO.filter((t) => (t !== "Documentos" && t !== "Historial") || editing).map((t) => (
             <Tab key={t} label={t} value={t} />
           ))}
         </Tabs>
@@ -1387,6 +1430,100 @@ function TesoreriaContratosPageContent() {
                     </Paper>
                   ))}
                 </Stack>
+              )}
+            </Stack>
+          )}
+          {/* HISTORIAL DE PAGO */}
+          {tab === "Historial" && editing && (
+            <Stack spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                <TextField
+                  size="small"
+                  type="date"
+                  label="Desde"
+                  value={historialFiltroFechaDesde}
+                  onChange={(e) => setHistorialFiltroFechaDesde(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ flex: 1 }}
+                />
+                <TextField
+                  size="small"
+                  type="date"
+                  label="Hasta"
+                  value={historialFiltroFechaHasta}
+                  onChange={(e) => setHistorialFiltroFechaHasta(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ flex: 1 }}
+                />
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel id="historial-pagado-label">Estado de pago</InputLabel>
+                  <Select
+                    labelId="historial-pagado-label"
+                    label="Estado de pago"
+                    value={historialFiltroPagado}
+                    onChange={(e) => setHistorialFiltroPagado(e.target.value as "" | "si" | "no")}
+                    MenuProps={{ disablePortal: true }}
+                  >
+                    <MenuItem value="">Todos</MenuItem>
+                    <MenuItem value="si">Pagado</MenuItem>
+                    <MenuItem value="no">Sin pagar</MenuItem>
+                  </Select>
+                </FormControl>
+              </Stack>
+
+              {historialError && <Alert severity="error">{historialError}</Alert>}
+              {historialLoading ? (
+                <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
+                  <CircularProgress size={24} />
+                </Box>
+              ) : historialFlujos.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center", py: 3 }}>
+                  Sin flujos registrados para este contrato
+                </Typography>
+              ) : (
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>ID Flujo</TableCell>
+                        <TableCell>Fecha</TableCell>
+                        <TableCell>Concepto</TableCell>
+                        <TableCell align="right">Total (MXP)</TableCell>
+                        <TableCell align="center">Estado</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {historialFlujos.map((flujo) => (
+                        <TableRow key={flujo.id_flujo} hover>
+                          <TableCell sx={{ fontFamily: "var(--font-mono, monospace)", fontSize: "0.7rem" }}>
+                            {flujo.id_flujo}
+                          </TableCell>
+                          <TableCell>
+                            {flujo.fecha_efectiva
+                              ? new Date(flujo.fecha_efectiva).toLocaleDateString("es-MX")
+                              : "—"}
+                          </TableCell>
+                          <TableCell sx={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {flujo.concepto ?? "—"}
+                          </TableCell>
+                          <TableCell align="right">
+                            {flujo.total_mxp != null
+                              ? Number(flujo.total_mxp).toLocaleString("es-MX", { minimumFractionDigits: 2 })
+                              : "—"}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              size="small"
+                              label={flujo.pagado ? "Pagado" : "Sin pagar"}
+                              color={flujo.pagado ? "success" : "default"}
+                              variant="outlined"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               )}
             </Stack>
           )}

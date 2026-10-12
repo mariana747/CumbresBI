@@ -27,7 +27,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet, ViewSet
+from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from . import google_sheets_utils, recaptcha
 from .audit_utils import emitir_evento_auditoria
@@ -72,7 +72,6 @@ from .models import (
     TesoreriaMovimientoBancario,
     TesoreriaNomina,
     TesoreriaNotaCredito,
-    TesoreriaNotificacion,
     TesoreriaProyectoCodigo,
     TesoreriaRecNomina,
     TesoreriaSaldo,
@@ -102,7 +101,6 @@ from .serializers import (
     TesoreriaMovimientoBancarioSerializer,
     TesoreriaNominaSerializer,
     TesoreriaNotaCreditoSerializer,
-    TesoreriaNotificacionSerializer,
     TesoreriaProyectoCodigoSerializer,
     TesoreriaRecNominaSerializer,
     TesoreriaSaldoSerializer,
@@ -1562,8 +1560,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         # "FLJ-{consecutivo:06d}", cambiado a hash corto para verse igual
         # que los Flujos migrados del legacy (ej. "0ca3e654").
         self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
-        flujo = serializer.save(id_flujo=_generar_id_flujo())
-        _notificar_mismatch_si_aplica(flujo, self.request)
+        serializer.save(id_flujo=_generar_id_flujo())
 
     def perform_update(self, serializer):
         # El estado "cerrado" vive en la Nomina, no en el Flujo - se valida
@@ -1572,8 +1569,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         # una que ya este cerrada).
         self._validar_nomina_editable(serializer.instance.periodo_nomina)
         self._validar_nomina_editable(serializer.validated_data.get("periodo_nomina"))
-        flujo = serializer.save()
-        _notificar_mismatch_si_aplica(flujo, self.request)
+        serializer.save()
 
     def destroy(self, request, *args, **kwargs):
         try:
@@ -1628,7 +1624,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         flujo = self.get_object()
         flujo.autorizacion = True
         flujo.autorizado_por = autorizado_por
-        flujo.fecha_autorizacion = timezone.now().date()
+        flujo.fecha_autorizacion = timezone.localdate()
         flujo.validacion_estado = TesoreriaFlujo.VALIDACION_APROBADA
         flujo.save(
             update_fields=["autorizacion", "autorizado_por", "fecha_autorizacion", "validacion_estado"]
@@ -1693,7 +1689,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 status=400,
             )
         flujo.pagado = True
-        flujo.fecha_pago = timezone.now().date()
+        flujo.fecha_pago = timezone.localdate()
         flujo.descripcion_pago = request.data.get("descripcion_pago", flujo.descripcion_pago)
         flujo.link_comprobante_banco = request.data.get(
             "link_comprobante_banco", flujo.link_comprobante_banco
@@ -2160,58 +2156,35 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         data["sugerencias_factura"] = sugerencias_factura
         return Response(data)
 
-    @action(detail=False, methods=["post"])
+    @action(detail=False, methods=["get"])
     def verificar_sociedad(self, request):
-        """Detecta flujos donde contrato.sociedad != cuenta.sociedad y crea
-        una TesoreriaNotificacion por flujo para cada admin/tesorería. Solo
-        genera notificaciones nuevas (no duplica si ya existe una no leída
-        del mismo flujo para ese destinatario). Requiere tesoreria.aprobar
-        (mismo gate que otras acciones administrativas del viewset)."""
+        """Devuelve la lista de flujos donde contrato.sociedad != cuenta.sociedad.
+        Requiere tesoreria.aprobar."""
         if not require_permission("tesoreria.aprobar")().has_permission(request, self):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied()
 
-        flujos_mismatch = (
+        flujos = (
             TesoreriaFlujo.objects.filter(
                 contrato__sociedad__isnull=False,
                 cuenta__sociedad__isnull=False,
             )
             .exclude(contrato__sociedad=F("cuenta__sociedad"))
             .select_related("contrato", "cuenta")
+            .order_by("id_flujo")
         )
 
-        if not flujos_mismatch.exists():
-            return Response({"creadas": 0, "flujos": 0})
-
-        headers, cookies = forward_auth_headers(request)
-        user_ids = _usuarios_por_roles(headers, cookies)
-
-        creadas = 0
-        for flujo in flujos_mismatch:
-            sociedad_contrato = flujo.contrato.sociedad if flujo.contrato else "?"
-            sociedad_cuenta = flujo.cuenta.sociedad if flujo.cuenta else "?"
-            mensaje = (
-                f"Flujo {flujo.id_flujo}: contrato de {sociedad_contrato} "
-                f"pero cuenta de {sociedad_cuenta}."
-            )
-            link_url = f"/tesoreria/flujos?id={flujo.id_flujo}"
-            for uid in user_ids:
-                ya_existe = TesoreriaNotificacion.objects.filter(
-                    destinatario=uid,
-                    tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                    link_url=link_url,
-                    leida=False,
-                ).exists()
-                if not ya_existe:
-                    TesoreriaNotificacion.objects.create(
-                        destinatario=uid,
-                        tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                        mensaje=mensaje,
-                        link_url=link_url,
-                    )
-                    creadas += 1
-
-        return Response({"creadas": creadas, "flujos": flujos_mismatch.count()})
+        data = [
+            {
+                "id_flujo": f.id_flujo,
+                "contrato": f.contrato_id,
+                "sociedad_contrato": f.contrato.sociedad if f.contrato else None,
+                "cuenta": f.cuenta_id,
+                "sociedad_cuenta": f.cuenta.sociedad if f.cuenta else None,
+            }
+            for f in flujos
+        ]
+        return Response({"flujos": data})
 
 
 class TesoreriaTicketReembolsoViewSet(ModelViewSet):
@@ -2449,7 +2422,7 @@ class TesoreriaTicketReembolsoViewSet(ModelViewSet):
             return Response({"estado": ["Solo se puede aprobar un ticket Pendiente."]}, status=400)
         ticket.estado = TesoreriaTicketReembolso.ESTADO_APROBADO
         ticket.autorizado_por = request.effective_scope.identity_user_id
-        ticket.fecha_autorizacion = timezone.now().date()
+        ticket.fecha_autorizacion = timezone.localdate()
         ticket.comentarios = request.data.get("comentarios", ticket.comentarios)
         ticket.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion", "comentarios"])
         emitir_evento_auditoria(
@@ -2770,7 +2743,7 @@ class TesoreriaSolicitudPagoViewSet(ModelViewSet):
             return Response({"estado": ["Solo se puede aprobar una solicitud Pendiente."]}, status=400)
         solicitud.estado = TesoreriaSolicitudPago.ESTADO_APROBADO
         solicitud.autorizado_por = request.effective_scope.identity_user_id
-        solicitud.fecha_autorizacion = timezone.now().date()
+        solicitud.fecha_autorizacion = timezone.localdate()
         solicitud.comentarios = request.data.get("comentarios", solicitud.comentarios)
         solicitud.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion", "comentarios"])
         emitir_evento_auditoria(
@@ -4579,23 +4552,111 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
         if not archivo:
             raise ValidationError("Se requiere 'file'.")
         contenido = archivo.read()
-        texto = contenido.decode("utf-8", errors="ignore")
-        numeros_encontrados = set(re.findall(r"\d{8,20}", texto))
+        nombre = archivo.name or ""
+        numeros_cuenta_header = set()
+        numeros_encontrados = set()
 
-        cuentas = TesoreriaCuenta.objects.select_related("banco").all()
+        def _leer_filas_spreadsheet(contenido, nombre):
+            """Devuelve lista de listas de strings detectando formato por magic bytes."""
+            import io
+            header = contenido[:8]
+            # ZIP magic → xlsx (OOXML)
+            if header[:2] == b"PK":
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(contenido), data_only=True)
+                filas = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        filas.append([str(c) if c is not None else "" for c in row])
+                return filas
+            # XML magic → SpreadsheetML (.xls guardado como XML)
+            if contenido[:5] in (b"<?xml", b"\xef\xbb\xbf<?") or b"<?xml" in contenido[:100]:
+                import xml.etree.ElementTree as ET
+                texto_xml = contenido.decode("utf-8", errors="ignore")
+                root = ET.fromstring(texto_xml)
+                # Busca todos los elementos <Data> o <Cell> sin importar namespace
+                filas = []
+                fila_actual = []
+                for elem in root.iter():
+                    tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                    if tag == "Row":
+                        if fila_actual:
+                            filas.append(fila_actual)
+                        fila_actual = []
+                    elif tag == "Data" and elem.text:
+                        fila_actual.append(elem.text.strip())
+                if fila_actual:
+                    filas.append(fila_actual)
+                return filas
+            # BIFF magic → xls binario clásico
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=contenido)
+            filas = []
+            for ws in wb.sheets():
+                for i in range(ws.nrows):
+                    filas.append([str(ws.cell_value(i, j)) for j in range(ws.ncols)])
+            return filas
+
+        try:
+            filas = _leer_filas_spreadsheet(contenido, nombre)
+        except Exception:
+            filas = []
+        if filas:
+            for i, row in enumerate(filas):
+                for j, val in enumerate(row):
+                    numeros_encontrados.update(re.findall(r"\d{4,20}", val))
+                    if i < 30 and re.search(r"cuenta|n[uú]m(ero)?\.?\s*(de\s*)?cuenta", val, re.IGNORECASE):
+                        for dj in (1, 2, -1):
+                            if 0 <= j + dj < len(row):
+                                numeros_cuenta_header.update(re.findall(r"\d{4,20}", row[j + dj]))
+                        if i + 1 < len(filas):
+                            for v in filas[i + 1]:
+                                numeros_cuenta_header.update(re.findall(r"\d{4,20}", v))
+        if not filas:
+            # Fallback: leer como texto (CSV o binario con errores ignorados)
+            texto = contenido.decode("utf-8", errors="ignore")
+            numeros_encontrados = set(re.findall(r"\d{4,20}", texto))
+
+        numeros_para_buscar = numeros_cuenta_header if numeros_cuenta_header else numeros_encontrados
+
+        cuentas = TesoreriaCuenta.objects.select_related("banco").all().order_by("id_cuenta_bancaria")
+
+        def _score_coincidencia(cuenta, numeros, todos_numeros=None):
+            # Mayor puntaje = match más específico; 0 = sin coincidencia.
+            # Prioridades: match exacto de cuenta > sufijo de cuenta > CLABE.
+            # Tiebreaker: +1 si la forma corta también aparece en el archivo completo.
+            todos = todos_numeros or numeros
+            if cuenta.cuenta:
+                for n in numeros:
+                    if n == cuenta.cuenta:
+                        bonus = 1 if (cuenta.cuenta[-4:] in todos and cuenta.cuenta[-4:] != cuenta.cuenta) else 0
+                        return (4, bonus, len(n))
+                for n in numeros:
+                    if n.endswith(cuenta.cuenta) and len(cuenta.cuenta) >= 4:
+                        bonus = 1 if (cuenta.cuenta[-4:] in todos and cuenta.cuenta[-4:] != cuenta.cuenta) else 0
+                        return (3, bonus, len(n))
+            if cuenta.clabe:
+                for n in numeros:
+                    if n == cuenta.clabe:
+                        return (2, 0, len(n))
+                for n in numeros:
+                    if n.endswith(cuenta.clabe) or cuenta.clabe.endswith(n):
+                        return (1, 0, len(n))
+            return (0, 0, 0)
 
         def _buscar_coincidencia(numeros):
+            mejor, mejor_score = None, (0, 0, 0)
             for cuenta in cuentas:
-                coincide = (cuenta.cuenta and cuenta.cuenta in numeros) or (
-                    cuenta.clabe and any(n in cuenta.clabe or cuenta.clabe in n for n in numeros)
-                )
-                if coincide:
-                    return cuenta
-            return None
+                score = _score_coincidencia(cuenta, numeros, numeros_encontrados)
+                if score > mejor_score:
+                    mejor, mejor_score = cuenta, score
+            return mejor if mejor_score[0] > 0 else None
 
-        cuenta_encontrada = _buscar_coincidencia(numeros_encontrados) if numeros_encontrados else None
+        cuenta_encontrada = _buscar_coincidencia(numeros_para_buscar) if numeros_para_buscar else None
         if cuenta_encontrada is None:
-            numero_ia = detectar_numero_cuenta_por_ia(texto)
+            # Fallback IA: solo aplica para CSV/TXT (xlsx ya se leyó correctamente arriba)
+            texto_ia = locals().get("texto", " ".join(str(c) for c in numeros_encontrados))
+            numero_ia = detectar_numero_cuenta_por_ia(texto_ia)
             if numero_ia:
                 cuenta_encontrada = _buscar_coincidencia({numero_ia})
 
@@ -5179,88 +5240,3 @@ class TesoreriaRecNominaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
         )
 
 
-# ── Alertas de sociedad mismatch ────────────────────────────────────────────
-
-def _notificar_mismatch_si_aplica(flujo, request) -> None:
-    """Crea notificaciones de campana si el flujo recién guardado tiene
-    contrato y cuenta de distinta sociedad. Fail-open: un error al crear
-    la notificación no revierta el guardado del flujo."""
-    try:
-        contrato_sociedad = flujo.contrato.sociedad if flujo.contrato_id and flujo.contrato else None
-        cuenta_sociedad = flujo.cuenta.sociedad if flujo.cuenta_id and flujo.cuenta else None
-        if not contrato_sociedad or not cuenta_sociedad or contrato_sociedad == cuenta_sociedad:
-            return
-        link_url = f"/tesoreria/flujos?id={flujo.id_flujo}"
-        mensaje = (
-            f"Flujo {flujo.id_flujo}: contrato de {contrato_sociedad} "
-            f"pero cuenta de {cuenta_sociedad}."
-        )
-        headers, cookies = forward_auth_headers(request)
-        for uid in _usuarios_por_roles(headers, cookies):
-            ya_existe = TesoreriaNotificacion.objects.filter(
-                destinatario=uid,
-                tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                link_url=link_url,
-                leida=False,
-            ).exists()
-            if not ya_existe:
-                TesoreriaNotificacion.objects.create(
-                    destinatario=uid,
-                    tipo=TesoreriaNotificacion.TIPO_SOCIEDAD_MISMATCH,
-                    mensaje=mensaje,
-                    link_url=link_url,
-                )
-    except Exception:
-        logger.warning("Error al crear notificacion de mismatch para flujo %s", getattr(flujo, "id_flujo", "?"), exc_info=True)
-
-
-# ── Roles que reciben alertas de tesorería ──────────────────────────────────
-_ROLES_ALERTA_TESORERIA = ["SUPER_ADMIN", "IAM_ADMIN", "FINANZAS_MANAGER", "TESORERIA_ANALISTA"]
-_TIMEOUT_IAM = 10
-
-
-def _usuarios_por_roles(headers, cookies) -> list[str]:
-    """Lista de identity_user_id de todos los usuarios con alguno de los
-    roles de alerta, via iam-service GET /api/usuarios/?role=<role_key>.
-    Fail-open: si iam no responde devuelve lista vacía."""
-    user_ids: set[str] = set()
-    for role_key in _ROLES_ALERTA_TESORERIA:
-        try:
-            resp = requests.get(
-                f"{settings.IAM_SERVICE_URL}/api/usuarios/",
-                params={"role": role_key},
-                headers=headers,
-                cookies=cookies,
-                timeout=_TIMEOUT_IAM,
-            )
-        except requests.RequestException:
-            logger.warning("iam-service no respondio al listar usuarios con rol %s", role_key, exc_info=True)
-            continue
-        if resp.status_code == 200:
-            for u in resp.json():
-                uid = u.get("user_id")
-                if uid:
-                    user_ids.add(uid)
-    return list(user_ids)
-
-
-class TesoreriaNotificacionViewSet(ReadOnlyModelViewSet):
-    """Campana de tesoreria-service (mismo patron que MaterialesNotificacionViewSet).
-    Solo lectura de las propias del usuario autenticado; el alta la hace
-    verificar_sociedad en TesoreriaFlujoViewSet."""
-
-    serializer_class = TesoreriaNotificacionSerializer
-
-    def get_queryset(self):
-        destinatario = getattr(self.request.effective_scope, "identity_user_id", None)
-        qs = TesoreriaNotificacion.objects.filter(destinatario=destinatario)
-        if self.request.query_params.get("solo_no_leidas") == "true":
-            qs = qs.filter(leida=False)
-        return qs
-
-    @action(detail=True, methods=["post"])
-    def marcar_leida(self, request, pk=None):
-        notificacion = self.get_object()
-        notificacion.leida = True
-        notificacion.save(update_fields=["leida"])
-        return Response(self.get_serializer(notificacion).data)

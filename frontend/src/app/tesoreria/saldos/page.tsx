@@ -337,7 +337,7 @@ export default function TesoreriaSaldosPage() {
           ) : undefined
         }
       >
-        <FormControl size="small" sx={{ minWidth: 180 }}>
+        <FormControl size="small" fullWidth>
           <InputLabel id="filtro-empresa-label">Filtrar por empresa</InputLabel>
           <Select
             labelId="filtro-empresa-label"
@@ -361,7 +361,7 @@ export default function TesoreriaSaldosPage() {
         <Autocomplete
           size="small"
           openOnFocus
-          sx={{ minWidth: 220 }}
+          sx={{ width: "100%" }}
           options={cuentasDeEmpresa}
           value={cuentasDeEmpresa.find((c) => c.id_cuenta_bancaria === filtroCuenta) || null}
           onChange={(_, value) => setFiltroCuenta(value?.id_cuenta_bancaria || "")}
@@ -385,7 +385,7 @@ export default function TesoreriaSaldosPage() {
           value={filtroFechaDesde}
           onChange={(e) => setFiltroFechaDesde(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
         <TextField
           size="small"
@@ -394,7 +394,7 @@ export default function TesoreriaSaldosPage() {
           value={filtroFechaHasta}
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 160 }}
+          fullWidth
         />
       </FiltrosBar>
 
