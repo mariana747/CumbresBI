@@ -3,6 +3,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from pld.views import (
+    PldAvisoUIFViewSet,
     PldContraparteDocViewSet,
     PldContraparteKycViewSet,
     PldDocumentoTicketViewSet,
@@ -20,6 +21,7 @@ router.register("solicitudes-eliminacion-doc", PldSolicitudEliminacionDocViewSet
 router.register("ticket-cliente", PldTicketClienteViewSet, basename="pldticketcliente")
 router.register("documento-tickets", PldDocumentoTicketViewSet, basename="plddocumentoticket")
 router.register("notificaciones", PldNotificacionViewSet, basename="pldnotificacion")
+router.register("avisos-uif", PldAvisoUIFViewSet, basename="pldavisouif")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

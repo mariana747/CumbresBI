@@ -380,7 +380,7 @@ export default function MotorDocumentalDialog({
   useEffect(() => {
     if (!open || contexto || kycPreseleccionado || servicioSolicitante !== "pld-service") return;
     listKyc()
-      .then(setKycOptions)
+      .then(({ results }) => setKycOptions(results))
       .catch(() => setKycOptions([]));
   }, [open, servicioSolicitante, kycPreseleccionado, contexto]);
 

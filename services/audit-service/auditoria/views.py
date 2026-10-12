@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from .models import BitacoraAuditoria
+from .pagination import ListadoPagination
 from .serializers import BitacoraAuditoriaSerializer
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class BitacoraAuditoriaViewSet(ReadOnlyModelViewSet):
 
     queryset = BitacoraAuditoria.objects.all()
     serializer_class = BitacoraAuditoriaSerializer
+    pagination_class = ListadoPagination
 
     def get_queryset(self):
         queryset = super().get_queryset()

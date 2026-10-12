@@ -3,6 +3,7 @@ import re
 from rest_framework import serializers
 
 from .models import (
+    PldAvisoUIF,
     PldContraparteDoc,
     PldContraparteKyc,
     PldNotificacion,
@@ -393,3 +394,29 @@ class PldNotificacionSerializer(serializers.ModelSerializer):
         model = PldNotificacion
         fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "leida", "created_at"]
         read_only_fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "created_at"]
+
+
+class PldAvisoUIFSerializer(serializers.ModelSerializer):
+    vencido = serializers.BooleanField(read_only=True)
+    nombre_contraparte = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PldAvisoUIF
+        fields = [
+            "id_aviso", "kyc_id", "nombre_contraparte", "estado", "vencido",
+            "monto_acumulado", "proyecto", "sociedad",
+            "fecha_deteccion", "plazo_presentacion",
+            "fecha_presentacion", "presentado_por",
+            "link_evidencia", "notas",
+            "created_at", "created_by", "updated_at", "updated_by",
+        ]
+        read_only_fields = [
+            "id_aviso", "kyc_id", "nombre_contraparte", "vencido",
+            "fecha_deteccion", "plazo_presentacion",
+            "created_at", "created_by", "updated_at", "updated_by",
+        ]
+
+    def get_nombre_contraparte(self, obj):
+        return obj.kyc.nombre_para_mostrar if hasattr(obj.kyc, "nombre_para_mostrar") else (
+            obj.kyc.nombre_completo or f"Contraparte {obj.kyc.id_contraparte}"
+        )
