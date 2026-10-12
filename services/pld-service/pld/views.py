@@ -1181,7 +1181,7 @@ class PldContraparteKycViewSet(ModelViewSet):
         if resp.status_code != 200:
             return Response({"detail": "No se pudo consultar el acumulado."}, status=status.HTTP_502_BAD_GATEWAY)
 
-        supera = any(item.get("supera_umbral") for item in resp.json())
+        supera = any(item.get("supera_umbral") for item in resp.json().get("items", []))
         if supera and not kyc.requiere_revision_pld:
             kyc.requiere_revision_pld = True
             kyc.updated_by = actor

@@ -21,6 +21,7 @@ import {
   Grid,
   IconButton,
   InputLabel,
+  Link,
   MenuItem,
   Paper,
   Select,
@@ -106,7 +107,7 @@ import {
 import {
   TesoreriaComplementoPago,
   TesoreriaFactura,
-  AcumuladoContraparte,
+  AcumuladoContraparteResponse,
   TesoreriaFlujo,
   TesoreriaNotaCredito,
   getAcumuladoContraparte,
@@ -114,6 +115,7 @@ import {
   listFacturas,
   listFlujos,
   listNotasCredito,
+  subirComprobanteFlujo,
 } from "@/lib/tesoreria";
 
 // Tipos que el Motor Documental ya reconoce (docint/classifier.py) - solo
@@ -173,6 +175,9 @@ type TransaccionUnificada = {
   concepto?: string | null;
   // Solo para Flujos: "proyecto|sociedad" — permite filtrar desde las cards de acumulado.
   proyectoSociedad?: string;
+  // Solo para Flujos: para subir/ver comprobante sin salir a Tesorería.
+  idFlujo?: string;
+  linkComprobante?: string | null;
 };
 
 // Agrupado en secciones (combinando con KycDetalleDialog.tsx de
@@ -317,7 +322,8 @@ export default function PldExpedienteDetallePage() {
   const [transFiltroHasta, setTransFiltroHasta] = useState("");
   const [transFiltroTipo, setTransFiltroTipo] = useState("");
   const [transFiltroProjSociedad, setTransFiltroProjSociedad] = useState("");
-  const [acumulado, setAcumulado] = useState<AcumuladoContraparte[] | null>(null);
+  const [acumulado, setAcumulado] = useState<AcumuladoContraparteResponse | null>(null);
+  const [comprovanteSubiendo, setComprovanteSubiendo] = useState<Record<string, boolean>>({});
   // Edicion manual del expediente (18/Ago/2026) - ver
   // pld/audit_utils.py::contexto_kyc y views.py::update, ya auditado en el
   // backend; esto es la UI que faltaba. editandoCampos es null cuando no
@@ -540,7 +546,7 @@ export default function PldExpedienteDetallePage() {
     ])
       .then(([flujosPage, facturasPage, complementosPage, notasPage, acumuladoData]) => {
         setAcumulado(acumuladoData);
-        if (acumuladoData.some((a) => a.supera_umbral) && !kyc.requiere_revision_pld) {
+        if (acumuladoData.items.some((a) => a.supera_umbral) && !kyc.requiere_revision_pld) {
           activarUmbralKyc(kyc.id_kyc).then(setKyc).catch(() => {});
         }
         const flujos = flujosPage.results;
@@ -556,6 +562,8 @@ export default function PldExpedienteDetallePage() {
           estado: f.pagado ? "Pagado" : f.autorizacion ? "Autorizado" : "Pendiente",
           concepto: f.concepto,
           proyectoSociedad: `${f.contrato_proyecto ?? ""}|${f.contrato_sociedad ?? ""}`,
+          idFlujo: f.id_flujo,
+          linkComprobante: f.link_comprobante_banco,
         });
         const filaFactura = (f: TesoreriaFactura): TransaccionUnificada => ({
           id: `factura-${f.id}`,
@@ -1239,8 +1247,8 @@ export default function PldExpedienteDetallePage() {
 
                     {GRUPOS_CAMPOS_GENERAL.map((grupo, indiceGrupo) => (
                       <Box key={grupo.titulo}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                          <Typography variant="subtitle2" gutterBottom>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                          <Typography variant="subtitle2">
                             {grupo.titulo}
                           </Typography>
                           {/* Botones de edicion junto al primer titulo (18/Ago/2026:
@@ -1432,14 +1440,8 @@ export default function PldExpedienteDetallePage() {
                                     campo === "fecha_nac_const"
                                       ? { lang: "es-MX" }
                                       : campo === "dom_cp" || campo === "dom_corresp_dom_cp"
-                                        ? // 5 digitos numericos (02/Sep/2026,
-                                          // pedido explicito del checklist de
-                                          // cumplimiento) - maxLength/inputMode
-                                          // son solo ayuda visual, la
-                                          // validacion real esta en el backend
-                                          // (PldContraparteKycSerializer.validate).
-                                          { maxLength: 5, inputMode: "numeric" }
-                                        : undefined
+                                        ? { maxLength: 5, inputMode: "numeric", style: { textTransform: "uppercase" } }
+                                        : { style: { textTransform: "uppercase" } }
                                   }
                                   error={
                                     ((campo === "dom_cp" || campo === "dom_corresp_dom_cp") &&
@@ -1480,7 +1482,7 @@ export default function PldExpedienteDetallePage() {
                                 <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                                   {campo === "nombre_completo" ? etiquetaNombreParaTipoPersona(kyc.tipo_persona) : label}
                                 </Typography>
-                                <Typography variant="body2" sx={{ lineHeight: 1.3 }}>
+                                <Typography variant="body2" sx={{ lineHeight: 1.3, textTransform: "uppercase" }}>
                                   {kyc[campo] || "—"}
                                 </Typography>
                               </Grid>
@@ -2128,13 +2130,24 @@ export default function PldExpedienteDetallePage() {
 
                 {tab === 3 && (
                   <Stack spacing={2}>
-                    {/* Cards de acumulado por proyecto — umbral PLD $948,000 */}
-                    {acumulado && acumulado.length > 0 && (
+                    {/* Cards de acumulado por proyecto — umbral PLD $948,000, ventana 6 meses */}
+                    {acumulado && acumulado.items.length > 0 && (
                       <Stack spacing={1}>
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Acumulado por proyecto (umbral PLD: $948,000 MXN)
-                        </Typography>
-                        {acumulado.map((row) => {
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Typography variant="subtitle2" color="text.secondary">
+                            Acumulado por proyecto (umbral PLD: $948,000 MXN)
+                          </Typography>
+                          {acumulado.fecha_desde ? (
+                            <Chip
+                              size="small"
+                              label={`Últimos 6 meses · desde ${new Date(acumulado.fecha_desde).toLocaleDateString("es-MX", { month: "short", year: "numeric" })}`}
+                              variant="outlined"
+                            />
+                          ) : (
+                            <Chip size="small" label="Acumulado histórico" variant="outlined" color="warning" />
+                          )}
+                        </Stack>
+                        {acumulado.items.map((row) => {
                           const acum = Number(row.acumulado);
                           const UMBRAL = 948_000;
                           const pct = Math.min((acum / UMBRAL) * 100, 100);
@@ -2147,7 +2160,11 @@ export default function PldExpedienteDetallePage() {
                                 p: 1.5,
                                 borderColor: row.supera_umbral ? "error.main" : "divider",
                                 cursor: "pointer",
-                                bgcolor: transFiltroProjSociedad === clave ? "action.selected" : undefined,
+                                bgcolor: transFiltroProjSociedad === clave
+                                  ? "action.selected"
+                                  : row.supera_umbral
+                                    ? (theme: import("@mui/material").Theme) => theme.palette.error.light + "22"
+                                    : undefined,
                               }}
                               onClick={() =>
                                 setTransFiltroProjSociedad(transFiltroProjSociedad === clave ? "" : clave)
@@ -2189,7 +2206,7 @@ export default function PldExpedienteDetallePage() {
 
                     {/* Filtros de la tabla */}
                     {!transaccionesLoading && !!transacciones?.length && (
-                      <Box sx={{ mx: -2.5, mt: acumulado?.length ? 0 : -3 }}>
+                      <Box sx={{ mx: -2.5, mt: acumulado?.items.length ? 0 : -3 }}>
                         <FiltrosBar search="" onSearchChange={() => undefined} hideSearch flush>
                           <TextField
                             size="small"
@@ -2263,6 +2280,7 @@ export default function PldExpedienteDetallePage() {
                                 <TableCell>Fecha</TableCell>
                                 <TableCell align="right">Monto (MXN)</TableCell>
                                 <TableCell>Estado</TableCell>
+                                <TableCell align="center">Comprobante</TableCell>
                               </TableRow>
                             </TableHead>
                             <TableBody>
@@ -2289,6 +2307,54 @@ export default function PldExpedienteDetallePage() {
                                       : "—"}
                                   </TableCell>
                                   <TableCell>{t.estado || "—"}</TableCell>
+                                  <TableCell align="center">
+                                    {t.tipo === "Flujo" && t.idFlujo ? (
+                                      t.linkComprobante ? (
+                                        <Link href={t.linkComprobante} target="_blank" rel="noopener noreferrer" sx={{ fontSize: "0.75rem" }}>
+                                          Ver
+                                        </Link>
+                                      ) : (
+                                        <Box component="label" sx={{ cursor: "pointer" }}>
+                                          {comprovanteSubiendo[t.idFlujo] ? (
+                                            <CircularProgress size={14} />
+                                          ) : (
+                                            <Typography variant="caption" color="primary" sx={{ textDecoration: "underline", cursor: "pointer" }}>
+                                              Subir
+                                            </Typography>
+                                          )}
+                                          <input
+                                            type="file"
+                                            accept="image/*,.pdf"
+                                            style={{ display: "none" }}
+                                            disabled={!!comprovanteSubiendo[t.idFlujo]}
+                                            onChange={async (e) => {
+                                              const archivo = e.target.files?.[0];
+                                              if (!archivo || !t.idFlujo) return;
+                                              setComprovanteSubiendo((prev) => ({ ...prev, [t.idFlujo!]: true }));
+                                              try {
+                                                await subirComprobanteFlujo(t.idFlujo, archivo);
+                                                setTransacciones((prev) =>
+                                                  prev
+                                                    ? prev.map((tx) =>
+                                                        tx.idFlujo === t.idFlujo
+                                                          ? { ...tx, linkComprobante: URL.createObjectURL(archivo) }
+                                                          : tx
+                                                      )
+                                                    : prev
+                                                );
+                                              } catch {
+                                                // silencioso — el usuario puede reintentar
+                                              } finally {
+                                                setComprovanteSubiendo((prev) => ({ ...prev, [t.idFlujo!]: false }));
+                                              }
+                                            }}
+                                          />
+                                        </Box>
+                                      )
+                                    ) : (
+                                      <Typography variant="caption" color="text.disabled">—</Typography>
+                                    )}
+                                  </TableCell>
                                 </TableRow>
                               ))}
                             </TableBody>

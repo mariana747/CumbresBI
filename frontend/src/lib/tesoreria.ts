@@ -1866,9 +1866,15 @@ export interface AcumuladoContraparte {
   acumulado: string;
   flujos_count: number;
   supera_umbral: boolean;
+  fecha_desde: string;
 }
 
-export async function getAcumuladoContraparte(idContraparte: string): Promise<AcumuladoContraparte[]> {
+export interface AcumuladoContraparteResponse {
+  fecha_desde: string | null;
+  items: AcumuladoContraparte[];
+}
+
+export async function getAcumuladoContraparte(idContraparte: string): Promise<AcumuladoContraparteResponse> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/acumulado-contraparte/?contraparte=${encodeURIComponent(idContraparte)}`);
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
