@@ -26,7 +26,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { CheckSquare, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
 import ContraparteSelector from "@/components/ContraparteSelector";
 import { TesoreriaContraparte, getContraparte } from "@/lib/tesoreria";
 import {
@@ -35,15 +35,22 @@ import {
   ViviendaClienteTipo,
   ViviendaExpediente,
   ViviendaExpedienteEstado,
+  ViviendaExpedienteItem,
+  ViviendaItemResponsable,
+  ViviendaItemStatus,
   ViviendaUnidad,
   createClienteExpediente,
   createExpediente,
+  createItem,
   deleteClienteExpediente,
+  deleteItem,
   listAsesores,
   listClientesExpediente,
   listExpedientes,
+  listItems,
   listViviendas,
   updateExpediente,
+  updateItem,
 } from "@/lib/vivienda";
 
 const TIPO_CLIENTE_LABELS: Record<ViviendaClienteTipo, string> = {
@@ -217,16 +224,407 @@ function ClientesExpedienteDialog({
   );
 }
 
+const ITEM_STATUS_LABELS: Record<ViviendaItemStatus, string> = {
+  PENDIENTE: "Pendiente",
+  "NO APLICA": "No aplica",
+  INCOMPLETO: "Incompleto",
+  ENTREGADO: "Entregado",
+  APROBADO: "Aprobado",
+  RECHAZADO: "Rechazado",
+  POSPUESTO: "Pospuesto",
+};
+
+const ITEM_STATUS_COLORS: Record<
+  ViviendaItemStatus,
+  "default" | "warning" | "info" | "success" | "error"
+> = {
+  PENDIENTE: "default",
+  "NO APLICA": "default",
+  INCOMPLETO: "warning",
+  ENTREGADO: "info",
+  APROBADO: "success",
+  RECHAZADO: "error",
+  POSPUESTO: "warning",
+};
+
+const RESPONSABLE_LABELS: Record<ViviendaItemResponsable, string> = {
+  VENTAS: "Ventas",
+  ESCRITURACION: "Escrituración",
+  TESORERIA: "Tesorería",
+  CONTABILIDAD: "Contabilidad",
+  LEGAL: "Legal",
+};
+
+const FORM_ITEM_VACIO = {
+  denominacion: "",
+  detallesAdicionales: "",
+  status: "PENDIENTE" as ViviendaItemStatus,
+  responsable: "" as ViviendaItemResponsable | "",
+  fechaSolicitud: "",
+  fechaLimite: "",
+  fechaEntrega: "",
+  fechaCierre: "",
+  linkDocumento: "",
+  comentarios: "",
+};
+
+function ItemsExpedienteDialog({
+  expediente,
+  onClose,
+  puedeCrear,
+  puedeEditar,
+  actorId,
+}: {
+  expediente: ViviendaExpediente;
+  onClose: () => void;
+  puedeCrear: boolean;
+  puedeEditar: boolean;
+  actorId: string;
+}) {
+  const [items, setItems] = useState<ViviendaExpedienteItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<ViviendaExpedienteItem | null>(null);
+  const [form, setForm] = useState(FORM_ITEM_VACIO);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function refresh() {
+    setLoading(true);
+    listItems(expediente.id_expediente)
+      .then(setItems)
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(refresh, [expediente.id_expediente]);
+
+  function abrirAlta() {
+    setEditing(null);
+    setForm(FORM_ITEM_VACIO);
+    setFormError(null);
+    setDialogOpen(true);
+  }
+
+  function abrirEdicion(item: ViviendaExpedienteItem) {
+    setEditing(item);
+    setForm({
+      denominacion: item.denominacion || "",
+      detallesAdicionales: item.detalles_adicionales || "",
+      status: item.status,
+      responsable: item.responsable || "",
+      fechaSolicitud: item.fecha_solicitud || "",
+      fechaLimite: item.fecha_limite || "",
+      fechaEntrega: item.fecha_entrega || "",
+      fechaCierre: item.fecha_cierre || "",
+      linkDocumento: item.link_documento || "",
+      comentarios: item.comentarios || "",
+    });
+    setFormError(null);
+    setDialogOpen(true);
+  }
+
+  async function handleGuardar() {
+    setSaving(true);
+    setFormError(null);
+    try {
+      if (editing) {
+        await updateItem(
+          editing.id_item,
+          {
+            status: form.status,
+            responsable: (form.responsable as ViviendaItemResponsable) || null,
+            linkDocumento: form.linkDocumento || null,
+            fechaEntrega: form.fechaEntrega || null,
+            fechaCierre: form.fechaCierre || null,
+            comentarios: form.comentarios || null,
+          },
+          actorId
+        );
+      } else {
+        await createItem({
+          expediente: expediente.id_expediente,
+          denominacion: form.denominacion || null,
+          detallesAdicionales: form.detallesAdicionales || null,
+          status: form.status,
+          responsable: (form.responsable as ViviendaItemResponsable) || null,
+          fechaSolicitud: form.fechaSolicitud || null,
+          fechaLimite: form.fechaLimite || null,
+          linkDocumento: form.linkDocumento || null,
+          comentarios: form.comentarios || null,
+          actorId,
+        });
+      }
+      setDialogOpen(false);
+      refresh();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleBorrar(item: ViviendaExpedienteItem) {
+    if (!window.confirm(`¿Borrar el documento "${item.denominacion || item.id_item}"?`)) return;
+    try {
+      await deleteItem(item.id_item);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    }
+  }
+
+  return (
+    <>
+      <Dialog open onClose={onClose} fullWidth maxWidth="md">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Checklist — Expediente {expediente.id_expediente}
+          <IconButton onClick={onClose} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {error && (
+            <Alert severity="error" sx={{ m: 2 }}>
+              {error}
+            </Alert>
+          )}
+          {puedeCrear && (
+            <Stack direction="row" sx={{ p: 2, borderBottom: "1px solid", borderColor: "divider" }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+              >
+                Agregar documento
+              </Button>
+            </Stack>
+          )}
+          {loading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+            </Stack>
+          ) : items.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ p: 3 }}>
+              Sin documentos en este expediente.
+            </Typography>
+          ) : (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Documento</TableCell>
+                    <TableCell>Responsable</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Fecha límite</TableCell>
+                    <TableCell>Fecha entrega</TableCell>
+                    <TableCell align="right">Acciones</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {items.map((item) => (
+                    <TableRow key={item.id_item} hover>
+                      <TableCell>
+                        {item.link_documento ? (
+                          <a href={item.link_documento} target="_blank" rel="noopener noreferrer">
+                            {item.denominacion || "—"}
+                          </a>
+                        ) : (
+                          item.denominacion || "—"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {item.responsable ? RESPONSABLE_LABELS[item.responsable] : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={ITEM_STATUS_LABELS[item.status]}
+                          color={ITEM_STATUS_COLORS[item.status]}
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>{item.fecha_limite || "—"}</TableCell>
+                      <TableCell>{item.fecha_entrega || "—"}</TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          aria-label="Editar"
+                          onClick={() => abrirEdicion(item)}
+                          disabled={!puedeEditar}
+                        >
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          aria-label="Borrar"
+                          onClick={() => handleBorrar(item)}
+                          disabled={!puedeEditar}
+                        >
+                          <Trash2 size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {editing ? "Editar documento" : "Agregar documento"}
+          <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {formError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {formError}
+            </Alert>
+          )}
+          <Stack spacing={2}>
+            <TextField
+              size="small"
+              label="Documento"
+              value={form.denominacion}
+              onChange={(e) => setForm({ ...form, denominacion: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              size="small"
+              label="Detalles adicionales"
+              value={form.detallesAdicionales}
+              onChange={(e) => setForm({ ...form, detallesAdicionales: e.target.value })}
+              fullWidth
+            />
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="status-label">Status</InputLabel>
+                <Select
+                  labelId="status-label"
+                  label="Status"
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value as ViviendaItemStatus })}
+                >
+                  {Object.entries(ITEM_STATUS_LABELS).map(([value, label]) => (
+                    <MenuItem key={value} value={value}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="responsable-label">Responsable</InputLabel>
+                <Select
+                  labelId="responsable-label"
+                  label="Responsable"
+                  value={form.responsable}
+                  onChange={(e) =>
+                    setForm({ ...form, responsable: e.target.value as ViviendaItemResponsable | "" })
+                  }
+                >
+                  <MenuItem value="">—</MenuItem>
+                  {Object.entries(RESPONSABLE_LABELS).map(([value, label]) => (
+                    <MenuItem key={value} value={value}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              {!editing && (
+                <TextField
+                  size="small"
+                  label="Fecha solicitud"
+                  type="date"
+                  value={form.fechaSolicitud}
+                  onChange={(e) => setForm({ ...form, fechaSolicitud: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+              )}
+              {!editing && (
+                <TextField
+                  size="small"
+                  label="Fecha límite"
+                  type="date"
+                  value={form.fechaLimite}
+                  onChange={(e) => setForm({ ...form, fechaLimite: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+              )}
+              {editing && (
+                <TextField
+                  size="small"
+                  label="Fecha entrega"
+                  type="date"
+                  value={form.fechaEntrega}
+                  onChange={(e) => setForm({ ...form, fechaEntrega: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+              )}
+              {editing && (
+                <TextField
+                  size="small"
+                  label="Fecha cierre"
+                  type="date"
+                  value={form.fechaCierre}
+                  onChange={(e) => setForm({ ...form, fechaCierre: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+              )}
+            </Stack>
+            <TextField
+              size="small"
+              label="Link documento"
+              value={form.linkDocumento}
+              onChange={(e) => setForm({ ...form, linkDocumento: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              size="small"
+              label="Comentarios"
+              value={form.comentarios}
+              onChange={(e) => setForm({ ...form, comentarios: e.target.value })}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
+          <Button variant="contained" onClick={handleGuardar} disabled={saving}>
+            {saving ? <CircularProgress size={16} /> : "Guardar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
 const ESTADO_LABELS: Record<ViviendaExpedienteEstado, string> = {
   PENDIENTE: "Pendiente",
   "EN PROCESO": "En proceso",
+  FIRMADO: "Firmado",
   CONCLUIDO: "Concluido",
   CANCELADO: "Cancelado",
 };
 
-const ESTADO_COLORS: Record<ViviendaExpedienteEstado, "default" | "info" | "success" | "error"> = {
+const ESTADO_COLORS: Record<ViviendaExpedienteEstado, "default" | "info" | "success" | "error" | "warning"> = {
   PENDIENTE: "default",
   "EN PROCESO": "info",
+  FIRMADO: "warning",
   CONCLUIDO: "success",
   CANCELADO: "error",
 };
@@ -259,6 +657,7 @@ export default function ExpedientesTab({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [clientesDe, setClientesDe] = useState<ViviendaExpediente | null>(null);
+  const [itemsDe, setItemsDe] = useState<ViviendaExpediente | null>(null);
 
   useEffect(() => {
     listViviendas().then(setViviendas).catch(() => undefined);
@@ -389,6 +788,9 @@ export default function ExpedientesTab({
                       <Chip size="small" label={ESTADO_LABELS[e.estado]} color={ESTADO_COLORS[e.estado]} variant="outlined" />
                     </TableCell>
                     <TableCell align="right">
+                      <IconButton size="small" aria-label="Checklist" onClick={() => setItemsDe(e)}>
+                        <CheckSquare size={14} strokeWidth={1.5} />
+                      </IconButton>
                       <IconButton size="small" aria-label="Clientes" onClick={() => setClientesDe(e)}>
                         <Users size={14} strokeWidth={1.5} />
                       </IconButton>
@@ -498,6 +900,16 @@ export default function ExpedientesTab({
         <ClientesExpedienteDialog
           expediente={clientesDe}
           onClose={() => setClientesDe(null)}
+          puedeCrear={puedeCrear}
+          puedeEditar={puedeEditar}
+          actorId={actorId}
+        />
+      )}
+
+      {itemsDe && (
+        <ItemsExpedienteDialog
+          expediente={itemsDe}
+          onClose={() => setItemsDe(null)}
           puedeCrear={puedeCrear}
           puedeEditar={puedeEditar}
           actorId={actorId}
