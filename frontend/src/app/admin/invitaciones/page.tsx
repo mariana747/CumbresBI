@@ -28,6 +28,7 @@ import {
 } from "@mui/material";
 import { Copy, Link2, ShieldOff, UploadCloud, UserPlus } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   GeneralSociedad,
@@ -202,7 +203,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     // muestre apodos desde el primer render, sin esperar a que el usuario
     // abra el selector "Da acceso a" (ver recursoNombre()).
     listKyc()
-      .then((expedientes) =>
+      .then(({ results: expedientes }) =>
         setCatalogoRecursos((prev) => ({
           ...prev,
           pld_kyc: expedientes.map((kyc) => ({
@@ -224,7 +225,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     if (recursoTipo === "pld_kyc" && !catalogoRecursos.pld_kyc) {
       setCargandoRecursos(true);
       listKyc()
-        .then((expedientes) =>
+        .then(({ results: expedientes }) =>
           setCatalogoRecursos((prev) => ({
             ...prev,
             pld_kyc: expedientes.map((kyc) => ({
@@ -665,8 +666,8 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
 
       {/* Filtros (07/Sep/2026) - Estado + rango de fecha de emision, sobre
           la lista ya combinada de Magic Links + tickets de proveedor. */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+      <FiltrosBar hideSearch search="" onSearchChange={() => {}}>
+        <FormControl size="small">
           <InputLabel id="filtro-estado-temporal-label">Estado</InputLabel>
           <Select
             labelId="filtro-estado-temporal-label"
@@ -700,7 +701,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
         />
-      </Stack>
+      </FiltrosBar>
 
       <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
@@ -1284,8 +1285,8 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
 
       {/* Filtros (07/Sep/2026, "igual en los internos") - mismo patron que
           InvitacionesTemporalesTab. */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+      <FiltrosBar hideSearch search="" onSearchChange={() => {}}>
+        <FormControl size="small">
           <InputLabel id="filtro-estado-colaborador-label">Estado</InputLabel>
           <Select
             labelId="filtro-estado-colaborador-label"
@@ -1319,7 +1320,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
         />
-      </Stack>
+      </FiltrosBar>
 
       <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por

@@ -82,7 +82,7 @@ export default function TicketsClientePage() {
   useEffect(() => {
     refrescarLista();
     listKyc()
-      .then(setExpedientes)
+      .then(({ results }) => setExpedientes(results))
       .catch(() => undefined);
     listSociedades()
       .then(setSociedades)

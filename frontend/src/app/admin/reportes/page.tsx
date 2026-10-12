@@ -9,7 +9,6 @@ import {
   Chip,
   CircularProgress,
   FormControl,
-  InputAdornment,
   InputLabel,
   MenuItem,
   Paper,
@@ -19,15 +18,18 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableFooter,
   TableHead,
+  TablePagination,
   TableRow,
   Tab,
   Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { Download, Search } from "lucide-react";
+import { Download } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import { IamUser, IamUserRole, SCOPE_LABELS, listRoleHistory, listUsers, scopeChipColor } from "@/lib/iam";
 import {
   BitacoraEvento,
@@ -57,6 +59,8 @@ const SUB_REPORTES = [
 
 function HistorialCambios() {
   const [historial, setHistorial] = useState<IamUserRole[]>([]);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,7 +112,7 @@ function HistorialCambios() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  historial.map((cambio) => (
+                  historial.slice(page * pageSize, (page + 1) * pageSize).map((cambio) => (
                     <TableRow key={cambio.assignment_id} hover>
                       <TableCell>{cambio.user_email}</TableCell>
                       <TableCell>{cambio.role_name}</TableCell>
@@ -134,6 +138,21 @@ function HistorialCambios() {
                   ))
                 )}
               </TableBody>
+              <TableFooter>
+                <TableRow>
+                  <TablePagination
+                    colSpan={5}
+                    count={historial.length}
+                    page={page}
+                    rowsPerPage={pageSize}
+                    rowsPerPageOptions={[20, 50, 100]}
+                    onPageChange={(_, p) => setPage(p)}
+                    onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                    labelRowsPerPage="Filas:"
+                    labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+                  />
+                </TableRow>
+              </TableFooter>
             </Table>
           </TableContainer>
         </Box>
@@ -190,6 +209,8 @@ function HistorialCambios() {
 
 function MatrizAcceso() {
   const [users, setUsers] = useState<IamUser[]>([]);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -234,7 +255,7 @@ function MatrizAcceso() {
                   </TableCell>
                 </TableRow>
               ) : (
-                users.map((user) => (
+                users.slice(page * pageSize, (page + 1) * pageSize).map((user) => (
                   <TableRow key={user.user_id} hover>
                     <TableCell>{user.display_name || user.primary_email}</TableCell>
                     <TableCell>
@@ -262,6 +283,21 @@ function MatrizAcceso() {
                 ))
               )}
             </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TablePagination
+                  colSpan={2}
+                  count={users.length}
+                  page={page}
+                  rowsPerPage={pageSize}
+                  rowsPerPageOptions={[20, 50, 100]}
+                  onPageChange={(_, p) => setPage(p)}
+                  onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                  labelRowsPerPage="Filas:"
+                  labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+                />
+              </TableRow>
+            </TableFooter>
           </Table>
         </TableContainer>
       </Paper>
@@ -277,6 +313,8 @@ function MatrizAcceso() {
 // donde se ven ahora.
 function UsuariosEliminados() {
   const [users, setUsers] = useState<IamUser[]>([]);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -329,7 +367,7 @@ function UsuariosEliminados() {
                   </TableCell>
                 </TableRow>
               ) : (
-                users.map((user) => (
+                users.slice(page * pageSize, (page + 1) * pageSize).map((user) => (
                   <TableRow key={user.user_id} hover>
                     <TableCell>{user.display_name || "—"}</TableCell>
                     <TableCell>{user.primary_email}</TableCell>
@@ -339,6 +377,21 @@ function UsuariosEliminados() {
                 ))
               )}
             </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TablePagination
+                  colSpan={4}
+                  count={users.length}
+                  page={page}
+                  rowsPerPage={pageSize}
+                  rowsPerPageOptions={[20, 50, 100]}
+                  onPageChange={(_, p) => setPage(p)}
+                  onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                  labelRowsPerPage="Filas:"
+                  labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+                />
+              </TableRow>
+            </TableFooter>
           </Table>
         </TableContainer>
       </Paper>
@@ -349,6 +402,9 @@ function UsuariosEliminados() {
 // Antes vivia en su propia pantalla (/admin/auditoria) - ver nota arriba.
 function BitacoraAuditoria() {
   const [eventos, setEventos] = useState<BitacoraEvento[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [search, setSearch] = useState("");
   const [servicioOrigen, setServicioOrigen] = useState("");
   const [desde, setDesde] = useState("");
@@ -396,22 +452,36 @@ function BitacoraAuditoria() {
       .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setLoading(true);
-      setError(null);
-      listBitacora({
-        search: search || undefined,
-        servicioOrigen: servicioOrigen || undefined,
-        desde: desde || undefined,
-        hasta: hasta || undefined,
+  function cargar(p = page, ps = pageSize) {
+    setLoading(true);
+    setError(null);
+    listBitacora({
+      search: search || undefined,
+      servicioOrigen: servicioOrigen || undefined,
+      desde: desde || undefined,
+      hasta: hasta || undefined,
+      page: p + 1,
+      pageSize: ps,
+    })
+      .then(({ count, results }) => {
+        setTotalCount(count);
+        setEventos(results);
       })
-        .then(setEventos)
-        .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
-        .finally(() => setLoading(false));
-    }, 300);
+      .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    setPage(0);
+    const timeout = setTimeout(() => cargar(0), 300);
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, servicioOrigen, desde, hasta]);
+
+  useEffect(() => {
+    cargar(page, pageSize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize]);
 
   return (
     <>
@@ -423,27 +493,24 @@ function BitacoraAuditoria() {
         usuario, el folio de un expediente) — varía según el tipo de evento.
       </Typography>
 
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
-        <TextField
-          size="small"
-          // Un solo buscador (18/Ago/2026: antes habia uno de texto libre y
-          // otro de "Cliente o expediente", redundantes) - el backend ya
-          // busca en accion/entidad/entidad_id Y en id_contraparte/
-          // nombre_completo del cliente con el mismo ?search=, ver
-          // audit-service/auditoria/views.py::get_queryset.
-          placeholder="Buscar por acción, cliente o expediente..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          sx={{ flex: 1, maxWidth: 320 }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search size={16} strokeWidth={1.5} />
-              </InputAdornment>
-            ),
-          }}
-        />
-        <FormControl size="small" sx={{ minWidth: 200 }}>
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por acción, cliente o expediente..."
+        actions={
+          <Button
+            variant="outlined"
+            startIcon={
+              exportando ? <CircularProgress size={16} /> : <Download size={16} strokeWidth={1.5} />
+            }
+            disabled={exportando}
+            onClick={handleExportarCsv}
+          >
+            CSV a Drive
+          </Button>
+        }
+      >
+        <FormControl size="small">
           <InputLabel id="servicio-filter-label">Servicio origen</InputLabel>
           <Select
             labelId="servicio-filter-label"
@@ -466,7 +533,6 @@ function BitacoraAuditoria() {
           value={desde}
           onChange={(e) => setDesde(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 150 }}
         />
         <TextField
           size="small"
@@ -475,19 +541,8 @@ function BitacoraAuditoria() {
           value={hasta}
           onChange={(e) => setHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 150 }}
         />
-        <Button
-          variant="outlined"
-          startIcon={
-            exportando ? <CircularProgress size={16} /> : <Download size={16} strokeWidth={1.5} />
-          }
-          disabled={exportando}
-          onClick={handleExportarCsv}
-        >
-          CSV a Drive
-        </Button>
-      </Stack>
+      </FiltrosBar>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -540,6 +595,21 @@ function BitacoraAuditoria() {
                   ))
                 )}
               </TableBody>
+              <TableFooter>
+                <TableRow>
+                  <TablePagination
+                    colSpan={6}
+                    count={totalCount}
+                    page={page}
+                    rowsPerPage={pageSize}
+                    rowsPerPageOptions={[20, 50, 100]}
+                    onPageChange={(_, p) => setPage(p)}
+                    onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                    labelRowsPerPage="Filas:"
+                    labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+                  />
+                </TableRow>
+              </TableFooter>
             </Table>
           </TableContainer>
         </Box>

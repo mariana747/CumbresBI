@@ -57,7 +57,7 @@ export default function HomePage() {
         );
       }
       if (puedePld) {
-        pendientes.push(listKyc().then(setKyc));
+        pendientes.push(listKyc().then(({ results }) => setKyc(results)));
       }
 
       Promise.all(pendientes)
@@ -72,7 +72,7 @@ export default function HomePage() {
       // quien no tiene el permiso).
       if (puedeVerBitacora(s)) {
         listBitacora()
-          .then((eventos) => setBitacora(eventos.slice(0, 5)))
+          .then(({ results }) => setBitacora(results.slice(0, 5)))
           .catch(() => setBitacora(null));
       }
     });

@@ -21,6 +21,7 @@ import {
   Grid,
   IconButton,
   InputLabel,
+  Link,
   MenuItem,
   Paper,
   Select,
@@ -30,7 +31,9 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableFooter,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -75,6 +78,8 @@ import {
   PldSolicitudEliminacionDoc,
   activarUmbralKyc,
   aprobarKyc,
+  listAvisosUIF,
+  presentarAvisoUIF,
   aprobarSolicitudEliminacion,
   catalogoOcupacionPorTipoPersona,
   congelarKyc,
@@ -106,7 +111,7 @@ import {
 import {
   TesoreriaComplementoPago,
   TesoreriaFactura,
-  AcumuladoContraparte,
+  AcumuladoContraparteResponse,
   TesoreriaFlujo,
   TesoreriaNotaCredito,
   getAcumuladoContraparte,
@@ -114,6 +119,7 @@ import {
   listFacturas,
   listFlujos,
   listNotasCredito,
+  subirComprobanteFlujo,
 } from "@/lib/tesoreria";
 
 // Tipos que el Motor Documental ya reconoce (docint/classifier.py) - solo
@@ -173,6 +179,9 @@ type TransaccionUnificada = {
   concepto?: string | null;
   // Solo para Flujos: "proyecto|sociedad" — permite filtrar desde las cards de acumulado.
   proyectoSociedad?: string;
+  // Solo para Flujos: para subir/ver comprobante sin salir a Tesorería.
+  idFlujo?: string;
+  linkComprobante?: string | null;
 };
 
 // Agrupado en secciones (combinando con KycDetalleDialog.tsx de
@@ -283,6 +292,9 @@ export default function PldExpedienteDetallePage() {
   const [solicitudesPendientes, setSolicitudesPendientes] = useState<PldSolicitudEliminacionDoc[]>([]);
   const [resolviendoSolicitud, setResolviendoSolicitud] = useState<string | null>(null);
   const [historial, setHistorial] = useState<BitacoraEvento[] | null>(null);
+  const [historialCount, setHistorialCount] = useState(0);
+  const [historialPage, setHistorialPage] = useState(0);
+  const [historialPageSize, setHistorialPageSize] = useState(20);
   const [historialLoading, setHistorialLoading] = useState(false);
   const [historialError, setHistorialError] = useState<string | null>(null);
   const [historialFiltroDesde, setHistorialFiltroDesde] = useState("");
@@ -317,7 +329,10 @@ export default function PldExpedienteDetallePage() {
   const [transFiltroHasta, setTransFiltroHasta] = useState("");
   const [transFiltroTipo, setTransFiltroTipo] = useState("");
   const [transFiltroProjSociedad, setTransFiltroProjSociedad] = useState("");
-  const [acumulado, setAcumulado] = useState<AcumuladoContraparte[] | null>(null);
+  const [transPage, setTransPage] = useState(0);
+  const [transPageSize, setTransPageSize] = useState(20);
+  const [acumulado, setAcumulado] = useState<AcumuladoContraparteResponse | null>(null);
+  const [comprovanteSubiendo, setComprovanteSubiendo] = useState<Record<string, boolean>>({});
   // Edicion manual del expediente (18/Ago/2026) - ver
   // pld/audit_utils.py::contexto_kyc y views.py::update, ya auditado en el
   // backend; esto es la UI que faltaba. editandoCampos es null cuando no
@@ -480,19 +495,25 @@ export default function PldExpedienteDetallePage() {
   // audit-service/auditoria/views.py::get_queryset. Carga perezosa: solo
   // al abrir la pestana, y solo si el usuario tiene el mismo gate que la
   // bitacora general (GLOBAL o rol AUDITOR).
-  function cargarHistorial(params?: { desde?: string; hasta?: string; accion?: string; busqueda?: string }) {
+  function cargarHistorial(params?: { desde?: string; hasta?: string; accion?: string; busqueda?: string; page?: number }) {
     if (!kyc || !puedeVerHistorial) return;
     setHistorialLoading(true);
     setHistorialError(null);
     setHistorial(null);
     const textoBusqueda = params?.busqueda ?? historialBusqueda;
+    const p = params?.page ?? historialPage;
     listBitacora({
       search: textoBusqueda ? `${kyc.id_contraparte} ${textoBusqueda}` : kyc.id_contraparte,
       ...(params?.desde && { desde: params.desde }),
       ...(params?.hasta && { hasta: `${params.hasta}T23:59:59` }),
       ...(params?.accion && { accion: params.accion }),
+      page: p + 1,
+      pageSize: historialPageSize,
     })
-      .then(setHistorial)
+      .then(({ count, results }) => {
+        setHistorialCount(count);
+        setHistorial(results);
+      })
       .catch((err) => setHistorialError(err instanceof Error ? err.message : "Error al cargar el historial"))
       .finally(() => setHistorialLoading(false));
   }
@@ -540,7 +561,7 @@ export default function PldExpedienteDetallePage() {
     ])
       .then(([flujosPage, facturasPage, complementosPage, notasPage, acumuladoData]) => {
         setAcumulado(acumuladoData);
-        if (acumuladoData.some((a) => a.supera_umbral) && !kyc.requiere_revision_pld) {
+        if (acumuladoData.items.some((a) => a.supera_umbral) && !kyc.requiere_revision_pld) {
           activarUmbralKyc(kyc.id_kyc).then(setKyc).catch(() => {});
         }
         const flujos = flujosPage.results;
@@ -556,6 +577,8 @@ export default function PldExpedienteDetallePage() {
           estado: f.pagado ? "Pagado" : f.autorizacion ? "Autorizado" : "Pendiente",
           concepto: f.concepto,
           proyectoSociedad: `${f.contrato_proyecto ?? ""}|${f.contrato_sociedad ?? ""}`,
+          idFlujo: f.id_flujo,
+          linkComprobante: f.link_comprobante_banco,
         });
         const filaFactura = (f: TesoreriaFactura): TransaccionUnificada => ({
           id: `factura-${f.id}`,
@@ -1227,6 +1250,7 @@ export default function PldExpedienteDetallePage() {
                 indice no se corra cuando puedeVerHistorial es false y ese
                 Tab de enmedio no se renderiza. */}
                 {esPersonaMoral && <Tab value={5} label="Representantes legales" />}
+                <Tab value={6} label="Avisos UIF" />
               </Tabs>
 
               {/* 07/Sep/2026: "esta muy junto" - pt insuficiente dejaba el
@@ -1239,8 +1263,8 @@ export default function PldExpedienteDetallePage() {
 
                     {GRUPOS_CAMPOS_GENERAL.map((grupo, indiceGrupo) => (
                       <Box key={grupo.titulo}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                          <Typography variant="subtitle2" gutterBottom>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                          <Typography variant="subtitle2">
                             {grupo.titulo}
                           </Typography>
                           {/* Botones de edicion junto al primer titulo (18/Ago/2026:
@@ -1432,14 +1456,8 @@ export default function PldExpedienteDetallePage() {
                                     campo === "fecha_nac_const"
                                       ? { lang: "es-MX" }
                                       : campo === "dom_cp" || campo === "dom_corresp_dom_cp"
-                                        ? // 5 digitos numericos (02/Sep/2026,
-                                          // pedido explicito del checklist de
-                                          // cumplimiento) - maxLength/inputMode
-                                          // son solo ayuda visual, la
-                                          // validacion real esta en el backend
-                                          // (PldContraparteKycSerializer.validate).
-                                          { maxLength: 5, inputMode: "numeric" }
-                                        : undefined
+                                        ? { maxLength: 5, inputMode: "numeric", style: { textTransform: "uppercase" } }
+                                        : { style: { textTransform: "uppercase" } }
                                   }
                                   error={
                                     ((campo === "dom_cp" || campo === "dom_corresp_dom_cp") &&
@@ -1480,7 +1498,7 @@ export default function PldExpedienteDetallePage() {
                                 <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
                                   {campo === "nombre_completo" ? etiquetaNombreParaTipoPersona(kyc.tipo_persona) : label}
                                 </Typography>
-                                <Typography variant="body2" sx={{ lineHeight: 1.3 }}>
+                                <Typography variant="body2" sx={{ lineHeight: 1.3, textTransform: "uppercase" }}>
                                   {kyc[campo] || "—"}
                                 </Typography>
                               </Grid>
@@ -2128,13 +2146,24 @@ export default function PldExpedienteDetallePage() {
 
                 {tab === 3 && (
                   <Stack spacing={2}>
-                    {/* Cards de acumulado por proyecto — umbral PLD $948,000 */}
-                    {acumulado && acumulado.length > 0 && (
+                    {/* Cards de acumulado por proyecto — umbral PLD $948,000, ventana 6 meses */}
+                    {acumulado && acumulado.items.length > 0 && (
                       <Stack spacing={1}>
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Acumulado por proyecto (umbral PLD: $948,000 MXN)
-                        </Typography>
-                        {acumulado.map((row) => {
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Typography variant="subtitle2" color="text.secondary">
+                            Acumulado por proyecto (umbral PLD: $948,000 MXN)
+                          </Typography>
+                          {acumulado.fecha_desde ? (
+                            <Chip
+                              size="small"
+                              label={`Últimos 6 meses · desde ${new Date(acumulado.fecha_desde).toLocaleDateString("es-MX", { month: "short", year: "numeric" })}`}
+                              variant="outlined"
+                            />
+                          ) : (
+                            <Chip size="small" label="Acumulado histórico" variant="outlined" color="warning" />
+                          )}
+                        </Stack>
+                        {acumulado.items.map((row) => {
                           const acum = Number(row.acumulado);
                           const UMBRAL = 948_000;
                           const pct = Math.min((acum / UMBRAL) * 100, 100);
@@ -2147,11 +2176,16 @@ export default function PldExpedienteDetallePage() {
                                 p: 1.5,
                                 borderColor: row.supera_umbral ? "error.main" : "divider",
                                 cursor: "pointer",
-                                bgcolor: transFiltroProjSociedad === clave ? "action.selected" : undefined,
+                                bgcolor: transFiltroProjSociedad === clave
+                                  ? "action.selected"
+                                  : row.supera_umbral
+                                    ? (theme: import("@mui/material").Theme) => theme.palette.error.light + "22"
+                                    : undefined,
                               }}
-                              onClick={() =>
-                                setTransFiltroProjSociedad(transFiltroProjSociedad === clave ? "" : clave)
-                              }
+                              onClick={() => {
+                                setTransFiltroProjSociedad(transFiltroProjSociedad === clave ? "" : clave);
+                                setTransPage(0);
+                              }}
                             >
                               <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.5}>
                                 <Stack direction="row" spacing={1} alignItems="center">
@@ -2189,14 +2223,14 @@ export default function PldExpedienteDetallePage() {
 
                     {/* Filtros de la tabla */}
                     {!transaccionesLoading && !!transacciones?.length && (
-                      <Box sx={{ mx: -2.5, mt: acumulado?.length ? 0 : -3 }}>
+                      <Box sx={{ mx: -2.5, mt: acumulado?.items.length ? 0 : -3 }}>
                         <FiltrosBar search="" onSearchChange={() => undefined} hideSearch flush>
                           <TextField
                             size="small"
                             label="Desde"
                             type="date"
                             value={transFiltroDesde}
-                            onChange={(e) => setTransFiltroDesde(e.target.value)}
+                            onChange={(e) => { setTransFiltroDesde(e.target.value); setTransPage(0); }}
                             InputLabelProps={{ shrink: true }}
                             sx={{ width: 160 }}
                           />
@@ -2205,7 +2239,7 @@ export default function PldExpedienteDetallePage() {
                             label="Hasta"
                             type="date"
                             value={transFiltroHasta}
-                            onChange={(e) => setTransFiltroHasta(e.target.value)}
+                            onChange={(e) => { setTransFiltroHasta(e.target.value); setTransPage(0); }}
                             InputLabelProps={{ shrink: true }}
                             sx={{ width: 160 }}
                           />
@@ -2214,7 +2248,7 @@ export default function PldExpedienteDetallePage() {
                             size="small"
                             label="Tipo"
                             value={transFiltroTipo}
-                            onChange={(e) => setTransFiltroTipo(e.target.value)}
+                            onChange={(e) => { setTransFiltroTipo(e.target.value); setTransPage(0); }}
                             sx={{ width: 200 }}
                           >
                             <MenuItem value="">Todos</MenuItem>
@@ -2263,10 +2297,11 @@ export default function PldExpedienteDetallePage() {
                                 <TableCell>Fecha</TableCell>
                                 <TableCell align="right">Monto (MXN)</TableCell>
                                 <TableCell>Estado</TableCell>
+                                <TableCell align="center">Comprobante</TableCell>
                               </TableRow>
                             </TableHead>
                             <TableBody>
-                              {filtradas.map((t) => (
+                              {filtradas.slice(transPage * transPageSize, (transPage + 1) * transPageSize).map((t) => (
                                 <TableRow key={t.id}>
                                   <TableCell>
                                     <Chip
@@ -2289,9 +2324,72 @@ export default function PldExpedienteDetallePage() {
                                       : "—"}
                                   </TableCell>
                                   <TableCell>{t.estado || "—"}</TableCell>
+                                  <TableCell align="center">
+                                    {t.tipo === "Flujo" && t.idFlujo ? (
+                                      t.linkComprobante ? (
+                                        <Link href={t.linkComprobante} target="_blank" rel="noopener noreferrer" sx={{ fontSize: "0.75rem" }}>
+                                          Ver
+                                        </Link>
+                                      ) : (
+                                        <Box component="label" sx={{ cursor: "pointer" }}>
+                                          {comprovanteSubiendo[t.idFlujo] ? (
+                                            <CircularProgress size={14} />
+                                          ) : (
+                                            <Typography variant="caption" color="primary" sx={{ textDecoration: "underline", cursor: "pointer" }}>
+                                              Subir
+                                            </Typography>
+                                          )}
+                                          <input
+                                            type="file"
+                                            accept="image/*,.pdf"
+                                            style={{ display: "none" }}
+                                            disabled={!!comprovanteSubiendo[t.idFlujo]}
+                                            onChange={async (e) => {
+                                              const archivo = e.target.files?.[0];
+                                              if (!archivo || !t.idFlujo) return;
+                                              setComprovanteSubiendo((prev) => ({ ...prev, [t.idFlujo!]: true }));
+                                              try {
+                                                await subirComprobanteFlujo(t.idFlujo, archivo);
+                                                setTransacciones((prev) =>
+                                                  prev
+                                                    ? prev.map((tx) =>
+                                                        tx.idFlujo === t.idFlujo
+                                                          ? { ...tx, linkComprobante: URL.createObjectURL(archivo) }
+                                                          : tx
+                                                      )
+                                                    : prev
+                                                );
+                                              } catch {
+                                                // silencioso — el usuario puede reintentar
+                                              } finally {
+                                                setComprovanteSubiendo((prev) => ({ ...prev, [t.idFlujo!]: false }));
+                                              }
+                                            }}
+                                          />
+                                        </Box>
+                                      )
+                                    ) : (
+                                      <Typography variant="caption" color="text.disabled">—</Typography>
+                                    )}
+                                  </TableCell>
                                 </TableRow>
                               ))}
                             </TableBody>
+                            <TableFooter>
+                              <TableRow>
+                                <TablePagination
+                                  colSpan={7}
+                                  count={filtradas.length}
+                                  page={transPage}
+                                  rowsPerPage={transPageSize}
+                                  rowsPerPageOptions={[20, 50, 100]}
+                                  onPageChange={(_, p) => setTransPage(p)}
+                                  onRowsPerPageChange={(e) => { setTransPageSize(Number(e.target.value)); setTransPage(0); }}
+                                  labelRowsPerPage="Filas:"
+                                  labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+                                />
+                              </TableRow>
+                            </TableFooter>
                           </Table>
                         </TableContainer>
                       );
@@ -2390,6 +2488,24 @@ export default function PldExpedienteDetallePage() {
                               </TableRow>
                             ))}
                           </TableBody>
+                          <TableFooter>
+                            <TableRow>
+                              <TablePagination
+                                colSpan={4}
+                                count={historialCount}
+                                page={historialPage}
+                                rowsPerPage={historialPageSize}
+                                rowsPerPageOptions={[20, 50, 100]}
+                                onPageChange={(_, p) => {
+                                  setHistorialPage(p);
+                                  cargarHistorial({ page: p });
+                                }}
+                                onRowsPerPageChange={(e) => { setHistorialPageSize(Number(e.target.value)); setHistorialPage(0); cargarHistorial({ page: 0 }); }}
+                                labelRowsPerPage="Filas:"
+                                labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+                              />
+                            </TableRow>
+                          </TableFooter>
                         </Table>
                       </TableContainer>
                     )}
@@ -2495,6 +2611,10 @@ export default function PldExpedienteDetallePage() {
 
         </Grid>
       )}
+
+                {tab === 6 && kyc && (
+                  <AvisosUifTab idKyc={kyc.id_kyc} puedeEditar={puedeEditar} />
+                )}
 
       {kyc && (
         <MotorDocumentalDialog
@@ -2780,5 +2900,198 @@ export default function PldExpedienteDetallePage() {
         </DialogActions>
       </Dialog>
     </AppShell>
+  );
+}
+
+function AvisosUifTab({ idKyc, puedeEditar }: { idKyc: string; puedeEditar: boolean }) {
+  const [avisos, setAvisos] = useState<import("@/lib/pld").PldAvisoUIF[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
+  const [dialogAviso, setDialogAviso] = useState<import("@/lib/pld").PldAvisoUIF | null>(null);
+  const [linkEvidencia, setLinkEvidencia] = useState("");
+  const [notas, setNotas] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [errorDialog, setErrorDialog] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCargando(true);
+    listAvisosUIF({ kyc: idKyc })
+      .then(setAvisos)
+      .catch((e: Error) => setErrorCarga(e.message))
+      .finally(() => setCargando(false));
+  }, [idKyc]);
+
+  function abrirDialog(aviso: import("@/lib/pld").PldAvisoUIF) {
+    setDialogAviso(aviso);
+    setLinkEvidencia(aviso.link_evidencia ?? "");
+    setNotas(aviso.notas ?? "");
+    setErrorDialog(null);
+  }
+
+  async function handlePresentar() {
+    if (!dialogAviso) return;
+    setGuardando(true);
+    setErrorDialog(null);
+    try {
+      const actualizado = await presentarAvisoUIF(dialogAviso.id_aviso, {
+        link_evidencia: linkEvidencia || undefined,
+        notas: notas || undefined,
+      });
+      setAvisos((prev) => prev.map((a) => (a.id_aviso === actualizado.id_aviso ? actualizado : a)));
+      setDialogAviso(null);
+    } catch (e: unknown) {
+      setErrorDialog(e instanceof Error ? e.message : "Error al guardar");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  function tiempoRestante(plazo: string) {
+    const diff = new Date(plazo).getTime() - Date.now();
+    if (diff <= 0) return "Vencido";
+    const h = Math.floor(diff / 3_600_000);
+    const m = Math.floor((diff % 3_600_000) / 60_000);
+    return `${h}h ${m}m restantes`;
+  }
+
+  if (cargando) return <CircularProgress size={24} sx={{ m: 2 }} />;
+  if (errorCarga) return <Alert severity="error">{errorCarga}</Alert>;
+
+  const pendientes = avisos.filter((a) => a.estado === "PENDIENTE");
+  const presentados = avisos.filter((a) => a.estado === "PRESENTADO");
+
+  return (
+    <>
+      <Stack spacing={3}>
+        {avisos.length === 0 && (
+          <Alert severity="info">No hay avisos UIF para este expediente.</Alert>
+        )}
+
+        {pendientes.length > 0 && (
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Pendientes de presentar
+            </Typography>
+            <Stack spacing={1.5}>
+              {pendientes.map((aviso) => (
+                <Paper
+                  key={aviso.id_aviso}
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    borderColor: aviso.vencido ? "error.main" : "success.main",
+                    bgcolor: (theme) =>
+                      aviso.vencido
+                        ? theme.palette.error.light + "18"
+                        : theme.palette.success.light + "18",
+                  }}
+                >
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>
+                        {aviso.proyecto} · {aviso.sociedad}
+                      </Typography>
+                      <Typography variant="body2">
+                        Acumulado: ${Number(aviso.monto_acumulado).toLocaleString("es-MX")} MXN
+                      </Typography>
+                      <Typography variant="caption" color={aviso.vencido ? "error" : "success.dark"}>
+                        Plazo: {new Date(aviso.plazo_presentacion).toLocaleString("es-MX")} —{" "}
+                        {tiempoRestante(aviso.plazo_presentacion)}
+                      </Typography>
+                    </Box>
+                    {puedeEditar && (
+                      <Button size="small" variant="outlined" onClick={() => abrirDialog(aviso)}>
+                        Registrar presentación
+                      </Button>
+                    )}
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          </Box>
+        )}
+
+        {presentados.length > 0 && (
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Presentados
+            </Typography>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Proyecto · Sociedad</TableCell>
+                  <TableCell>Monto</TableCell>
+                  <TableCell>Presentado</TableCell>
+                  <TableCell>Evidencia</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {presentados.map((aviso) => (
+                  <TableRow key={aviso.id_aviso}>
+                    <TableCell>{aviso.proyecto} · {aviso.sociedad}</TableCell>
+                    <TableCell>${Number(aviso.monto_acumulado).toLocaleString("es-MX")}</TableCell>
+                    <TableCell>
+                      {aviso.fecha_presentacion
+                        ? new Date(aviso.fecha_presentacion).toLocaleString("es-MX")
+                        : "—"}
+                    </TableCell>
+                    <TableCell>
+                      {aviso.link_evidencia ? (
+                        <Link href={aviso.link_evidencia} target="_blank" rel="noopener">
+                          Ver comprobante
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+        )}
+      </Stack>
+
+      <Dialog open={!!dialogAviso} onClose={() => setDialogAviso(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Registrar presentación de Aviso UIF
+          <IconButton onClick={() => setDialogAviso(null)} size="small">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {errorDialog && <Alert severity="error" sx={{ mb: 2 }}>{errorDialog}</Alert>}
+          <Stack spacing={2}>
+            <Alert severity="info" icon={false}>
+              Una vez marcado como presentado no se puede revertir. Adjunta el comprobante de
+              envío al portal SICOAM antes de confirmar.
+            </Alert>
+            <TextField
+              size="small"
+              fullWidth
+              label="Link al comprobante (Drive u otro)"
+              value={linkEvidencia}
+              onChange={(e) => setLinkEvidencia(e.target.value)}
+              placeholder="https://drive.google.com/…"
+            />
+            <TextField
+              size="small"
+              fullWidth
+              label="Notas"
+              multiline
+              minRows={2}
+              value={notas}
+              onChange={(e) => setNotas(e.target.value)}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogAviso(null)}>Cancelar</Button>
+          <Button variant="contained" onClick={handlePresentar} disabled={guardando}>
+            {guardando ? <CircularProgress size={16} /> : "Confirmar presentación"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }

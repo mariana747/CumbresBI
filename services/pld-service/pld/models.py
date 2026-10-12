@@ -798,3 +798,58 @@ class PldNotificacion(models.Model):
 
     def __str__(self):
         return self.id_notificacion
+
+
+class PldAvisoUIF(models.Model):
+    """Registro de un Aviso formal a la UIF (LFPIORPI art. 24).
+    Se crea automáticamente cuando una contraparte supera el umbral de
+    $948,000 MXN en 6 meses. El analista lo marca como PRESENTADO una vez
+    que lo sube al portal SICOAM y adjunta el comprobante."""
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_PRESENTADO = "PRESENTADO"
+    ESTADOS = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_PRESENTADO, "Presentado"),
+    ]
+
+    SCOPE_FIELD = "kyc__sociedad"
+    objects = ScopedManager()
+
+    id_aviso = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    kyc = models.ForeignKey(
+        PldContraparteKyc,
+        on_delete=models.CASCADE,
+        related_name="avisos_uif",
+        db_column="id_kyc",
+    )
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=ESTADO_PENDIENTE)
+    # Datos del evento que originó el aviso
+    monto_acumulado = models.DecimalField(max_digits=14, decimal_places=2)
+    proyecto = models.CharField(max_length=200, blank=True)
+    sociedad = models.CharField(max_length=100, blank=True)
+    # Plazo regulatorio: 24h desde la detección
+    fecha_deteccion = models.DateTimeField()
+    plazo_presentacion = models.DateTimeField()
+    # Presentación
+    fecha_presentacion = models.DateTimeField(blank=True, null=True)
+    presentado_por = models.CharField(max_length=8, blank=True, null=True)
+    link_evidencia = models.CharField(max_length=1000, blank=True, null=True)
+    notas = models.TextField(blank=True, null=True)
+    # Auditoría
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=8, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=8, blank=True, null=True)
+
+    class Meta:
+        db_table = "pld_aviso_uif"
+        ordering = ["plazo_presentacion"]
+
+    def __str__(self):
+        return self.id_aviso
+
+    @property
+    def vencido(self):
+        from django.utils import timezone
+        return self.estado == self.ESTADO_PENDIENTE and timezone.now() > self.plazo_presentacion

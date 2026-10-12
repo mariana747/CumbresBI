@@ -1246,11 +1246,9 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     def acumulado_contraparte(self, request):
         """Acumulado de ingresos por proyecto para una contraparte (09/Oct/2026,
         monitoreo transaccional PLD). Suma total_mxp > 0 (ingresos) agrupado
-        por contrato__proyecto + contrato__sociedad.
-
-        Pendiente de negocio: si el umbral aplica solo a ingresos, solo a
-        egresos o a ambos. Por ahora se suman solo los positivos (ingresos),
-        que coincide con el ejemplo de rentas del pendiente.md.
+        por contrato__proyecto + contrato__sociedad, en una ventana móvil de
+        6 meses (requisito legal LFPIORPI — acumulacion de seis meses para
+        formular Avisos a la UIF).
 
         El ScopedManager ya restringe por sociedad segun el token del usuario:
         un analista de sociedad CTZ solo ve flujos de CTZ; un usuario GLOBAL
@@ -1259,26 +1257,42 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
         ?contraparte=<id_contraparte> es obligatorio.
         """
+        from datetime import timedelta
         from django.db.models import Count, Sum
+        from django.utils import timezone
         contraparte_id = request.query_params.get("contraparte")
         if not contraparte_id:
             return Response({"detail": "Se requiere ?contraparte=<id>"}, status=400)
 
+        fecha_desde = timezone.now().date() - timedelta(days=180)
         CONCEPTOS_PLD = ["CASA", "VENTA DE TERRENO", "RENTA"]
         concepto_q = Q()
         for c in CONCEPTOS_PLD:
             concepto_q |= Q(concepto__icontains=c)
-        qs = (
+
+        base_qs = (
             self.get_queryset()
-            .filter(
-                contrato__contraparte_id=contraparte_id,
-                total_mxp__gt=0,
-            )
+            .filter(contrato__contraparte_id=contraparte_id, total_mxp__gt=0)
             .filter(concepto_q)
+        )
+        qs = (
+            base_qs.filter(fecha_efectiva__gte=fecha_desde)
             .values("contrato__proyecto", "contrato__sociedad")
             .annotate(acumulado=Sum("total_mxp"), flujos_count=Count("id_flujo"))
             .order_by("-acumulado")
         )
+        # Si no hay flujos en la ventana de 6 meses (datos historicos sin
+        # fecha_efectiva reciente), mostrar acumulado historico completo.
+        ventana_6m = True
+        if not qs.exists():
+            qs = (
+                base_qs
+                .values("contrato__proyecto", "contrato__sociedad")
+                .annotate(acumulado=Sum("total_mxp"), flujos_count=Count("id_flujo"))
+                .order_by("-acumulado")
+            )
+            ventana_6m = False
+
         UMBRAL_PLD = 948_000
         resultado = [
             {
@@ -1290,7 +1304,10 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             }
             for row in qs
         ]
-        return Response(resultado)
+        return Response({
+            "fecha_desde": str(fecha_desde) if ventana_6m else None,
+            "items": resultado,
+        })
 
     @action(detail=False, methods=["get"])
     def exportar_csv(self, request):

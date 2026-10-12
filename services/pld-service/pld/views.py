@@ -22,7 +22,9 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from .audit_utils import contexto_kyc, emitir_evento_auditoria
+from .pagination import ListadoPagination
 from .models import (
+    PldAvisoUIF,
     PldContraparteDoc,
     PldContraparteKyc,
     PldDocumentoTicket,
@@ -32,6 +34,7 @@ from .models import (
     PldTicketCliente,
 )
 from .serializers import (
+    PldAvisoUIFSerializer,
     PldContraparteDocSerializer,
     PldContraparteKycSerializer,
     PldNotificacionSerializer,
@@ -420,6 +423,7 @@ class PldContraparteKycViewSet(ModelViewSet):
     serializer_class = PldContraparteKycSerializer
     filter_backends = [SearchFilter]
     search_fields = ["id_contraparte", "curp"]
+    pagination_class = ListadoPagination
 
     def get_permissions(self):
         if self.action == "create":
@@ -467,6 +471,12 @@ class PldContraparteKycViewSet(ModelViewSet):
                 )
             else:
                 queryset = queryset.filter(categoria_cumplimiento=categoria)
+        desde = self.request.query_params.get("desde")
+        if desde:
+            queryset = queryset.filter(created_at__date__gte=desde)
+        hasta = self.request.query_params.get("hasta")
+        if hasta:
+            queryset = queryset.filter(created_at__date__lte=hasta)
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -1181,7 +1191,8 @@ class PldContraparteKycViewSet(ModelViewSet):
         if resp.status_code != 200:
             return Response({"detail": "No se pudo consultar el acumulado."}, status=status.HTTP_502_BAD_GATEWAY)
 
-        supera = any(item.get("supera_umbral") for item in resp.json())
+        items = resp.json().get("items", [])
+        supera = any(item.get("supera_umbral") for item in items)
         if supera and not kyc.requiere_revision_pld:
             kyc.requiere_revision_pld = True
             kyc.updated_by = actor
@@ -1194,6 +1205,29 @@ class PldContraparteKycViewSet(ModelViewSet):
                 valores_previos={"requiere_revision_pld": False},
                 valores_nuevos={"requiere_revision_pld": True},
             )
+            # Crear Aviso UIF por cada proyecto que supera el umbral
+            # (idempotente: no duplica si ya existe uno PENDIENTE para el mismo kyc+proyecto).
+            ahora = timezone.now()
+            for item in items:
+                if not item.get("supera_umbral"):
+                    continue
+                ya_existe = PldAvisoUIF.objects.filter(
+                    kyc=kyc,
+                    proyecto=item.get("proyecto", ""),
+                    sociedad=item.get("sociedad", ""),
+                    estado=PldAvisoUIF.ESTADO_PENDIENTE,
+                ).exists()
+                if not ya_existe:
+                    PldAvisoUIF.objects.create(
+                        kyc=kyc,
+                        monto_acumulado=item.get("acumulado", 0),
+                        proyecto=item.get("proyecto", ""),
+                        sociedad=item.get("sociedad", ""),
+                        fecha_deteccion=ahora,
+                        plazo_presentacion=ahora + datetime.timedelta(hours=24),
+                        created_by=actor,
+                        updated_by=actor,
+                    )
             # Notificaciones in-app y correo (idempotentes por link_url).
             try:
                 nombre = kyc.nombre_completo or f"Contraparte {kyc.id_contraparte}"
@@ -1504,6 +1538,60 @@ def _emitir_evento_eliminar_documento(doc, actor_user_id, accion="pld_contrapart
         actor_user_id=actor_user_id,
         valores_previos={**contexto_kyc(doc.kyc), "denominacion": doc.denominacion, "drive_file_id": doc.drive_file_id},
     )
+
+
+class PldAvisoUIFViewSet(ModelViewSet):
+    """Tracker de Avisos formales a la UIF (LFPIORPI art. 24).
+    Se crea automáticamente desde activar_umbral cuando una contraparte
+    supera $948,000 MXN en 6 meses. El analista lo marca como PRESENTADO
+    una vez que sube el aviso al portal SICOAM."""
+
+    queryset = PldAvisoUIF.objects.select_related("kyc").all()
+    serializer_class = PldAvisoUIFSerializer
+    pagination_class = ListadoPagination
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in ("presentar",):
+            return [require_permission("pld-compliance.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        kyc_id = self.request.query_params.get("kyc")
+        if kyc_id:
+            qs = qs.filter(kyc_id=kyc_id)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+        return qs
+
+    @action(detail=True, methods=["post"])
+    def presentar(self, request, pk=None):
+        """Marca el aviso como PRESENTADO. Acepta link_evidencia y notas."""
+        aviso = self.get_object()
+        if aviso.estado == PldAvisoUIF.ESTADO_PRESENTADO:
+            return Response({"detail": "El aviso ya fue marcado como presentado."}, status=status.HTTP_400_BAD_REQUEST)
+        actor = request.effective_scope.identity_user_id
+        aviso.estado = PldAvisoUIF.ESTADO_PRESENTADO
+        aviso.fecha_presentacion = timezone.now()
+        aviso.presentado_por = actor
+        aviso.link_evidencia = request.data.get("link_evidencia") or aviso.link_evidencia
+        aviso.notas = request.data.get("notas") or aviso.notas
+        aviso.updated_by = actor
+        aviso.save(update_fields=[
+            "estado", "fecha_presentacion", "presentado_por",
+            "link_evidencia", "notas", "updated_by", "updated_at",
+        ])
+        emitir_evento_auditoria(
+            "pld_aviso_uif.presentado",
+            "pld_aviso_uif",
+            str(aviso.id_aviso),
+            actor_user_id=actor,
+            valores_previos={"estado": PldAvisoUIF.ESTADO_PENDIENTE},
+            valores_nuevos={"estado": PldAvisoUIF.ESTADO_PRESENTADO},
+        )
+        return Response(self.get_serializer(aviso).data)
 
 
 class PldNotificacionViewSet(ModelViewSet):
