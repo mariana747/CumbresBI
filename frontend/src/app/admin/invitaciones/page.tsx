@@ -461,8 +461,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Acceso de un solo uso para usuarios externos, sin contraseña. Modo desarrollo — sin envío de
-        correo real todavía, el link se muestra aquí directamente en vez de enviarse por email.
+        Acceso de un solo uso para usuarios externos, sin contraseña.
       </Typography>
 
       {error && (
@@ -1131,7 +1130,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Un correo que todavía no forma parte de CumbresBI no puede iniciar sesión hasta que un
-            Admin lo invite aquí — no hace falta enviarle ningún link, en cuanto queda pendiente ya
+            Admin, en cuanto queda pendiente ya
             puede entrar con su cuenta de Google Workspace.
           </Typography>
           <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleInvitarWorkspace}>
@@ -1173,9 +1172,8 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
             Dar acceso a un colaborador externo
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Para quien no tiene correo de Google Workspace pero necesita entrar a secciones reales
-            (roles/permisos asignados desde /admin/directorio). El link no vence por tiempo — solo
-            se revoca a mano.
+            Para quien no tiene correo de Google Workspace pero necesita entrar a secciones reales. 
+            El link no tiene caducidad, para revocar dirigete a la parte inferior de la página.
           </Typography>
           <Stack component="form" spacing={2} onSubmit={handleCrearExterno}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>

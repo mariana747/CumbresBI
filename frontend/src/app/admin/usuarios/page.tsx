@@ -307,7 +307,7 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Usuarios registrados en iam-service. Búsqueda por correo/nombre y
+        Usuarios registrados en CumbresBI. Búsqueda por correo/nombre y
         filtros por estado, rol y empresa.
       </Typography>
 
@@ -953,8 +953,8 @@ function SuspendidosTab({ session }: { session: SessionUser | null }) {
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Usuarios suspendidos no pueden iniciar sesión ni canjear su acceso hasta que se
-        reactiven aquí. Si la suspensión vino de revocar un acceso externo, reactivar solo
-        les devuelve el login — el enlace en sí necesita "Reenviar" desde Invitaciones.
+        reactiven. Si la suspensión vino de revocar un acceso externo, reactivar solo
+        les devuelve el login, el enlace en sí necesita "Reenviar" desde Invitaciones.
       </Typography>
 
       {error && (

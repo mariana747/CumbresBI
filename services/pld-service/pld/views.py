@@ -1593,6 +1593,50 @@ class PldAvisoUIFViewSet(ModelViewSet):
         )
         return Response(self.get_serializer(aviso).data)
 
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_evidencia(self, request, pk=None):
+        """Sube el comprobante de presentación ante SICOAM a Drive y guarda el link."""
+        aviso = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        nombre_archivo = f"AvisoUIF-{aviso.id_aviso}-{archivo.name}"
+        carpeta = f"PLD/AvisosUIF/{aviso.id_aviso}"
+        headers, cookies = forward_auth_headers(request)
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "pld-compliance.editar"},
+                files={"file": (nombre_archivo, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir evidencia de aviso %s", aviso.id_aviso, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        aviso.link_evidencia = resultado["web_view_link"]
+        aviso.updated_by = request.effective_scope.identity_user_id
+        aviso.save(update_fields=["link_evidencia", "updated_by", "updated_at"])
+        emitir_evento_auditoria(
+            "pld_aviso_uif.subir_evidencia",
+            "pld_aviso_uif",
+            str(aviso.id_aviso),
+            actor_user_id=request.effective_scope.identity_user_id,
+            valores_nuevos={"nombre_archivo": nombre_archivo},
+        )
+        return Response(self.get_serializer(aviso).data)
+
 
 class PldNotificacionViewSet(ModelViewSet):
     """Campana de pld-service. Solo lectura de las propias del usuario
