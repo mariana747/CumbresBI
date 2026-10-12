@@ -1349,12 +1349,23 @@ export async function listAvisosUIF(params?: {
 
 export async function presentarAvisoUIF(
   idAviso: string,
-  payload: { link_evidencia?: string; notas?: string }
+  payload: { notas?: string }
 ): Promise<PldAvisoUIF> {
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/avisos-uif/${idAviso}/presentar/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw await friendlyApiError("PLD", response);
+  return response.json();
+}
+
+export async function subirEvidenciaAvisoUIF(idAviso: string, archivo: File): Promise<PldAvisoUIF> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/avisos-uif/${idAviso}/subir_evidencia/`, {
+    method: "POST",
+    body: formData,
   });
   if (!response.ok) throw await friendlyApiError("PLD", response);
   return response.json();

@@ -185,9 +185,8 @@ export default function TicketsClientePage() {
         Tickets de Cliente
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Acceso de un solo uso para un cliente externo, para llenar o consultar su expediente KYC sin
-        cuenta de Workspace. Modo desarrollo — sin envío de correo real todavía, el link se muestra
-        aquí directamente en vez de enviarse por email.
+        Acceso de un solo uso para un cliente externo, para llenar su expediente KYC sin
+        cuenta de Workspace.
       </Typography>
 
       {error && (

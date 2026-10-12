@@ -516,8 +516,7 @@ export default function PldPage() {
         PLD / Cumplimiento
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Expedientes y documentos. El Motor Documental se usa desde dentro de cada expediente
-        (pestaña &quot;Documentos KYC&quot;), ya sin tener que volver a elegir a qué cliente pertenece.
+        Expedientes y documentos, se integra el Motor Documental desde dentro de cada expediente.
       </Typography>
 
       <TablaExpedientes session={session} />
