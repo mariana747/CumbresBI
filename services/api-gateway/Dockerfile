@@ -1,7 +1,7 @@
 # Build context es la raiz del repo (ver docker-compose.yml). Sin
 # mysqlclient/build-essential: el Gateway no tiene base de datos propia, solo
 # reenvia requests (ver gateway/views.py) - imagen mas liviana que el resto.
-FROM python:3.12-slim
+FROM public.ecr.aws/docker/library/python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

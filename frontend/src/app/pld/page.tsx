@@ -22,7 +22,9 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableFooter,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -63,6 +65,9 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // proposito, PLD_ANALISTA no puede aprobar su propio trabajo).
   const puedeCrear = session?.perm_keys.includes("pld-compliance.crear") ?? false;
   const [expedientes, setExpedientes] = useState<(PldContraparteKyc & PldDatosEditables)[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [search, setSearch] = useState("");
   const [estadoLlenado, setEstadoLlenado] = useState("");
   const [loading, setLoading] = useState(true);
@@ -109,13 +114,15 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   // ve todas mezcladas por default; este filtro acota la vista sin cambiar
   // el alcance real de la sesion.
   const [filtroSociedad, setFiltroSociedad] = useState("");
+  const [filtroDesde, setFiltroDesde] = useState("");
+  const [filtroHasta, setFiltroHasta] = useState("");
 
   // Tabs KYC/KYB: solo 2 tabs, sin "Todos" ni tab propio para pendientes:
   // PENDIENTE_REVISION aparece en los dos (ver get_queryset en el backend),
   // distinguido por el color del chip en la columna Categoria. Default KYC.
   const [tabCategoria, setTabCategoria] = useState<Extract<PldCategoriaCumplimiento, "KYC" | "KYB">>("KYC");
 
-  function cargar() {
+  function cargar(p = page, ps = pageSize) {
     setLoading(true);
     setError(null);
     listKyc({
@@ -123,17 +130,30 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
       search: search || undefined,
       sociedadRfc: filtroSociedad || undefined,
       categoriaCumplimiento: tabCategoria,
+      desde: filtroDesde || undefined,
+      hasta: filtroHasta || undefined,
+      page: p + 1,
+      pageSize: ps,
     })
-      .then(setExpedientes)
+      .then(({ count, results }) => {
+        setTotalCount(count);
+        setExpedientes(results);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    const timeout = setTimeout(cargar, 300);
+    setPage(0);
+    const timeout = setTimeout(() => cargar(0), 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, estadoLlenado, filtroSociedad, tabCategoria]);
+  }, [search, estadoLlenado, filtroSociedad, tabCategoria, filtroDesde, filtroHasta]);
+
+  useEffect(() => {
+    cargar(page, pageSize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize]);
 
   // Aprobar/reactivar se movieron a la vista de detalle (/pld/[idKyc]) -
   // la lista ya solo tiene "Ver".
@@ -333,6 +353,24 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
             ))}
           </Select>
         </FormControl>
+        <TextField
+          size="small"
+          type="date"
+          label="Creado desde"
+          value={filtroDesde}
+          onChange={(e) => setFiltroDesde(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 155 }}
+        />
+        <TextField
+          size="small"
+          type="date"
+          label="Creado hasta"
+          value={filtroHasta}
+          onChange={(e) => setFiltroHasta(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 155 }}
+        />
       </Stack>
 
       {error && (
@@ -438,6 +476,21 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
               ))
             )}
           </TableBody>
+          <TableFooter>
+            <TableRow>
+              <TablePagination
+                colSpan={10}
+                count={totalCount}
+                page={page}
+                rowsPerPage={pageSize}
+                rowsPerPageOptions={[20, 50, 100]}
+                onPageChange={(_, p) => setPage(p)}
+                onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                labelRowsPerPage="Filas:"
+                labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+              />
+            </TableRow>
+          </TableFooter>
         </Table>
       </TableContainer>
     </Paper>
@@ -463,8 +516,7 @@ export default function PldPage() {
         PLD / Cumplimiento
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Expedientes y documentos. El Motor Documental se usa desde dentro de cada expediente
-        (pestaña &quot;Documentos KYC&quot;), ya sin tener que volver a elegir a qué cliente pertenece.
+        Expedientes y documentos, se integra el Motor Documental desde dentro de cada expediente.
       </Typography>
 
       <TablaExpedientes session={session} />

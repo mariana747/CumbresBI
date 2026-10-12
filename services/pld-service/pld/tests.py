@@ -21,6 +21,7 @@ from rest_framework.test import APIRequestFactory
 
 from .audit_utils import emitir_evento_auditoria
 from .models import (
+    PldAvisoUIF,
     PldContraparteDoc,
     PldContraparteKyc,
     PldDocumentoTicket,
@@ -30,6 +31,7 @@ from .models import (
 )
 from .ticket_utils import hash_token
 from .views import (
+    PldAvisoUIFViewSet,
     PldContraparteDocViewSet,
     PldContraparteKycViewSet,
     PldDocumentoTicketViewSet,
@@ -89,12 +91,12 @@ class PldContraparteKycScopeTests(TestCase):
     def test_global_ve_los_tres_expedientes(self):
         response = self._listar(EffectiveScope(is_global=True))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 3)
+        self.assertEqual(response.data["count"], 3)
 
     def test_usuario_de_tizara_solo_ve_su_expediente(self):
         scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA,))
         response = self._listar(scope)
-        ids = {row["id_contraparte"] for row in response.data}
+        ids = {row["id_contraparte"] for row in response.data["results"]}
         self.assertEqual(ids, {"cp000001"})
 
     def test_usuario_de_capital_no_ve_el_expediente_de_tizara(self):
@@ -102,7 +104,7 @@ class PldContraparteKycScopeTests(TestCase):
         ninguno ve los datos del otro."""
         scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_CAPITAL,))
         response = self._listar(scope)
-        ids = {row["id_contraparte"] for row in response.data}
+        ids = {row["id_contraparte"] for row in response.data["results"]}
         self.assertEqual(ids, {"cp000002"})
         self.assertNotIn("cp000001", ids)
 
@@ -112,12 +114,12 @@ class PldContraparteKycScopeTests(TestCase):
         sociedad - queda fuera hasta que se le asigne una."""
         scope = EffectiveScope(is_global=False, sociedad_rfcs=(RFC_TIZARA, RFC_CAPITAL))
         response = self._listar(scope)
-        ids = {row["id_contraparte"] for row in response.data}
+        ids = {row["id_contraparte"] for row in response.data["results"]}
         self.assertNotIn("cp000003", ids)
 
     def test_anonimo_no_ve_nada(self):
         response = self._listar(EffectiveScope.anonymous())
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(response.data["count"], 0)
 
     def test_filtro_sociedad_acota_dentro_del_scope_union(self):
         # Filtro por sociedad: un
@@ -127,7 +129,7 @@ class PldContraparteKycScopeTests(TestCase):
         request = self.factory.get(f"/api/kyc/?sociedad={RFC_TIZARA}")
         request.effective_scope = scope
         response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
-        ids = {row["id_contraparte"] for row in response.data}
+        ids = {row["id_contraparte"] for row in response.data["results"]}
         self.assertEqual(ids, {"cp000001"})
 
     def test_filtro_sociedad_no_expande_mas_alla_del_scope(self):
@@ -137,7 +139,7 @@ class PldContraparteKycScopeTests(TestCase):
         request = self.factory.get(f"/api/kyc/?sociedad={RFC_CAPITAL}")
         request.effective_scope = scope
         response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(response.data["count"], 0)
 
 
 class PldContraparteDocScopeTests(TestCase):
@@ -972,7 +974,7 @@ class CategoriaCumplimientoKycKybTests(TestCase):
         request = self.factory.get("/api/kyc/?categoria_cumplimiento=KYC")
         request.effective_scope = EffectiveScope(is_global=True)
         response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
-        ids = [r["id_kyc"] for r in response.data]
+        ids = [r["id_kyc"] for r in response.data["results"]]
         self.assertIn(fisica.id_kyc, ids)
         self.assertNotIn(moral.id_kyc, ids)
 
@@ -987,7 +989,7 @@ class CategoriaCumplimientoKycKybTests(TestCase):
             request = self.factory.get(f"/api/kyc/?categoria_cumplimiento={valor}")
             request.effective_scope = EffectiveScope(is_global=True)
             response = PldContraparteKycViewSet.as_view({"get": "list"})(request)
-            ids = [r["id_kyc"] for r in response.data]
+            ids = [r["id_kyc"] for r in response.data["results"]]
             self.assertIn(pendiente.id_kyc, ids, f"debería verse en el tab {valor}")
 
 
@@ -2491,3 +2493,140 @@ class ExportarExcelCumplimientoTests(TestCase):
         libro = self._get()
         hoja = libro["Beneficiarios_Finales"]
         self.assertEqual(hoja.max_row, 1)  # solo el encabezado
+
+
+class PldAvisoUIFTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.kyc = _kyc("cp900001", RFC_TIZARA)
+        self.scope = EffectiveScope(
+            is_global=False,
+            sociedad_rfcs=(RFC_TIZARA,),
+            perm_keys=("pld-compliance.ver", "pld-compliance.editar"),
+            identity_user_id="usr00001",
+        )
+        ahora = timezone.now()
+        self.aviso = PldAvisoUIF.objects.create(
+            kyc=self.kyc,
+            monto_acumulado="1000000.00",
+            proyecto="Proy-01",
+            sociedad="CTZ",
+            fecha_deteccion=ahora,
+            plazo_presentacion=ahora + datetime.timedelta(hours=24),
+            created_by="usr00001",
+            updated_by="usr00001",
+        )
+
+    def _list(self, scope=None):
+        request = _with_scope(self.factory.get("/api/avisos-uif/"), scope or self.scope)
+        view = PldAvisoUIFViewSet.as_view({"get": "list"})
+        return view(request)
+
+    def _presentar(self, id_aviso, payload=None, scope=None):
+        request = _with_scope(
+            self.factory.post(f"/api/avisos-uif/{id_aviso}/presentar/", payload or {}, format="json"),
+            scope or self.scope,
+        )
+        view = PldAvisoUIFViewSet.as_view({"post": "presentar"})
+        return view(request, pk=id_aviso)
+
+    def test_listar_avisos_del_kyc(self):
+        resp = self._list()
+        self.assertEqual(resp.status_code, 200)
+        ids = [a["id_aviso"] for a in resp.data["results"]]
+        self.assertIn(self.aviso.id_aviso, ids)
+
+    def test_filtrar_por_kyc(self):
+        otro_kyc = _kyc("cp900002", RFC_TIZARA)
+        ahora = timezone.now()
+        PldAvisoUIF.objects.create(
+            kyc=otro_kyc,
+            monto_acumulado="950000.00",
+            proyecto="Proy-02",
+            sociedad="CTZ",
+            fecha_deteccion=ahora,
+            plazo_presentacion=ahora + datetime.timedelta(hours=24),
+        )
+        request = _with_scope(
+            self.factory.get("/api/avisos-uif/", {"kyc": self.kyc.id_kyc}),
+            self.scope,
+        )
+        resp = PldAvisoUIFViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(resp.status_code, 200)
+        for aviso in resp.data["results"]:
+            self.assertEqual(aviso["kyc_id"], self.kyc.id_kyc)
+
+    def test_vencido_false_cuando_dentro_del_plazo(self):
+        resp = self._list()
+        aviso_data = next(a for a in resp.data["results"] if a["id_aviso"] == self.aviso.id_aviso)
+        self.assertFalse(aviso_data["vencido"])
+
+    def test_vencido_true_cuando_plazo_pasado(self):
+        self.aviso.plazo_presentacion = timezone.now() - datetime.timedelta(hours=1)
+        self.aviso.save(update_fields=["plazo_presentacion"])
+        resp = self._list()
+        aviso_data = next(a for a in resp.data["results"] if a["id_aviso"] == self.aviso.id_aviso)
+        self.assertTrue(aviso_data["vencido"])
+
+    def test_presentar_cambia_estado(self):
+        resp = self._presentar(
+            self.aviso.id_aviso,
+            {"link_evidencia": "https://drive.google.com/test", "notas": "Enviado a SICOAM"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.aviso.refresh_from_db()
+        self.assertEqual(self.aviso.estado, PldAvisoUIF.ESTADO_PRESENTADO)
+        self.assertEqual(self.aviso.link_evidencia, "https://drive.google.com/test")
+        self.assertEqual(self.aviso.notas, "Enviado a SICOAM")
+        self.assertIsNotNone(self.aviso.fecha_presentacion)
+        self.assertEqual(self.aviso.presentado_por, "usr00001")
+
+    def test_presentar_dos_veces_devuelve_400(self):
+        self._presentar(self.aviso.id_aviso)
+        resp = self._presentar(self.aviso.id_aviso)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_filtrar_por_estado_pendiente(self):
+        request = _with_scope(
+            self.factory.get("/api/avisos-uif/", {"estado": "PENDIENTE"}),
+            self.scope,
+        )
+        resp = PldAvisoUIFViewSet.as_view({"get": "list"})(request)
+        self.assertEqual(resp.status_code, 200)
+        for aviso in resp.data["results"]:
+            self.assertEqual(aviso["estado"], "PENDIENTE")
+
+    def test_aviso_creado_automaticamente_al_activar_umbral(self):
+        """activar_umbral crea PldAvisoUIF cuando supera_umbral=True."""
+        kyc = _kyc("cp900099", RFC_TIZARA)
+        acumulado_resp = {
+            "fecha_desde": None,
+            "items": [{"proyecto": "Proy-X", "sociedad": "CTZ", "acumulado": "1200000.00", "supera_umbral": True}],
+        }
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = Mock(status_code=200, json=Mock(return_value=acumulado_resp))
+            request = _with_scope(
+                self.factory.post(f"/api/kyc/{kyc.id_kyc}/activar-umbral/"),
+                self.scope,
+            )
+            view = PldContraparteKycViewSet.as_view({"post": "activar_umbral"})
+            resp = view(request, pk=kyc.id_kyc)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(PldAvisoUIF.objects.filter(kyc=kyc, proyecto="Proy-X", estado="PENDIENTE").exists())
+
+    def test_activar_umbral_idempotente_no_duplica_aviso(self):
+        """Segunda llamada a activar_umbral no crea un segundo aviso si ya existe uno PENDIENTE."""
+        kyc = _kyc("cp900098", RFC_TIZARA)
+        acumulado_resp = {
+            "fecha_desde": None,
+            "items": [{"proyecto": "Proy-Y", "sociedad": "CTZ", "acumulado": "1200000.00", "supera_umbral": True}],
+        }
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = Mock(status_code=200, json=Mock(return_value=acumulado_resp))
+            for _ in range(2):
+                request = _with_scope(
+                    self.factory.post(f"/api/kyc/{kyc.id_kyc}/activar-umbral/"),
+                    self.scope,
+                )
+                PldContraparteKycViewSet.as_view({"post": "activar_umbral"})(request, pk=kyc.id_kyc)
+        self.assertEqual(PldAvisoUIF.objects.filter(kyc=kyc, proyecto="Proy-Y").count(), 1)

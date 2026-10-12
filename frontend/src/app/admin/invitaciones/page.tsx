@@ -28,6 +28,7 @@ import {
 } from "@mui/material";
 import { Copy, Link2, ShieldOff, UploadCloud, UserPlus } from "lucide-react";
 import AppShell from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import { SessionUser, getSession } from "@/lib/auth";
 import {
   GeneralSociedad,
@@ -202,7 +203,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     // muestre apodos desde el primer render, sin esperar a que el usuario
     // abra el selector "Da acceso a" (ver recursoNombre()).
     listKyc()
-      .then((expedientes) =>
+      .then(({ results: expedientes }) =>
         setCatalogoRecursos((prev) => ({
           ...prev,
           pld_kyc: expedientes.map((kyc) => ({
@@ -224,7 +225,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
     if (recursoTipo === "pld_kyc" && !catalogoRecursos.pld_kyc) {
       setCargandoRecursos(true);
       listKyc()
-        .then((expedientes) =>
+        .then(({ results: expedientes }) =>
           setCatalogoRecursos((prev) => ({
             ...prev,
             pld_kyc: expedientes.map((kyc) => ({
@@ -460,8 +461,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Acceso de un solo uso para usuarios externos, sin contraseña. Modo desarrollo — sin envío de
-        correo real todavía, el link se muestra aquí directamente en vez de enviarse por email.
+        Acceso de un solo uso para usuarios externos, sin contraseña.
       </Typography>
 
       {error && (
@@ -665,8 +665,8 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
 
       {/* Filtros (07/Sep/2026) - Estado + rango de fecha de emision, sobre
           la lista ya combinada de Magic Links + tickets de proveedor. */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+      <FiltrosBar hideSearch search="" onSearchChange={() => {}}>
+        <FormControl size="small">
           <InputLabel id="filtro-estado-temporal-label">Estado</InputLabel>
           <Select
             labelId="filtro-estado-temporal-label"
@@ -700,7 +700,7 @@ function InvitacionesTemporalesTab({ session }: { session: SessionUser | null })
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
         />
-      </Stack>
+      </FiltrosBar>
 
       <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
@@ -1130,7 +1130,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Un correo que todavía no forma parte de CumbresBI no puede iniciar sesión hasta que un
-            Admin lo invite aquí — no hace falta enviarle ningún link, en cuanto queda pendiente ya
+            Admin, en cuanto queda pendiente ya
             puede entrar con su cuenta de Google Workspace.
           </Typography>
           <Stack component="form" direction={{ xs: "column", sm: "row" }} spacing={2} onSubmit={handleInvitarWorkspace}>
@@ -1172,9 +1172,8 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
             Dar acceso a un colaborador externo
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Para quien no tiene correo de Google Workspace pero necesita entrar a secciones reales
-            (roles/permisos asignados desde /admin/directorio). El link no vence por tiempo — solo
-            se revoca a mano.
+            Para quien no tiene correo de Google Workspace pero necesita entrar a secciones reales. 
+            El link no tiene caducidad, para revocar dirigete a la parte inferior de la página.
           </Typography>
           <Stack component="form" spacing={2} onSubmit={handleCrearExterno}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
@@ -1284,8 +1283,8 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
 
       {/* Filtros (07/Sep/2026, "igual en los internos") - mismo patron que
           InvitacionesTemporalesTab. */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+      <FiltrosBar hideSearch search="" onSearchChange={() => {}}>
+        <FormControl size="small">
           <InputLabel id="filtro-estado-colaborador-label">Estado</InputLabel>
           <Select
             labelId="filtro-estado-colaborador-label"
@@ -1319,7 +1318,7 @@ function ColaboradoresTab({ session }: { session: SessionUser | null }) {
           onChange={(e) => setFiltroFechaHasta(e.target.value)}
           InputLabelProps={{ shrink: true }}
         />
-      </Stack>
+      </FiltrosBar>
 
       <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por

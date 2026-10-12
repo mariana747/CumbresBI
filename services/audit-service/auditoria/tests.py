@@ -39,23 +39,23 @@ class BitacoraAuditoriaScopeTests(TestCase):
     def test_global_ve_la_bitacora(self):
         response = self._listar(EffectiveScope(is_global=True))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data["count"], 1)
 
     def test_rol_auditor_ve_la_bitacora_aunque_no_sea_global(self):
         scope = EffectiveScope(is_global=False, sociedad_rfcs=("#####1",), role_keys=("AUDITOR",))
         response = self._listar(scope)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data["count"], 1)
 
     def test_otro_rol_no_global_no_ve_la_bitacora(self):
         """Ej. un PLD_ANALISTA con alcance de sociedad no deberia poder leer
         el log de auditoria completo solo por tener alcance de datos."""
         scope = EffectiveScope(is_global=False, sociedad_rfcs=("#####1",), role_keys=("PLD_ANALISTA",))
         response = self._listar(scope)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(response.data["count"], 0)
 
     def test_anonimo_no_ve_nada(self):
         response = self._listar(EffectiveScope.anonymous())
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(response.data["count"], 0)
 
 
 class FiltroClienteTests(TestCase):
@@ -96,25 +96,25 @@ class FiltroClienteTests(TestCase):
 
     def test_encuentra_por_id_contraparte(self):
         response = self._listar("cp000200")
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["accion"], "pld_contrapartes_kyc.aprobar")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["accion"], "pld_contrapartes_kyc.aprobar")
 
     def test_encuentra_por_nombre_completo_parcial(self):
         response = self._listar("Perez")
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data["count"], 1)
 
     def test_no_mezcla_eventos_de_otro_cliente(self):
         response = self._listar("cp000200")
-        acciones = {row["accion"] for row in response.data}
+        acciones = {row["accion"] for row in response.data["results"]}
         self.assertNotIn("iam_users.create", acciones)
 
     def test_sin_coincidencia_regresa_vacio(self):
         response = self._listar("no-existe-este-cliente")
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(response.data["count"], 0)
 
     def test_sigue_encontrando_por_accion_como_antes(self):
         """El buscador unificado no debe perder lo que ya hacia el
         SearchFilter generico que reemplazo (accion/entidad/entidad_id)."""
         response = self._listar("iam_users.create")
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["accion"], "iam_users.create")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["accion"], "iam_users.create")

@@ -173,6 +173,7 @@ export interface PldContraparteKyc {
   grado_riesgo_manual: boolean;
   es_pep: boolean | null;
   notas_riesgo: string | null;
+  requiere_revision_pld: boolean;
 }
 
 const PLD_API_BASE_URL = `${GATEWAY_URL}/pld`;
@@ -289,21 +290,24 @@ export const rechazarSolicitudEliminacion = (
 export async function listKyc(params?: {
   estadoLlenado?: string;
   search?: string;
-  // Un analista con acceso a varias sociedades las ve todas mezcladas por
-  // default; este filtro acota la vista sin tocar el scope real de la
-  // sesion.
   sociedadRfc?: string;
   proyecto?: string;
-  // Filtra la lista por KYC/KYB/PENDIENTE_REVISION, mismo criterio que
-  // los demas filtros de arriba.
   categoriaCumplimiento?: PldCategoriaCumplimiento;
-}): Promise<(PldContraparteKyc & PldDatosEditables)[]> {
+  desde?: string;
+  hasta?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<{ count: number; results: (PldContraparteKyc & PldDatosEditables)[] }> {
   const query = new URLSearchParams();
   if (params?.estadoLlenado) query.set("estado_llenado", params.estadoLlenado);
   if (params?.search) query.set("search", params.search);
   if (params?.sociedadRfc) query.set("sociedad", params.sociedadRfc);
   if (params?.proyecto) query.set("proyecto", params.proyecto);
   if (params?.categoriaCumplimiento) query.set("categoria_cumplimiento", params.categoriaCumplimiento);
+  if (params?.desde) query.set("desde", params.desde);
+  if (params?.hasta) query.set("hasta", params.hasta);
+  if (params?.page && params.page > 1) query.set("page", String(params.page));
+  if (params?.pageSize) query.set("page_size", String(params.pageSize));
   const qs = query.toString();
 
   const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${qs ? `?${qs}` : ""}`);
@@ -840,6 +844,42 @@ export async function aprobarKyc(idKyc: string, aprobadoPor: string): Promise<Pl
   return response.json();
 }
 
+export interface PldNotificacion {
+  id_notificacion: string;
+  destinatario: string;
+  tipo: string;
+  mensaje: string;
+  link_url: string | null;
+  leida: boolean;
+  created_at: string;
+}
+
+export async function listNotificacionesPld(soloNoLeidas = false): Promise<PldNotificacion[]> {
+  const params = soloNoLeidas ? "?solo_no_leidas=true" : "";
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/notificaciones/${params}`);
+  if (!response.ok) return [];
+  return response.json();
+}
+
+export async function marcarNotificacionPldLeida(idNotificacion: string): Promise<void> {
+  await apiFetch("PLD", `${PLD_API_BASE_URL}/api/notificaciones/${idNotificacion}/marcar_leida/`, {
+    method: "POST",
+  });
+}
+
+// Activa requiere_revision_pld si algún proyecto de esta contraparte supera
+// $948,000 MXN. Idempotente — si ya estaba activo no hace nada. El backend
+// consulta tesoreria-service internamente; el flag solo se apaga manualmente.
+export async function activarUmbralKyc(idKyc: string): Promise<PldContraparteKyc> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/kyc/${idKyc}/activar-umbral/`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("PLD", response);
+  }
+  return response.json();
+}
+
 // Semaforo de estado_cuenta (17/Ago/2026, vista de detalle) - mismo peso de
 // decision que aprobarKyc, mismo permiso (pld-compliance.aprobar).
 async function cambiarEstadoCuenta(
@@ -1267,4 +1307,66 @@ export async function descargarExcelCumplimiento(): Promise<void> {
   link.download = "reporte_cumplimiento_pld.xlsx";
   link.click();
   URL.revokeObjectURL(url);
+}
+
+// ── Avisos UIF ────────────────────────────────────────────────────────────────
+
+export type PldAvisoEstado = "PENDIENTE" | "PRESENTADO";
+
+export interface PldAvisoUIF {
+  id_aviso: string;
+  kyc_id: string;
+  nombre_contraparte: string;
+  estado: PldAvisoEstado;
+  vencido: boolean;
+  monto_acumulado: string;
+  proyecto: string;
+  sociedad: string;
+  fecha_deteccion: string;
+  plazo_presentacion: string;
+  fecha_presentacion: string | null;
+  presentado_por: string | null;
+  link_evidencia: string | null;
+  notas: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export async function listAvisosUIF(params?: {
+  kyc?: string;
+  estado?: PldAvisoEstado;
+}): Promise<PldAvisoUIF[]> {
+  const qs = new URLSearchParams();
+  if (params?.kyc) qs.set("kyc", params.kyc);
+  if (params?.estado) qs.set("estado", params.estado);
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/avisos-uif/?${qs.toString()}`);
+  if (!response.ok) throw await friendlyApiError("PLD", response);
+  const data = await response.json();
+  return data.results ?? data;
+}
+
+export async function presentarAvisoUIF(
+  idAviso: string,
+  payload: { notas?: string }
+): Promise<PldAvisoUIF> {
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/avisos-uif/${idAviso}/presentar/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw await friendlyApiError("PLD", response);
+  return response.json();
+}
+
+export async function subirEvidenciaAvisoUIF(idAviso: string, archivo: File): Promise<PldAvisoUIF> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch("PLD", `${PLD_API_BASE_URL}/api/avisos-uif/${idAviso}/subir_evidencia/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) throw await friendlyApiError("PLD", response);
+  return response.json();
 }

@@ -163,3 +163,40 @@ def enviar_correo_documento_faltante(
         logger.warning("mail-service rechazo el aviso de documento faltante a %s: %s", email, respuesta.text)
         return False
     return True
+
+
+def enviar_correo_umbral_pld(request, email: str, nombre_contraparte: str, link_expediente: str) -> bool:
+    """Avisa al analista que una contraparte cruzó el umbral PLD ($948,000 MXN).
+    No propaga la excepcion si mail-service no responde."""
+    headers, cookies = forward_auth_headers(request)
+    html_body = _renderizar_correo(
+        kicker_texto="Alerta PLD",
+        kicker_bg="#FDE8E8",
+        kicker_color="#9B1C1C",
+        titulo="Contraparte supera el umbral de monitoreo PLD",
+        cuerpo_html=(
+            f"<p style='margin:0;'>La contraparte <strong>{escape(nombre_contraparte)}</strong> "
+            "ha acumulado ingresos que alcanzan o superan el umbral regulatorio de "
+            "<strong>$948,000 MXN</strong> en al menos un proyecto. "
+            "Se requiere iniciar o actualizar el proceso PLD correspondiente.</p>"
+        ),
+        cta_texto="Ver expediente",
+        cta_url=link_expediente,
+        fineprint_texto="Este aviso se generó automáticamente al registrar el cruce del umbral.",
+    )
+    try:
+        respuesta = requests.post(
+            f"{settings.MAIL_SERVICE_URL}/api/send/",
+            params={"perm": "pld-compliance.aprobar"},
+            json={"to": email, "subject": "Alerta PLD: contraparte supera umbral de $948,000 MXN", "html_body": html_body},
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_SEGUNDOS,
+        )
+    except requests.RequestException:
+        logger.warning("mail-service no respondio al enviar alerta de umbral PLD a %s", email, exc_info=True)
+        return False
+    if respuesta.status_code != 201:
+        logger.warning("mail-service rechazo la alerta de umbral PLD a %s: %s", email, respuesta.text)
+        return False
+    return True

@@ -1,7 +1,7 @@
 # Build context is the repo root (see docker-compose.yml) so this Dockerfile
 # can install the shared libs/cumbresbi-scope package - all paths below are
 # relative to the repo root, not to this service's folder.
-FROM python:3.12-slim
+FROM public.ecr.aws/docker/library/python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1
 

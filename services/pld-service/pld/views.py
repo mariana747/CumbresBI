@@ -22,23 +22,28 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet, ViewSet
 
 from .audit_utils import contexto_kyc, emitir_evento_auditoria
+from .pagination import ListadoPagination
 from .models import (
+    PldAvisoUIF,
     PldContraparteDoc,
     PldContraparteKyc,
     PldDocumentoTicket,
+    PldNotificacion,
     PldRepresentanteLegal,
     PldSolicitudEliminacionDoc,
     PldTicketCliente,
 )
 from .serializers import (
+    PldAvisoUIFSerializer,
     PldContraparteDocSerializer,
     PldContraparteKycSerializer,
+    PldNotificacionSerializer,
     PldRepresentanteLegalSerializer,
     PldSolicitudEliminacionDocSerializer,
     PldTicketClienteSerializer,
 )
 from . import recaptcha
-from .mail_utils import enviar_correo_documento_faltante, enviar_correo_ticket_cliente
+from .mail_utils import enviar_correo_documento_faltante, enviar_correo_ticket_cliente, enviar_correo_umbral_pld
 from .signals import recalcular_estado_llenado
 from .ticket_utils import generate_token, hash_token
 
@@ -357,6 +362,52 @@ MAX_ARCHIVOS_POR_LOTE = 5
 MAX_TAMANO_ARCHIVO_MB = 2
 MAX_TAMANO_ARCHIVO_BYTES = MAX_TAMANO_ARCHIVO_MB * 1024 * 1024
 
+# ── Helpers para notificaciones de umbral PLD ────────────────────────────────
+_ROLES_ALERTA_PLD = ["SUPER_ADMIN", "IAM_ADMIN", "PLD_APROBADOR", "PLD_ANALISTA"]
+_TIMEOUT_IAM = 5
+
+
+def _usuarios_por_perm_pld(headers, cookies) -> list[str]:
+    """Lista de identity_user_id de usuarios con roles PLD, via iam-service.
+    Fail-open: si iam no responde, devuelve lista vacía."""
+    user_ids: set[str] = set()
+    for role_key in _ROLES_ALERTA_PLD:
+        try:
+            resp = requests.get(
+                f"{settings.IAM_SERVICE_URL}/api/usuarios/",
+                params={"role": role_key},
+                headers=headers,
+                cookies=cookies,
+                timeout=_TIMEOUT_IAM,
+            )
+        except requests.RequestException:
+            logger.warning("iam-service no respondio al listar usuarios con rol %s para alerta PLD", role_key)
+            continue
+        if resp.status_code == 200:
+            for u in resp.json():
+                uid = u.get("user_id")
+                if uid:
+                    user_ids.add(uid)
+    return list(user_ids)
+
+
+def _email_de_usuario(user_id: str, headers, cookies) -> str | None:
+    """Resuelve el primary_email de un user_id via iam-service. Fail-open."""
+    if not user_id:
+        return None
+    try:
+        resp = requests.get(
+            f"{settings.IAM_SERVICE_URL}/api/usuarios/{user_id}/",
+            headers=headers,
+            cookies=cookies,
+            timeout=_TIMEOUT_IAM,
+        )
+    except requests.RequestException:
+        return None
+    if resp.status_code == 200:
+        return resp.json().get("primary_email")
+    return None
+
 
 class PldContraparteKycViewSet(ModelViewSet):
     """Expediente KYC. Alcance real por sociedad (ScopedManager, ver
@@ -372,6 +423,7 @@ class PldContraparteKycViewSet(ModelViewSet):
     serializer_class = PldContraparteKycSerializer
     filter_backends = [SearchFilter]
     search_fields = ["id_contraparte", "curp"]
+    pagination_class = ListadoPagination
 
     def get_permissions(self):
         if self.action == "create":
@@ -419,6 +471,12 @@ class PldContraparteKycViewSet(ModelViewSet):
                 )
             else:
                 queryset = queryset.filter(categoria_cumplimiento=categoria)
+        desde = self.request.query_params.get("desde")
+        if desde:
+            queryset = queryset.filter(created_at__date__gte=desde)
+        hasta = self.request.query_params.get("hasta")
+        if hasta:
+            queryset = queryset.filter(created_at__date__lte=hasta)
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -1107,6 +1165,97 @@ class PldContraparteKycViewSet(ModelViewSet):
         """Deshace marcar_sospechoso/congelar - vuelve la cuenta a ACTIVA."""
         return self._set_estado_cuenta(request, PldContraparteKyc.CUENTA_ACTIVA, "pld_contrapartes_kyc.reactivar_cuenta")
 
+    @action(detail=True, methods=["post"], url_path="activar-umbral")
+    def activar_umbral(self, request, pk=None):
+        """Consulta el acumulado de ingresos de esta contraparte en
+        tesoreria-service. Si algún proyecto supera $948,000 MXN y el flag
+        requiere_revision_pld estaba en False, lo activa y emite auditoría.
+        Idempotente: si ya estaba activo no hace nada. No desactiva el flag
+        — eso lo hace el analista manualmente tras documentar la revisión."""
+        kyc = self.get_object()
+        actor = request.effective_scope.identity_user_id
+
+        try:
+            resp = requests.get(
+                f"{settings.TESORERIA_SERVICE_URL}/api/flujos/acumulado-contraparte/",
+                params={"contraparte": kyc.id_contraparte},
+                headers={k: v for k, v in request.headers.items() if k.lower() in ("authorization", "cookie", "x-scope")},
+                cookies=request.COOKIES,
+                timeout=5,
+            )
+        except requests.exceptions.Timeout:
+            return Response({"detail": "Timeout al consultar tesorería."}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+        except requests.exceptions.RequestException:
+            return Response({"detail": "Error de red al consultar tesorería."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        if resp.status_code != 200:
+            return Response({"detail": "No se pudo consultar el acumulado."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        items = resp.json().get("items", [])
+        supera = any(item.get("supera_umbral") for item in items)
+        if supera and not kyc.requiere_revision_pld:
+            kyc.requiere_revision_pld = True
+            kyc.updated_by = actor
+            kyc.save(update_fields=["requiere_revision_pld", "updated_by", "updated_at"])
+            emitir_evento_auditoria(
+                "pld_contrapartes_kyc.umbral_alcanzado",
+                "pld_contrapartes_kyc",
+                str(kyc.id_kyc),
+                actor_user_id=actor,
+                valores_previos={"requiere_revision_pld": False},
+                valores_nuevos={"requiere_revision_pld": True},
+            )
+            # Crear Aviso UIF por cada proyecto que supera el umbral
+            # (idempotente: no duplica si ya existe uno PENDIENTE para el mismo kyc+proyecto).
+            ahora = timezone.now()
+            for item in items:
+                if not item.get("supera_umbral"):
+                    continue
+                ya_existe = PldAvisoUIF.objects.filter(
+                    kyc=kyc,
+                    proyecto=item.get("proyecto", ""),
+                    sociedad=item.get("sociedad", ""),
+                    estado=PldAvisoUIF.ESTADO_PENDIENTE,
+                ).exists()
+                if not ya_existe:
+                    PldAvisoUIF.objects.create(
+                        kyc=kyc,
+                        monto_acumulado=item.get("acumulado", 0),
+                        proyecto=item.get("proyecto", ""),
+                        sociedad=item.get("sociedad", ""),
+                        fecha_deteccion=ahora,
+                        plazo_presentacion=ahora + datetime.timedelta(hours=24),
+                        created_by=actor,
+                        updated_by=actor,
+                    )
+            # Notificaciones in-app y correo (idempotentes por link_url).
+            try:
+                nombre = kyc.nombre_completo or f"Contraparte {kyc.id_contraparte}"
+                link_url = f"{settings.FRONTEND_BASE_URL}/pld/{kyc.id_kyc}"
+                mensaje = f"{nombre} superó el umbral PLD de $948,000 MXN. Se requiere revisión."
+                headers_idem, cookies_idem = forward_auth_headers(request)
+                for uid in _usuarios_por_perm_pld(headers_idem, cookies_idem):
+                    ya_existe = PldNotificacion.objects.filter(
+                        destinatario=uid,
+                        tipo=PldNotificacion.TIPO_UMBRAL_PLD,
+                        link_url=link_url,
+                        leida=False,
+                    ).exists()
+                    if not ya_existe:
+                        PldNotificacion.objects.create(
+                            destinatario=uid,
+                            tipo=PldNotificacion.TIPO_UMBRAL_PLD,
+                            mensaje=mensaje,
+                            link_url=link_url,
+                        )
+                email_analista = _email_de_usuario(kyc.created_by, headers_idem, cookies_idem)
+                if email_analista:
+                    enviar_correo_umbral_pld(request, email_analista, nombre, link_url)
+            except Exception:
+                logger.warning("Error al crear notificaciones de umbral PLD para kyc %s", kyc.id_kyc, exc_info=True)
+
+        return Response(self.get_serializer(kyc).data)
+
 
 class PldRepresentanteLegalViewSet(ModelViewSet):
     """Representante legal / apoderado de una contraparte Moral (02/Sep/2026,
@@ -1389,6 +1538,127 @@ def _emitir_evento_eliminar_documento(doc, actor_user_id, accion="pld_contrapart
         actor_user_id=actor_user_id,
         valores_previos={**contexto_kyc(doc.kyc), "denominacion": doc.denominacion, "drive_file_id": doc.drive_file_id},
     )
+
+
+class PldAvisoUIFViewSet(ModelViewSet):
+    """Tracker de Avisos formales a la UIF (LFPIORPI art. 24).
+    Se crea automáticamente desde activar_umbral cuando una contraparte
+    supera $948,000 MXN en 6 meses. El analista lo marca como PRESENTADO
+    una vez que sube el aviso al portal SICOAM."""
+
+    queryset = PldAvisoUIF.objects.select_related("kyc").all()
+    serializer_class = PldAvisoUIFSerializer
+    pagination_class = ListadoPagination
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in ("presentar",):
+            return [require_permission("pld-compliance.editar")()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        kyc_id = self.request.query_params.get("kyc")
+        if kyc_id:
+            qs = qs.filter(kyc_id=kyc_id)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+        return qs
+
+    @action(detail=True, methods=["post"])
+    def presentar(self, request, pk=None):
+        """Marca el aviso como PRESENTADO. Acepta link_evidencia y notas."""
+        aviso = self.get_object()
+        if aviso.estado == PldAvisoUIF.ESTADO_PRESENTADO:
+            return Response({"detail": "El aviso ya fue marcado como presentado."}, status=status.HTTP_400_BAD_REQUEST)
+        actor = request.effective_scope.identity_user_id
+        aviso.estado = PldAvisoUIF.ESTADO_PRESENTADO
+        aviso.fecha_presentacion = timezone.now()
+        aviso.presentado_por = actor
+        aviso.link_evidencia = request.data.get("link_evidencia") or aviso.link_evidencia
+        aviso.notas = request.data.get("notas") or aviso.notas
+        aviso.updated_by = actor
+        aviso.save(update_fields=[
+            "estado", "fecha_presentacion", "presentado_por",
+            "link_evidencia", "notas", "updated_by", "updated_at",
+        ])
+        emitir_evento_auditoria(
+            "pld_aviso_uif.presentado",
+            "pld_aviso_uif",
+            str(aviso.id_aviso),
+            actor_user_id=actor,
+            valores_previos={"estado": PldAvisoUIF.ESTADO_PENDIENTE},
+            valores_nuevos={"estado": PldAvisoUIF.ESTADO_PRESENTADO},
+        )
+        return Response(self.get_serializer(aviso).data)
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_evidencia(self, request, pk=None):
+        """Sube el comprobante de presentación ante SICOAM a Drive y guarda el link."""
+        aviso = self.get_object()
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+
+        nombre_archivo = f"AvisoUIF-{aviso.id_aviso}-{archivo.name}"
+        carpeta = f"PLD/AvisosUIF/{aviso.id_aviso}"
+        headers, cookies = forward_auth_headers(request)
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "pld-compliance.editar"},
+                files={"file": (nombre_archivo, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir evidencia de aviso %s", aviso.id_aviso, exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+
+        resultado = upstream.json()
+        aviso.link_evidencia = resultado["web_view_link"]
+        aviso.updated_by = request.effective_scope.identity_user_id
+        aviso.save(update_fields=["link_evidencia", "updated_by", "updated_at"])
+        emitir_evento_auditoria(
+            "pld_aviso_uif.subir_evidencia",
+            "pld_aviso_uif",
+            str(aviso.id_aviso),
+            actor_user_id=request.effective_scope.identity_user_id,
+            valores_nuevos={"nombre_archivo": nombre_archivo},
+        )
+        return Response(self.get_serializer(aviso).data)
+
+
+class PldNotificacionViewSet(ModelViewSet):
+    """Campana de pld-service. Solo lectura de las propias del usuario
+    autenticado + accion marcar_leida. Mismo patron que
+    TesoreriaNotificacionViewSet."""
+
+    serializer_class = PldNotificacionSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        destinatario = getattr(self.request.effective_scope, "identity_user_id", None)
+        qs = PldNotificacion.objects.filter(destinatario=destinatario)
+        if self.request.query_params.get("solo_no_leidas") == "true":
+            qs = qs.filter(leida=False)
+        return qs
+
+    @action(detail=True, methods=["post"])
+    def marcar_leida(self, request, pk=None):
+        notificacion = self.get_object()
+        notificacion.leida = True
+        notificacion.save(update_fields=["leida"])
+        return Response(self.get_serializer(notificacion).data)
 
 
 class PldSolicitudEliminacionDocViewSet(ModelViewSet):

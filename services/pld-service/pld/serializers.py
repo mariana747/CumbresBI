@@ -3,8 +3,10 @@ import re
 from rest_framework import serializers
 
 from .models import (
+    PldAvisoUIF,
     PldContraparteDoc,
     PldContraparteKyc,
+    PldNotificacion,
     PldRepresentanteLegal,
     PldSolicitudEliminacionDoc,
     PldTicketCliente,
@@ -244,6 +246,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "grado_riesgo_manual",
             "es_pep",
             "notas_riesgo",
+            "requiere_revision_pld",
         ]
         # estado_llenado_manual NO esta aqui a proposito: no se expone para
         # setear directo, solo se prende solo (ver update() abajo) cuando el
@@ -384,3 +387,36 @@ class PldTicketClienteSerializer(serializers.ModelSerializer):
             "last_used_at",
             "revoked_at",
         ]
+
+
+class PldNotificacionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PldNotificacion
+        fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "leida", "created_at"]
+        read_only_fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "created_at"]
+
+
+class PldAvisoUIFSerializer(serializers.ModelSerializer):
+    vencido = serializers.BooleanField(read_only=True)
+    nombre_contraparte = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PldAvisoUIF
+        fields = [
+            "id_aviso", "kyc_id", "nombre_contraparte", "estado", "vencido",
+            "monto_acumulado", "proyecto", "sociedad",
+            "fecha_deteccion", "plazo_presentacion",
+            "fecha_presentacion", "presentado_por",
+            "link_evidencia", "notas",
+            "created_at", "created_by", "updated_at", "updated_by",
+        ]
+        read_only_fields = [
+            "id_aviso", "kyc_id", "nombre_contraparte", "vencido",
+            "fecha_deteccion", "plazo_presentacion",
+            "created_at", "created_by", "updated_at", "updated_by",
+        ]
+
+    def get_nombre_contraparte(self, obj):
+        return obj.kyc.nombre_para_mostrar if hasattr(obj.kyc, "nombre_para_mostrar") else (
+            obj.kyc.nombre_completo or f"Contraparte {obj.kyc.id_contraparte}"
+        )

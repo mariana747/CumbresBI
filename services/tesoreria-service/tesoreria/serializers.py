@@ -389,6 +389,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
     exista esa automatizacion; por ahora las llena quien captura."""
 
     contrato_sociedad = serializers.CharField(source="contrato.sociedad", read_only=True, default=None)
+    contrato_proyecto = serializers.CharField(source="contrato.proyecto", read_only=True, default=None)
     contrato_concepto_factura = serializers.CharField(source="contrato.concepto_factura", read_only=True, default=None)
     contrato_contraparte_nombre = serializers.SerializerMethodField()
     cuenta_alias = serializers.CharField(source="cuenta.alias", read_only=True)
@@ -421,6 +422,7 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "id_flujo",
             "contrato",
             "contrato_sociedad",
+            "contrato_proyecto",
             "contrato_concepto_factura",
             "contrato_contraparte_nombre",
             "periodo_nomina",

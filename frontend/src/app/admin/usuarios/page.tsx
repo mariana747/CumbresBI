@@ -17,7 +17,6 @@ import {
   Divider,
   FormControl,
   IconButton,
-  InputAdornment,
   InputLabel,
   Menu,
   MenuItem,
@@ -35,8 +34,9 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Ban, Building2, Clock, PencilLine, RotateCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
+import { Ban, Building2, Clock, PencilLine, RotateCcw, ShieldCheck, Trash2, Users } from "lucide-react";
 import AppShell, { notifySinRolChanged } from "@/components/AppShell";
+import FiltrosBar from "@/components/FiltrosBar";
 import EmpresaAssignmentDialog from "@/components/EmpresaAssignmentDialog";
 import RoleAssignmentDialog from "@/components/RoleAssignmentDialog";
 import { getSession, SessionUser } from "@/lib/auth";
@@ -307,26 +307,16 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Usuarios registrados en iam-service. Búsqueda por correo/nombre y
+        Usuarios registrados en CumbresBI. Búsqueda por correo/nombre y
         filtros por estado, rol y empresa.
       </Typography>
 
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
-        <TextField
-          size="small"
-          placeholder="Buscar por correo o nombre..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          sx={{ flex: 1, maxWidth: 360 }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search size={16} strokeWidth={1.5} />
-              </InputAdornment>
-            ),
-          }}
-        />
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por correo o nombre..."
+      >
+        <FormControl size="small">
           <InputLabel id="status-filter-label">Estado</InputLabel>
           <Select
             labelId="status-filter-label"
@@ -339,7 +329,7 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
             <MenuItem value="SUSPENDED">Suspendido</MenuItem>
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 200 }}>
+        <FormControl size="small">
           <InputLabel id="role-filter-label">Rol</InputLabel>
           <Select
             labelId="role-filter-label"
@@ -358,7 +348,7 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
+        <FormControl size="small">
           <InputLabel id="group-filter-label">Empresa</InputLabel>
           <Select labelId="group-filter-label" label="Empresa" value={group} onChange={(e) => setGroup(e.target.value)}>
             <MenuItem value="">Todas</MenuItem>
@@ -369,7 +359,7 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 140 }}>
+        <FormControl size="small">
           <InputLabel id="access-mode-filter-label">Tipo</InputLabel>
           <Select
             labelId="access-mode-filter-label"
@@ -382,7 +372,7 @@ function DirectorioUsuariosContent({ session }: { session: SessionUser | null })
             <MenuItem value="RESTRICTED">Externo</MenuItem>
           </Select>
         </FormControl>
-      </Stack>
+      </FiltrosBar>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -963,8 +953,8 @@ function SuspendidosTab({ session }: { session: SessionUser | null }) {
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Usuarios suspendidos no pueden iniciar sesión ni canjear su acceso hasta que se
-        reactiven aquí. Si la suspensión vino de revocar un acceso externo, reactivar solo
-        les devuelve el login — el enlace en sí necesita "Reenviar" desde Invitaciones.
+        reactiven. Si la suspensión vino de revocar un acceso externo, reactivar solo
+        les devuelve el login, el enlace en sí necesita "Reenviar" desde Invitaciones.
       </Typography>
 
       {error && (

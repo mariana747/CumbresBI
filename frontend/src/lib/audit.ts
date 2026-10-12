@@ -27,19 +27,18 @@ export async function listBitacora({
   accion,
   desde,
   hasta,
+  page,
+  pageSize,
 }: {
-  // Un solo buscador (18/Ago/2026, auditoria especifica del Motor
-  // Documental dentro de PLD): ademas de accion/entidad/entidad_id, tambien
-  // busca id_contraparte/nombre_completo del cliente dentro del JSON
-  // valores_nuevos/valores_previos - ver
-  // audit-service/auditoria/views.py::get_queryset.
   search?: string;
   servicioOrigen?: string;
   entidad?: string;
   accion?: string;
   desde?: string;
   hasta?: string;
-} = {}): Promise<BitacoraEvento[]> {
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<{ count: number; results: BitacoraEvento[] }> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (servicioOrigen) params.set("servicio_origen", servicioOrigen);
@@ -47,6 +46,8 @@ export async function listBitacora({
   if (accion) params.set("accion", accion);
   if (desde) params.set("desde", desde);
   if (hasta) params.set("hasta", hasta);
+  if (page && page > 1) params.set("page", String(page));
+  if (pageSize) params.set("page_size", String(pageSize));
 
   const response = await apiFetch("AUDIT", `${AUDIT_API_BASE_URL}/api/bitacora/?${params.toString()}`);
   if (!response.ok) {
