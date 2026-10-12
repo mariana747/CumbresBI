@@ -187,13 +187,29 @@ class ViviendaRelExpedienteClienteSerializer(serializers.ModelSerializer):
 
 class ViviendaVentasExpedienteItemSerializer(serializers.ModelSerializer):
     """Checklist de documentos de un expediente (status pendiente/incompleto
-    /entregado/aprobado)."""
+    /entregado/aprobado). expediente_estado y expediente_vivienda_denominacion
+    son read-only y solo se poblean cuando el viewset hace select_related
+    (firmas de escrituras / entregas de vivienda cross-cutting views)."""
+
+    expediente_estado = serializers.SerializerMethodField()
+    expediente_vivienda_denominacion = serializers.SerializerMethodField()
+
+    def get_expediente_estado(self, obj):
+        return getattr(obj.expediente, "estado", None)
+
+    def get_expediente_vivienda_denominacion(self, obj):
+        vivienda = getattr(obj.expediente, "vivienda", None)
+        if vivienda is None:
+            return None
+        return vivienda.denominacion or vivienda.num_oficial
 
     class Meta:
         model = ViviendaVentasExpedienteItem
         fields = [
             "id_item",
             "expediente",
+            "expediente_estado",
+            "expediente_vivienda_denominacion",
             "denominacion",
             "detalles_adicionales",
             "status",
@@ -209,4 +225,4 @@ class ViviendaVentasExpedienteItemSerializer(serializers.ModelSerializer):
             "updated_at",
             "updated_by",
         ]
-        read_only_fields = ["id_item", "created_at", "updated_at"]
+        read_only_fields = ["id_item", "expediente_estado", "expediente_vivienda_denominacion", "created_at", "updated_at"]

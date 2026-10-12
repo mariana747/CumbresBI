@@ -420,6 +420,8 @@ export interface ViviendaExpediente {
 export interface ViviendaExpedienteItem {
   id_item: string;
   expediente: string;
+  expediente_estado: ViviendaExpedienteEstado | null;
+  expediente_vivienda_denominacion: string | null;
   denominacion: string | null;
   detalles_adicionales: string | null;
   status: ViviendaItemStatus;
@@ -573,6 +575,15 @@ export async function deleteClienteExpediente(idRelViviendaExpCliente: string): 
 
 export async function listItems(expedienteId: string): Promise<ViviendaExpedienteItem[]> {
   const params = new URLSearchParams({ expediente: expedienteId });
+  const response = await apiFetch("VIVIENDA", `${VIVIENDA_API_BASE_URL}/api/expedientes-items/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+  return response.json();
+}
+
+export async function listItemsByDenominacion(denominacion: string): Promise<ViviendaExpedienteItem[]> {
+  const params = new URLSearchParams({ denominacion });
   const response = await apiFetch("VIVIENDA", `${VIVIENDA_API_BASE_URL}/api/expedientes-items/?${params.toString()}`);
   if (!response.ok) {
     throw await friendlyApiError("VIVIENDA", response);

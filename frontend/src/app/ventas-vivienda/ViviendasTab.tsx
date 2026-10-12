@@ -66,6 +66,7 @@ export default function ViviendasTab({
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   const [viviendas, setViviendas] = useState<ViviendaUnidad[]>([]);
   const [filtroProyecto, setFiltroProyecto] = useState("");
+  const [filtroDisponible, setFiltroDisponible] = useState<"" | "true" | "false">("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +87,10 @@ export default function ViviendasTab({
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"))
       .finally(() => setLoading(false));
   }
+
+  const viviendasFiltradas = filtroDisponible === ""
+    ? viviendas
+    : viviendas.filter((v) => (v.disponible ? "true" : "false") === filtroDisponible);
 
   useEffect(() => {
     const timeout = setTimeout(refresh, 300);
@@ -193,6 +198,19 @@ export default function ViviendasTab({
               ))}
             </Select>
           </FormControl>
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel id="filtro-disponible-label">Disponibilidad</InputLabel>
+            <Select
+              labelId="filtro-disponible-label"
+              label="Disponibilidad"
+              value={filtroDisponible}
+              onChange={(e) => setFiltroDisponible(e.target.value as "" | "true" | "false")}
+            >
+              <MenuItem value="">Todas</MenuItem>
+              <MenuItem value="true">Disponibles</MenuItem>
+              <MenuItem value="false">No disponibles</MenuItem>
+            </Select>
+          </FormControl>
           <TextField
             size="small"
             placeholder="Buscar por número, denominación, modelo o torre..."
@@ -238,7 +256,7 @@ export default function ViviendasTab({
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : viviendas.length === 0 ? (
+              ) : viviendasFiltradas.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -247,7 +265,7 @@ export default function ViviendasTab({
                   </TableCell>
                 </TableRow>
               ) : (
-                viviendas.map((v) => (
+                viviendasFiltradas.map((v) => (
                   <TableRow key={v.id_vivienda} hover>
                     <TableCell>{v.denominacion || v.num_oficial || "—"}</TableCell>
                     <TableCell>{v.proyecto_denominacion || "—"}</TableCell>
