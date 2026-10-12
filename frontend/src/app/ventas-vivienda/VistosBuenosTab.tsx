@@ -54,7 +54,7 @@ function fmtFecha(f: string | null): string {
   return isNaN(d.getTime()) ? f : d.toLocaleDateString("es-MX");
 }
 
-type TabStatus = "APROBADO" | "POSPUESTO" | "NO APLICA" | "";
+type TabStatus = ViviendaItemStatus | "";
 
 type TabConfig = { label: string; value: TabStatus }[];
 
