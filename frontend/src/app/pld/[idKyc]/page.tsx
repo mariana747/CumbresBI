@@ -53,6 +53,7 @@ import {
   ShieldQuestion,
   Snowflake,
   Trash2,
+  Upload as UploadIcon,
   UploadCloud,
   X as CloseIcon,
 } from "lucide-react";
@@ -80,6 +81,7 @@ import {
   aprobarKyc,
   listAvisosUIF,
   presentarAvisoUIF,
+  subirEvidenciaAvisoUIF,
   aprobarSolicitudEliminacion,
   catalogoOcupacionPorTipoPersona,
   congelarKyc,
@@ -2908,10 +2910,11 @@ function AvisosUifTab({ idKyc, puedeEditar }: { idKyc: string; puedeEditar: bool
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [dialogAviso, setDialogAviso] = useState<import("@/lib/pld").PldAvisoUIF | null>(null);
-  const [linkEvidencia, setLinkEvidencia] = useState("");
+  const [archivo, setArchivo] = useState<File | null>(null);
   const [notas, setNotas] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [errorDialog, setErrorDialog] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setCargando(true);
@@ -2923,7 +2926,7 @@ function AvisosUifTab({ idKyc, puedeEditar }: { idKyc: string; puedeEditar: bool
 
   function abrirDialog(aviso: import("@/lib/pld").PldAvisoUIF) {
     setDialogAviso(aviso);
-    setLinkEvidencia(aviso.link_evidencia ?? "");
+    setArchivo(null);
     setNotas(aviso.notas ?? "");
     setErrorDialog(null);
   }
@@ -2933,10 +2936,10 @@ function AvisosUifTab({ idKyc, puedeEditar }: { idKyc: string; puedeEditar: bool
     setGuardando(true);
     setErrorDialog(null);
     try {
-      const actualizado = await presentarAvisoUIF(dialogAviso.id_aviso, {
-        link_evidencia: linkEvidencia || undefined,
-        notas: notas || undefined,
-      });
+      let actualizado = await presentarAvisoUIF(dialogAviso.id_aviso, { notas: notas || undefined });
+      if (archivo) {
+        actualizado = await subirEvidenciaAvisoUIF(dialogAviso.id_aviso, archivo);
+      }
       setAvisos((prev) => prev.map((a) => (a.id_aviso === actualizado.id_aviso ? actualizado : a)));
       setDialogAviso(null);
     } catch (e: unknown) {
@@ -3066,14 +3069,26 @@ function AvisosUifTab({ idKyc, puedeEditar }: { idKyc: string; puedeEditar: bool
               Una vez marcado como presentado no se puede revertir. Adjunta el comprobante de
               envío al portal SICOAM antes de confirmar.
             </Alert>
-            <TextField
-              size="small"
-              fullWidth
-              label="Link al comprobante (Drive u otro)"
-              value={linkEvidencia}
-              onChange={(e) => setLinkEvidencia(e.target.value)}
-              placeholder="https://drive.google.com/…"
+            <input
+              ref={fileInputRef}
+              type="file"
+              hidden
+              accept=".pdf,.jpg,.jpeg,.png"
+              onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
             />
+            <Box>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<UploadIcon size={14} strokeWidth={1.5} />}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {archivo ? archivo.name : "Seleccionar comprobante SICOAM"}
+              </Button>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                PDF, JPG o PNG. Se sube a Drive al confirmar.
+              </Typography>
+            </Box>
             <TextField
               size="small"
               fullWidth
