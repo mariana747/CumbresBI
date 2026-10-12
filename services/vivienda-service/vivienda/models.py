@@ -296,7 +296,7 @@ class ViviendaVentasExpedienteItem(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDIENTE)
     link_documento = models.CharField(max_length=2083, blank=True, null=True)
     fecha_solicitud = models.DateField(blank=True, null=True)
-    fecha_limite = models.DateField()
+    fecha_limite = models.DateField(blank=True, null=True)
     fecha_entrega = models.DateField(blank=True, null=True)
     fecha_cierre = models.DateField(blank=True, null=True)
     responsable = models.CharField(max_length=20, choices=RESPONSABLE_CHOICES, blank=True, null=True)
