@@ -264,6 +264,12 @@ class PldContraparteKyc(models.Model):
     grado_riesgo_manual = models.BooleanField(default=False)
     es_pep = models.BooleanField(null=True, blank=True)
     notas_riesgo = models.TextField(blank=True, null=True)
+    # Monitoreo transaccional (09/Oct/2026): se activa automaticamente cuando
+    # el acumulado de ingresos de la contraparte en algun proyecto supera
+    # $948,000 MXN (umbral regulatorio). Se calcula en tesoreria-service y lo
+    # prende el endpoint acumulado-contraparte; el analista puede apagarlo
+    # manualmente solo tras documentar la revision.
+    requiere_revision_pld = models.BooleanField(default=False)
 
     # FK real a iam_users.user_id (iam-service) - referencia laxa, ver nota arriba.
     aprobado_por = models.CharField(max_length=8)
@@ -769,3 +775,26 @@ class PldDocumentoTicket(models.Model):
 
     def __str__(self):
         return self.id_ticket
+
+
+class PldNotificacion(models.Model):
+    """Campana de pld-service. Mismo patron que TesoreriaNotificacion.
+    Hoy solo se usa para avisar del cruce del umbral transaccional PLD
+    ($948,000 MXN); el modelo es generico para futuros avisos."""
+
+    TIPO_UMBRAL_PLD = "UMBRAL_PLD"
+
+    id_notificacion = models.CharField(max_length=8, primary_key=True, default=_short_id, editable=False)
+    destinatario = models.CharField(max_length=8)
+    tipo = models.CharField(max_length=50)
+    mensaje = models.CharField(max_length=500)
+    link_url = models.CharField(max_length=500, blank=True, null=True)
+    leida = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "pld_notificacion"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.id_notificacion

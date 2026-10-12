@@ -2,7 +2,7 @@
 # (incl. devDependencies, necesarias para "next build") y compila; la
 # etapa final solo copia el resultado "standalone" (ver next.config.js) -
 # imagen de produccion sin devDependencies ni codigo fuente sin compilar.
-FROM node:20-slim AS builder
+FROM public.ecr.aws/docker/library/node:20-slim AS builder
 
 WORKDIR /app
 
@@ -27,7 +27,7 @@ ENV NEXT_PUBLIC_GOOGLE_PICKER_API_KEY=$NEXT_PUBLIC_GOOGLE_PICKER_API_KEY
 RUN npm run build
 
 # ---- Etapa final: solo el output standalone, sin devDependencies ----
-FROM node:20-slim AS runner
+FROM public.ecr.aws/docker/library/node:20-slim AS runner
 
 WORKDIR /app
 

@@ -2,7 +2,7 @@
 # mysqlclient/build-essential: sin base de datos propia (proxy stateless
 # hacia Drive, ver config/settings.py) - imagen mas liviana, mismo criterio
 # que api-gateway.
-FROM python:3.12-slim
+FROM public.ecr.aws/docker/library/python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

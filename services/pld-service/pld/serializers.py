@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import (
     PldContraparteDoc,
     PldContraparteKyc,
+    PldNotificacion,
     PldRepresentanteLegal,
     PldSolicitudEliminacionDoc,
     PldTicketCliente,
@@ -244,6 +245,7 @@ class PldContraparteKycSerializer(serializers.ModelSerializer):
             "grado_riesgo_manual",
             "es_pep",
             "notas_riesgo",
+            "requiere_revision_pld",
         ]
         # estado_llenado_manual NO esta aqui a proposito: no se expone para
         # setear directo, solo se prende solo (ver update() abajo) cuando el
@@ -384,3 +386,10 @@ class PldTicketClienteSerializer(serializers.ModelSerializer):
             "last_used_at",
             "revoked_at",
         ]
+
+
+class PldNotificacionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PldNotificacion
+        fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "leida", "created_at"]
+        read_only_fields = ["id_notificacion", "destinatario", "tipo", "mensaje", "link_url", "created_at"]
