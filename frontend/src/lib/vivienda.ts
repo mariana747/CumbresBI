@@ -375,7 +375,28 @@ export async function deleteAsesor(idAsesor: string): Promise<void> {
   }
 }
 
-export type ViviendaExpedienteEstado = "PENDIENTE" | "EN PROCESO" | "CONCLUIDO" | "CANCELADO";
+export type ViviendaExpedienteEstado =
+  | "PENDIENTE"
+  | "EN PROCESO"
+  | "FIRMADO"
+  | "CONCLUIDO"
+  | "CANCELADO";
+
+export type ViviendaItemStatus =
+  | "PENDIENTE"
+  | "NO APLICA"
+  | "INCOMPLETO"
+  | "ENTREGADO"
+  | "APROBADO"
+  | "RECHAZADO"
+  | "POSPUESTO";
+
+export type ViviendaItemResponsable =
+  | "VENTAS"
+  | "ESCRITURACION"
+  | "TESORERIA"
+  | "CONTABILIDAD"
+  | "LEGAL";
 
 export interface ViviendaExpediente {
   id_expediente: string;
@@ -387,6 +408,27 @@ export interface ViviendaExpediente {
   estado: ViviendaExpedienteEstado;
   fecha_cierre: string | null;
   link_expediente: string | null;
+  medio_pago: string | null;
+  pagos_efectivo: boolean | null;
+  comentarios: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface ViviendaExpedienteItem {
+  id_item: string;
+  expediente: string;
+  denominacion: string | null;
+  detalles_adicionales: string | null;
+  status: ViviendaItemStatus;
+  link_documento: string | null;
+  fecha_solicitud: string | null;
+  fecha_limite: string | null;
+  fecha_entrega: string | null;
+  fecha_cierre: string | null;
+  responsable: ViviendaItemResponsable | null;
   comentarios: string | null;
   created_at: string;
   created_by: string | null;
@@ -524,6 +566,90 @@ export async function deleteClienteExpediente(idRelViviendaExpCliente: string): 
     `${VIVIENDA_API_BASE_URL}/api/expedientes-clientes/${idRelViviendaExpCliente}/`,
     { method: "DELETE" }
   );
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+}
+
+export async function listItems(expedienteId: string): Promise<ViviendaExpedienteItem[]> {
+  const params = new URLSearchParams({ expediente: expedienteId });
+  const response = await apiFetch("VIVIENDA", `${VIVIENDA_API_BASE_URL}/api/expedientes-items/?${params.toString()}`);
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+  return response.json();
+}
+
+export async function createItem(params: {
+  expediente: string;
+  denominacion?: string | null;
+  detallesAdicionales?: string | null;
+  status?: ViviendaItemStatus;
+  linkDocumento?: string | null;
+  fechaSolicitud?: string | null;
+  fechaLimite?: string | null;
+  responsable?: ViviendaItemResponsable | null;
+  comentarios?: string | null;
+  actorId: string;
+}): Promise<ViviendaExpedienteItem> {
+  const response = await apiFetch("VIVIENDA", `${VIVIENDA_API_BASE_URL}/api/expedientes-items/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expediente: params.expediente,
+      denominacion: params.denominacion || null,
+      detalles_adicionales: params.detallesAdicionales || null,
+      status: params.status || "PENDIENTE",
+      link_documento: params.linkDocumento || null,
+      fecha_solicitud: params.fechaSolicitud || null,
+      fecha_limite: params.fechaLimite || null,
+      responsable: params.responsable || null,
+      comentarios: params.comentarios || null,
+      created_by: params.actorId,
+      updated_by: params.actorId,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+  return response.json();
+}
+
+export async function updateItem(
+  idItem: string,
+  params: Partial<{
+    status: ViviendaItemStatus;
+    linkDocumento: string | null;
+    fechaEntrega: string | null;
+    fechaCierre: string | null;
+    responsable: ViviendaItemResponsable | null;
+    comentarios: string | null;
+  }>,
+  actorId: string
+): Promise<ViviendaExpedienteItem> {
+  const response = await apiFetch("VIVIENDA", `${VIVIENDA_API_BASE_URL}/api/expedientes-items/${idItem}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      status: params.status,
+      link_documento: params.linkDocumento,
+      fecha_entrega: params.fechaEntrega,
+      fecha_cierre: params.fechaCierre,
+      responsable: params.responsable,
+      comentarios: params.comentarios,
+      updated_by: actorId,
+    }),
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("VIVIENDA", response);
+  }
+  return response.json();
+}
+
+export async function deleteItem(idItem: string): Promise<void> {
+  const response = await apiFetch("VIVIENDA", `${VIVIENDA_API_BASE_URL}/api/expedientes-items/${idItem}/`, {
+    method: "DELETE",
+  });
   if (!response.ok) {
     throw await friendlyApiError("VIVIENDA", response);
   }
