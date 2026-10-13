@@ -481,6 +481,8 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
                         "folio": f.comprobante_folio,
                         "total": f.comprobante_total,
                         "metodo_pago": f.comprobante_metodo_pago,
+                        "emisor_rfc": f.emisor_rfc,
+                        "fecha_timbrado": f.timbre_fecha_timbrado.date().isoformat() if f.timbre_fecha_timbrado else None,
                         "diferencia": diferencia,
                     }
                 )
@@ -497,7 +499,15 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
             diferencia = abs(c.total - monto)
             if diferencia <= tolerancia:
                 candidatos_complemento.append(
-                    {"id": c.id, "timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total, "diferencia": diferencia}
+                    {
+                        "id": c.id,
+                        "timbre_uuid": c.timbre_uuid,
+                        "folio": c.folio,
+                        "total": c.total,
+                        "emisor_rfc": c.emisor_rfc,
+                        "fecha_timbrado": c.timbre_fecha_timbrado.date().isoformat() if c.timbre_fecha_timbrado else None,
+                        "diferencia": diferencia,
+                    }
                 )
         candidatos_complemento.sort(key=lambda c: c["diferencia"])
 
@@ -541,6 +551,8 @@ def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> lis
                 "timbre_uuid": f.timbre_uuid,
                 "folio": f.comprobante_folio,
                 "total": f.comprobante_total,
+                "emisor_rfc": f.emisor_rfc,
+                "fecha_timbrado": f.timbre_fecha_timbrado.date().isoformat() if f.timbre_fecha_timbrado else None,
             }
         )
 
@@ -549,7 +561,14 @@ def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> lis
         contraparte_id__in=contraparte_ids, total__isnull=False
     ).exclude(flujos__isnull=False):
         complementos_por_contraparte.setdefault(c.contraparte_id, []).append(
-            {"id": c.id, "timbre_uuid": c.timbre_uuid, "folio": c.folio, "total": c.total}
+            {
+                "id": c.id,
+                "timbre_uuid": c.timbre_uuid,
+                "folio": c.folio,
+                "total": c.total,
+                "emisor_rfc": c.emisor_rfc,
+                "fecha_timbrado": c.timbre_fecha_timbrado.date().isoformat() if c.timbre_fecha_timbrado else None,
+            }
         )
 
     sugerencias = []
