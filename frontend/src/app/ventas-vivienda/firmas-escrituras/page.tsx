@@ -17,6 +17,7 @@ export default function FirmasEscriturasPage() {
       </Typography>
       <VistosBuenosTab
         denominacion="VISTO BUENO PARA FIRMA DE ESCRITURA"
+        nombreArchivo="firmas-escrituras"
         tabs={[
           { label: "Aprobados", value: "APROBADO" },
           { label: "Pospuestos", value: "POSPUESTO" },

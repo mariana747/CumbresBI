@@ -5,6 +5,7 @@ import {
   Alert,
   Button,
   Checkbox,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -13,7 +14,6 @@ import {
   FormControl,
   FormControlLabel,
   IconButton,
-  InputAdornment,
   InputLabel,
   MenuItem,
   Paper,
@@ -28,7 +28,8 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
+import { Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
+import FiltrosBar from "@/components/FiltrosBar";
 import {
   ViviendaProyecto,
   ViviendaUnidad,
@@ -180,63 +181,55 @@ export default function ViviendasTab({
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
-            <InputLabel id="filtro-proyecto-label">Proyecto</InputLabel>
-            <Select
-              labelId="filtro-proyecto-label"
-              label="Proyecto"
-              value={filtroProyecto}
-              onChange={(e) => setFiltroProyecto(e.target.value)}
-            >
-              <MenuItem value="">Todos los proyectos</MenuItem>
-              {proyectos.map((p) => (
-                <MenuItem key={p.id_proyecto} value={p.id_proyecto}>
-                  {p.denominacion || p.id_proyecto}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel id="filtro-disponible-label">Disponibilidad</InputLabel>
-            <Select
-              labelId="filtro-disponible-label"
-              label="Disponibilidad"
-              value={filtroDisponible}
-              onChange={(e) => setFiltroDisponible(e.target.value as "" | "true" | "false")}
-            >
-              <MenuItem value="">Todas</MenuItem>
-              <MenuItem value="true">Disponibles</MenuItem>
-              <MenuItem value="false">No disponibles</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            size="small"
-            placeholder="Buscar por número, denominación, modelo o torre..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          {puedeCrear && (
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por número, denominación, modelo o torre..."
+        actions={
+          puedeCrear ? (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
             >
               Nueva Unidad
             </Button>
-          )}
-        </Stack>
+          ) : undefined
+        }
+      >
+        <FormControl size="small">
+          <InputLabel id="filtro-proyecto-label">Proyecto</InputLabel>
+          <Select
+            labelId="filtro-proyecto-label"
+            label="Proyecto"
+            value={filtroProyecto}
+            onChange={(e) => setFiltroProyecto(e.target.value)}
+          >
+            <MenuItem value="">Todos los proyectos</MenuItem>
+            {proyectos.map((p) => (
+              <MenuItem key={p.id_proyecto} value={p.id_proyecto}>
+                {p.denominacion || p.id_proyecto}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small">
+          <InputLabel id="filtro-disponible-label">Disponibilidad</InputLabel>
+          <Select
+            labelId="filtro-disponible-label"
+            label="Disponibilidad"
+            value={filtroDisponible}
+            onChange={(e) => setFiltroDisponible(e.target.value as "" | "true" | "false")}
+          >
+            <MenuItem value="">Todas</MenuItem>
+            <MenuItem value="true">Disponibles</MenuItem>
+            <MenuItem value="false">No disponibles</MenuItem>
+          </Select>
+        </FormControl>
+      </FiltrosBar>
+
+      <Paper variant="outlined">
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -273,7 +266,14 @@ export default function ViviendasTab({
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
                       {v.precio_lista ? `$${v.precio_lista}` : "—"}
                     </TableCell>
-                    <TableCell>{v.disponible ? "Sí" : "No"}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={v.disponible ? "Disponible" : "No disponible"}
+                        color={v.disponible ? "success" : "error"}
+                        variant="outlined"
+                      />
+                    </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(v)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />

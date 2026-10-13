@@ -56,6 +56,7 @@ import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelRef
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
+import { ViviendaProyecto, listProyectos } from "@/lib/vivienda";
 import {
   CONTRATO_CATEGORIA_LABELS,
   CONTRATO_DOCUMENTO_NOMBRE_OPCIONES,
@@ -163,6 +164,7 @@ function TesoreriaContratosPageContent() {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [contratos, setContratos] = useState<TesoreriaContrato[]>([]);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
+  const [proyectosVivienda, setProyectosVivienda] = useState<ViviendaProyecto[]>([]);
   // Buscador en vivo (23/Sep/2026, "no aparecen las contrapartes nuevas" -
   // antes era una sola carga de 200 sin buscador, y ya hay 500+ contrapartes:
   // una nueva que no cae en las primeras 200 alfabeticas nunca aparecia aqui).
@@ -249,6 +251,7 @@ function TesoreriaContratosPageContent() {
   useEffect(() => {
     getSession().then(setSession);
     listSociedades().then(setSociedades).catch(() => setSociedades([]));
+    listProyectos().then(setProyectosVivienda).catch((e) => { console.warn("No se pudieron cargar proyectos de vivienda:", e); setProyectosVivienda([]); });
   }, []);
 
   // Busqueda en vivo del filtro "Filtrar por contraparte" (ver comentario
@@ -675,13 +678,22 @@ function TesoreriaContratosPageContent() {
               />
             )}
           />
-          <TextField
-            size="small"
-            label="Filtrar por proyecto"
-            value={filtroProyecto}
-            onChange={(e) => setFiltroProyecto(e.target.value)}
-            fullWidth
-          />
+          <FormControl size="small" fullWidth>
+            <InputLabel id="filtro-proyecto-label">Proyecto</InputLabel>
+            <Select
+              labelId="filtro-proyecto-label"
+              label="Proyecto"
+              value={filtroProyecto}
+              onChange={(e) => setFiltroProyecto(e.target.value)}
+            >
+              <MenuItem value="">Todos</MenuItem>
+              {proyectosVivienda.map((p) => (
+                <MenuItem key={p.id_proyecto} value={p.alias_proyecto ?? p.id_proyecto}>
+                  {p.alias_proyecto ? `${p.alias_proyecto} — ${p.denominacion}` : p.denominacion}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <TextField
             size="small"
             type="date"
@@ -1032,12 +1044,27 @@ function TesoreriaContratosPageContent() {
                   3. */}
               {!ocultaCamposFormales && (
                 <>
-                  <TextField
+                  <Autocomplete
+                    freeSolo
                     size="small"
-                    label="Proyecto"
-                    value={form.proyecto}
-                    onChange={(e) => setForm({ ...form, proyecto: e.target.value })}
-                    fullWidth
+                    options={proyectosVivienda}
+                    getOptionLabel={(opt) =>
+                      typeof opt === "string" ? opt : (opt.alias_proyecto ?? opt.denominacion ?? opt.id_proyecto)
+                    }
+                    renderOption={(props, opt) => (
+                      <li {...props} key={opt.id_proyecto}>
+                        <span style={{ fontWeight: 600, marginRight: 6 }}>{opt.alias_proyecto}</span>
+                        {opt.denominacion}
+                      </li>
+                    )}
+                    inputValue={form.proyecto}
+                    onInputChange={(_, val) => setForm({ ...form, proyecto: val })}
+                    onChange={(_, val) => {
+                      if (!val) setForm({ ...form, proyecto: "" });
+                      else if (typeof val === "string") setForm({ ...form, proyecto: val });
+                      else setForm({ ...form, proyecto: val.alias_proyecto ?? "" });
+                    }}
+                    renderInput={(params) => <TextField {...params} size="small" label="Proyecto (opcional)" fullWidth />}
                   />
                   <TextField
                     size="small"
