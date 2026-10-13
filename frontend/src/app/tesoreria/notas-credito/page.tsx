@@ -30,7 +30,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FileMinus, Pencil, Plus, Trash2, X as CloseIcon, Eye, ExternalLink, FileText, FileCode2, RefreshCw } from "lucide-react";
+import { FileMinus, Pencil, Plus, Trash2, X as CloseIcon, Eye, FileText, FileCode2, RefreshCw } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -49,13 +49,8 @@ import {
   sincronizarDriveNotaCredito,
   updateNotaCredito,
   urlVerNotaCreditoPdf,
+  urlVerNotaCreditoXml,
 } from "@/lib/tesoreria";
-
-// Link real de Drive a partir del file_id - ver comentario equivalente en
-// tesoreria/facturas/page.tsx.
-function urlDriveWebView(fileId: string): string {
-  return `https://drive.google.com/file/d/${fileId}/view`;
-}
 
 // Renglones de la nota de credito (Sem 20, CRUD real agregado 24/Ago/2026 -
 // mismo criterio que PanelConceptos en /tesoreria/facturas: enlace logico
@@ -294,7 +289,7 @@ export default function TesoreriaNotasCreditoPage() {
   const [buscandoFactura, setBuscandoFactura] = useState(false);
 
   // Documentos reales desde Drive - mismo patron que tesoreria/facturas.
-  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string; probablementeImagen?: boolean } | null>(null);
   const [sincronizando, setSincronizando] = useState(false);
   const [errorSincronizar, setErrorSincronizar] = useState<string | null>(null);
 
@@ -953,27 +948,26 @@ export default function TesoreriaNotasCreditoPage() {
                           <Stack direction="row" spacing={1} alignItems="center">
                             <IconButton
                               size="small"
-                              aria-label={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
-                              title={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
+                              aria-label={tipo === "pdf" ? "Ver PDF" : "Ver XML"}
+                              title={tipo === "pdf" ? "Ver PDF" : "Ver XML"}
                               disabled={!driveFileId}
                               onClick={() => {
                                 if (!driveFileId) return;
-                                if (tipo === "pdf") {
-                                  setPreviewDoc({
-                                    url: urlVerNotaCreditoPdf(editing.id),
-                                    titulo: `Nota ${editing.comprobante_folio || editing.timbre_uuid} — PDF`,
-                                    urlExterna: urlDriveWebView(driveFileId),
-                                  });
-                                } else {
-                                  window.open(urlDriveWebView(driveFileId), "_blank", "noopener,noreferrer");
-                                }
+                                setPreviewDoc(
+                                  tipo === "pdf"
+                                    ? {
+                                        url: urlVerNotaCreditoPdf(editing.id),
+                                        titulo: `Nota ${editing.comprobante_folio || editing.timbre_uuid} — PDF`,
+                                      }
+                                    : {
+                                        url: urlVerNotaCreditoXml(editing.id),
+                                        titulo: `Nota ${editing.comprobante_folio || editing.timbre_uuid} — XML`,
+                                        probablementeImagen: false,
+                                      }
+                                );
                               }}
                             >
-                              {tipo === "pdf" ? (
-                                <Eye size={16} strokeWidth={1.5} />
-                              ) : (
-                                <ExternalLink size={16} strokeWidth={1.5} />
-                              )}
+                              <Eye size={16} strokeWidth={1.5} />
                             </IconButton>
                             <Chip
                               size="small"
@@ -1005,6 +999,7 @@ export default function TesoreriaNotasCreditoPage() {
         url={previewDoc?.url ?? null}
         titulo={previewDoc?.titulo ?? ""}
         urlExterna={previewDoc?.urlExterna}
+        probablementeImagen={previewDoc?.probablementeImagen}
       />
     </AppShell>
   );
