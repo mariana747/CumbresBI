@@ -160,6 +160,7 @@ export default function ConciliacionFacturasPage() {
   const [errorVincular, setErrorVincular] = useState<string | null>(null);
   const [sugerencias, setSugerencias] = useState<SugerenciasCfdiResponse | null>(null);
   const [cargandoSugerencias, setCargandoSugerencias] = useState(false);
+  const [filtroBusquedaMonto, setFiltroBusquedaMonto] = useState("");
 
   const [mensajeRecordatorio, setMensajeRecordatorio] = useState("");
   const [enviandoRecordatorio, setEnviandoRecordatorio] = useState(false);
@@ -290,6 +291,7 @@ export default function ConciliacionFacturasPage() {
     setRecordatorioEnviado(false);
     setErrorRecordatorio(null);
     setSugerencias(null);
+    setFiltroBusquedaMonto("");
   }
 
   // Buscar sugerencias (10/Sep/2026, "la vinculacion no tiene un boton para
@@ -798,13 +800,16 @@ export default function ConciliacionFacturasPage() {
                   </Stack>
                 ) : (
                   <>
-                    <Typography variant="body2" sx={{ mb: 1.5 }}>
-                      Busca sugerencias (misma contraparte, monto parecido) o captura el UUID a mano.
-                    </Typography>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-                        Sugerencias
-                      </Typography>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+                      <TextField
+                        size="small"
+                        label="Filtrar por monto"
+                        value={filtroBusquedaMonto}
+                        onChange={(e) => setFiltroBusquedaMonto(e.target.value)}
+                        placeholder="ej. 12500"
+                        sx={{ width: 160 }}
+                      />
+                      <Box sx={{ flex: 1 }} />
                       <Button
                         size="small"
                         variant="outlined"
@@ -816,44 +821,45 @@ export default function ConciliacionFacturasPage() {
                     </Stack>
                     {sugerencias === null && !cargandoSugerencias ? (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Presiona "Buscar sugerencias" para ver candidatos.
+                        Presiona "Buscar sugerencias" para ver candidatos con el mismo RFC.
                       </Typography>
                     ) : cargandoSugerencias ? null : sugerencias && (sugerencias.facturas.length > 0 || sugerencias.complementos.length > 0 || sugerencias.sugerencia_ia) ? (
                       <Stack spacing={1} sx={{ mb: 2 }}>
-                        {sugerencias.facturas.map((s) => (
-                          <Stack key={s.timbre_uuid} direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 1 }}>
-                            <Typography variant="body2" sx={{ flex: 1 }}>
-                              Factura {s.folio || s.timbre_uuid.slice(0, 8)} — {numero(s.total)}
-                            </Typography>
-                            <Button
-                              size="small"
-                              variant={timbreUuid === s.timbre_uuid && !esComplemento ? "contained" : "outlined"}
-                              onClick={() => {
-                                setTimbreUuid(s.timbre_uuid);
-                                setEsComplemento(false);
-                              }}
-                            >
-                              {timbreUuid === s.timbre_uuid && !esComplemento ? "Elegida" : "Usar"}
-                            </Button>
-                          </Stack>
-                        ))}
-                        {sugerencias.complementos.map((s) => (
-                          <Stack key={s.timbre_uuid} direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 1 }}>
-                            <Typography variant="body2" sx={{ flex: 1 }}>
-                              REP {s.folio || s.timbre_uuid.slice(0, 8)} — {numero(s.total)}
-                            </Typography>
-                            <Button
-                              size="small"
-                              variant={timbreUuid === s.timbre_uuid && esComplemento ? "contained" : "outlined"}
-                              onClick={() => {
-                                setTimbreUuid(s.timbre_uuid);
-                                setEsComplemento(true);
-                              }}
-                            >
-                              {timbreUuid === s.timbre_uuid && esComplemento ? "Elegida" : "Usar"}
-                            </Button>
-                          </Stack>
-                        ))}
+                        {[
+                          ...sugerencias.facturas
+                            .filter((s) => !filtroBusquedaMonto || String(s.total).includes(filtroBusquedaMonto))
+                            .sort((a, b) => (b.fecha_timbrado ?? "").localeCompare(a.fecha_timbrado ?? ""))
+                            .map((s) => ({ ...s, _tipo: "factura" as const })),
+                          ...sugerencias.complementos
+                            .filter((s) => !filtroBusquedaMonto || String(s.total).includes(filtroBusquedaMonto))
+                            .sort((a, b) => (b.fecha_timbrado ?? "").localeCompare(a.fecha_timbrado ?? ""))
+                            .map((s) => ({ ...s, _tipo: "complemento" as const })),
+                        ].map((s) => {
+                          const esComp = s._tipo === "complemento";
+                          const elegida = timbreUuid === s.timbre_uuid && esComplemento === esComp;
+                          return (
+                            <Stack key={s.timbre_uuid + s._tipo} direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: elegida ? "primary.main" : "divider", borderRadius: 1, p: 1 }}>
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <Typography variant="body2" fontWeight="medium">
+                                  {esComp ? "REP" : "Factura"} {s.folio || "—"} — {numero(s.total)}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  RFC: {s.emisor_rfc || "—"} · {s.fecha_timbrado || "—"}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.65rem" }}>
+                                  {s.timbre_uuid}
+                                </Typography>
+                              </Box>
+                              <Button
+                                size="small"
+                                variant={elegida ? "contained" : "outlined"}
+                                onClick={() => { setTimbreUuid(s.timbre_uuid); setEsComplemento(esComp); }}
+                              >
+                                {elegida ? "Elegida" : "Usar"}
+                              </Button>
+                            </Stack>
+                          );
+                        })}
                         {sugerencias.sugerencia_ia && sugerencias.facturas.length === 0 && sugerencias.complementos.length === 0 && (
                           <Stack direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: "info.main", borderRadius: 1, p: 1 }}>
                             <Box sx={{ flex: 1 }}>
@@ -883,7 +889,7 @@ export default function ConciliacionFacturasPage() {
                       </Stack>
                     ) : (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Sin coincidencias por contraparte/monto ni por IA — captúralo a mano abajo.
+                        Sin coincidencias por RFC/monto — captúralo a mano abajo.
                       </Typography>
                     )}
 

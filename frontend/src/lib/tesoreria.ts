@@ -1928,6 +1928,8 @@ export interface SugerenciaCfdi {
   folio: string | null;
   total: string;
   metodo_pago?: string | null;
+  emisor_rfc: string | null;
+  fecha_timbrado: string | null;
   diferencia: string;
 }
 
@@ -1963,6 +1965,8 @@ export interface SugerenciaCfdiLote {
   id: number;
   timbre_uuid: string;
   folio: string | null;
+  emisor_rfc: string | null;
+  fecha_timbrado: string | null;
   confianza: "alta" | "media" | "ia";
   razon_ia: string | null;
 }
