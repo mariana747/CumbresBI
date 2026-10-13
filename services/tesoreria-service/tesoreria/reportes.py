@@ -468,13 +468,16 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
     rfc_contraparte = contraparte.rfc
     monto = abs(flujo.total_mxp)
 
+    ya_ligadas_factura = set(
+        TesoreriaFlujo.objects.filter(factura__isnull=False).values_list("factura__timbre_uuid", flat=True)
+    )
     candidatos_factura = []
     if not flujo.factura_id:
         filtro_facturas = Q(contraparte_id=contraparte.id_contraparte)
         if rfc_contraparte:
             filtro_facturas |= Q(emisor_rfc=rfc_contraparte)
-        for f in TesoreriaFactura.objects.filter(filtro_facturas).exclude(flujos__isnull=False).distinct():
-            if f.comprobante_total is None:
+        for f in TesoreriaFactura.objects.filter(filtro_facturas).distinct():
+            if f.timbre_uuid in ya_ligadas_factura or f.comprobante_total is None:
                 continue
             candidatos_factura.append(
                 {
@@ -490,13 +493,16 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
             )
         candidatos_factura.sort(key=lambda c: c["fecha_timbrado"] or "", reverse=True)
 
+    ya_ligados_complemento = set(
+        TesoreriaFlujo.objects.filter(complemento__isnull=False).values_list("complemento__timbre_uuid", flat=True)
+    )
     candidatos_complemento = []
     if not flujo.complemento_id:
         filtro_complementos = Q(contraparte_id=contraparte.id_contraparte)
         if rfc_contraparte:
             filtro_complementos |= Q(emisor_rfc=rfc_contraparte)
-        for c in TesoreriaComplementoPago.objects.filter(filtro_complementos).exclude(flujos__isnull=False).distinct():
-            if c.total is None:
+        for c in TesoreriaComplementoPago.objects.filter(filtro_complementos).distinct():
+            if c.timbre_uuid in ya_ligados_complemento or c.total is None:
                 continue
             candidatos_complemento.append(
                 {

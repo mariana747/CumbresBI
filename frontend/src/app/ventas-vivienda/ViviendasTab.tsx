@@ -34,6 +34,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Eye, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
+import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
 import FiltrosBar from "@/components/FiltrosBar";
 import {
   ViviendaExpediente,
@@ -105,6 +106,8 @@ export default function ViviendasTab({
   const [itemsDrawer, setItemsDrawer] = useState<ViviendaExpedienteItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [duplicando, setDuplicando] = useState(false);
+  const [docBlobUrl, setDocBlobUrl] = useState<string | null>(null);
+  const [loadingDoc, setLoadingDoc] = useState(false);
   const [docUrl, setDocUrl] = useState<string | null>(null);
   const [dispActual, setDispActual] = useState<boolean>(true);
 
@@ -785,8 +788,23 @@ export default function ViviendasTab({
                       <Typography variant="caption" color="text.secondary">Responsable: {item.responsable || "—"}</Typography>
                       <Typography variant="caption" color="text.secondary">Fecha solicitud: {item.fecha_solicitud || "—"}</Typography>
                       {item.link_documento && (
-                        <IconButton size="small" aria-label="Ver documento" onClick={() => window.open(item.link_documento!, "_blank", "noopener,noreferrer")}>
-                          <Eye size={14} strokeWidth={1.5} />
+                        <IconButton
+                          size="small"
+                          aria-label="Ver documento"
+                          disabled={loadingDoc}
+                          onClick={async () => {
+                            const fileId = driveFileIdFromUrl(item.link_documento!);
+                            if (!fileId) return;
+                            setLoadingDoc(true);
+                            try {
+                              const url = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+                              if (docBlobUrl) URL.revokeObjectURL(docBlobUrl);
+                              setDocBlobUrl(url);
+                            } catch { window.open(item.link_documento!, "_blank", "noopener,noreferrer"); }
+                            finally { setLoadingDoc(false); }
+                          }}
+                        >
+                          {loadingDoc ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
                         </IconButton>
                       )}
                     </Stack>
@@ -822,6 +840,26 @@ export default function ViviendasTab({
         </DialogContent>
       </Dialog>
 
+
+      <Dialog
+        open={!!docBlobUrl}
+        onClose={() => { if (docBlobUrl) URL.revokeObjectURL(docBlobUrl); setDocBlobUrl(null); }}
+        fullWidth
+        maxWidth="lg"
+        sx={{ zIndex: (theme) => theme.zIndex.modal + 2 }}
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", py: 1 }}>
+          <Typography variant="subtitle1">Documento</Typography>
+          <IconButton size="small" aria-label="Cerrar" onClick={() => { if (docBlobUrl) URL.revokeObjectURL(docBlobUrl); setDocBlobUrl(null); }}>
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0, height: "80vh" }}>
+          {docBlobUrl && (
+            <object data={docBlobUrl} style={{ width: "100%", height: "100%", border: "none" }} title="Documento" />
+          )}
+        </DialogContent>
+      </Dialog>
 
     </>
   );
