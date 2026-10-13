@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Dialog, DialogContent, DialogTitle, IconButton, Paper, Stack } from "@mui/material";
+import { Box, CircularProgress, Dialog, DialogContent, DialogTitle, IconButton, Paper, Stack, Typography } from "@mui/material";
 import { ExternalLink, Minus, Plus, Search, X as CloseIcon } from "lucide-react";
 
 // Preview embebido de un documento ya subido: "ver documento" en PLD debe
@@ -58,14 +58,37 @@ export default function DocumentoPreviewDialog({
   // cursor. Ambos se
   // reinician junto con el zoom cada vez que se abre un documento distinto.
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [errorCarga, setErrorCarga] = useState(false);
   const arrastrando = useRef(false);
   const inicioArrastre = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
+
   useEffect(() => {
-    if (open) {
-      setZoom(1);
-      setEsImagen(probablementeImagen);
-      setOffset({ x: 0, y: 0 });
+    if (!open || !url) {
+      setBlobUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+      return;
     }
+    let activo = true;
+    setCargando(true);
+    setErrorCarga(false);
+    setZoom(1);
+    setEsImagen(probablementeImagen);
+    setOffset({ x: 0, y: 0 });
+    setBlobUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+    fetch(url, { credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!activo) return;
+        if (!blob.type.startsWith("image/")) setEsImagen(false);
+        setBlobUrl(URL.createObjectURL(blob));
+      })
+      .catch(() => { if (activo) setErrorCarga(true); })
+      .finally(() => { if (activo) setCargando(false); });
+    return () => { activo = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, url]);
 
@@ -134,7 +157,19 @@ export default function DocumentoPreviewDialog({
           anidados mostraban 2 scrollbars cuando con 1 bastaba) - el
           scroll real vive solo en el Box de adentro. */}
       <DialogContent dividers sx={{ p: 0, overflow: "hidden", position: "relative" }}>
-        {url && (
+        {cargando && (
+          <Stack alignItems="center" justifyContent="center" sx={{ height: "80vh" }}>
+            <CircularProgress />
+          </Stack>
+        )}
+        {errorCarga && (
+          <Stack alignItems="center" justifyContent="center" sx={{ height: "80vh" }}>
+            <Typography variant="body2" color="text.secondary">
+              No se pudo cargar el documento.
+            </Typography>
+          </Stack>
+        )}
+        {blobUrl && (
           <>
             <Box
               sx={{
@@ -166,7 +201,7 @@ export default function DocumentoPreviewDialog({
               {esImagen ? (
                 <Box
                   component="img"
-                  src={url}
+                  src={blobUrl}
                   alt={titulo}
                   draggable={false}
                   onError={() => setEsImagen(false)}
@@ -189,7 +224,7 @@ export default function DocumentoPreviewDialog({
               ) : (
                 <Box
                   component="iframe"
-                  src={url}
+                  src={blobUrl}
                   title={titulo}
                   sx={{
                     width: "100%",
