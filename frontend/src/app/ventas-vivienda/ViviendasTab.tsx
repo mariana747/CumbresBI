@@ -108,7 +108,8 @@ export default function ViviendasTab({
   const [loadingItems, setLoadingItems] = useState(false);
   const [duplicando, setDuplicando] = useState(false);
   const [previewDocBlobUrl, setPreviewDocBlobUrl] = useState<string | null>(null);
-  const [loadingDoc, setLoadingDoc] = useState(false);
+  const [fallbackDocUrl, setFallbackDocUrl] = useState<string | null>(null);
+  const [loadingDocId, setLoadingDocId] = useState<string | null>(null);
   const [dispActual, setDispActual] = useState<boolean>(true);
 
   useEffect(() => {
@@ -739,20 +740,21 @@ export default function ViviendasTab({
                       <TableCell sx={{ fontSize: 12 }}>
                         <IconButton
                           size="small"
-                          disabled={loadingDoc}
+                          disabled={loadingDocId === "expediente"}
                           onClick={async () => {
                             const fileId = driveFileIdFromUrl(expedienteDrawer.link_expediente!);
-                            if (!fileId) { window.open(expedienteDrawer.link_expediente!, "_blank", "noopener,noreferrer"); return; }
-                            setLoadingDoc(true);
+                            if (!fileId) { setFallbackDocUrl(expedienteDrawer.link_expediente!); return; }
+                            setLoadingDocId("expediente");
                             try {
                               const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
                               if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                              setFallbackDocUrl(null);
                               setPreviewDocBlobUrl(blob);
-                            } catch { window.open(expedienteDrawer.link_expediente!, "_blank", "noopener,noreferrer"); }
-                            finally { setLoadingDoc(false); }
+                            } catch { setFallbackDocUrl(expedienteDrawer.link_expediente!); }
+                            finally { setLoadingDocId(null); }
                           }}
                         >
-                          {loadingDoc ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
+                          {loadingDocId === "expediente" ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
                         </IconButton>
                       </TableCell>
                     </TableRow>
@@ -807,20 +809,21 @@ export default function ViviendasTab({
                         <IconButton
                           size="small"
                           aria-label="Ver documento"
-                          disabled={loadingDoc}
+                          disabled={loadingDocId === item.id_item}
                           onClick={async () => {
                             const fileId = driveFileIdFromUrl(item.link_documento!);
-                            if (!fileId) return;
-                            setLoadingDoc(true);
+                            if (!fileId) { setFallbackDocUrl(item.link_documento!); return; }
+                            setLoadingDocId(item.id_item);
                             try {
                               const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
                               if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                              setFallbackDocUrl(null);
                               setPreviewDocBlobUrl(blob);
-                            } catch { window.open(item.link_documento!, "_blank", "noopener,noreferrer"); }
-                            finally { setLoadingDoc(false); }
+                            } catch { setFallbackDocUrl(item.link_documento!); }
+                            finally { setLoadingDocId(null); }
                           }}
                         >
-                          {loadingDoc ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
+                          {loadingDocId === item.id_item ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
                         </IconButton>
                       )}
                     </Stack>
@@ -833,10 +836,12 @@ export default function ViviendasTab({
       </Drawer>
 
       <DocumentoPreviewDialog
-        open={!!previewDocBlobUrl}
-        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); }}
+        open={!!previewDocBlobUrl || !!fallbackDocUrl}
+        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); setFallbackDocUrl(null); }}
         url={previewDocBlobUrl}
+        urlExterna={fallbackDocUrl}
         titulo="Documento"
+        sx={{ zIndex: (theme: { zIndex: { modal: number } }) => theme.zIndex.modal + 2 }}
       />
 
     </>
