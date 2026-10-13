@@ -29,7 +29,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Receipt, Pencil, Plus, Trash2, X as CloseIcon, Eye, ExternalLink, FileText, FileCode2, RefreshCw } from "lucide-react";
+import { Receipt, Pencil, Plus, Trash2, X as CloseIcon, Eye, FileText, FileCode2, RefreshCw } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -46,13 +46,8 @@ import {
   sincronizarDriveComplementoPago,
   updateComplementoPago,
   urlVerComplementoPagoPdf,
+  urlVerComplementoPagoXml,
 } from "@/lib/tesoreria";
-
-// Link real de Drive a partir del file_id - ver comentario equivalente en
-// tesoreria/facturas/page.tsx.
-function urlDriveWebView(fileId: string): string {
-  return `https://drive.google.com/file/d/${fileId}/view`;
-}
 
 const FORM_VACIO = {
   timbreUuid: "",
@@ -275,7 +270,7 @@ export default function TesoreriaComplementosPagoPage() {
   const [sociedadesFiltro, setSociedadesFiltro] = useState<GeneralSociedad[]>([]);
   const [filtroReceptor, setFiltroReceptor] = useState("");
   // Documentos reales desde Drive - mismo patron que tesoreria/facturas.
-  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string; probablementeImagen?: boolean } | null>(null);
   const [sincronizando, setSincronizando] = useState(false);
   const [errorSincronizar, setErrorSincronizar] = useState<string | null>(null);
 
@@ -748,27 +743,26 @@ export default function TesoreriaComplementosPagoPage() {
                           <Stack direction="row" spacing={1} alignItems="center">
                             <IconButton
                               size="small"
-                              aria-label={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
-                              title={tipo === "pdf" ? "Ver PDF" : "Abrir XML en Drive"}
+                              aria-label={tipo === "pdf" ? "Ver PDF" : "Ver XML"}
+                              title={tipo === "pdf" ? "Ver PDF" : "Ver XML"}
                               disabled={!driveFileId}
                               onClick={() => {
                                 if (!driveFileId) return;
-                                if (tipo === "pdf") {
-                                  setPreviewDoc({
-                                    url: urlVerComplementoPagoPdf(editing.id),
-                                    titulo: `Complemento ${editing.folio || editing.timbre_uuid} — PDF`,
-                                    urlExterna: urlDriveWebView(driveFileId),
-                                  });
-                                } else {
-                                  window.open(urlDriveWebView(driveFileId), "_blank", "noopener,noreferrer");
-                                }
+                                setPreviewDoc(
+                                  tipo === "pdf"
+                                    ? {
+                                        url: urlVerComplementoPagoPdf(editing.id),
+                                        titulo: `Complemento ${editing.folio || editing.timbre_uuid} — PDF`,
+                                      }
+                                    : {
+                                        url: urlVerComplementoPagoXml(editing.id),
+                                        titulo: `Complemento ${editing.folio || editing.timbre_uuid} — XML`,
+                                        probablementeImagen: false,
+                                      }
+                                );
                               }}
                             >
-                              {tipo === "pdf" ? (
-                                <Eye size={16} strokeWidth={1.5} />
-                              ) : (
-                                <ExternalLink size={16} strokeWidth={1.5} />
-                              )}
+                              <Eye size={16} strokeWidth={1.5} />
                             </IconButton>
                             <Chip
                               size="small"
@@ -800,6 +794,7 @@ export default function TesoreriaComplementosPagoPage() {
         url={previewDoc?.url ?? null}
         titulo={previewDoc?.titulo ?? ""}
         urlExterna={previewDoc?.urlExterna}
+        probablementeImagen={previewDoc?.probablementeImagen}
       />
     </AppShell>
   );

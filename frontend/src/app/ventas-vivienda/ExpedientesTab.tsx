@@ -32,6 +32,8 @@ import {
   Typography,
 } from "@mui/material";
 import { CheckSquare, Eye, FileSpreadsheet, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import { descargarCsv } from "@/lib/descargarCsv";
 import ContraparteSelector from "@/components/ContraparteSelector";
@@ -667,6 +669,8 @@ export default function ExpedientesTab({
   const [clientesDe, setClientesDe] = useState<ViviendaExpediente | null>(null);
   const [itemsDe, setItemsDe] = useState<ViviendaExpediente | null>(null);
   const [viendo, setViendo] = useState<ViviendaExpediente | null>(null);
+  const [previewDocBlobUrl, setPreviewDocBlobUrl] = useState<string | null>(null);
+  const [loadingDoc, setLoadingDoc] = useState(false);
   const [tabEstado, setTabEstado] = useState<"PENDIENTE" | "EN PROCESO" | "FIRMADO" | "">("EN PROCESO");
   const [search, setSearch] = useState("");
   const [filtroVivienda, setFiltroVivienda] = useState(searchParams?.get("vivienda") ?? "");
@@ -1079,16 +1083,23 @@ export default function ExpedientesTab({
                   <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160, flexShrink: 0 }}>
                     Link expediente
                   </Typography>
-                  <Typography
-                    variant="body2"
-                    component="a"
-                    href={viendo.link_expediente}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    sx={{ color: "primary.main", wordBreak: "break-all" }}
+                  <IconButton
+                    size="small"
+                    disabled={loadingDoc}
+                    onClick={async () => {
+                      const fileId = driveFileIdFromUrl(viendo.link_expediente!);
+                      if (!fileId) { window.open(viendo.link_expediente!, "_blank", "noopener,noreferrer"); return; }
+                      setLoadingDoc(true);
+                      try {
+                        const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+                        if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                        setPreviewDocBlobUrl(blob);
+                      } catch { window.open(viendo.link_expediente!, "_blank", "noopener,noreferrer"); }
+                      finally { setLoadingDoc(false); }
+                    }}
                   >
-                    Abrir en Drive
-                  </Typography>
+                    {loadingDoc ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
+                  </IconButton>
                 </Stack>
               )}
             </Stack>
@@ -1098,6 +1109,12 @@ export default function ExpedientesTab({
           </DialogActions>
         </Dialog>
       )}
+      <DocumentoPreviewDialog
+        open={!!previewDocBlobUrl}
+        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); }}
+        url={previewDocBlobUrl}
+        titulo="Expediente"
+      />
     </>
   );
 }
