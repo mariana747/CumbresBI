@@ -35,6 +35,7 @@ import {
 } from "@mui/material";
 import { Eye, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
+import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import {
   ViviendaExpediente,
@@ -106,9 +107,8 @@ export default function ViviendasTab({
   const [itemsDrawer, setItemsDrawer] = useState<ViviendaExpedienteItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [duplicando, setDuplicando] = useState(false);
-  const [docBlobUrl, setDocBlobUrl] = useState<string | null>(null);
+  const [previewDocBlobUrl, setPreviewDocBlobUrl] = useState<string | null>(null);
   const [loadingDoc, setLoadingDoc] = useState(false);
-  const [docUrl, setDocUrl] = useState<string | null>(null);
   const [dispActual, setDispActual] = useState<boolean>(true);
 
   useEffect(() => {
@@ -737,7 +737,23 @@ export default function ViviendasTab({
                     <TableRow>
                       <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", fontSize: 12 }}>Link</TableCell>
                       <TableCell sx={{ fontSize: 12 }}>
-                        <a href={expedienteDrawer.link_expediente} target="_blank" rel="noreferrer">Abrir en Drive</a>
+                        <IconButton
+                          size="small"
+                          disabled={loadingDoc}
+                          onClick={async () => {
+                            const fileId = driveFileIdFromUrl(expedienteDrawer.link_expediente!);
+                            if (!fileId) { window.open(expedienteDrawer.link_expediente!, "_blank", "noopener,noreferrer"); return; }
+                            setLoadingDoc(true);
+                            try {
+                              const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+                              if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                              setPreviewDocBlobUrl(blob);
+                            } catch { window.open(expedienteDrawer.link_expediente!, "_blank", "noopener,noreferrer"); }
+                            finally { setLoadingDoc(false); }
+                          }}
+                        >
+                          {loadingDoc ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
+                        </IconButton>
                       </TableCell>
                     </TableRow>
                   )}
@@ -797,9 +813,9 @@ export default function ViviendasTab({
                             if (!fileId) return;
                             setLoadingDoc(true);
                             try {
-                              const url = await downloadDriveFile(fileId, "ventas-vivienda.editar");
-                              if (docBlobUrl) URL.revokeObjectURL(docBlobUrl);
-                              setDocBlobUrl(url);
+                              const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+                              if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                              setPreviewDocBlobUrl(blob);
                             } catch { window.open(item.link_documento!, "_blank", "noopener,noreferrer"); }
                             finally { setLoadingDoc(false); }
                           }}
@@ -816,50 +832,12 @@ export default function ViviendasTab({
         )}
       </Drawer>
 
-      <Dialog
-        open={!!docUrl}
-        onClose={() => setDocUrl(null)}
-        fullWidth
-        maxWidth="lg"
-        sx={{ zIndex: (theme) => theme.zIndex.modal + 2 }}
-      >
-        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", py: 1 }}>
-          <Typography variant="subtitle1">Documento</Typography>
-          <IconButton size="small" onClick={() => setDocUrl(null)} aria-label="Cerrar">
-            <CloseIcon size={18} strokeWidth={1.5} />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers sx={{ p: 0, height: "80vh" }}>
-          {docUrl && (
-            <iframe
-              src={docUrl.replace("/view", "/preview")}
-              style={{ width: "100%", height: "100%", border: "none" }}
-              title="Documento"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-
-
-      <Dialog
-        open={!!docBlobUrl}
-        onClose={() => { if (docBlobUrl) URL.revokeObjectURL(docBlobUrl); setDocBlobUrl(null); }}
-        fullWidth
-        maxWidth="lg"
-        sx={{ zIndex: (theme) => theme.zIndex.modal + 2 }}
-      >
-        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", py: 1 }}>
-          <Typography variant="subtitle1">Documento</Typography>
-          <IconButton size="small" aria-label="Cerrar" onClick={() => { if (docBlobUrl) URL.revokeObjectURL(docBlobUrl); setDocBlobUrl(null); }}>
-            <CloseIcon size={18} strokeWidth={1.5} />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers sx={{ p: 0, height: "80vh" }}>
-          {docBlobUrl && (
-            <object data={docBlobUrl} style={{ width: "100%", height: "100%", border: "none" }} title="Documento" />
-          )}
-        </DialogContent>
-      </Dialog>
+      <DocumentoPreviewDialog
+        open={!!previewDocBlobUrl}
+        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); }}
+        url={previewDocBlobUrl}
+        titulo="Documento"
+      />
 
     </>
   );

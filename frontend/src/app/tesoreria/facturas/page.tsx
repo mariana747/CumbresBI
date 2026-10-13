@@ -94,6 +94,8 @@ import {
   sincronizarDriveFactura,
   subirPdfFactura,
   subirXmlFactura,
+  urlVerFacturaPdf,
+  urlVerFacturaXml,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -163,13 +165,6 @@ const ESTADO_DESCRIPCION: Record<TesoreriaFacturaEstado, string> = {
   ACEPTADA: "Revisada y con PDF + XML completos — ya se puede usar sin restricción.",
   RECHAZADA: "No pasó la revisión — no se puede aceptar así.",
 };
-
-// Link real de Drive a partir del file_id (09/Sep/2026, "la redireccion
-// debe hacer al archivo de drive") - "Abrir en pestaña nueva" debe ir al
-// archivo real, no a nuestro endpoint de streaming.
-function urlDriveWebView(fileId: string): string {
-  return `https://drive.google.com/file/d/${fileId}/view`;
-}
 
 // Pestañas del formulario de factura
 const TABS_FACTURA = ["Comprobante", "Montos", "Emisor y Receptor", "Timbrado", "Documentos", "Proceso"] as const;
@@ -510,7 +505,7 @@ export default function TesoreriaFacturasPage() {
   const [session, setSession] = useState<SessionUser | null>(null);
   // Preview embebido del PDF (el ojo conserva su comportamiento de
   // siempre) - el XML en cambio redirige directo a Drive.
-  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string } | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; titulo: string; urlExterna?: string; probablementeImagen?: boolean } | null>(null);
   // Referencias cruzadas (10/Sep/2026, "replica el patron en Facturas y
   // Flujos") - ver componente PanelReferenciaCruzada.
   const [panelReferencia, setPanelReferencia] = useState<ReferenciaCruzada>(null);
@@ -1839,20 +1834,20 @@ export default function TesoreriaFacturasPage() {
                         <Typography variant="body2">Factura (PDF)</Typography>
                       </Stack>
                       <Stack direction="row" spacing={1} alignItems="center">
-                        {(() => {
-                          const url = editing?.drive_file_id_pdf
-                            ? urlDriveWebView(editing.drive_file_id_pdf)
-                            : (editing?.link_pdf || form.linkPdf || null);
-                          return url ? (
-                            <IconButton
-                              size="small"
-                              title="Abrir PDF"
-                              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-                            >
-                              <ExternalLink size={16} strokeWidth={1.5} />
-                            </IconButton>
-                          ) : null;
-                        })()}
+                        {editing && (editing.drive_file_id_pdf || editing.link_pdf) && (
+                          <IconButton
+                            size="small"
+                            title="Ver PDF"
+                            onClick={() =>
+                              setPreviewDoc({
+                                url: urlVerFacturaPdf(editing.id),
+                                titulo: `Factura ${editing.comprobante_folio || editing.timbre_uuid} — PDF`,
+                              })
+                            }
+                          >
+                            <Eye size={16} strokeWidth={1.5} />
+                          </IconButton>
+                        )}
                         {editing && !modoSoloLectura && (
                           <>
                             <input
@@ -1917,20 +1912,21 @@ export default function TesoreriaFacturasPage() {
                         <Typography variant="body2">Comprobante Fiscal (XML)</Typography>
                       </Stack>
                       <Stack direction="row" spacing={1} alignItems="center">
-                        {(() => {
-                          const url = editing?.drive_file_id_xml
-                            ? urlDriveWebView(editing.drive_file_id_xml)
-                            : (editing?.link_xml || form.linkXml || null);
-                          return url ? (
-                            <IconButton
-                              size="small"
-                              title="Abrir XML"
-                              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-                            >
-                              <ExternalLink size={16} strokeWidth={1.5} />
-                            </IconButton>
-                          ) : null;
-                        })()}
+                        {editing && (editing.drive_file_id_xml || editing.link_xml) && (
+                          <IconButton
+                            size="small"
+                            title="Ver XML"
+                            onClick={() =>
+                              setPreviewDoc({
+                                url: urlVerFacturaXml(editing.id),
+                                titulo: `Factura ${editing.comprobante_folio || editing.timbre_uuid} — XML`,
+                                probablementeImagen: false,
+                              })
+                            }
+                          >
+                            <Eye size={16} strokeWidth={1.5} />
+                          </IconButton>
+                        )}
                         {editing && !modoSoloLectura && (
                           <>
                             <input
@@ -2312,6 +2308,7 @@ export default function TesoreriaFacturasPage() {
         url={previewDoc?.url ?? null}
         titulo={previewDoc?.titulo ?? ""}
         urlExterna={previewDoc?.urlExterna}
+        probablementeImagen={previewDoc?.probablementeImagen}
       />
       <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
     </AppShell>
