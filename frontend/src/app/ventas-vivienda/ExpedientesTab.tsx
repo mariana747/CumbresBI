@@ -298,6 +298,9 @@ function ItemsExpedienteDialog({
   const [form, setForm] = useState(FORM_ITEM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [previewDocBlobUrl, setPreviewDocBlobUrl] = useState<string | null>(null);
+  const [fallbackDocUrl, setFallbackDocUrl] = useState<string | null>(null);
+  const [loadingDocId, setLoadingDocId] = useState<string | null>(null);
 
   function refresh() {
     setLoading(true);
@@ -436,13 +439,29 @@ function ItemsExpedienteDialog({
                   {items.map((item) => (
                     <TableRow key={item.id_item} hover>
                       <TableCell>
-                        {item.link_documento ? (
-                          <a href={item.link_documento} target="_blank" rel="noopener noreferrer">
-                            {item.denominacion || "—"}
-                          </a>
-                        ) : (
-                          item.denominacion || "—"
-                        )}
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <span>{item.denominacion || "—"}</span>
+                          {item.link_documento && (
+                            <IconButton
+                              size="small"
+                              disabled={loadingDocId === item.id_item}
+                              onClick={async () => {
+                                const fileId = driveFileIdFromUrl(item.link_documento!);
+                                if (!fileId) { setFallbackDocUrl(item.link_documento!); return; }
+                                setLoadingDocId(item.id_item);
+                                try {
+                                  const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+                                  if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                                  setFallbackDocUrl(null);
+                                  setPreviewDocBlobUrl(blob);
+                                } catch { setFallbackDocUrl(item.link_documento!); }
+                                finally { setLoadingDocId(null); }
+                              }}
+                            >
+                              {loadingDocId === item.id_item ? <CircularProgress size={12} /> : <Eye size={12} strokeWidth={1.5} />}
+                            </IconButton>
+                          )}
+                        </Stack>
                       </TableCell>
                       <TableCell>
                         {item.responsable ? RESPONSABLE_LABELS[item.responsable] : "—"}
@@ -618,6 +637,14 @@ function ItemsExpedienteDialog({
           </Button>
         </DialogActions>
       </Dialog>
+
+      <DocumentoPreviewDialog
+        open={!!previewDocBlobUrl || !!fallbackDocUrl}
+        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); setFallbackDocUrl(null); }}
+        url={previewDocBlobUrl}
+        urlExterna={fallbackDocUrl}
+        titulo="Documento"
+      />
     </>
   );
 }
@@ -670,7 +697,8 @@ export default function ExpedientesTab({
   const [itemsDe, setItemsDe] = useState<ViviendaExpediente | null>(null);
   const [viendo, setViendo] = useState<ViviendaExpediente | null>(null);
   const [previewDocBlobUrl, setPreviewDocBlobUrl] = useState<string | null>(null);
-  const [loadingDoc, setLoadingDoc] = useState(false);
+  const [fallbackDocUrl, setFallbackDocUrl] = useState<string | null>(null);
+  const [loadingDocId, setLoadingDocId] = useState<string | null>(null);
   const [tabEstado, setTabEstado] = useState<"PENDIENTE" | "EN PROCESO" | "FIRMADO" | "">("EN PROCESO");
   const [search, setSearch] = useState("");
   const [filtroVivienda, setFiltroVivienda] = useState(searchParams?.get("vivienda") ?? "");
@@ -1085,20 +1113,21 @@ export default function ExpedientesTab({
                   </Typography>
                   <IconButton
                     size="small"
-                    disabled={loadingDoc}
+                    disabled={loadingDocId === "expediente"}
                     onClick={async () => {
                       const fileId = driveFileIdFromUrl(viendo.link_expediente!);
-                      if (!fileId) { window.open(viendo.link_expediente!, "_blank", "noopener,noreferrer"); return; }
-                      setLoadingDoc(true);
+                      if (!fileId) { setFallbackDocUrl(viendo.link_expediente!); return; }
+                      setLoadingDocId("expediente");
                       try {
                         const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
                         if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                        setFallbackDocUrl(null);
                         setPreviewDocBlobUrl(blob);
-                      } catch { window.open(viendo.link_expediente!, "_blank", "noopener,noreferrer"); }
-                      finally { setLoadingDoc(false); }
+                      } catch { setFallbackDocUrl(viendo.link_expediente!); }
+                      finally { setLoadingDocId(null); }
                     }}
                   >
-                    {loadingDoc ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
+                    {loadingDocId === "expediente" ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
                   </IconButton>
                 </Stack>
               )}
@@ -1110,9 +1139,10 @@ export default function ExpedientesTab({
         </Dialog>
       )}
       <DocumentoPreviewDialog
-        open={!!previewDocBlobUrl}
-        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); }}
+        open={!!previewDocBlobUrl || !!fallbackDocUrl}
+        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); setFallbackDocUrl(null); }}
         url={previewDocBlobUrl}
+        urlExterna={fallbackDocUrl}
         titulo="Expediente"
       />
     </>

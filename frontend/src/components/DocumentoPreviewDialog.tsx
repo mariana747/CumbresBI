@@ -25,6 +25,7 @@ export interface DocumentoPreviewDialogProps {
   // nuestro endpoint de streaming - `url` sigue siendo el que se embebe
   // en el <img>/<iframe>. Si se omite, cae a `url`.
   urlExterna?: string | null;
+  sx?: object;
 }
 
 // ZOOM_MIN = 1: el ajuste automatico (object-fit: contain) YA es el tamaño
@@ -41,6 +42,7 @@ export default function DocumentoPreviewDialog({
   titulo,
   probablementeImagen = true,
   urlExterna,
+  sx,
 }: DocumentoPreviewDialogProps) {
   // Zoom +/-: barra flotante centrada abajo, encima del documento - como
   // en apps de galeria/escaner, no dos botones sueltos en el titulo.
@@ -127,7 +129,7 @@ export default function DocumentoPreviewDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl" sx={sx}>
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Box sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{titulo}</Box>
         <Box sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
