@@ -156,8 +156,14 @@ export interface ViviendaUnidad {
   lote: string | null;
   piso: string | null;
   habitaciones: number | null;
+  frente_m2: string | null;
+  fondo_m2: string | null;
   sup_terreno_m2: string | null;
   sup_const_m2: string | null;
+  terraza_m2: string | null;
+  balcones_m2: string | null;
+  bodega_m2: string | null;
+  cajones_est: string | null;
   precio_lista: string | null;
   disponible: boolean | null;
   muestra: boolean | null;
@@ -230,10 +236,17 @@ export async function updateVivienda(
     tipo: string | null;
     modelo: string | null;
     habitaciones: number | null;
+    frenteM2: string | null;
+    fondoM2: string | null;
     supTerrenoM2: string | null;
     supConstM2: string | null;
+    terrazaM2: string | null;
+    balconesM2: string | null;
+    bodegaM2: string | null;
+    cajonesEst: string | null;
     precioLista: string | null;
     disponible: boolean;
+    muestra: boolean;
     comentarios: string | null;
   }>,
   actorId: string
@@ -248,10 +261,17 @@ export async function updateVivienda(
       tipo: params.tipo,
       modelo: params.modelo,
       habitaciones: params.habitaciones,
+      frente_m2: params.frenteM2,
+      fondo_m2: params.fondoM2,
       sup_terreno_m2: params.supTerrenoM2,
       sup_const_m2: params.supConstM2,
+      terraza_m2: params.terrazaM2,
+      balcones_m2: params.balconesM2,
+      bodega_m2: params.bodegaM2,
+      cajones_est: params.cajonesEst,
       precio_lista: params.precioLista,
       disponible: params.disponible,
+      muestra: params.muestra,
       comentarios: params.comentarios,
       updated_by: actorId,
     }),

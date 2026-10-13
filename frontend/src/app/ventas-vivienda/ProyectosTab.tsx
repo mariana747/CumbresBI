@@ -18,6 +18,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -64,6 +65,8 @@ export default function ProyectosTab({
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -91,6 +94,7 @@ export default function ProyectosTab({
   }
 
   useEffect(() => {
+    setPage(0);
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,7 +233,7 @@ export default function ProyectosTab({
                   </TableCell>
                 </TableRow>
               ) : (
-                proyectos.map((p) => (
+                proyectos.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((p) => (
                   <TableRow key={p.id_proyecto} hover>
                     <TableCell>{p.denominacion || "—"}</TableCell>
                     <TableCell>{p.alias_proyecto || "—"}</TableCell>
@@ -251,6 +255,17 @@ export default function ProyectosTab({
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={proyectos.length}
+          page={page}
+          onPageChange={(_, p) => setPage(p)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+          rowsPerPageOptions={[10, 25, 50]}
+          labelRowsPerPage="Filas:"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">

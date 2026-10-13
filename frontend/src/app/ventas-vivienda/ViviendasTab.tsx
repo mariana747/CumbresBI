@@ -3,38 +3,50 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
-  Checkbox,
+  ButtonGroup,
   Chip,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
+  Drawer,
   FormControl,
-  FormControlLabel,
   IconButton,
   InputLabel,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
+import { Eye, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import FiltrosBar from "@/components/FiltrosBar";
 import {
+  ViviendaExpediente,
+  ViviendaExpedienteEstado,
+  ViviendaExpedienteItem,
+  ViviendaItemStatus,
   ViviendaProyecto,
   ViviendaUnidad,
+  createItem,
   createVivienda,
   deleteVivienda,
+  listExpedientes,
+  listItems,
   listProyectos,
   listViviendas,
   updateVivienda,
@@ -48,10 +60,16 @@ const FORM_VACIO = {
   tipo: "",
   modelo: "",
   habitaciones: "",
+  frenteM2: "",
+  fondoM2: "",
   supTerrenoM2: "",
   supConstM2: "",
+  terrazaM2: "",
+  balconesM2: "",
+  bodegaM2: "",
+  cajonesEst: "",
   precioLista: "",
-  disponible: true,
+  muestra: false,
   comentarios: "",
 };
 
@@ -69,6 +87,8 @@ export default function ViviendasTab({
   const [filtroProyecto, setFiltroProyecto] = useState("");
   const [filtroDisponible, setFiltroDisponible] = useState<"" | "true" | "false">("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -76,6 +96,17 @@ export default function ViviendasTab({
   const [form, setForm] = useState(FORM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [soloLectura, setSoloLectura] = useState(false);
+  const [verTab, setVerTab] = useState(0);
+  const [expedientesVer, setExpedientesVer] = useState<ViviendaExpediente[]>([]);
+  const [loadingExp, setLoadingExp] = useState(false);
+  const [togglingDisp, setTogglingDisp] = useState(false);
+  const [expedienteDrawer, setExpedienteDrawer] = useState<ViviendaExpediente | null>(null);
+  const [itemsDrawer, setItemsDrawer] = useState<ViviendaExpedienteItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [duplicando, setDuplicando] = useState(false);
+  const [docUrl, setDocUrl] = useState<string | null>(null);
+  const [dispActual, setDispActual] = useState<boolean>(true);
 
   useEffect(() => {
     listProyectos().then(setProyectos).catch(() => undefined);
@@ -94,20 +125,25 @@ export default function ViviendasTab({
     : viviendas.filter((v) => (v.disponible ? "true" : "false") === filtroDisponible);
 
   useEffect(() => {
+    setPage(0);
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filtroProyecto]);
 
+  useEffect(() => { setPage(0); }, [filtroDisponible]);
+
   function abrirAlta() {
     setEditing(null);
     setForm({ ...FORM_VACIO, proyecto: filtroProyecto });
     setFormError(null);
+    setSoloLectura(false);
     setDialogOpen(true);
   }
 
   function abrirEdicion(v: ViviendaUnidad) {
     setEditing(v);
+    setDispActual(v.disponible ?? true);
     setForm({
       proyecto: v.proyecto,
       denominacion: v.denominacion || "",
@@ -116,13 +152,50 @@ export default function ViviendasTab({
       tipo: v.tipo || "",
       modelo: v.modelo || "",
       habitaciones: v.habitaciones?.toString() || "",
+      frenteM2: v.frente_m2 || "",
+      fondoM2: v.fondo_m2 || "",
       supTerrenoM2: v.sup_terreno_m2 || "",
       supConstM2: v.sup_const_m2 || "",
+      terrazaM2: v.terraza_m2 || "",
+      balconesM2: v.balcones_m2 || "",
+      bodegaM2: v.bodega_m2 || "",
+      cajonesEst: v.cajones_est || "",
       precioLista: v.precio_lista || "",
-      disponible: v.disponible ?? true,
+      muestra: v.muestra ?? false,
       comentarios: v.comentarios || "",
     });
     setFormError(null);
+    setSoloLectura(false);
+    setDialogOpen(true);
+  }
+
+  function abrirVer(v: ViviendaUnidad) {
+    setEditing(v);
+    setDispActual(v.disponible ?? true);
+    setForm({
+      proyecto: v.proyecto,
+      denominacion: v.denominacion || "",
+      numOficial: v.num_oficial || "",
+      etapa: v.etapa || "",
+      tipo: v.tipo || "",
+      modelo: v.modelo || "",
+      habitaciones: v.habitaciones?.toString() || "",
+      frenteM2: v.frente_m2 || "",
+      fondoM2: v.fondo_m2 || "",
+      supTerrenoM2: v.sup_terreno_m2 || "",
+      supConstM2: v.sup_const_m2 || "",
+      terrazaM2: v.terraza_m2 || "",
+      balconesM2: v.balcones_m2 || "",
+      bodegaM2: v.bodega_m2 || "",
+      cajonesEst: v.cajones_est || "",
+      precioLista: v.precio_lista || "",
+      muestra: v.muestra ?? false,
+      comentarios: v.comentarios || "",
+    });
+    setFormError(null);
+    setVerTab(0);
+    setExpedientesVer([]);
+    setSoloLectura(true);
     setDialogOpen(true);
   }
 
@@ -141,10 +214,16 @@ export default function ViviendasTab({
         tipo: form.tipo || null,
         modelo: form.modelo || null,
         habitaciones: form.habitaciones ? Number(form.habitaciones) : null,
+        frenteM2: form.frenteM2 || null,
+        fondoM2: form.fondoM2 || null,
         supTerrenoM2: form.supTerrenoM2 || null,
         supConstM2: form.supConstM2 || null,
+        terrazaM2: form.terrazaM2 || null,
+        balconesM2: form.balconesM2 || null,
+        bodegaM2: form.bodegaM2 || null,
+        cajonesEst: form.cajonesEst || null,
         precioLista: form.precioLista || null,
-        disponible: form.disponible,
+        muestra: form.muestra,
         comentarios: form.comentarios || null,
       };
       if (editing) {
@@ -258,7 +337,7 @@ export default function ViviendasTab({
                   </TableCell>
                 </TableRow>
               ) : (
-                viviendasFiltradas.map((v) => (
+                viviendasFiltradas.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((v) => (
                   <TableRow key={v.id_vivienda} hover>
                     <TableCell>{v.denominacion || v.num_oficial || "—"}</TableCell>
                     <TableCell>{v.proyecto_denominacion || "—"}</TableCell>
@@ -275,6 +354,10 @@ export default function ViviendasTab({
                       />
                     </TableCell>
                     <TableCell align="right">
+                      <IconButton size="small" aria-label="Ver detalle" onClick={() => abrirVer(v)}>
+                        <Eye size={14} strokeWidth={1.5} />
+                      </IconButton>
+
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(v)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
                       </IconButton>
@@ -288,22 +371,140 @@ export default function ViviendasTab({
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={viviendasFiltradas.length}
+          page={page}
+          onPageChange={(_, p) => setPage(p)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+          rowsPerPageOptions={[10, 25, 50]}
+          labelRowsPerPage="Filas:"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {editing ? `Editar ${editing.denominacion || editing.id_vivienda}` : "Nueva Unidad"}
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <span>{soloLectura ? (editing?.denominacion || editing?.num_oficial || editing?.id_vivienda || "Detalle") : editing ? `Editar ${editing.denominacion || editing.id_vivienda}` : "Nueva Unidad"}</span>
+            {soloLectura && editing && (
+              <Chip size="small" label={dispActual ? "Disponible" : "No disponible"} color={dispActual ? "success" : "error"} variant="outlined" />
+            )}
+          </Stack>
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
         </DialogTitle>
+        {soloLectura && (
+          <Tabs
+            value={verTab}
+            onChange={(_, v) => {
+              setVerTab(v);
+              if (v === 1 && expedientesVer.length === 0 && editing) {
+                setLoadingExp(true);
+                listExpedientes({ vivienda: editing.id_vivienda })
+                  .then(setExpedientesVer)
+                  .finally(() => setLoadingExp(false));
+              }
+            }}
+            sx={{ px: 3, borderBottom: "1px solid", borderColor: "divider" }}
+          >
+            <Tab label="Detalle" value={0} />
+            <Tab label="Expedientes" value={1} />
+          </Tabs>
+        )}
         <DialogContent dividers>
-          {formError && (
+          {formError && !soloLectura && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {formError}
             </Alert>
           )}
-          <Stack spacing={2}>
+          {soloLectura && verTab === 1 ? (
+            loadingExp ? (
+              <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress size={24} /></Stack>
+            ) : expedientesVer.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>Sin expedientes para esta vivienda.</Typography>
+            ) : (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Expediente</TableCell>
+                      <TableCell>Asesor</TableCell>
+                      <TableCell>Contrato</TableCell>
+                      <TableCell>Estado</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {expedientesVer.map((e) => (
+                      <TableRow
+                        key={e.id_expediente}
+                        hover
+                        sx={{ cursor: "pointer" }}
+                        onClick={() => {
+                          setExpedienteDrawer(e);
+                          setItemsDrawer([]);
+                          setLoadingItems(true);
+                          listItems(e.id_expediente).then(setItemsDrawer).finally(() => setLoadingItems(false));
+                        }}
+                      >
+                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>
+                          {e.id_expediente.slice(0, 8).toUpperCase()}
+                        </TableCell>
+                        <TableCell>{e.asesor_nombre}</TableCell>
+                        <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{e.id_contrato}</TableCell>
+                        <TableCell>
+                          <Chip size="small" label={e.estado} variant="outlined"
+                            color={({ PENDIENTE: "default", "EN PROCESO": "info", FIRMADO: "warning", CONCLUIDO: "success", CANCELADO: "error" } as Record<ViviendaExpedienteEstado, "default"|"info"|"warning"|"success"|"error">)[e.estado] ?? "default"}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )
+          ) : (
+          <Stack component="fieldset" disabled={soloLectura} spacing={2} sx={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+            {editing && (
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Typography variant="body2" color="text.secondary" sx={{ minWidth: 120 }}>Disponibilidad</Typography>
+                <ButtonGroup size="small" variant="outlined" disabled={togglingDisp}>
+                  <Button
+                    color="success"
+                    variant={dispActual ? "contained" : "outlined"}
+                    onClick={async () => {
+                      if (dispActual) return;
+                      setTogglingDisp(true);
+                      try {
+                        await updateVivienda(editing.id_vivienda, { disponible: true }, actorId);
+                        setDispActual(true);
+                        refresh();
+                      } finally { setTogglingDisp(false); }
+                    }}
+                  >
+                    Disponible
+                  </Button>
+                  <Button
+                    color="error"
+                    variant={!dispActual ? "contained" : "outlined"}
+                    onClick={async () => {
+                      if (!dispActual) return;
+                      setTogglingDisp(true);
+                      try {
+                        await updateVivienda(editing.id_vivienda, { disponible: false }, actorId);
+                        setDispActual(false);
+                        refresh();
+                      } finally { setTogglingDisp(false); }
+                    }}
+                  >
+                    No disponible
+                  </Button>
+                </ButtonGroup>
+                {togglingDisp && <CircularProgress size={18} />}
+              </Stack>
+            )}
             {!editing && (
               <FormControl size="small" fullWidth>
                 <InputLabel id="proyecto-label">Proyecto</InputLabel>
@@ -371,6 +572,31 @@ export default function ViviendasTab({
               />
               <TextField
                 size="small"
+                label="Cajones estacionamiento"
+                value={form.cajonesEst}
+                onChange={(e) => setForm({ ...form, cajonesEst: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="Frente (m²)"
+                value={form.frenteM2}
+                onChange={(e) => setForm({ ...form, frenteM2: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Fondo (m²)"
+                value={form.fondoM2}
+                onChange={(e) => setForm({ ...form, fondoM2: e.target.value })}
+                fullWidth
+              />
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
                 label="Sup. terreno (m²)"
                 value={form.supTerrenoM2}
                 onChange={(e) => setForm({ ...form, supTerrenoM2: e.target.value })}
@@ -384,6 +610,29 @@ export default function ViviendasTab({
                 fullWidth
               />
             </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                size="small"
+                label="Terraza (m²)"
+                value={form.terrazaM2}
+                onChange={(e) => setForm({ ...form, terrazaM2: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Balcones (m²)"
+                value={form.balconesM2}
+                onChange={(e) => setForm({ ...form, balconesM2: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                label="Bodega (m²)"
+                value={form.bodegaM2}
+                onChange={(e) => setForm({ ...form, bodegaM2: e.target.value })}
+                fullWidth
+              />
+            </Stack>
             <TextField
               size="small"
               label="Precio de lista"
@@ -391,15 +640,25 @@ export default function ViviendasTab({
               onChange={(e) => setForm({ ...form, precioLista: e.target.value })}
               fullWidth
             />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={form.disponible}
-                  onChange={(e) => setForm({ ...form, disponible: e.target.checked })}
-                />
-              }
-              label="Disponible"
-            />
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Typography variant="body2" color="text.secondary" sx={{ minWidth: 120 }}>Unidad muestra</Typography>
+              <ButtonGroup size="small" variant="outlined">
+                <Button
+                  color="success"
+                  variant={form.muestra ? "contained" : "outlined"}
+                  onClick={() => setForm({ ...form, muestra: true })}
+                >
+                  Sí
+                </Button>
+                <Button
+                  color="error"
+                  variant={!form.muestra ? "contained" : "outlined"}
+                  onClick={() => setForm({ ...form, muestra: false })}
+                >
+                  No
+                </Button>
+              </ButtonGroup>
+            </Stack>
             <TextField
               size="small"
               label="Comentarios"
@@ -410,14 +669,160 @@ export default function ViviendasTab({
               fullWidth
             />
           </Stack>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={handleGuardar} disabled={saving}>
-            {saving ? <CircularProgress size={16} /> : "Guardar"}
-          </Button>
+          {soloLectura ? (
+            <Button onClick={() => setDialogOpen(false)}>Cerrar</Button>
+          ) : (
+            <>
+              <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
+              <Button variant="contained" onClick={handleGuardar} disabled={saving}>
+                {saving ? <CircularProgress size={16} /> : "Guardar"}
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
+
+      <Drawer
+        anchor="right"
+        open={!!expedienteDrawer}
+        onClose={(_, reason) => {
+          if (reason === "backdropClick" || reason === "escapeKeyDown") return;
+          setExpedienteDrawer(null);
+        }}
+        sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}
+      >
+        {expedienteDrawer && (
+          <Box sx={{ width: 380, p: 3 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="h6">Expediente</Typography>
+                <Chip size="small" label={expedienteDrawer.estado} variant="outlined"
+                  color={({ PENDIENTE: "default", "EN PROCESO": "info", FIRMADO: "warning", CONCLUIDO: "success", CANCELADO: "error" } as Record<ViviendaExpedienteEstado, "default"|"info"|"warning"|"success"|"error">)[expedienteDrawer.estado] ?? "default"}
+                />
+              </Stack>
+              <IconButton size="small" aria-label="Cerrar" onClick={() => setExpedienteDrawer(null)}>
+                <CloseIcon size={18} strokeWidth={1.5} />
+              </IconButton>
+            </Stack>
+            <Divider sx={{ mb: 2 }} />
+
+            <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+              <Table size="small">
+                <TableBody>
+                  {([
+                    ["ID", expedienteDrawer.id_expediente.slice(0, 8).toUpperCase()],
+                    ["Asesor", expedienteDrawer.asesor_nombre],
+                    ["Contrato", expedienteDrawer.id_contrato],
+                    ["Medio de pago", expedienteDrawer.medio_pago],
+                    ["Pagos en efectivo", expedienteDrawer.pagos_efectivo != null ? (expedienteDrawer.pagos_efectivo ? "Sí" : "No") : null],
+                    ["Fecha cierre", expedienteDrawer.fecha_cierre],
+                    ["Comentarios", expedienteDrawer.comentarios],
+                    ["Creado por", expedienteDrawer.created_by],
+                    ["Creado el", expedienteDrawer.created_at ? new Date(expedienteDrawer.created_at).toLocaleString("es-MX") : null],
+                    ["Actualizado por", expedienteDrawer.updated_by],
+                    ["Actualizado el", expedienteDrawer.updated_at ? new Date(expedienteDrawer.updated_at).toLocaleString("es-MX") : null],
+                  ] as [string, string | null | undefined][]).map(([label, value]) => (
+                    <TableRow key={label}>
+                      <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", width: "40%", fontSize: 12 }}>{label}</TableCell>
+                      <TableCell sx={{ fontSize: 12 }}>{value || "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                  {expedienteDrawer.link_expediente && (
+                    <TableRow>
+                      <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", fontSize: 12 }}>Link</TableCell>
+                      <TableCell sx={{ fontSize: 12 }}>
+                        <a href={expedienteDrawer.link_expediente} target="_blank" rel="noreferrer">Abrir en Drive</a>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>Documentos</Typography>
+            {loadingItems ? (
+              <CircularProgress size={20} />
+            ) : itemsDrawer.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">Sin documentos.</Typography>
+            ) : (
+              <Stack spacing={1.5}>
+                {itemsDrawer.map((item) => (
+                  <Paper key={item.id_item} variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack spacing={0.5}>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between">
+                        <Typography variant="body2" fontWeight={500}>{item.denominacion || "—"}</Typography>
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Chip size="small" label={item.status}
+                            color={({ PENDIENTE: "default", "NO APLICA": "default", INCOMPLETO: "warning", ENTREGADO: "info", APROBADO: "success", RECHAZADO: "error", POSPUESTO: "warning" } as Record<ViviendaItemStatus, "default"|"warning"|"info"|"success"|"error">)[item.status] ?? "default"}
+                          />
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            sx={{ minWidth: 0, px: 1, fontSize: 11 }}
+                            disabled={duplicando}
+                            onClick={async () => {
+                              setDuplicando(true);
+                              try {
+                                await createItem({
+                                  expediente: item.expediente,
+                                  denominacion: item.denominacion,
+                                  status: "PENDIENTE",
+                                  responsable: item.responsable,
+                                  actorId,
+                                });
+                                setLoadingItems(true);
+                                listItems(expedienteDrawer.id_expediente).then(setItemsDrawer).finally(() => setLoadingItems(false));
+                              } finally { setDuplicando(false); }
+                            }}
+                          >
+                            Duplicar
+                          </Button>
+                        </Stack>
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary">Responsable: {item.responsable || "—"}</Typography>
+                      <Typography variant="caption" color="text.secondary">Fecha solicitud: {item.fecha_solicitud || "—"}</Typography>
+                      {item.link_documento && (
+                        <IconButton size="small" aria-label="Ver documento" onClick={() => window.open(item.link_documento!, "_blank", "noopener,noreferrer")}>
+                          <Eye size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+          </Box>
+        )}
+      </Drawer>
+
+      <Dialog
+        open={!!docUrl}
+        onClose={() => setDocUrl(null)}
+        fullWidth
+        maxWidth="lg"
+        sx={{ zIndex: (theme) => theme.zIndex.modal + 2 }}
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", py: 1 }}>
+          <Typography variant="subtitle1">Documento</Typography>
+          <IconButton size="small" onClick={() => setDocUrl(null)} aria-label="Cerrar">
+            <CloseIcon size={18} strokeWidth={1.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0, height: "80vh" }}>
+          {docUrl && (
+            <iframe
+              src={docUrl.replace("/view", "/preview")}
+              style={{ width: "100%", height: "100%", border: "none" }}
+              title="Documento"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+
     </>
   );
 }

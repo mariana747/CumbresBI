@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Stack, Typography } from "@mui/material";
+import { Suspense, useEffect, useState } from "react";
+import { CircularProgress, Stack, Typography } from "@mui/material";
 import { ClipboardList } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { SessionUser, getSession } from "@/lib/auth";
@@ -27,7 +27,9 @@ export default function VentasViviendaExpedientesPage() {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Expedientes de venta (vivienda + asesor + contrato de Tesorería).
       </Typography>
-      <ExpedientesTab puedeCrear={puedeCrear} puedeEditar={puedeEditar} actorId={actorId} />
+      <Suspense fallback={<CircularProgress size={24} sx={{ mt: 2 }} />}>
+        <ExpedientesTab puedeCrear={puedeCrear} puedeEditar={puedeEditar} actorId={actorId} />
+      </Suspense>
     </AppShell>
   );
 }
