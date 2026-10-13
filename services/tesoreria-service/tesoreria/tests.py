@@ -1289,7 +1289,8 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         self.factory = APIRequestFactory()
         self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
         self.contraparte = TesoreriaContraparte.objects.create(
-            razon_social="Proveedor sugerencias", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="s@s.com"
+            razon_social="Proveedor sugerencias", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="s@s.com",
+            rfc="SUG010101SUG",
         )
         self.contrato = TesoreriaContrato.objects.create(
             id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-SUG",
@@ -1314,6 +1315,7 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         TesoreriaFactura.objects.create(
             timbre_uuid="44444444-4444-4444-4444-444444444444",
             contraparte=self.contraparte,
+            emisor_rfc=self.contraparte.rfc,
             comprobante_total=Decimal("1000.50"),
         )
         response = self._sugerencias(self.flujo.id_flujo)
@@ -1321,11 +1323,28 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         self.assertEqual(len(response.data["facturas"]), 1)
         self.assertEqual(response.data["facturas"][0]["timbre_uuid"], "44444444-4444-4444-4444-444444444444")
 
-    def test_no_propone_factura_fuera_de_tolerancia(self):
+    def test_propone_todas_las_facturas_del_rfc_sin_filtro_de_monto(self):
+        # El backend devuelve todas las facturas del RFC; el filtro de monto
+        # es responsabilidad del frontend.
         TesoreriaFactura.objects.create(
             timbre_uuid="55555555-5555-5555-5555-555555555555",
             contraparte=self.contraparte,
+            emisor_rfc=self.contraparte.rfc,
             comprobante_total=Decimal("5000.00"),
+        )
+        response = self._sugerencias(self.flujo.id_flujo)
+        self.assertEqual(len(response.data["facturas"]), 1)
+
+    def test_no_propone_factura_de_otro_rfc(self):
+        otra_contraparte = TesoreriaContraparte.objects.create(
+            razon_social="Otro proveedor", tipo_persona=TesoreriaContraparte.TIPO_MORAL,
+            email="otro@s.com", rfc="OTR010101OTR",
+        )
+        TesoreriaFactura.objects.create(
+            timbre_uuid="55555555-5555-5555-5555-555555555555",
+            contraparte=otra_contraparte,
+            emisor_rfc="OTR010101OTR",
+            comprobante_total=Decimal("1000.00"),
         )
         response = self._sugerencias(self.flujo.id_flujo)
         self.assertEqual(len(response.data["facturas"]), 0)
@@ -1334,6 +1353,7 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         factura = TesoreriaFactura.objects.create(
             timbre_uuid="66666666-6666-6666-6666-666666666666",
             contraparte=self.contraparte,
+            emisor_rfc=self.contraparte.rfc,
             comprobante_total=Decimal("1000.00"),
         )
         TesoreriaFlujo.objects.create(

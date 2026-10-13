@@ -463,53 +463,45 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
     if not flujo.contrato_id or flujo.total_mxp is None:
         return {"facturas": [], "complementos": []}
 
-    contraparte_id = flujo.contrato.contraparte_id
+    rfc_contraparte = flujo.contrato.contraparte.rfc
     monto = abs(flujo.total_mxp)
 
     candidatos_factura = []
-    if not flujo.factura_id:
-        facturas = TesoreriaFactura.objects.filter(contraparte_id=contraparte_id).exclude(flujos__isnull=False)
-        for f in facturas:
+    if not flujo.factura_id and rfc_contraparte:
+        for f in TesoreriaFactura.objects.filter(emisor_rfc=rfc_contraparte).exclude(flujos__isnull=False):
             if f.comprobante_total is None:
                 continue
-            diferencia = abs(f.comprobante_total - monto)
-            if diferencia <= tolerancia:
-                candidatos_factura.append(
-                    {
-                        "id": f.id,
-                        "timbre_uuid": f.timbre_uuid,
-                        "folio": f.comprobante_folio,
-                        "total": f.comprobante_total,
-                        "metodo_pago": f.comprobante_metodo_pago,
-                        "emisor_rfc": f.emisor_rfc,
-                        "fecha_timbrado": f.timbre_fecha_timbrado.date().isoformat() if f.timbre_fecha_timbrado else None,
-                        "diferencia": diferencia,
-                    }
-                )
-        candidatos_factura.sort(key=lambda c: c["diferencia"])
+            candidatos_factura.append(
+                {
+                    "id": f.id,
+                    "timbre_uuid": f.timbre_uuid,
+                    "folio": f.comprobante_folio,
+                    "total": f.comprobante_total,
+                    "metodo_pago": f.comprobante_metodo_pago,
+                    "emisor_rfc": f.emisor_rfc,
+                    "fecha_timbrado": f.timbre_fecha_timbrado.date().isoformat() if f.timbre_fecha_timbrado else None,
+                    "diferencia": abs(f.comprobante_total - monto),
+                }
+            )
+        candidatos_factura.sort(key=lambda c: c["fecha_timbrado"] or "", reverse=True)
 
     candidatos_complemento = []
-    if not flujo.complemento_id:
-        complementos = TesoreriaComplementoPago.objects.filter(contraparte_id=contraparte_id).exclude(
-            flujos__isnull=False
-        )
-        for c in complementos:
+    if not flujo.complemento_id and rfc_contraparte:
+        for c in TesoreriaComplementoPago.objects.filter(emisor_rfc=rfc_contraparte).exclude(flujos__isnull=False):
             if c.total is None:
                 continue
-            diferencia = abs(c.total - monto)
-            if diferencia <= tolerancia:
-                candidatos_complemento.append(
-                    {
-                        "id": c.id,
-                        "timbre_uuid": c.timbre_uuid,
-                        "folio": c.folio,
-                        "total": c.total,
-                        "emisor_rfc": c.emisor_rfc,
-                        "fecha_timbrado": c.timbre_fecha_timbrado.date().isoformat() if c.timbre_fecha_timbrado else None,
-                        "diferencia": diferencia,
-                    }
-                )
-        candidatos_complemento.sort(key=lambda c: c["diferencia"])
+            candidatos_complemento.append(
+                {
+                    "id": c.id,
+                    "timbre_uuid": c.timbre_uuid,
+                    "folio": c.folio,
+                    "total": c.total,
+                    "emisor_rfc": c.emisor_rfc,
+                    "fecha_timbrado": c.timbre_fecha_timbrado.date().isoformat() if c.timbre_fecha_timbrado else None,
+                    "diferencia": abs(c.total - monto),
+                }
+            )
+        candidatos_complemento.sort(key=lambda c: c["fecha_timbrado"] or "", reverse=True)
 
     return {"facturas": candidatos_factura, "complementos": candidatos_complemento}
 
