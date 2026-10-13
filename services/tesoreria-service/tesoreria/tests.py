@@ -1289,7 +1289,8 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         self.factory = APIRequestFactory()
         self.scope = EffectiveScope(is_global=True, perm_keys=("tesoreria.leer",))
         self.contraparte = TesoreriaContraparte.objects.create(
-            razon_social="Proveedor sugerencias", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="s@s.com"
+            razon_social="Proveedor sugerencias", tipo_persona=TesoreriaContraparte.TIPO_MORAL, email="s@s.com",
+            rfc="SUG010101SUG",
         )
         self.contrato = TesoreriaContrato.objects.create(
             id_contrato=f"{RFC_TIZARA}-{self.contraparte.id_contraparte}-SUG",
@@ -1314,6 +1315,7 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         TesoreriaFactura.objects.create(
             timbre_uuid="44444444-4444-4444-4444-444444444444",
             contraparte=self.contraparte,
+            emisor_rfc=self.contraparte.rfc,
             comprobante_total=Decimal("1000.50"),
         )
         response = self._sugerencias(self.flujo.id_flujo)
