@@ -298,8 +298,6 @@ function ItemsExpedienteDialog({
   const [form, setForm] = useState(FORM_ITEM_VACIO);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [previewDocBlobUrl, setPreviewDocBlobUrl] = useState<string | null>(null);
-  const [loadingDoc, setLoadingDoc] = useState(false);
 
   function refresh() {
     setLoading(true);
@@ -438,28 +436,13 @@ function ItemsExpedienteDialog({
                   {items.map((item) => (
                     <TableRow key={item.id_item} hover>
                       <TableCell>
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <span>{item.denominacion || "—"}</span>
-                          {item.link_documento && (
-                            <IconButton
-                              size="small"
-                              disabled={loadingDoc}
-                              onClick={async () => {
-                                const fileId = driveFileIdFromUrl(item.link_documento!);
-                                if (!fileId) { window.open(item.link_documento!, "_blank", "noopener,noreferrer"); return; }
-                                setLoadingDoc(true);
-                                try {
-                                  const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
-                                  if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
-                                  setPreviewDocBlobUrl(blob);
-                                } catch { window.open(item.link_documento!, "_blank", "noopener,noreferrer"); }
-                                finally { setLoadingDoc(false); }
-                              }}
-                            >
-                              {loadingDoc ? <CircularProgress size={12} /> : <Eye size={12} strokeWidth={1.5} />}
-                            </IconButton>
-                          )}
-                        </Stack>
+                        {item.link_documento ? (
+                          <a href={item.link_documento} target="_blank" rel="noopener noreferrer">
+                            {item.denominacion || "—"}
+                          </a>
+                        ) : (
+                          item.denominacion || "—"
+                        )}
                       </TableCell>
                       <TableCell>
                         {item.responsable ? RESPONSABLE_LABELS[item.responsable] : "—"}
@@ -500,13 +483,6 @@ function ItemsExpedienteDialog({
           )}
         </DialogContent>
       </Dialog>
-
-      <DocumentoPreviewDialog
-        open={!!previewDocBlobUrl}
-        onClose={() => { if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl); setPreviewDocBlobUrl(null); }}
-        url={previewDocBlobUrl}
-        titulo="Documento"
-      />
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
