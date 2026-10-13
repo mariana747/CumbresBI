@@ -12,7 +12,6 @@ import {
   DialogTitle,
   FormControlLabel,
   IconButton,
-  InputAdornment,
   Paper,
   Stack,
   Table,
@@ -24,7 +23,8 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
+import { Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
+import FiltrosBar from "@/components/FiltrosBar";
 import { ViviendaAsesor, createAsesor, deleteAsesor, listAsesores, updateAsesor } from "@/lib/vivienda";
 
 const FORM_VACIO = {
@@ -169,34 +169,25 @@ export default function AsesoresTab({
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por nombre, correo o razón social..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          {puedeCrear && (
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por nombre, correo o razón social..."
+        actions={
+          puedeCrear ? (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
             >
               Nuevo Asesor
             </Button>
-          )}
-        </Stack>
+          ) : undefined
+        }
+      />
+
+      <Paper variant="outlined">
         <TableContainer>
           <Table size="small">
             <TableHead>

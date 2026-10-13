@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Button,
   Chip,
   CircularProgress,
   Divider,
@@ -18,7 +19,10 @@ import {
   Tabs,
   Typography,
 } from "@mui/material";
+import { FileSpreadsheet } from "lucide-react";
 import { ViviendaExpedienteItem, ViviendaExpedienteEstado, ViviendaItemStatus, listItemsByDenominacion } from "@/lib/vivienda";
+import FiltrosBar from "@/components/FiltrosBar";
+import { descargarCsv } from "@/lib/descargarCsv";
 
 const ITEM_STATUS_COLORS: Record<ViviendaItemStatus, "default" | "warning" | "info" | "success" | "error"> = {
   PENDIENTE: "default",
@@ -62,15 +66,18 @@ export default function VistosBuenosTab({
   denominacion,
   tabs,
   defaultTab,
+  nombreArchivo = "vistos-buenos",
 }: {
   denominacion: string;
   tabs?: TabConfig;
   defaultTab?: TabStatus;
+  nombreArchivo?: string;
 }) {
   const [items, setItems] = useState<ViviendaExpedienteItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabStatus>(defaultTab ?? "APROBADO");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -83,9 +90,51 @@ export default function VistosBuenosTab({
   if (loading) return <CircularProgress size={24} sx={{ mt: 2 }} />;
   if (error) return <Alert severity="error">{error}</Alert>;
 
-  const visibles = tabs && tab ? items.filter((i) => i.status === tab) : items;
+  const visibles = items.filter((i) => {
+    if (tabs && tab && i.status !== tab) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        i.expediente_vivienda_denominacion?.toLowerCase().includes(q) ||
+        i.expediente?.toLowerCase().includes(q) ||
+        i.responsable?.toLowerCase().includes(q) ||
+        i.comentarios?.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   return (
+    <>
+    <FiltrosBar
+      search={search}
+      onSearchChange={setSearch}
+      searchPlaceholder="Buscar por vivienda, expediente o responsable..."
+      actions={
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<FileSpreadsheet size={14} strokeWidth={2} />}
+          disabled={visibles.length === 0}
+          onClick={() =>
+            descargarCsv(
+              visibles.map((i) => ({
+                Vivienda: i.expediente_vivienda_denominacion ?? "",
+                Expediente: i.expediente,
+                "Estado expediente": i.expediente_estado ?? "",
+                "Visto bueno": i.status,
+                Responsable: i.responsable ?? "",
+                "Fecha cierre": i.fecha_cierre ?? "",
+                Comentarios: i.comentarios ?? "",
+              })),
+              `${nombreArchivo}.csv`
+            )
+          }
+        >
+          Descargar CSV
+        </Button>
+      }
+    />
     <Paper variant="outlined">
       {tabs && (
         <>
@@ -161,5 +210,6 @@ export default function VistosBuenosTab({
       </Table>
     </TableContainer>
     </Paper>
+    </>
   );
 }

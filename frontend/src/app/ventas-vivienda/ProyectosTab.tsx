@@ -11,7 +11,6 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  InputAdornment,
   Paper,
   Stack,
   Table,
@@ -23,7 +22,8 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Pencil, Plus, Search, Trash2, X as CloseIcon } from "lucide-react";
+import { Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
+import FiltrosBar from "@/components/FiltrosBar";
 import { GeneralSociedad, listSociedades } from "@/lib/iam";
 import {
   ViviendaProyecto,
@@ -183,34 +183,25 @@ export default function ProyectosTab({
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ p: 2 }}>
-          <TextField
-            size="small"
-            placeholder="Buscar por denominación o alias..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: 1, maxWidth: 320 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={16} strokeWidth={1.5} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          {puedeCrear && (
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por denominación o alias..."
+        actions={
+          puedeCrear ? (
             <Button
               size="small"
               variant="contained"
               startIcon={<Plus size={14} strokeWidth={2} />}
               onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" } }}
             >
               Nuevo Proyecto
             </Button>
-          )}
-        </Stack>
+          ) : undefined
+        }
+      />
+
+      <Paper variant="outlined">
         <TableContainer>
           <Table size="small">
             <TableHead>
