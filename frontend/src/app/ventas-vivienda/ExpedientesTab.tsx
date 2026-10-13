@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Alert,
   Button,
@@ -24,12 +25,13 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { CheckSquare, FileSpreadsheet, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { CheckSquare, Eye, FileSpreadsheet, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
 import FiltrosBar from "@/components/FiltrosBar";
 import { descargarCsv } from "@/lib/descargarCsv";
 import ContraparteSelector from "@/components/ContraparteSelector";
@@ -651,6 +653,7 @@ export default function ExpedientesTab({
   puedeEditar: boolean;
   actorId: string;
 }) {
+  const searchParams = useSearchParams();
   const [expedientes, setExpedientes] = useState<ViviendaExpediente[]>([]);
   const [viviendas, setViviendas] = useState<ViviendaUnidad[]>([]);
   const [asesores, setAsesores] = useState<ViviendaAsesor[]>([]);
@@ -663,12 +666,28 @@ export default function ExpedientesTab({
   const [formError, setFormError] = useState<string | null>(null);
   const [clientesDe, setClientesDe] = useState<ViviendaExpediente | null>(null);
   const [itemsDe, setItemsDe] = useState<ViviendaExpediente | null>(null);
+  const [viendo, setViendo] = useState<ViviendaExpediente | null>(null);
   const [tabEstado, setTabEstado] = useState<"PENDIENTE" | "EN PROCESO" | "FIRMADO" | "">("EN PROCESO");
   const [search, setSearch] = useState("");
+  const [filtroVivienda, setFiltroVivienda] = useState(searchParams?.get("vivienda") ?? "");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const initDone = useRef(false);
 
   useEffect(() => {
     listViviendas().then(setViviendas).catch(() => undefined);
     listAsesores().then(setAsesores).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (initDone.current) return;
+    initDone.current = true;
+    const v = searchParams?.get("vivienda");
+    if (v) {
+      setFiltroVivienda(v);
+      setTabEstado("");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function refresh() {
@@ -680,6 +699,8 @@ export default function ExpedientesTab({
   }
 
   useEffect(refresh, []);
+
+  useEffect(() => { setPage(0); }, [tabEstado, search, filtroVivienda]);
 
   function abrirAlta() {
     setEditing(null);
@@ -734,6 +755,20 @@ export default function ExpedientesTab({
     }
   }
 
+  const expedientesFiltrados = expedientes.filter((e) => {
+    if (filtroVivienda && e.vivienda !== filtroVivienda) return false;
+    if (tabEstado && e.estado !== tabEstado) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        e.vivienda_denominacion?.toLowerCase().includes(q) ||
+        e.asesor_nombre?.toLowerCase().includes(q) ||
+        e.id_contrato?.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   return (
     <>
       {error && (
@@ -781,7 +816,24 @@ export default function ExpedientesTab({
             )}
           </Stack>
         }
-      />
+      >
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel id="filtro-viv-label">Vivienda</InputLabel>
+          <Select
+            labelId="filtro-viv-label"
+            label="Vivienda"
+            value={filtroVivienda}
+            onChange={(e) => setFiltroVivienda(e.target.value)}
+          >
+            <MenuItem value="">Todas</MenuItem>
+            {viviendas.map((v) => (
+              <MenuItem key={v.id_vivienda} value={v.id_vivienda}>
+                {v.denominacion || v.num_oficial || v.id_vivienda}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </FiltrosBar>
 
       <Paper variant="outlined">
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ px: 2, pt: 1.5, pb: 0 }}>
@@ -816,18 +868,7 @@ export default function ExpedientesTab({
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : expedientes.filter((e) => {
-                  if (tabEstado && e.estado !== tabEstado) return false;
-                  if (search) {
-                    const q = search.toLowerCase();
-                    return (
-                      e.vivienda_denominacion?.toLowerCase().includes(q) ||
-                      e.asesor_nombre?.toLowerCase().includes(q) ||
-                      e.id_contrato?.toLowerCase().includes(q)
-                    );
-                  }
-                  return true;
-                }).length === 0 ? (
+              ) : expedientesFiltrados.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -836,18 +877,7 @@ export default function ExpedientesTab({
                   </TableCell>
                 </TableRow>
               ) : (
-                expedientes.filter((e) => {
-                  if (tabEstado && e.estado !== tabEstado) return false;
-                  if (search) {
-                    const q = search.toLowerCase();
-                    return (
-                      e.vivienda_denominacion?.toLowerCase().includes(q) ||
-                      e.asesor_nombre?.toLowerCase().includes(q) ||
-                      e.id_contrato?.toLowerCase().includes(q)
-                    );
-                  }
-                  return true;
-                }).map((e) => (
+                expedientesFiltrados.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((e) => (
                   <TableRow key={e.id_expediente} hover>
                     <TableCell>{e.vivienda_denominacion || "—"}</TableCell>
                     <TableCell>{e.asesor_nombre}</TableCell>
@@ -856,6 +886,9 @@ export default function ExpedientesTab({
                       <Chip size="small" label={ESTADO_LABELS[e.estado]} color={ESTADO_COLORS[e.estado]} variant="outlined" />
                     </TableCell>
                     <TableCell align="right">
+                      <IconButton size="small" aria-label="Ver detalle" onClick={() => setViendo(e)}>
+                        <Eye size={14} strokeWidth={1.5} />
+                      </IconButton>
                       <IconButton size="small" aria-label="Checklist" onClick={() => setItemsDe(e)}>
                         <CheckSquare size={14} strokeWidth={1.5} />
                       </IconButton>
@@ -872,6 +905,17 @@ export default function ExpedientesTab({
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={expedientesFiltrados.length}
+          page={page}
+          onPageChange={(_, p) => setPage(p)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+          rowsPerPageOptions={[10, 25, 50]}
+          labelRowsPerPage="Filas:"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
@@ -982,6 +1026,77 @@ export default function ExpedientesTab({
           puedeEditar={puedeEditar}
           actorId={actorId}
         />
+      )}
+
+      {viendo && (
+        <Dialog open onClose={() => setViendo(null)} fullWidth maxWidth="sm">
+          <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Typography variant="h6" sx={{ fontFamily: "var(--font-mono, monospace)", fontSize: 16 }}>
+                {viendo.id_expediente.slice(0, 8).toUpperCase()}
+              </Typography>
+              <Chip size="small" label={ESTADO_LABELS[viendo.estado]} color={ESTADO_COLORS[viendo.estado]} variant="outlined" />
+            </Stack>
+            <IconButton onClick={() => setViendo(null)} size="small" aria-label="Cerrar">
+              <CloseIcon size={18} strokeWidth={1.5} />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent dividers sx={{ p: 0 }}>
+            <Stack spacing={0}>
+              {([
+                ["Vivienda", viendo.vivienda_denominacion],
+                ["Asesor", viendo.asesor_nombre],
+                ["Contrato", viendo.id_contrato],
+                ["Estado", viendo.estado],
+                ["Medio de pago", viendo.medio_pago],
+                ["Pagos en efectivo", viendo.pagos_efectivo != null ? (viendo.pagos_efectivo ? "Sí" : "No") : null],
+                ["Fecha cierre", viendo.fecha_cierre],
+                ["Comentarios", viendo.comentarios],
+                ["Creado por", viendo.created_by],
+                ["Creado el", viendo.created_at ? new Date(viendo.created_at).toLocaleString("es-MX") : null],
+                ["Actualizado por", viendo.updated_by],
+                ["Actualizado el", viendo.updated_at ? new Date(viendo.updated_at).toLocaleString("es-MX") : null],
+              ] as [string, string | null | undefined][]).map(([label, value], i) => (
+                <Stack
+                  key={label}
+                  direction="row"
+                  sx={{ px: 3, py: 1, bgcolor: i % 2 === 0 ? "action.hover" : "transparent" }}
+                  spacing={2}
+                >
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160, flexShrink: 0 }}>
+                    {label}
+                  </Typography>
+                  <Typography variant="body2">{value || "—"}</Typography>
+                </Stack>
+              ))}
+              {viendo.link_expediente && (
+                <Stack
+                  direction="row"
+                  sx={{ px: 3, py: 1, bgcolor: "transparent" }}
+                  spacing={2}
+                  alignItems="center"
+                >
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160, flexShrink: 0 }}>
+                    Link expediente
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    component="a"
+                    href={viendo.link_expediente}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{ color: "primary.main", wordBreak: "break-all" }}
+                  >
+                    Abrir en Drive
+                  </Typography>
+                </Stack>
+              )}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setViendo(null)}>Cerrar</Button>
+          </DialogActions>
+        </Dialog>
       )}
     </>
   );

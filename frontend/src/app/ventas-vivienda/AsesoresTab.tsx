@@ -19,6 +19,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -53,6 +54,8 @@ export default function AsesoresTab({
 }) {
   const [asesores, setAsesores] = useState<ViviendaAsesor[]>([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -70,6 +73,7 @@ export default function AsesoresTab({
   }
 
   useEffect(() => {
+    setPage(0);
     const timeout = setTimeout(refresh, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -215,7 +219,7 @@ export default function AsesoresTab({
                   </TableCell>
                 </TableRow>
               ) : (
-                asesores.map((a) => (
+                asesores.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((a) => (
                   <TableRow key={a.id_asesor} hover>
                     <TableCell>{a.nombre}</TableCell>
                     <TableCell>{a.email}</TableCell>
@@ -237,6 +241,17 @@ export default function AsesoresTab({
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={asesores.length}
+          page={page}
+          onPageChange={(_, p) => setPage(p)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+          rowsPerPageOptions={[10, 25, 50]}
+          labelRowsPerPage="Filas:"
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
