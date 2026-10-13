@@ -1798,14 +1798,16 @@ function TesoreriaFlujosPageContent() {
                   fullWidth
                 />
               )}
-              <TextField
-                size="small"
-                label="Referencia (link)"
-                value={form.linkReferencia}
-                onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-              />
+              {!soloLectura && (
+                <TextField
+                  size="small"
+                  label="Referencia (link)"
+                  value={form.linkReferencia}
+                  onChange={(e) => setForm({ ...form, linkReferencia: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+              )}
             </Stack>
 
             {editing && (
