@@ -953,6 +953,7 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
     TOLERANCIA_MONTO = Decimal("1.00")
     TOLERANCIA_DIAS = 15
 
+    monto_abs = abs(monto)
     candidatos = TesoreriaFactura.objects.filter(comprobante_total__isnull=False)
     if contraparte and contraparte.rfc:
         from django.db.models import Q
@@ -962,7 +963,7 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
     # Sin contraparte conocida, acotar solo por monto (dentro de tolerancia)
     # para no traer el catalogo completo de facturas sin filtro real.
     candidatos = candidatos.filter(
-        comprobante_total__gte=monto - TOLERANCIA_MONTO, comprobante_total__lte=monto + TOLERANCIA_MONTO
+        comprobante_total__gte=monto_abs - TOLERANCIA_MONTO, comprobante_total__lte=monto_abs + TOLERANCIA_MONTO
     )
 
     sugerencias = []
@@ -971,7 +972,7 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
             continue
         score = 0
         motivos = []
-        if factura.comprobante_total == monto:
+        if factura.comprobante_total == monto_abs:
             score += 2
             motivos.append("mismo monto exacto")
         else:
