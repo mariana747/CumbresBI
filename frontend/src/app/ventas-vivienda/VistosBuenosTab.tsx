@@ -15,6 +15,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   Typography,
@@ -78,6 +79,8 @@ export default function VistosBuenosTab({
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabStatus>(defaultTab ?? "APROBADO");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   useEffect(() => {
     setLoading(true);
@@ -86,6 +89,8 @@ export default function VistosBuenosTab({
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, [denominacion]);
+
+  useEffect(() => { setPage(0); }, [tab, search]);
 
   if (loading) return <CircularProgress size={24} sx={{ mt: 2 }} />;
   if (error) return <Alert severity="error">{error}</Alert>;
@@ -169,7 +174,7 @@ export default function VistosBuenosTab({
               </TableCell>
             </TableRow>
           )}
-          {visibles.map((item) => (
+          {visibles.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((item) => (
             <TableRow key={item.id_item} hover>
               <TableCell>{item.expediente_vivienda_denominacion ?? "—"}</TableCell>
               <TableCell>
@@ -209,6 +214,17 @@ export default function VistosBuenosTab({
         </TableBody>
       </Table>
     </TableContainer>
+    <TablePagination
+      component="div"
+      count={visibles.length}
+      page={page}
+      onPageChange={(_, p) => setPage(p)}
+      rowsPerPage={rowsPerPage}
+      onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+      rowsPerPageOptions={[10, 25, 50]}
+      labelRowsPerPage="Filas:"
+      labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+    />
     </Paper>
     </>
   );
