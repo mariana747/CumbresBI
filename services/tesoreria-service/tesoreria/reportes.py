@@ -461,32 +461,22 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
     ligado (para no proponer dos veces el mismo). Solo tiene sentido pedir
     candidatos para lo que el flujo todavia NO tiene (si ya tiene factura,
     solo se buscan complementos; si ya tiene complemento, solo facturas)."""
-    if flujo.total_mxp is None:
+    if not flujo.contrato_id or flujo.total_mxp is None:
         return {"facturas": [], "complementos": []}
 
-    contraparte = None
-    if flujo.contrato_id:
-        contraparte = flujo.contrato.contraparte
-    rfc_contraparte = contraparte.rfc if contraparte else None
+    contraparte = flujo.contrato.contraparte
+    rfc_contraparte = contraparte.rfc
     monto = abs(flujo.total_mxp)
 
-    # Excluir solo facturas ya ligadas a OTRO flujo (no al propio).
     ya_ligadas_factura = set(
-        TesoreriaFlujo.objects.filter(factura__isnull=False)
-        .exclude(id_flujo=flujo.id_flujo)
-        .values_list("factura__timbre_uuid", flat=True)
+        TesoreriaFlujo.objects.filter(factura__isnull=False).values_list("factura__timbre_uuid", flat=True)
     )
     candidatos_factura = []
     if not flujo.factura_id:
-        if contraparte or rfc_contraparte:
-            filtro_facturas = Q()
-            if contraparte:
-                filtro_facturas |= Q(contraparte_id=contraparte.id_contraparte)
-            if rfc_contraparte:
-                filtro_facturas |= Q(emisor_rfc=rfc_contraparte) | Q(receptor_rfc=rfc_contraparte)
-        else:
-            filtro_facturas = None
-        for f in (TesoreriaFactura.objects.filter(filtro_facturas).distinct() if filtro_facturas is not None else []):
+        filtro_facturas = Q(contraparte_id=contraparte.id_contraparte)
+        if rfc_contraparte:
+            filtro_facturas |= Q(emisor_rfc=rfc_contraparte)
+        for f in TesoreriaFactura.objects.filter(filtro_facturas).distinct():
             if f.timbre_uuid in ya_ligadas_factura or f.comprobante_total is None:
                 continue
             candidatos_factura.append(
@@ -504,21 +494,14 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
         candidatos_factura.sort(key=lambda c: c["fecha_timbrado"] or "", reverse=True)
 
     ya_ligados_complemento = set(
-        TesoreriaFlujo.objects.filter(complemento__isnull=False)
-        .exclude(id_flujo=flujo.id_flujo)
-        .values_list("complemento__timbre_uuid", flat=True)
+        TesoreriaFlujo.objects.filter(complemento__isnull=False).values_list("complemento__timbre_uuid", flat=True)
     )
     candidatos_complemento = []
     if not flujo.complemento_id:
-        if contraparte or rfc_contraparte:
-            filtro_complementos = Q()
-            if contraparte:
-                filtro_complementos |= Q(contraparte_id=contraparte.id_contraparte)
-            if rfc_contraparte:
-                filtro_complementos |= Q(emisor_rfc=rfc_contraparte) | Q(receptor_rfc=rfc_contraparte)
-        else:
-            filtro_complementos = None
-        for c in (TesoreriaComplementoPago.objects.filter(filtro_complementos).distinct() if filtro_complementos is not None else []):
+        filtro_complementos = Q(contraparte_id=contraparte.id_contraparte)
+        if rfc_contraparte:
+            filtro_complementos |= Q(emisor_rfc=rfc_contraparte)
+        for c in TesoreriaComplementoPago.objects.filter(filtro_complementos).distinct():
             if c.timbre_uuid in ya_ligados_complemento or c.total is None:
                 continue
             candidatos_complemento.append(
