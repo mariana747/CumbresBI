@@ -15,6 +15,7 @@ Regla de negocio (finanzas.md, citado):
 
 from decimal import Decimal
 
+from django.db.models import Q
 from django.db.models.functions import Coalesce
 
 from .models import (
@@ -463,12 +464,16 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
     if not flujo.contrato_id or flujo.total_mxp is None:
         return {"facturas": [], "complementos": []}
 
-    rfc_contraparte = flujo.contrato.contraparte.rfc
+    contraparte = flujo.contrato.contraparte
+    rfc_contraparte = contraparte.rfc
     monto = abs(flujo.total_mxp)
 
     candidatos_factura = []
-    if not flujo.factura_id and rfc_contraparte:
-        for f in TesoreriaFactura.objects.filter(emisor_rfc=rfc_contraparte).exclude(flujos__isnull=False):
+    if not flujo.factura_id:
+        filtro_facturas = Q(contraparte_id=contraparte.id_contraparte)
+        if rfc_contraparte:
+            filtro_facturas |= Q(emisor_rfc=rfc_contraparte)
+        for f in TesoreriaFactura.objects.filter(filtro_facturas).exclude(flujos__isnull=False).distinct():
             if f.comprobante_total is None:
                 continue
             candidatos_factura.append(
@@ -486,8 +491,11 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
         candidatos_factura.sort(key=lambda c: c["fecha_timbrado"] or "", reverse=True)
 
     candidatos_complemento = []
-    if not flujo.complemento_id and rfc_contraparte:
-        for c in TesoreriaComplementoPago.objects.filter(emisor_rfc=rfc_contraparte).exclude(flujos__isnull=False):
+    if not flujo.complemento_id:
+        filtro_complementos = Q(contraparte_id=contraparte.id_contraparte)
+        if rfc_contraparte:
+            filtro_complementos |= Q(emisor_rfc=rfc_contraparte)
+        for c in TesoreriaComplementoPago.objects.filter(filtro_complementos).exclude(flujos__isnull=False).distinct():
             if c.total is None:
                 continue
             candidatos_complemento.append(
