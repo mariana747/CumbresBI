@@ -2860,9 +2860,15 @@ def _servir_documento_drive(request, drive_file_id, mime_type, nombre_archivo, c
     redirige ahi en vez de devolver 404."""
     if not drive_file_id:
         if link_fallback:
-            from django.http import HttpResponseRedirect
-            return HttpResponseRedirect(link_fallback)
-        return Response({"detail": "Este documento todavía no tiene un archivo subido."}, status=404)
+            import re
+            m = re.search(r"/file/d/([a-zA-Z0-9_-]+)", link_fallback)
+            if m:
+                drive_file_id = m.group(1)
+            else:
+                from django.http import HttpResponseRedirect
+                return HttpResponseRedirect(link_fallback)
+        else:
+            return Response({"detail": "Este documento todavía no tiene un archivo subido."}, status=404)
 
     # "-v2" (04/Sep/2026, hallazgo real): antes del fix de Content-Type
     # (drive-service ahora consulta el tipo real, ver driveclient.
