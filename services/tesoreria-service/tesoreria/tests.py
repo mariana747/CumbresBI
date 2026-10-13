@@ -1327,6 +1327,7 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         TesoreriaFactura.objects.create(
             timbre_uuid="55555555-5555-5555-5555-555555555555",
             contraparte=self.contraparte,
+            emisor_rfc=self.contraparte.rfc,
             comprobante_total=Decimal("5000.00"),
         )
         response = self._sugerencias(self.flujo.id_flujo)
@@ -1336,6 +1337,7 @@ class TesoreriaSugerenciasCfdiTests(TestCase):
         factura = TesoreriaFactura.objects.create(
             timbre_uuid="66666666-6666-6666-6666-666666666666",
             contraparte=self.contraparte,
+            emisor_rfc=self.contraparte.rfc,
             comprobante_total=Decimal("1000.00"),
         )
         TesoreriaFlujo.objects.create(
