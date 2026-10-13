@@ -17,6 +17,7 @@ export default function EntregasViviendaPage() {
       </Typography>
       <VistosBuenosTab
         denominacion="VISTO BUENO PARA ENTREGA DE VIVIENDA"
+        nombreArchivo="entregas-vivienda"
         tabs={[
           { label: "Aprobados", value: "APROBADO" },
           { label: "Pendientes", value: "PENDIENTE" },

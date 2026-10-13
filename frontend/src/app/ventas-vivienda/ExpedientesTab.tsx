@@ -29,7 +29,9 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CheckSquare, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { CheckSquare, FileSpreadsheet, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import FiltrosBar from "@/components/FiltrosBar";
+import { descargarCsv } from "@/lib/descargarCsv";
 import ContraparteSelector from "@/components/ContraparteSelector";
 import { TesoreriaContraparte, getContraparte } from "@/lib/tesoreria";
 import {
@@ -662,6 +664,7 @@ export default function ExpedientesTab({
   const [clientesDe, setClientesDe] = useState<ViviendaExpediente | null>(null);
   const [itemsDe, setItemsDe] = useState<ViviendaExpediente | null>(null);
   const [tabEstado, setTabEstado] = useState<"PENDIENTE" | "EN PROCESO" | "FIRMADO" | "">("EN PROCESO");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     listViviendas().then(setViviendas).catch(() => undefined);
@@ -739,6 +742,47 @@ export default function ExpedientesTab({
         </Alert>
       )}
 
+      <FiltrosBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar por vivienda, asesor o contrato..."
+        actions={
+          <Stack direction="row" spacing={1}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<FileSpreadsheet size={14} strokeWidth={2} />}
+              disabled={expedientes.length === 0}
+              onClick={() =>
+                descargarCsv(
+                  expedientes.map((e) => ({
+                    Vivienda: e.vivienda_denominacion ?? "",
+                    Asesor: e.asesor_nombre,
+                    Contrato: e.id_contrato,
+                    Estado: e.estado,
+                    "Fecha cierre": e.fecha_cierre ?? "",
+                    Comentarios: e.comentarios ?? "",
+                  })),
+                  "expedientes-vivienda.csv"
+                )
+              }
+            >
+              Descargar CSV
+            </Button>
+            {puedeCrear && (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Plus size={14} strokeWidth={2} />}
+                onClick={abrirAlta}
+              >
+                Nuevo Expediente
+              </Button>
+            )}
+          </Stack>
+        }
+      />
+
       <Paper variant="outlined">
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ px: 2, pt: 1.5, pb: 0 }}>
           <Tabs
@@ -752,17 +796,6 @@ export default function ExpedientesTab({
             <Tab label="Firmados" value="FIRMADO" sx={{ minHeight: 36, py: 0.5 }} />
             <Tab label="Todos" value="" sx={{ minHeight: 36, py: 0.5 }} />
           </Tabs>
-          {puedeCrear && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Plus size={14} strokeWidth={2} />}
-              onClick={abrirAlta}
-              sx={{ ml: { sm: "auto" }, mb: 0.5 }}
-            >
-              Nuevo Expediente
-            </Button>
-          )}
         </Stack>
         <Divider />
         <TableContainer>
@@ -783,7 +816,18 @@ export default function ExpedientesTab({
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
-              ) : expedientes.filter((e) => !tabEstado || e.estado === tabEstado).length === 0 ? (
+              ) : expedientes.filter((e) => {
+                  if (tabEstado && e.estado !== tabEstado) return false;
+                  if (search) {
+                    const q = search.toLowerCase();
+                    return (
+                      e.vivienda_denominacion?.toLowerCase().includes(q) ||
+                      e.asesor_nombre?.toLowerCase().includes(q) ||
+                      e.id_contrato?.toLowerCase().includes(q)
+                    );
+                  }
+                  return true;
+                }).length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -792,7 +836,18 @@ export default function ExpedientesTab({
                   </TableCell>
                 </TableRow>
               ) : (
-                expedientes.filter((e) => !tabEstado || e.estado === tabEstado).map((e) => (
+                expedientes.filter((e) => {
+                  if (tabEstado && e.estado !== tabEstado) return false;
+                  if (search) {
+                    const q = search.toLowerCase();
+                    return (
+                      e.vivienda_denominacion?.toLowerCase().includes(q) ||
+                      e.asesor_nombre?.toLowerCase().includes(q) ||
+                      e.id_contrato?.toLowerCase().includes(q)
+                    );
+                  }
+                  return true;
+                }).map((e) => (
                   <TableRow key={e.id_expediente} hover>
                     <TableCell>{e.vivienda_denominacion || "—"}</TableCell>
                     <TableCell>{e.asesor_nombre}</TableCell>
