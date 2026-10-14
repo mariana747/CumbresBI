@@ -108,6 +108,10 @@ def _tipo_persona(rfc):
 
 
 def seed(apps, schema_editor):
+    import sys
+    if "test" in sys.argv:
+        return
+
     Contraparte = apps.get_model("tesoreria", "TesoreriaContraparte")
 
     # RFCs ya vistos en esta misma pasada (para duplicados dentro del seed)
