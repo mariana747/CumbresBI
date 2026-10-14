@@ -478,6 +478,28 @@ function TesoreriaContratosPageContent() {
   function abrirEdicion(c: TesoreriaContrato, verSolo = false) {
     setEditing(c);
     setSoloLectura(verSolo);
+    setContraparteSeleccionada({
+      id_contraparte: c.contraparte as string,
+      razon_social: c.contraparte_nombre || "",
+      rfc: "",
+      tipo_persona: null,
+      genero: null,
+      contacto: null,
+      telefono_sms: null,
+      email: null,
+      cliente: true,
+      proveedor: false,
+      referencia_pago: c.contraparte_referencia_pago || null,
+      local: c.contraparte_local || null,
+      nombre_comercial: c.contraparte_nombre_comercial || null,
+      comentarios: null,
+      permiso: null,
+      autorizado_por: null,
+      created_at: "",
+      created_by: null,
+      updated_at: "",
+      updated_by: null,
+    } as TesoreriaContraparte);
     setTab("Detalles");
     setDocumentos([]);
     setRecordatorioMensaje(null);
@@ -528,6 +550,7 @@ function TesoreriaContratosPageContent() {
     try {
       if (editing) {
         await updateContrato(editing.id_contrato, {
+          contraparte: form.contraparte || undefined,
           sociedad: form.sociedad === SIN_SOCIEDAD ? "" : form.sociedad,
           categoria: form.categoria || undefined,
           tipo: form.tipo,
@@ -1013,20 +1036,26 @@ function TesoreriaContratosPageContent() {
                   <MenuItem value="EXTERNO">Externo</MenuItem>
                 </Select>
               </FormControl>
-              {!editing && (
-                <ContraparteSelector
-                  value={contraparteSeleccionada}
-                  onChange={(seleccion) => {
-                    setContraparteSeleccionada(seleccion);
-                    setForm({ ...form, contraparte: seleccion?.id_contraparte || "" });
-                  }}
-                />
-              )}
+              <ContraparteSelector
+                value={contraparteSeleccionada}
+                onChange={(seleccion) => {
+                  setContraparteSeleccionada(seleccion);
+                  setForm({ ...form, contraparte: seleccion?.id_contraparte || "" });
+                }}
+                disabled={soloLectura}
+              />
               {/* Datos de locatario — solo lectura, vienen de la contraparte */}
               {(() => {
-                const refPago = editing?.contraparte_referencia_pago || contraparteSeleccionada?.referencia_pago || null;
-                const local = editing?.contraparte_local || contraparteSeleccionada?.local || null;
-                const nombreComercial = editing?.contraparte_nombre_comercial || contraparteSeleccionada?.nombre_comercial || null;
+                const contraparteCambiada = editing && form.contraparte !== editing.contraparte;
+                const refPago = contraparteCambiada
+                  ? (contraparteSeleccionada?.referencia_pago || null)
+                  : (contraparteSeleccionada?.referencia_pago || editing?.contraparte_referencia_pago || null);
+                const local = contraparteCambiada
+                  ? (contraparteSeleccionada?.local || null)
+                  : (contraparteSeleccionada?.local || editing?.contraparte_local || null);
+                const nombreComercial = contraparteCambiada
+                  ? (contraparteSeleccionada?.nombre_comercial || null)
+                  : (contraparteSeleccionada?.nombre_comercial || editing?.contraparte_nombre_comercial || null);
                 if (!refPago && !local && !nombreComercial) return null;
                 return (
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
@@ -1111,8 +1140,13 @@ function TesoreriaContratosPageContent() {
                 size="small"
                 label="Referencia"
                 value={(() => {
-                  const ref = editing?.contraparte_referencia_pago || contraparteSeleccionada?.referencia_pago || "";
-                  const cp = editing?.contraparte_nombre || contraparteSeleccionada?.razon_social || "";
+                  const contraparteCambiada = editing && form.contraparte !== editing.contraparte;
+                  const ref = contraparteCambiada
+                    ? (contraparteSeleccionada?.referencia_pago || "")
+                    : (contraparteSeleccionada?.referencia_pago || editing?.contraparte_referencia_pago || "");
+                  const cp = contraparteCambiada
+                    ? (contraparteSeleccionada?.razon_social || "")
+                    : (contraparteSeleccionada?.razon_social || editing?.contraparte_nombre || "");
                   const soc = form.sociedad === SIN_SOCIEDAD ? "" : aliasSociedad(form.sociedad);
                   const base = `${ref ? `${ref} · ` : ""}${cp}/${form.proyecto}//${soc}`;
                   return form.concepto ? `${base} - ${form.concepto}` : base;

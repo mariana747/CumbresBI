@@ -2067,6 +2067,7 @@ export async function enviarAvisoSaldoPendiente(idFactura: number, mensaje?: str
 export async function updateContrato(
   idContrato: string,
   params: Partial<{
+    contraparte: string;
     sociedad: string;
     categoria: TesoreriaContratoCategoria;
     tipo: TesoreriaContratoTipo;
@@ -2099,6 +2100,7 @@ export async function updateContrato(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      contraparte: params.contraparte,
       sociedad: params.sociedad,
       categoria: params.categoria,
       tipo: params.tipo,
