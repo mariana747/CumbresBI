@@ -66,6 +66,9 @@ export interface TesoreriaContraparte {
   email: string | null;
   cliente: boolean;
   proveedor: boolean;
+  referencia_pago: string | null;
+  local: string | null;
+  nombre_comercial: string | null;
   comentarios: string | null;
   permiso: string | null;
   autorizado_por: string | null;
@@ -152,6 +155,9 @@ export async function createContraparte(params: {
   telefonoSms?: string | null;
   cliente?: boolean;
   proveedor?: boolean;
+  referenciaPago?: string | null;
+  local?: string | null;
+  nombreComercial?: string | null;
   comentarios?: string | null;
   permiso?: string | null;
   autorizadoPor?: string | null;
@@ -173,6 +179,9 @@ export async function createContraparte(params: {
       telefono_sms: params.telefonoSms || null,
       cliente: params.cliente ?? false,
       proveedor: params.proveedor ?? false,
+      referencia_pago: params.referenciaPago || null,
+      local: params.local || null,
+      nombre_comercial: params.nombreComercial || null,
       comentarios: params.comentarios || null,
       permiso: params.permiso || null,
       autorizado_por: params.autorizadoPor || null,
@@ -198,6 +207,9 @@ export async function updateContraparte(
     telefonoSms: string | null;
     cliente: boolean;
     proveedor: boolean;
+    referenciaPago: string | null;
+    local: string | null;
+    nombreComercial: string | null;
     comentarios: string | null;
     permiso: string | null;
     autorizadoPor: string | null;
@@ -218,6 +230,9 @@ export async function updateContraparte(
       telefono_sms: params.telefonoSms,
       cliente: params.cliente,
       proveedor: params.proveedor,
+      referencia_pago: params.referenciaPago,
+      local: params.local,
+      nombre_comercial: params.nombreComercial,
       comentarios: params.comentarios,
       permiso: params.permiso,
       autorizado_por: params.autorizadoPor,
@@ -943,6 +958,9 @@ export interface TesoreriaContrato {
   sociedad: string;
   contraparte: string;
   contraparte_nombre: string;
+  contraparte_referencia_pago: string | null;
+  contraparte_local: string | null;
+  contraparte_nombre_comercial: string | null;
   categoria: TesoreriaContratoCategoria | null;
   tipo: TesoreriaContratoTipo | null;
   fecha_generacion: string | null;

@@ -382,7 +382,9 @@ function TesoreriaContratosPageContent() {
     listContratos(undefined, form.contraparte, 1, 1, esSinSociedad ? undefined : form.sociedad)
       .then((res) => {
         const consecutivo = res.count + 1;
-        setIdContratoPrevio(`${prefijo}-${form.contraparte}-${consecutivo.toString().padStart(3, "0")}`);
+        const base = `${prefijo}-${form.contraparte}-${consecutivo.toString().padStart(3, "0")}`;
+        const ref = contraparteSeleccionada?.referencia_pago;
+        setIdContratoPrevio(ref ? `${ref}-${base}` : base);
       })
       .catch(() => setIdContratoPrevio(""));
   }, [dialogOpen, editing, form.sociedad, form.contraparte]);
@@ -724,6 +726,7 @@ function TesoreriaContratosPageContent() {
             <TableHead>
               <TableRow>
                 <TableCell>ID de contrato</TableCell>
+                <TableCell>Ref. pago</TableCell>
                 <TableCell>Sociedad</TableCell>
                 <TableCell>Referencia</TableCell>
                 <TableCell>Tipo</TableCell>
@@ -735,13 +738,13 @@ function TesoreriaContratosPageContent() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <CircularProgress size={20} />
                   </TableCell>
                 </TableRow>
               ) : contratosFiltrados.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       Sin contratos registrados.
                     </Typography>
@@ -751,10 +754,11 @@ function TesoreriaContratosPageContent() {
                 contratosFiltrados.map((c) => (
                   <TableRow key={c.id_contrato} hover>
                     <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.id_contrato}</TableCell>
+                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{c.contraparte_referencia_pago || "—"}</TableCell>
                     <TableCell>{nombreSociedad(c.sociedad)}</TableCell>
                     <TableCell>
                       <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                        {`${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto_factura ? ` - ${c.concepto_factura}` : ""}`}
+                        {`${c.contraparte_referencia_pago ? `${c.contraparte_referencia_pago} · ` : ""}${c.contraparte_nombre}/${c.proyecto ?? ""}//${aliasSociedad(c.sociedad)}${c.concepto_factura ? ` - ${c.concepto_factura}` : ""}`}
                       </Typography>
                     </TableCell>
                     <TableCell>{c.tipo || "—"}</TableCell>
@@ -1018,6 +1022,20 @@ function TesoreriaContratosPageContent() {
                   }}
                 />
               )}
+              {/* Datos de locatario — solo lectura, vienen de la contraparte */}
+              {(() => {
+                const refPago = editing?.contraparte_referencia_pago || contraparteSeleccionada?.referencia_pago || null;
+                const local = editing?.contraparte_local || contraparteSeleccionada?.local || null;
+                const nombreComercial = editing?.contraparte_nombre_comercial || contraparteSeleccionada?.nombre_comercial || null;
+                if (!refPago && !local && !nombreComercial) return null;
+                return (
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    {refPago && <TextField size="small" label="Referencia de pago" value={refPago} disabled fullWidth />}
+                    {local && <TextField size="small" label="Local" value={local} disabled fullWidth />}
+                    {nombreComercial && <TextField size="small" label="Nombre comercial" value={nombreComercial} disabled fullWidth />}
+                  </Stack>
+                );
+              })()}
               <FormControl size="small" fullWidth>
                 <InputLabel id="sociedad-label">Sociedad</InputLabel>
                 <Select
@@ -1093,9 +1111,10 @@ function TesoreriaContratosPageContent() {
                 size="small"
                 label="Referencia"
                 value={(() => {
+                  const ref = editing?.contraparte_referencia_pago || contraparteSeleccionada?.referencia_pago || "";
                   const cp = editing?.contraparte_nombre || contraparteSeleccionada?.razon_social || "";
                   const soc = form.sociedad === SIN_SOCIEDAD ? "" : aliasSociedad(form.sociedad);
-                  const base = `${cp}/${form.proyecto}//${soc}`;
+                  const base = `${ref ? `${ref} · ` : ""}${cp}/${form.proyecto}//${soc}`;
                   return form.concepto ? `${base} - ${form.concepto}` : base;
                 })()}
                 disabled
