@@ -15,6 +15,7 @@ import {
   FormControl,
   IconButton,
   InputLabel,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -31,7 +32,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CheckSquare, Eye, FileSpreadsheet, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { CheckSquare, ExternalLink, Eye, FileSpreadsheet, MoreVertical, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
 import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -301,6 +302,8 @@ function ItemsExpedienteDialog({
   const [previewDocBlobUrl, setPreviewDocBlobUrl] = useState<string | null>(null);
   const [fallbackDocUrl, setFallbackDocUrl] = useState<string | null>(null);
   const [loadingDocId, setLoadingDocId] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [menuItem, setMenuItem] = useState<ViviendaExpedienteItem | null>(null);
 
   function refresh() {
     setLoading(true);
@@ -438,31 +441,7 @@ function ItemsExpedienteDialog({
                 <TableBody>
                   {items.map((item) => (
                     <TableRow key={item.id_item} hover>
-                      <TableCell>
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <span>{item.denominacion || "—"}</span>
-                          {item.link_documento && (
-                            <IconButton
-                              size="small"
-                              disabled={loadingDocId === item.id_item}
-                              onClick={async () => {
-                                const fileId = driveFileIdFromUrl(item.link_documento!);
-                                if (!fileId) { setFallbackDocUrl(item.link_documento!); return; }
-                                setLoadingDocId(item.id_item);
-                                try {
-                                  const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
-                                  if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
-                                  setFallbackDocUrl(null);
-                                  setPreviewDocBlobUrl(blob);
-                                } catch { setFallbackDocUrl(item.link_documento!); }
-                                finally { setLoadingDocId(null); }
-                              }}
-                            >
-                              {loadingDocId === item.id_item ? <CircularProgress size={12} /> : <Eye size={12} strokeWidth={1.5} />}
-                            </IconButton>
-                          )}
-                        </Stack>
-                      </TableCell>
+                      <TableCell>{item.denominacion || "—"}</TableCell>
                       <TableCell>
                         {item.responsable ? RESPONSABLE_LABELS[item.responsable] : "—"}
                       </TableCell>
@@ -479,19 +458,9 @@ function ItemsExpedienteDialog({
                       <TableCell align="right">
                         <IconButton
                           size="small"
-                          aria-label="Editar"
-                          onClick={() => abrirEdicion(item)}
-                          disabled={!puedeEditar}
+                          onClick={(e) => { setMenuAnchor(e.currentTarget); setMenuItem(item); }}
                         >
-                          <Pencil size={14} strokeWidth={1.5} />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          aria-label="Borrar"
-                          onClick={() => handleBorrar(item)}
-                          disabled={!puedeEditar}
-                        >
-                          <Trash2 size={14} strokeWidth={1.5} />
+                          {loadingDocId === item.id_item ? <CircularProgress size={14} /> : <MoreVertical size={14} strokeWidth={1.5} />}
                         </IconButton>
                       </TableCell>
                     </TableRow>
@@ -502,6 +471,68 @@ function ItemsExpedienteDialog({
           )}
         </DialogContent>
       </Dialog>
+
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor}
+        onClose={() => { setMenuAnchor(null); setMenuItem(null); }}
+      >
+        <MenuItem
+          disabled={!menuItem?.link_documento}
+          onClick={async () => {
+            setMenuAnchor(null);
+            if (!menuItem?.link_documento) return;
+            const fileId = driveFileIdFromUrl(menuItem.link_documento);
+            if (!fileId) { setFallbackDocUrl(menuItem.link_documento); return; }
+            setLoadingDocId(menuItem.id_item);
+            try {
+              const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+              if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+              setFallbackDocUrl(null);
+              setPreviewDocBlobUrl(blob);
+            } catch { setFallbackDocUrl(menuItem.link_documento); }
+            finally { setLoadingDocId(null); setMenuItem(null); }
+          }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Eye size={14} strokeWidth={1.5} />
+            <span>Vista previa</span>
+          </Stack>
+        </MenuItem>
+        <MenuItem
+          disabled={!menuItem?.link_documento}
+          component="a"
+          href={menuItem?.link_documento ?? undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => { setMenuAnchor(null); setMenuItem(null); }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <ExternalLink size={14} strokeWidth={1.5} />
+            <span>Abrir enlace</span>
+          </Stack>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          disabled={!puedeEditar}
+          onClick={() => { setMenuAnchor(null); if (menuItem) abrirEdicion(menuItem); setMenuItem(null); }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Pencil size={14} strokeWidth={1.5} />
+            <span>Editar</span>
+          </Stack>
+        </MenuItem>
+        <MenuItem
+          disabled={!puedeEditar}
+          onClick={() => { setMenuAnchor(null); if (menuItem) handleBorrar(menuItem); setMenuItem(null); }}
+          sx={{ color: "error.main" }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Trash2 size={14} strokeWidth={1.5} />
+            <span>Borrar</span>
+          </Stack>
+        </MenuItem>
+      </Menu>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

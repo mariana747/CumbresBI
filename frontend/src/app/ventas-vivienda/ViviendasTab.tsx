@@ -12,8 +12,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
-  Drawer,
   FormControl,
   IconButton,
   InputLabel,
@@ -388,7 +386,7 @@ export default function ViviendasTab({
         />
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => { setDialogOpen(false); setExpedienteDrawer(null); }} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <Stack direction="row" spacing={1.5} alignItems="center">
             <span>{soloLectura ? (editing?.denominacion || editing?.num_oficial || editing?.id_vivienda || "Detalle") : editing ? `Editar ${editing.denominacion || editing.id_vivienda}` : "Nueva Unidad"}</span>
@@ -396,7 +394,7 @@ export default function ViviendasTab({
               <Chip size="small" label={dispActual ? "Disponible" : "No disponible"} color={dispActual ? "success" : "error"} variant="outlined" />
             )}
           </Stack>
-          <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
+          <IconButton onClick={() => { setDialogOpen(false); setExpedienteDrawer(null); }} size="small" aria-label="Cerrar">
             <CloseIcon size={18} strokeWidth={1.5} />
           </IconButton>
         </DialogTitle>
@@ -405,6 +403,7 @@ export default function ViviendasTab({
             value={verTab}
             onChange={(_, v) => {
               setVerTab(v);
+              setExpedienteDrawer(null);
               if (v === 1 && expedientesVer.length === 0 && editing) {
                 setLoadingExp(true);
                 listExpedientes({ vivienda: editing.id_vivienda })
@@ -427,6 +426,149 @@ export default function ViviendasTab({
           {soloLectura && verTab === 1 ? (
             loadingExp ? (
               <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress size={24} /></Stack>
+            ) : expedienteDrawer ? (
+              <Box>
+                <Button size="small" onClick={() => setExpedienteDrawer(null)} sx={{ mb: 2 }}>
+                  ← Volver
+                </Button>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+                  <Typography variant="subtitle1" fontWeight={600}>Expediente</Typography>
+                  <Chip size="small" label={expedienteDrawer.estado} variant="outlined"
+                    color={({ PENDIENTE: "default", "EN PROCESO": "info", FIRMADO: "warning", CONCLUIDO: "success", CANCELADO: "error" } as Record<ViviendaExpedienteEstado, "default"|"info"|"warning"|"success"|"error">)[expedienteDrawer.estado] ?? "default"}
+                  />
+                </Stack>
+                <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+                  <Table size="small">
+                    <TableBody>
+                      {([
+                        ["ID", expedienteDrawer.id_expediente.slice(0, 8).toUpperCase()],
+                        ["Asesor", expedienteDrawer.asesor_nombre],
+                        ["Contrato", expedienteDrawer.id_contrato],
+                        ["Medio de pago", expedienteDrawer.medio_pago],
+                        ["Pagos en efectivo", expedienteDrawer.pagos_efectivo != null ? (expedienteDrawer.pagos_efectivo ? "Sí" : "No") : null],
+                        ["Fecha cierre", expedienteDrawer.fecha_cierre],
+                        ["Comentarios", expedienteDrawer.comentarios],
+                        ["Creado por", expedienteDrawer.created_by],
+                        ["Creado el", expedienteDrawer.created_at ? new Date(expedienteDrawer.created_at).toLocaleString("es-MX") : null],
+                        ["Actualizado por", expedienteDrawer.updated_by],
+                        ["Actualizado el", expedienteDrawer.updated_at ? new Date(expedienteDrawer.updated_at).toLocaleString("es-MX") : null],
+                      ] as [string, string | null | undefined][]).map(([label, value]) => (
+                        <TableRow key={label}>
+                          <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", width: "40%", fontSize: 12 }}>{label}</TableCell>
+                          <TableCell sx={{ fontSize: 12 }}>{value || "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                      {expedienteDrawer.link_expediente && (
+                        <TableRow>
+                          <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", fontSize: 12 }}>Link</TableCell>
+                          <TableCell sx={{ fontSize: 12 }}>
+                            <IconButton
+                              size="small"
+                              disabled={loadingDocId === "expediente"}
+                              onClick={async () => {
+                                const fileId = driveFileIdFromUrl(expedienteDrawer.link_expediente!);
+                                if (!fileId) { setFallbackDocUrl(expedienteDrawer.link_expediente!); return; }
+                                setLoadingDocId("expediente");
+                                try {
+                                  const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+                                  if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                                  setFallbackDocUrl(null);
+                                  setPreviewDocBlobUrl(blob);
+                                } catch { setFallbackDocUrl(expedienteDrawer.link_expediente!); }
+                                finally { setLoadingDocId(null); }
+                              }}
+                            >
+                              {loadingDocId === "expediente" ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Documentos</Typography>
+                {loadingItems ? (
+                  <CircularProgress size={20} />
+                ) : itemsDrawer.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">Sin documentos.</Typography>
+                ) : (
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Documento</TableCell>
+                          <TableCell>Estado</TableCell>
+                          <TableCell>Responsable</TableCell>
+                          <TableCell>Fecha solicitud</TableCell>
+                          <TableCell />
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {itemsDrawer.map((item) => (
+                          <TableRow key={item.id_item}>
+                            <TableCell sx={{ fontSize: 12 }}>{item.denominacion || "—"}</TableCell>
+                            <TableCell>
+                              <Chip size="small" label={item.status}
+                                color={({ PENDIENTE: "default", "NO APLICA": "default", INCOMPLETO: "warning", ENTREGADO: "info", APROBADO: "success", RECHAZADO: "error", POSPUESTO: "warning" } as Record<ViviendaItemStatus, "default"|"warning"|"info"|"success"|"error">)[item.status] ?? "default"}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ fontSize: 12 }}>{item.responsable || "—"}</TableCell>
+                            <TableCell sx={{ fontSize: 12 }}>{item.fecha_solicitud || "—"}</TableCell>
+                            <TableCell align="right">
+                              <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                                {item.link_documento && (
+                                  <IconButton
+                                    size="small"
+                                    aria-label="Ver documento"
+                                    disabled={loadingDocId === item.id_item}
+                                    onClick={async () => {
+                                      const fileId = driveFileIdFromUrl(item.link_documento!);
+                                      if (!fileId) { setFallbackDocUrl(item.link_documento!); return; }
+                                      setLoadingDocId(item.id_item);
+                                      try {
+                                        const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
+                                        if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
+                                        setFallbackDocUrl(null);
+                                        setPreviewDocBlobUrl(blob);
+                                      } catch { setFallbackDocUrl(item.link_documento!); }
+                                      finally { setLoadingDocId(null); }
+                                    }}
+                                  >
+                                    {loadingDocId === item.id_item ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
+                                  </IconButton>
+                                )}
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ minWidth: 0, px: 1, fontSize: 11 }}
+                                  disabled={duplicando}
+                                  onClick={async () => {
+                                    setDuplicando(true);
+                                    try {
+                                      await createItem({
+                                        expediente: item.expediente,
+                                        denominacion: item.denominacion,
+                                        status: "PENDIENTE",
+                                        responsable: item.responsable,
+                                        actorId,
+                                      });
+                                      setLoadingItems(true);
+                                      listItems(expedienteDrawer.id_expediente).then(setItemsDrawer).finally(() => setLoadingItems(false));
+                                    } finally { setDuplicando(false); }
+                                  }}
+                                >
+                                  Duplicar
+                                </Button>
+                              </Stack>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
             ) : expedientesVer.length === 0 ? (
               <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>Sin expedientes para esta vivienda.</Typography>
             ) : (
@@ -688,152 +830,6 @@ export default function ViviendasTab({
           )}
         </DialogActions>
       </Dialog>
-
-      <Drawer
-        anchor="right"
-        open={!!expedienteDrawer}
-        onClose={(_, reason) => {
-          if (reason === "backdropClick" || reason === "escapeKeyDown") return;
-          setExpedienteDrawer(null);
-        }}
-        sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}
-      >
-        {expedienteDrawer && (
-          <Box sx={{ width: 380, p: 3 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Typography variant="h6">Expediente</Typography>
-                <Chip size="small" label={expedienteDrawer.estado} variant="outlined"
-                  color={({ PENDIENTE: "default", "EN PROCESO": "info", FIRMADO: "warning", CONCLUIDO: "success", CANCELADO: "error" } as Record<ViviendaExpedienteEstado, "default"|"info"|"warning"|"success"|"error">)[expedienteDrawer.estado] ?? "default"}
-                />
-              </Stack>
-              <IconButton size="small" aria-label="Cerrar" onClick={() => setExpedienteDrawer(null)}>
-                <CloseIcon size={18} strokeWidth={1.5} />
-              </IconButton>
-            </Stack>
-            <Divider sx={{ mb: 2 }} />
-
-            <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
-              <Table size="small">
-                <TableBody>
-                  {([
-                    ["ID", expedienteDrawer.id_expediente.slice(0, 8).toUpperCase()],
-                    ["Asesor", expedienteDrawer.asesor_nombre],
-                    ["Contrato", expedienteDrawer.id_contrato],
-                    ["Medio de pago", expedienteDrawer.medio_pago],
-                    ["Pagos en efectivo", expedienteDrawer.pagos_efectivo != null ? (expedienteDrawer.pagos_efectivo ? "Sí" : "No") : null],
-                    ["Fecha cierre", expedienteDrawer.fecha_cierre],
-                    ["Comentarios", expedienteDrawer.comentarios],
-                    ["Creado por", expedienteDrawer.created_by],
-                    ["Creado el", expedienteDrawer.created_at ? new Date(expedienteDrawer.created_at).toLocaleString("es-MX") : null],
-                    ["Actualizado por", expedienteDrawer.updated_by],
-                    ["Actualizado el", expedienteDrawer.updated_at ? new Date(expedienteDrawer.updated_at).toLocaleString("es-MX") : null],
-                  ] as [string, string | null | undefined][]).map(([label, value]) => (
-                    <TableRow key={label}>
-                      <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", width: "40%", fontSize: 12 }}>{label}</TableCell>
-                      <TableCell sx={{ fontSize: 12 }}>{value || "—"}</TableCell>
-                    </TableRow>
-                  ))}
-                  {expedienteDrawer.link_expediente && (
-                    <TableRow>
-                      <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold", fontSize: 12 }}>Link</TableCell>
-                      <TableCell sx={{ fontSize: 12 }}>
-                        <IconButton
-                          size="small"
-                          disabled={loadingDocId === "expediente"}
-                          onClick={async () => {
-                            const fileId = driveFileIdFromUrl(expedienteDrawer.link_expediente!);
-                            if (!fileId) { setFallbackDocUrl(expedienteDrawer.link_expediente!); return; }
-                            setLoadingDocId("expediente");
-                            try {
-                              const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
-                              if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
-                              setFallbackDocUrl(null);
-                              setPreviewDocBlobUrl(blob);
-                            } catch { setFallbackDocUrl(expedienteDrawer.link_expediente!); }
-                            finally { setLoadingDocId(null); }
-                          }}
-                        >
-                          {loadingDocId === "expediente" ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>Documentos</Typography>
-            {loadingItems ? (
-              <CircularProgress size={20} />
-            ) : itemsDrawer.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">Sin documentos.</Typography>
-            ) : (
-              <Stack spacing={1.5}>
-                {itemsDrawer.map((item) => (
-                  <Paper key={item.id_item} variant="outlined" sx={{ p: 1.5 }}>
-                    <Stack spacing={0.5}>
-                      <Stack direction="row" alignItems="center" justifyContent="space-between">
-                        <Typography variant="body2" fontWeight={500}>{item.denominacion || "—"}</Typography>
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <Chip size="small" label={item.status}
-                            color={({ PENDIENTE: "default", "NO APLICA": "default", INCOMPLETO: "warning", ENTREGADO: "info", APROBADO: "success", RECHAZADO: "error", POSPUESTO: "warning" } as Record<ViviendaItemStatus, "default"|"warning"|"info"|"success"|"error">)[item.status] ?? "default"}
-                          />
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            sx={{ minWidth: 0, px: 1, fontSize: 11 }}
-                            disabled={duplicando}
-                            onClick={async () => {
-                              setDuplicando(true);
-                              try {
-                                await createItem({
-                                  expediente: item.expediente,
-                                  denominacion: item.denominacion,
-                                  status: "PENDIENTE",
-                                  responsable: item.responsable,
-                                  actorId,
-                                });
-                                setLoadingItems(true);
-                                listItems(expedienteDrawer.id_expediente).then(setItemsDrawer).finally(() => setLoadingItems(false));
-                              } finally { setDuplicando(false); }
-                            }}
-                          >
-                            Duplicar
-                          </Button>
-                        </Stack>
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary">Responsable: {item.responsable || "—"}</Typography>
-                      <Typography variant="caption" color="text.secondary">Fecha solicitud: {item.fecha_solicitud || "—"}</Typography>
-                      {item.link_documento && (
-                        <IconButton
-                          size="small"
-                          aria-label="Ver documento"
-                          disabled={loadingDocId === item.id_item}
-                          onClick={async () => {
-                            const fileId = driveFileIdFromUrl(item.link_documento!);
-                            if (!fileId) { setFallbackDocUrl(item.link_documento!); return; }
-                            setLoadingDocId(item.id_item);
-                            try {
-                              const blob = await downloadDriveFile(fileId, "ventas-vivienda.editar");
-                              if (previewDocBlobUrl) URL.revokeObjectURL(previewDocBlobUrl);
-                              setFallbackDocUrl(null);
-                              setPreviewDocBlobUrl(blob);
-                            } catch { setFallbackDocUrl(item.link_documento!); }
-                            finally { setLoadingDocId(null); }
-                          }}
-                        >
-                          {loadingDocId === item.id_item ? <CircularProgress size={14} /> : <Eye size={14} strokeWidth={1.5} />}
-                        </IconButton>
-                      )}
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            )}
-          </Box>
-        )}
-      </Drawer>
 
       <DocumentoPreviewDialog
         open={!!previewDocBlobUrl || !!fallbackDocUrl}
