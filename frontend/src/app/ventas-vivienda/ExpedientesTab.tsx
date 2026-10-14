@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import {
   Alert,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -31,6 +33,8 @@ import {
   Tabs,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { CheckSquare, ExternalLink, Eye, FileSpreadsheet, MoreVertical, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
 import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
@@ -86,6 +90,8 @@ function ClientesExpedienteDialog({
   puedeEditar: boolean;
   actorId: string;
 }) {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [clientes, setClientes] = useState<(ViviendaClienteExpediente & { contraparteNombre?: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +152,7 @@ function ClientesExpedienteDialog({
   }
 
   return (
-    <Dialog open onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open onClose={onClose} fullWidth maxWidth="sm" fullScreen={esMovil}>
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         Clientes del expediente {expediente.id_expediente}
         <IconButton onClick={onClose} size="small" aria-label="Cerrar">
@@ -291,6 +297,8 @@ function ItemsExpedienteDialog({
   puedeEditar: boolean;
   actorId: string;
 }) {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [items, setItems] = useState<ViviendaExpedienteItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -392,7 +400,7 @@ function ItemsExpedienteDialog({
 
   return (
     <>
-      <Dialog open onClose={onClose} fullWidth maxWidth="md">
+      <Dialog open onClose={onClose} fullWidth maxWidth="md" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           Checklist — Expediente {expediente.id_expediente}
           <IconButton onClick={onClose} size="small" aria-label="Cerrar">
@@ -534,7 +542,7 @@ function ItemsExpedienteDialog({
         </MenuItem>
       </Menu>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editing ? "Editar documento" : "Agregar documento"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -714,6 +722,8 @@ export default function ExpedientesTab({
   actorId: string;
 }) {
   const searchParams = useSearchParams();
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [expedientes, setExpedientes] = useState<ViviendaExpediente[]>([]);
   const [viviendas, setViviendas] = useState<ViviendaUnidad[]>([]);
   const [asesores, setAsesores] = useState<ViviendaAsesor[]>([]);
@@ -913,42 +923,33 @@ export default function ExpedientesTab({
           </Tabs>
         </Stack>
         <Divider />
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Vivienda</TableCell>
-                <TableCell>Asesor</TableCell>
-                <TableCell>Contrato</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
-                </TableRow>
-              ) : expedientesFiltrados.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin expedientes registrados.
+        {loading ? (
+          <Stack alignItems="center" sx={{ py: 4 }}>
+            <CircularProgress size={24} />
+          </Stack>
+        ) : expedientesFiltrados.length === 0 ? (
+          <Stack alignItems="center" sx={{ py: 4 }}>
+            <Typography variant="body2" color="text.secondary">Sin expedientes registrados.</Typography>
+          </Stack>
+        ) : esMovil ? (
+          <Stack spacing={1.5} sx={{ p: 1.5 }}>
+            {expedientesFiltrados.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((e) => (
+              <Card key={e.id_expediente} variant="outlined">
+                <CardContent sx={{ pb: "12px !important" }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                    <Typography variant="subtitle2" fontWeight={600}>
+                      {e.asesor_nombre}
                     </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                expedientesFiltrados.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((e) => (
-                  <TableRow key={e.id_expediente} hover>
-                    <TableCell>{e.vivienda_denominacion || "—"}</TableCell>
-                    <TableCell>{e.asesor_nombre}</TableCell>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{e.id_contrato}</TableCell>
-                    <TableCell>
-                      <Chip size="small" label={ESTADO_LABELS[e.estado]} color={ESTADO_COLORS[e.estado]} variant="outlined" />
-                    </TableCell>
-                    <TableCell align="right">
+                    <Chip size="small" label={ESTADO_LABELS[e.estado]} color={ESTADO_COLORS[e.estado]} variant="outlined" />
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    {e.vivienda_denominacion || "—"}
+                  </Typography>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>
+                      {e.id_contrato}
+                    </Typography>
+                    <Stack direction="row" spacing={0.5}>
                       <IconButton size="small" aria-label="Ver detalle" onClick={() => setViendo(e)}>
                         <Eye size={14} strokeWidth={1.5} />
                       </IconButton>
@@ -961,27 +962,80 @@ export default function ExpedientesTab({
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(e)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
                       </IconButton>
-                    </TableCell>
+                    </Stack>
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+            <TablePagination
+              component="div"
+              count={expedientesFiltrados.length}
+              page={page}
+              onPageChange={(_, p) => setPage(p)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+              rowsPerPageOptions={[10, 25, 50]}
+              labelRowsPerPage="Filas:"
+              labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+            />
+          </Stack>
+        ) : (
+          <>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Vivienda</TableCell>
+                    <TableCell>Asesor</TableCell>
+                    <TableCell>Contrato</TableCell>
+                    <TableCell>Estado</TableCell>
+                    <TableCell align="right">Acciones</TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <TablePagination
-          component="div"
-          count={expedientesFiltrados.length}
-          page={page}
-          onPageChange={(_, p) => setPage(p)}
-          rowsPerPage={rowsPerPage}
-          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
-          rowsPerPageOptions={[10, 25, 50]}
-          labelRowsPerPage="Filas:"
-          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
-        />
+                </TableHead>
+                <TableBody>
+                  {expedientesFiltrados.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((e) => (
+                    <TableRow key={e.id_expediente} hover>
+                      <TableCell>{e.vivienda_denominacion || "—"}</TableCell>
+                      <TableCell>{e.asesor_nombre}</TableCell>
+                      <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{e.id_contrato}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={ESTADO_LABELS[e.estado]} color={ESTADO_COLORS[e.estado]} variant="outlined" />
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton size="small" aria-label="Ver detalle" onClick={() => setViendo(e)}>
+                          <Eye size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Checklist" onClick={() => setItemsDe(e)}>
+                          <CheckSquare size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Clientes" onClick={() => setClientesDe(e)}>
+                          <Users size={14} strokeWidth={1.5} />
+                        </IconButton>
+                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(e)} disabled={!puedeEditar}>
+                          <Pencil size={14} strokeWidth={1.5} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <TablePagination
+              component="div"
+              count={expedientesFiltrados.length}
+              page={page}
+              onPageChange={(_, p) => setPage(p)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+              rowsPerPageOptions={[10, 25, 50]}
+              labelRowsPerPage="Filas:"
+              labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+            />
+          </>
+        )}
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editing ? `Editar Expediente ${editing.id_expediente}` : "Nuevo Expediente"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -1092,7 +1146,7 @@ export default function ExpedientesTab({
       )}
 
       {viendo && (
-        <Dialog open onClose={() => setViendo(null)} fullWidth maxWidth="sm">
+        <Dialog open onClose={() => setViendo(null)} fullWidth maxWidth="sm" fullScreen={esMovil}>
           <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <Stack direction="row" spacing={1.5} alignItems="center">
               <Typography variant="h6" sx={{ fontFamily: "var(--font-mono, monospace)", fontSize: 16 }}>

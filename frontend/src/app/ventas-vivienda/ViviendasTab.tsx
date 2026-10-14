@@ -6,6 +6,8 @@ import {
   Box,
   Button,
   ButtonGroup,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -30,6 +32,8 @@ import {
   Tabs,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Eye, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
@@ -82,6 +86,8 @@ export default function ViviendasTab({
   puedeEditar: boolean;
   actorId: string;
 }) {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   const [viviendas, setViviendas] = useState<ViviendaUnidad[]>([]);
   const [filtroProyecto, setFiltroProyecto] = useState("");
@@ -310,36 +316,82 @@ export default function ViviendasTab({
         </FormControl>
       </FiltrosBar>
 
-      <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Denominación</TableCell>
-                <TableCell>Proyecto</TableCell>
-                <TableCell>Modelo</TableCell>
-                <TableCell>Precio de lista</TableCell>
-                <TableCell>Disponible</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
-                </TableRow>
-              ) : viviendasFiltradas.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin unidades registradas.
+      {loading ? (
+        <Stack alignItems="center" sx={{ py: 4 }}>
+          <CircularProgress size={24} />
+        </Stack>
+      ) : viviendasFiltradas.length === 0 ? (
+        <Stack alignItems="center" sx={{ py: 4 }}>
+          <Typography variant="body2" color="text.secondary">Sin unidades registradas.</Typography>
+        </Stack>
+      ) : esMovil ? (
+        <Stack spacing={1.5}>
+          {viviendasFiltradas.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((v) => (
+            <Card key={v.id_vivienda} variant="outlined">
+              <CardContent sx={{ pb: "12px !important" }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                  <Box>
+                    <Typography variant="subtitle2" fontWeight={600}>
+                      {v.denominacion || v.num_oficial || "—"}
                     </Typography>
-                  </TableCell>
+                    <Typography variant="body2" color="text.secondary">
+                      {v.proyecto_denominacion || "—"}
+                    </Typography>
+                  </Box>
+                  <Chip
+                    size="small"
+                    label={v.disponible ? "Disponible" : "No disponible"}
+                    color={v.disponible ? "success" : "error"}
+                    variant="outlined"
+                  />
+                </Stack>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {v.modelo || "—"}
+                  </Typography>
+                  <Stack direction="row" spacing={0.5}>
+                    <IconButton size="small" aria-label="Ver detalle" onClick={() => abrirVer(v)}>
+                      <Eye size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(v)} disabled={!puedeEditar}>
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(v)} disabled={!puedeEditar}>
+                      <Trash2 size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          ))}
+          <TablePagination
+            component="div"
+            count={viviendasFiltradas.length}
+            page={page}
+            onPageChange={(_, p) => setPage(p)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+            rowsPerPageOptions={[10, 25, 50]}
+            labelRowsPerPage="Filas:"
+            labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+          />
+        </Stack>
+      ) : (
+        <Paper variant="outlined">
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Denominación</TableCell>
+                  <TableCell>Proyecto</TableCell>
+                  <TableCell>Modelo</TableCell>
+                  <TableCell>Precio de lista</TableCell>
+                  <TableCell>Disponible</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : (
-                viviendasFiltradas.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((v) => (
+              </TableHead>
+              <TableBody>
+                {viviendasFiltradas.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((v) => (
                   <TableRow key={v.id_vivienda} hover>
                     <TableCell>{v.denominacion || v.num_oficial || "—"}</TableCell>
                     <TableCell>{v.proyecto_denominacion || "—"}</TableCell>
@@ -359,7 +411,6 @@ export default function ViviendasTab({
                       <IconButton size="small" aria-label="Ver detalle" onClick={() => abrirVer(v)}>
                         <Eye size={14} strokeWidth={1.5} />
                       </IconButton>
-
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(v)} disabled={!puedeEditar}>
                         <Pencil size={14} strokeWidth={1.5} />
                       </IconButton>
@@ -368,25 +419,25 @@ export default function ViviendasTab({
                       </IconButton>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <TablePagination
-          component="div"
-          count={viviendasFiltradas.length}
-          page={page}
-          onPageChange={(_, p) => setPage(p)}
-          rowsPerPage={rowsPerPage}
-          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
-          rowsPerPageOptions={[10, 25, 50]}
-          labelRowsPerPage="Filas:"
-          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
-        />
-      </Paper>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <TablePagination
+            component="div"
+            count={viviendasFiltradas.length}
+            page={page}
+            onPageChange={(_, p) => setPage(p)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+            rowsPerPageOptions={[10, 25, 50]}
+            labelRowsPerPage="Filas:"
+            labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+          />
+        </Paper>
+      )}
 
-      <Dialog open={dialogOpen} onClose={() => { setDialogOpen(false); setExpedienteDrawer(null); }} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => { setDialogOpen(false); setExpedienteDrawer(null); }} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <Stack direction="row" spacing={1.5} alignItems="center">
             <span>{soloLectura ? (editing?.denominacion || editing?.num_oficial || editing?.id_vivienda || "Detalle") : editing ? `Editar ${editing.denominacion || editing.id_vivienda}` : "Nueva Unidad"}</span>

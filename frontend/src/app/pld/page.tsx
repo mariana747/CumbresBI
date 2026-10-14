@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -28,6 +30,8 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Eye, FilePlus2, FolderOpen, Search } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -116,6 +120,9 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
   const [filtroSociedad, setFiltroSociedad] = useState("");
   const [filtroDesde, setFiltroDesde] = useState("");
   const [filtroHasta, setFiltroHasta] = useState("");
+
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
 
   // Tabs KYC/KYB: solo 2 tabs, sin "Todos" ni tab propio para pendientes:
   // PENDIENTE_REVISION aparece en los dos (ver get_queryset en el backend),
@@ -223,6 +230,7 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         }}
         fullWidth
         maxWidth="xs"
+        fullScreen={esMovil}
       >
         <DialogTitle>Nuevo Expediente KYC</DialogTitle>
         <Stack component="form" onSubmit={handleCrearExpediente}>
@@ -379,47 +387,56 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
         </Alert>
       )}
 
-      <TableContainer>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Contraparte</TableCell>
-              <TableCell>Nombre / Razón social</TableCell>
-              <TableCell>CURP</TableCell>
-              {/* Sociedad (02/Sep/2026, pedido explicito: mismo criterio que
-              la columna "Sociedad" de Tesoreria/Contrapartes - "no veo en
-              contraparte a que empresa esta 'asociada'") - a diferencia de
-              Tesoreria, PLD SI tiene la sociedad como columna propia del
-              expediente (sociedad_nombre, snapshot de sociedad_rfc al
-              crear, ver models.py), no hay que derivarla de nada mas. */}
-              <TableCell>Sociedad</TableCell>
-              {/* Categoría se deriva sola de tipo_persona, ver
-              PldContraparteKyc.save() en el backend. */}
-              <TableCell>Categoría</TableCell>
-              <TableCell>Estado</TableCell>
-              <TableCell>Documentos</TableCell>
-              <TableCell>Aprobación</TableCell>
-              <TableCell>Creado</TableCell>
-              <TableCell align="right">Acciones</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
+      {loading ? (
+        <Stack alignItems="center" sx={{ py: 4 }}>
+          <CircularProgress size={24} />
+        </Stack>
+      ) : expedientes.length === 0 ? (
+        <Stack alignItems="center" sx={{ py: 4 }}>
+          <Typography variant="body2" color="text.secondary">Sin expedientes todavía.</Typography>
+        </Stack>
+      ) : esMovil ? (
+        <Stack spacing={1} sx={{ p: 1 }}>
+          {expedientes.map((kyc) => (
+            <Card key={kyc.id_kyc} variant="outlined" component="a" href={`/pld/${kyc.id_kyc}`} sx={{ textDecoration: "none", color: "inherit" }}>
+              <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                  <Typography variant="body2" fontWeight={600}>{nombreParaMostrar(kyc) || "—"}</Typography>
+                  <IconButton size="small" href={`/pld/${kyc.id_kyc}`} aria-label="Ver expediente">
+                    <Eye size={16} strokeWidth={1.5} />
+                  </IconButton>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" display="block">{kyc.sociedad_nombre || "—"}</Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                  {kyc.categoria_cumplimiento && (
+                    <Chip size="small" variant={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "outlined" : "filled"} color={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "warning" : "default"} label={CATEGORIA_CUMPLIMIENTO_LABELS[kyc.categoria_cumplimiento]} />
+                  )}
+                  <Chip size="small" label={ESTADO_OPTIONS.find((o) => o.value === kyc.estado_llenado)?.label ?? kyc.estado_llenado} color={ESTADO_COLOR[kyc.estado_llenado] ?? "default"} />
+                  {kyc.aprobado_en && <Chip size="small" color="success" label="Aprobado" />}
+                </Stack>
+              </CardContent>
+            </Card>
+          ))}
+        </Stack>
+      ) : (
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
-                  <CircularProgress size={24} />
-                </TableCell>
+                <TableCell>Contraparte</TableCell>
+                <TableCell>Nombre / Razón social</TableCell>
+                <TableCell>CURP</TableCell>
+                <TableCell>Sociedad</TableCell>
+                <TableCell>Categoría</TableCell>
+                <TableCell>Estado</TableCell>
+                <TableCell>Documentos</TableCell>
+                <TableCell>Aprobación</TableCell>
+                <TableCell>Creado</TableCell>
+                <TableCell align="right">Acciones</TableCell>
               </TableRow>
-            ) : expedientes.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Sin expedientes todavía.
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            ) : (
-              expedientes.map((kyc) => (
+            </TableHead>
+            <TableBody>
+              {expedientes.map((kyc) => (
                 <TableRow key={kyc.id_kyc} hover>
                   <TableCell>{kyc.id_contraparte}</TableCell>
                   <TableCell>{nombreParaMostrar(kyc) || "—"}</TableCell>
@@ -427,43 +444,21 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                   <TableCell>{kyc.sociedad_nombre || "—"}</TableCell>
                   <TableCell>
                     {kyc.categoria_cumplimiento ? (
-                      <Chip
-                        size="small"
-                        variant={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "outlined" : "filled"}
-                        color={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "warning" : "default"}
-                        label={CATEGORIA_CUMPLIMIENTO_LABELS[kyc.categoria_cumplimiento]}
-                      />
-                    ) : (
-                      "—"
-                    )}
+                      <Chip size="small" variant={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "outlined" : "filled"} color={kyc.categoria_cumplimiento === "PENDIENTE_REVISION" ? "warning" : "default"} label={CATEGORIA_CUMPLIMIENTO_LABELS[kyc.categoria_cumplimiento]} />
+                    ) : "—"}
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Chip
-                        size="small"
-                        label={ESTADO_OPTIONS.find((o) => o.value === kyc.estado_llenado)?.label ?? kyc.estado_llenado}
-                        color={ESTADO_COLOR[kyc.estado_llenado] ?? "default"}
-                      />
-                      {kyc.estado_llenado_manual && (
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label="Manual"
-                          title="El analista fijó este estado a mano - ya no se recalcula solo según los documentos."
-                        />
-                      )}
+                      <Chip size="small" label={ESTADO_OPTIONS.find((o) => o.value === kyc.estado_llenado)?.label ?? kyc.estado_llenado} color={ESTADO_COLOR[kyc.estado_llenado] ?? "default"} />
+                      {kyc.estado_llenado_manual && <Chip size="small" variant="outlined" label="Manual" title="El analista fijó este estado a mano." />}
                     </Stack>
                   </TableCell>
-                  <TableCell>
-                    {kyc.documentos.length} documento{kyc.documentos.length === 1 ? "" : "s"}
-                  </TableCell>
+                  <TableCell>{kyc.documentos.length} documento{kyc.documentos.length === 1 ? "" : "s"}</TableCell>
                   <TableCell>
                     {kyc.aprobado_en ? (
                       <Chip size="small" color="success" label={`Aprobado (${kyc.aprobado_por})`} />
                     ) : (
-                      <Typography variant="caption" color="text.secondary">
-                        Sin aprobar
-                      </Typography>
+                      <Typography variant="caption" color="text.secondary">Sin aprobar</Typography>
                     )}
                   </TableCell>
                   <TableCell>{new Date(kyc.created_at).toLocaleDateString("es-MX")}</TableCell>
@@ -473,26 +468,26 @@ function TablaExpedientes({ session }: { session: SessionUser | null }) {
                     </IconButton>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-          <TableFooter>
-            <TableRow>
-              <TablePagination
-                colSpan={10}
-                count={totalCount}
-                page={page}
-                rowsPerPage={pageSize}
-                rowsPerPageOptions={[20, 50, 100]}
-                onPageChange={(_, p) => setPage(p)}
-                onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
-                labelRowsPerPage="Filas:"
-                labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
-              />
-            </TableRow>
-          </TableFooter>
-        </Table>
-      </TableContainer>
+              ))}
+            </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TablePagination
+                  colSpan={10}
+                  count={totalCount}
+                  page={page}
+                  rowsPerPage={pageSize}
+                  rowsPerPageOptions={[20, 50, 100]}
+                  onPageChange={(_, p) => setPage(p)}
+                  onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                  labelRowsPerPage="Filas:"
+                  labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+                />
+              </TableRow>
+            </TableFooter>
+          </Table>
+        </TableContainer>
+      )}
     </Paper>
   );
 }

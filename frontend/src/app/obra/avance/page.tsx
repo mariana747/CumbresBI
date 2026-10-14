@@ -434,6 +434,12 @@ export default function ObraAvancePage() {
         </Alert>
       )}
 
+      <Box sx={{ display: { xs: "block", sm: "none" }, mb: 2 }}>
+        <Alert severity="info">
+          Esta pantalla está optimizada para escritorio — la matriz de avance tiene muchas columnas. Para mejor experiencia, ábrela en una computadora o tablet horizontal.
+        </Alert>
+      </Box>
+
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 3 }} alignItems={{ md: "stretch" }}>
         {/* Grupo 1: filtros + Avance Total, en su propio Paper - no
         comparte recuadro con la leyenda. */}

@@ -6,6 +6,8 @@ import {
   Autocomplete,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -23,6 +25,8 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Building2, Plus, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -44,6 +48,8 @@ import { createPresupuesto, generarPresupuestoDesdeCatalogo } from "@/lib/materi
 // - listo para llenar montos/cantidades reales despues. El avance semanal
 // por Etapa sigue siendo pantalla aparte (/obra/avance), esto no lo toca.
 export default function ObraObrasPage() {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [session, setSession] = useState<SessionUser | null>(null);
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   const [proyectoId, setProyectoId] = useState("");
@@ -233,66 +239,85 @@ export default function ObraObrasPage() {
             <Stack alignItems="center" sx={{ py: 4 }}>
               <CircularProgress size={20} />
             </Stack>
+          ) : !proyectoId ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <Typography variant="body2" color="text.secondary">Selecciona un proyecto para ver sus Obras.</Typography>
+            </Stack>
+          ) : lotes.length === 0 ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <Typography variant="body2" color="text.secondary">Este proyecto todavía no tiene Obras registradas.</Typography>
+            </Stack>
           ) : (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Tipo</TableCell>
-                    {/* No. de Casa (18/Sep/2026) - numeracion corrida de
-                    todas las CASA del proyecto (1, 2, 3...), sin importar
-                    manzana - distinta de "Lote" (que reinicia en 1 dentro
-                    de cada manzana). Vacia para ESPECIAL. */}
-                    <TableCell align="right">No. Casa</TableCell>
-                    <TableCell>Manzana</TableCell>
-                    <TableCell>Lote</TableCell>
-                    <TableCell>Identificador</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {!proyectoId ? (
-                    <TableRow>
-                      <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Selecciona un proyecto para ver sus Obras.
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ) : lotes.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Este proyecto todavía no tiene Obras registradas.
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    (() => {
-                      let numCasa = 0;
-                      return lotes.map((l) => {
-                        if (l.tipo === "CASA") numCasa += 1;
-                        return (
-                          <TableRow key={l.id_lote} hover>
-                            <TableCell>
-                              <Chip size="small" label={l.tipo === "CASA" ? "Casa" : "Especial"} />
-                            </TableCell>
-                            <TableCell align="right">{l.tipo === "CASA" ? numCasa : "—"}</TableCell>
-                            <TableCell>{l.tipo === "CASA" ? l.manzana : "—"}</TableCell>
-                            <TableCell>{l.tipo === "CASA" ? l.numero_lote : "—"}</TableCell>
-                            <TableCell>{l.identificador || "—"}</TableCell>
-                          </TableRow>
-                        );
-                      });
-                    })()
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            <>
+              <Box sx={{ display: { xs: "none", sm: "block" } }}>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Tipo</TableCell>
+                        {/* No. de Casa (18/Sep/2026) - numeracion corrida de
+                        todas las CASA del proyecto (1, 2, 3...), sin importar
+                        manzana - distinta de "Lote" (que reinicia en 1 dentro
+                        de cada manzana). Vacia para ESPECIAL. */}
+                        <TableCell align="right">No. Casa</TableCell>
+                        <TableCell>Manzana</TableCell>
+                        <TableCell>Lote</TableCell>
+                        <TableCell>Identificador</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {(() => {
+                        let numCasa = 0;
+                        return lotes.map((l) => {
+                          if (l.tipo === "CASA") numCasa += 1;
+                          return (
+                            <TableRow key={l.id_lote} hover>
+                              <TableCell>
+                                <Chip size="small" label={l.tipo === "CASA" ? "Casa" : "Especial"} />
+                              </TableCell>
+                              <TableCell align="right">{l.tipo === "CASA" ? numCasa : "—"}</TableCell>
+                              <TableCell>{l.tipo === "CASA" ? l.manzana : "—"}</TableCell>
+                              <TableCell>{l.tipo === "CASA" ? l.numero_lote : "—"}</TableCell>
+                              <TableCell>{l.identificador || "—"}</TableCell>
+                            </TableRow>
+                          );
+                        });
+                      })()}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+
+              <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+                {(() => {
+                  let numCasa = 0;
+                  return lotes.map((l) => {
+                    if (l.tipo === "CASA") numCasa += 1;
+                    const nCasa = numCasa;
+                    return (
+                      <Card key={l.id_lote} variant="outlined">
+                        <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Chip size="small" label={l.tipo === "CASA" ? "Casa" : "Especial"} />
+                            <Typography variant="body2" fontWeight={600}>
+                              {l.tipo === "CASA" ? `No. ${nCasa} · ${l.manzana} · Lote ${l.numero_lote}` : (l.identificador || "—")}
+                            </Typography>
+                          </Stack>
+                          {l.tipo === "ESPECIAL" && l.identificador && (
+                            <Typography variant="caption" color="text.secondary">{l.identificador}</Typography>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  });
+                })()}
+              </Stack>
+            </>
           )}
         </Paper>
       </Stack>
 
-      <Dialog open={bloqueDialogOpen} onClose={() => !generando && setBloqueDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={bloqueDialogOpen} onClose={() => !generando && setBloqueDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           Generar Manzanas y Lotes
           <IconButton onClick={() => setBloqueDialogOpen(false)} size="small" aria-label="Cerrar" disabled={generando}>
@@ -346,7 +371,7 @@ export default function ObraObrasPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={especialDialogOpen} onClose={() => !generando && setEspecialDialogOpen(false)} fullWidth maxWidth="xs">
+      <Dialog open={especialDialogOpen} onClose={() => !generando && setEspecialDialogOpen(false)} fullWidth maxWidth="xs" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           Nueva Obra Especial
           <IconButton onClick={() => setEspecialDialogOpen(false)} size="small" aria-label="Cerrar" disabled={generando}>
