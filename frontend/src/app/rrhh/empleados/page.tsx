@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -28,6 +30,8 @@ import {
   Tab,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Eye, Plus, UserCheck, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -105,6 +109,8 @@ export default function RrhhEmpleadosPage() {
 
   const puedeCrear = session?.perm_keys.includes("rrhh.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("rrhh.editar") ?? false;
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
 
   function refresh() {
     setLoading(true);
@@ -243,6 +249,21 @@ export default function RrhhEmpleadosPage() {
               Sin empleados registrados todavía.
             </Typography>
           </Stack>
+        ) : esMovil ? (
+          <Stack spacing={1} sx={{ p: 1.5 }}>
+            {empleados.map((e) => (
+              <Card key={e.id_empleado} variant="outlined" onClick={() => abrirDetalle(e)} sx={{ cursor: "pointer" }}>
+                <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="body2" fontWeight={600}>{e.nombre_completo || "—"}</Typography>
+                    <IconButton size="small" aria-label="Ver"><Eye size={16} strokeWidth={1.5} /></IconButton>
+                  </Stack>
+                  {e.curp && <Typography variant="caption" color="text.secondary" display="block">CURP: {e.curp}</Typography>}
+                  {e.email && <Typography variant="caption" color="text.secondary" display="block">{e.email}</Typography>}
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
         ) : (
           <TableContainer>
             <Table size="small">
@@ -276,7 +297,7 @@ export default function RrhhEmpleadosPage() {
       </Paper>
 
       {/* Alta de empleado */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           Nuevo Empleado
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -380,7 +401,7 @@ export default function RrhhEmpleadosPage() {
       </Dialog>
 
       {/* Detalle de empleado + Puestos (historial de sueldo) */}
-      <Dialog open={!!detalle} onClose={() => setDetalle(null)} fullWidth maxWidth="sm">
+      <Dialog open={!!detalle} onClose={() => setDetalle(null)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         {detalle && (
           <>
             <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

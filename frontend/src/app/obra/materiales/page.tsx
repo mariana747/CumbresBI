@@ -5,6 +5,8 @@ import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -32,6 +34,8 @@ import {
   Tabs,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Camera, Package, Pencil, Plus, Trash2, Truck, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -113,6 +117,8 @@ const ESTADO_COLOR: Record<SolicitudMaterialEstado, "default" | "success" | "err
 type Seccion = "catalogo" | "disponibles" | "salida";
 
 export default function MaterialesPage() {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   // Pestañas (mismo patrón de Tabs que admin/reportes/page.tsx) en vez de
   // tarjetas apiladas/laterales: 3 secciones que antes competían por el
   // mismo scroll vertical.
@@ -487,59 +493,78 @@ export default function MaterialesPage() {
                 }
               />
               <Paper variant="outlined">
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Material</TableCell>
-                      <TableCell>Unidad</TableCell>
-                      <TableCell align="right">Disponible</TableCell>
-                      <TableCell align="right">Precio unitario</TableCell>
-                      <TableCell>Proveedor</TableCell>
-                      <TableCell align="right">Acciones</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {materiales.length === 0 ? (
+              <Box sx={{ display: { xs: "none", sm: "block" } }}>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
                       <TableRow>
-                        <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            Sin materiales registrados.
-                          </Typography>
-                        </TableCell>
+                        <TableCell>Material</TableCell>
+                        <TableCell>Unidad</TableCell>
+                        <TableCell align="right">Disponible</TableCell>
+                        <TableCell align="right">Precio unitario</TableCell>
+                        <TableCell>Proveedor</TableCell>
+                        <TableCell align="right">Acciones</TableCell>
                       </TableRow>
-                    ) : (
-                      materiales.map((m) => (
-                        <TableRow key={m.id_material} hover>
-                          <TableCell>{m.material}</TableCell>
-                          <TableCell>{m.unidad_medida}</TableCell>
-                          <TableCell align="right">{m.cantidad_disponible}</TableCell>
-                          <TableCell align="right">${m.precio_unitario}</TableCell>
-                          <TableCell>{m.proveedor || "—"}</TableCell>
-                          <TableCell align="right">
-                            <IconButton
-                              size="small"
-                              aria-label="Editar"
-                              onClick={() => abrirEdicionMaterial(m)}
-                              disabled={!puedeEditar}
-                            >
-                              <Pencil size={14} strokeWidth={1.5} />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              aria-label="Borrar"
-                              onClick={() => handleBorrarMaterial(m)}
-                              disabled={!puedeEditar}
-                            >
-                              <Trash2 size={14} strokeWidth={1.5} />
-                            </IconButton>
+                    </TableHead>
+                    <TableBody>
+                      {materiales.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                            <Typography variant="body2" color="text.secondary">
+                              Sin materiales registrados.
+                            </Typography>
                           </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                      ) : (
+                        materiales.map((m) => (
+                          <TableRow key={m.id_material} hover>
+                            <TableCell>{m.material}</TableCell>
+                            <TableCell>{m.unidad_medida}</TableCell>
+                            <TableCell align="right">{m.cantidad_disponible}</TableCell>
+                            <TableCell align="right">${m.precio_unitario}</TableCell>
+                            <TableCell>{m.proveedor || "—"}</TableCell>
+                            <TableCell align="right">
+                              <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionMaterial(m)} disabled={!puedeEditar}>
+                                <Pencil size={14} strokeWidth={1.5} />
+                              </IconButton>
+                              <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarMaterial(m)} disabled={!puedeEditar}>
+                                <Trash2 size={14} strokeWidth={1.5} />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+              <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+                {materiales.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>Sin materiales registrados.</Typography>
+                ) : (
+                  materiales.map((m) => (
+                    <Card key={m.id_material} variant="outlined">
+                      <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                            <Typography variant="body2" fontWeight={600}>{m.material}</Typography>
+                            <Typography variant="caption" color="text.secondary">{m.unidad_medida} · disponible: {m.cantidad_disponible} · ${m.precio_unitario}</Typography>
+                            {m.proveedor && <Typography variant="caption" color="text.secondary">{m.proveedor}</Typography>}
+                          </Stack>
+                          <Stack direction="row">
+                            <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionMaterial(m)} disabled={!puedeEditar}>
+                              <Pencil size={14} strokeWidth={1.5} />
+                            </IconButton>
+                            <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarMaterial(m)} disabled={!puedeEditar}>
+                              <Trash2 size={14} strokeWidth={1.5} />
+                            </IconButton>
+                          </Stack>
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </Stack>
               <TablePagination
                 component="div"
                 count={totalCatalogo}
@@ -566,38 +591,54 @@ export default function MaterialesPage() {
                 searchPlaceholder="Buscar por material o unidad..."
               />
               <Paper variant="outlined">
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Material</TableCell>
-                      <TableCell>Unidad</TableCell>
-                      <TableCell align="right">Disponible</TableCell>
-                      <TableCell align="right">Precio unitario</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {disponibles.length === 0 ? (
+              <Box sx={{ display: { xs: "none", sm: "block" } }}>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
                       <TableRow>
-                        <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            Ningún material tiene existencia disponible ahora mismo.
-                          </Typography>
-                        </TableCell>
+                        <TableCell>Material</TableCell>
+                        <TableCell>Unidad</TableCell>
+                        <TableCell align="right">Disponible</TableCell>
+                        <TableCell align="right">Precio unitario</TableCell>
                       </TableRow>
-                    ) : (
-                      disponibles.map((m) => (
-                        <TableRow key={m.id_material} hover>
-                          <TableCell>{m.material}</TableCell>
-                          <TableCell>{m.unidad_medida}</TableCell>
-                          <TableCell align="right">{m.cantidad_disponible}</TableCell>
-                          <TableCell align="right">${m.precio_unitario}</TableCell>
+                    </TableHead>
+                    <TableBody>
+                      {disponibles.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                            <Typography variant="body2" color="text.secondary">
+                              Ningún material tiene existencia disponible ahora mismo.
+                            </Typography>
+                          </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                      ) : (
+                        disponibles.map((m) => (
+                          <TableRow key={m.id_material} hover>
+                            <TableCell>{m.material}</TableCell>
+                            <TableCell>{m.unidad_medida}</TableCell>
+                            <TableCell align="right">{m.cantidad_disponible}</TableCell>
+                            <TableCell align="right">${m.precio_unitario}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+              <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+                {disponibles.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>Ningún material tiene existencia disponible ahora mismo.</Typography>
+                ) : (
+                  disponibles.map((m) => (
+                    <Card key={m.id_material} variant="outlined">
+                      <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                        <Typography variant="body2" fontWeight={600}>{m.material}</Typography>
+                        <Typography variant="caption" color="text.secondary">{m.unidad_medida} · disponible: {m.cantidad_disponible} · ${m.precio_unitario}</Typography>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </Stack>
               <TablePagination
                 component="div"
                 count={totalDisponibles}
@@ -836,7 +877,7 @@ export default function MaterialesPage() {
         </>
       )}
 
-      <Dialog open={materialDialogOpen} onClose={() => setMaterialDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={materialDialogOpen} onClose={() => setMaterialDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editandoMaterial ? `Editar ${editandoMaterial.material}` : "Nuevo Material"}
           <IconButton onClick={() => setMaterialDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -906,7 +947,7 @@ export default function MaterialesPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={solicitudDialogOpen} onClose={() => setSolicitudDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={solicitudDialogOpen} onClose={() => setSolicitudDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           Nueva Salida de Almacén
           <IconButton onClick={() => setSolicitudDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -991,7 +1032,7 @@ export default function MaterialesPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!bitacoraSolicitud} onClose={() => setBitacoraSolicitud(null)} fullWidth maxWidth="sm">
+      <Dialog open={!!bitacoraSolicitud} onClose={() => setBitacoraSolicitud(null)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           Bitácora de recepción — {bitacoraSolicitud?.material_nombre}
           <IconButton onClick={() => setBitacoraSolicitud(null)} size="small" aria-label="Cerrar">

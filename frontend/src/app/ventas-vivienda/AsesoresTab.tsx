@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
+  Card,
+  CardContent,
   Checkbox,
   CircularProgress,
   Dialog,
@@ -23,6 +25,8 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -52,6 +56,8 @@ export default function AsesoresTab({
   puedeEditar: boolean;
   actorId: string;
 }) {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [asesores, setAsesores] = useState<ViviendaAsesor[]>([]);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -192,55 +198,60 @@ export default function AsesoresTab({
       />
 
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Nombre</TableCell>
-                <TableCell>Correo</TableCell>
-                <TableCell>Contacto</TableCell>
-                <TableCell>% Comisión</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {loading ? (
+          <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress size={20} /></Stack>
+        ) : asesores.length === 0 ? (
+          <Stack alignItems="center" sx={{ py: 3 }}><Typography variant="body2" color="text.secondary">Sin asesores registrados.</Typography></Stack>
+        ) : esMovil ? (
+          <Stack spacing={1} sx={{ p: 1.5 }}>
+            {asesores.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((a) => (
+              <Card key={a.id_asesor} variant="outlined">
+                <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                    <Stack>
+                      <Typography variant="body2" fontWeight={600}>{a.nombre}</Typography>
+                      <Typography variant="caption" color="text.secondary">{a.email}</Typography>
+                      {a.contacto && <Typography variant="caption" color="text.secondary">{a.contacto}</Typography>}
+                      <Typography variant="caption" color="text.secondary">Comisión: {(Number(a.porc_comision) * 100).toFixed(0)}%</Typography>
+                    </Stack>
+                    <Stack direction="row">
+                      <IconButton size="small" onClick={() => abrirEdicion(a)} disabled={!puedeEditar}><Pencil size={14} strokeWidth={1.5} /></IconButton>
+                      <IconButton size="small" onClick={() => handleBorrar(a)} disabled={!puedeEditar}><Trash2 size={14} strokeWidth={1.5} /></IconButton>
+                    </Stack>
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
+                  <TableCell>Nombre</TableCell>
+                  <TableCell>Correo</TableCell>
+                  <TableCell>Contacto</TableCell>
+                  <TableCell>% Comisión</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : asesores.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin asesores registrados.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                asesores.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((a) => (
+              </TableHead>
+              <TableBody>
+                {asesores.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((a) => (
                   <TableRow key={a.id_asesor} hover>
                     <TableCell>{a.nombre}</TableCell>
                     <TableCell>{a.email}</TableCell>
                     <TableCell>{a.contacto || "—"}</TableCell>
-                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>
-                      {(Number(a.porc_comision) * 100).toFixed(0)}%
-                    </TableCell>
+                    <TableCell sx={{ fontFamily: "var(--font-mono, monospace)" }}>{(Number(a.porc_comision) * 100).toFixed(0)}%</TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(a)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(a)} disabled={!puedeEditar}>
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </IconButton>
+                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(a)} disabled={!puedeEditar}><Pencil size={14} strokeWidth={1.5} /></IconButton>
+                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(a)} disabled={!puedeEditar}><Trash2 size={14} strokeWidth={1.5} /></IconButton>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
         <TablePagination
           component="div"
           count={asesores.length}
@@ -254,7 +265,7 @@ export default function AsesoresTab({
         />
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editing ? `Editar ${editing.nombre}` : "Nuevo Asesor"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">

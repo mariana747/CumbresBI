@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   FormControl,
@@ -21,6 +24,8 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Copy, Link2, Search } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -49,6 +54,8 @@ const ESTADO_LLENADO_LABELS: Record<string, string> = {
 // envío de correo real (mismo gap que Magic Links) - el link se muestra
 // aquí directamente.
 export default function TicketsClientePage() {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [email, setEmail] = useState("");
   const [kycId, setKycId] = useState("");
   const [expiresInMinutes, setExpiresInMinutes] = useState(30);
@@ -326,36 +333,55 @@ export default function TicketsClientePage() {
         </FormControl>
       </Stack>
 
-      <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Correo</TableCell>
-                <TableCell>Expediente</TableCell>
-                <TableCell>Emitido</TableCell>
-                <TableCell>Expira</TableCell>
-                <TableCell>Usos</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {loading ? (
+          <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress size={24} /></Stack>
+        ) : ticketsVisibles.length === 0 ? (
+          <Stack alignItems="center" sx={{ py: 4 }}><Typography variant="body2" color="text.secondary">Sin tickets generados todavía.</Typography></Stack>
+        ) : esMovil ? (
+          <Stack spacing={1.5} sx={{ p: 2 }}>
+            {ticketsVisibles.map((ticket) => {
+              const estado = estadoDe(ticket);
+              return (
+                <Card key={ticket.id_pld_ticket} variant="outlined">
+                  <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" fontWeight={600}>{ticket.email}</Typography>
+                        <Typography variant="caption" color="text.secondary">{expedienteNombre(ticket.kyc)}</Typography>
+                        <Typography variant="caption" color="text.secondary">Emitido: {new Date(ticket.issued_at).toLocaleString("es-MX")}</Typography>
+                        <Typography variant="caption" color="text.secondary">Expira: {new Date(ticket.expires_at).toLocaleString("es-MX")}</Typography>
+                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
+                          <Chip size="small" label={estado.label} color={estado.color} />
+                          <Typography variant="caption" color="text.secondary">{ticket.uses_count}/{ticket.max_uses} usos</Typography>
+                        </Stack>
+                      </Stack>
+                      {estado.label === "Activo" && (
+                        <Button size="small" variant="outlined" color="error" onClick={() => handleRevocar(ticket.id_pld_ticket)} disabled={!puedeEditar}>
+                          Revocar
+                        </Button>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </Stack>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
+                  <TableCell>Correo</TableCell>
+                  <TableCell>Expediente</TableCell>
+                  <TableCell>Emitido</TableCell>
+                  <TableCell>Expira</TableCell>
+                  <TableCell>Usos</TableCell>
+                  <TableCell>Estado</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : ticketsVisibles.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin tickets generados todavía.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                ticketsVisibles.map((ticket) => {
+              </TableHead>
+              <TableBody>
+                {ticketsVisibles.map((ticket) => {
                   const estado = estadoDe(ticket);
                   return (
                     <TableRow key={ticket.id_pld_ticket} hover>
@@ -363,32 +389,22 @@ export default function TicketsClientePage() {
                       <TableCell>{expedienteNombre(ticket.kyc)}</TableCell>
                       <TableCell>{new Date(ticket.issued_at).toLocaleString("es-MX")}</TableCell>
                       <TableCell>{new Date(ticket.expires_at).toLocaleString("es-MX")}</TableCell>
-                      <TableCell>
-                        {ticket.uses_count}/{ticket.max_uses}
-                      </TableCell>
-                      <TableCell>
-                        <Chip size="small" label={estado.label} color={estado.color} />
-                      </TableCell>
+                      <TableCell>{ticket.uses_count}/{ticket.max_uses}</TableCell>
+                      <TableCell><Chip size="small" label={estado.label} color={estado.color} /></TableCell>
                       <TableCell align="right">
                         {estado.label === "Activo" && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="error"
-                            onClick={() => handleRevocar(ticket.id_pld_ticket)}
-                            disabled={!puedeEditar}
-                          >
+                          <Button size="small" variant="outlined" color="error" onClick={() => handleRevocar(ticket.id_pld_ticket)} disabled={!puedeEditar}>
                             Revocar
                           </Button>
                         )}
                       </TableCell>
                     </TableRow>
                   );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
       </Paper>
     </AppShell>
   );

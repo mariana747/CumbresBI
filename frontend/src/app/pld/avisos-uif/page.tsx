@@ -5,6 +5,8 @@ import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -28,6 +30,8 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { AlertTriangle, CheckCircle, Clock, Upload } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -69,6 +73,8 @@ function plazoLabel(aviso: PldAvisoUIF) {
 }
 
 export default function AvisosUifPage() {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [avisos, setAvisos] = useState<PldAvisoUIF[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -217,109 +223,151 @@ export default function AvisosUifPage() {
       />
 
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Contraparte</TableCell>
-                <TableCell>Proyecto</TableCell>
-                <TableCell>Sociedad</TableCell>
-                <TableCell align="right">Monto acumulado</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell>Plazo / Presentado</TableCell>
-                <TableCell align="right">Evidencia / Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
-                </TableRow>
-              ) : avisos.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin avisos registrados
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                avisos.map((aviso) => (
-                  <TableRow
-                    key={aviso.id_aviso}
-                    sx={aviso.vencido ? { bgcolor: "error.light", opacity: 0.9 } : undefined}
-                  >
-                    <TableCell>
+        {loading ? (
+          <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress size={24} /></Stack>
+        ) : avisos.length === 0 ? (
+          <Stack alignItems="center" sx={{ py: 4 }}><Typography variant="body2" color="text.secondary">Sin avisos registrados</Typography></Stack>
+        ) : esMovil ? (
+          <Stack spacing={1.5} sx={{ p: 2 }}>
+            {avisos.map((aviso) => (
+              <Card key={aviso.id_aviso} variant="outlined" sx={aviso.vencido ? { borderColor: "error.main" } : undefined}>
+                <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                    <Stack spacing={0.25} sx={{ minWidth: 0 }}>
                       <Typography
                         variant="body2"
+                        fontWeight={600}
                         component="a"
                         href={`/pld/${aviso.kyc_id}`}
-                        sx={{ color: "primary.main", textDecoration: "none", "&:hover": { textDecoration: "underline" } }}
+                        sx={{ color: "primary.main", textDecoration: "none" }}
                       >
                         {aviso.nombre_contraparte}
                       </Typography>
-                    </TableCell>
-                    <TableCell>{aviso.proyecto || "—"}</TableCell>
-                    <TableCell>{aviso.sociedad || "—"}</TableCell>
-                    <TableCell align="right">{MXN.format(Number(aviso.monto_acumulado))}</TableCell>
-                    <TableCell>{chipAviso(aviso)}</TableCell>
-                    <TableCell>{plazoLabel(aviso)}</TableCell>
-                    <TableCell align="right">
-                      <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
-                        {aviso.link_evidencia && (
-                          <Button size="small" component="a" href={aviso.link_evidencia} target="_blank" rel="noopener">
-                            Ver evidencia
-                          </Button>
-                        )}
-                        {aviso.estado === "PRESENTADO" && !aviso.link_evidencia && (
-                          <Tooltip title="Subir comprobante de presentación">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={subiendoId === aviso.id_aviso ? <CircularProgress size={14} /> : <Upload size={14} />}
-                              disabled={subiendoId === aviso.id_aviso}
-                              onClick={() => {
-                                if (sueltaRef.current) {
-                                  sueltaRef.current.dataset.avisoId = aviso.id_aviso;
-                                  sueltaRef.current.click();
-                                }
-                              }}
-                            >
-                              Subir evidencia
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {aviso.estado === "PENDIENTE" && (
-                          <Tooltip title="Marcar como presentado ante SICOAM">
-                            <Button size="small" variant="outlined" onClick={() => abrirDialog(aviso)}>
-                              Marcar presentado
-                            </Button>
-                          </Tooltip>
-                        )}
-                      </Stack>
-                    </TableCell>
+                      <Typography variant="caption" color="text.secondary">{aviso.proyecto || "—"} · {aviso.sociedad || "—"}</Typography>
+                      <Typography variant="caption" color="text.secondary">{MXN.format(Number(aviso.monto_acumulado))}</Typography>
+                      <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }}>{chipAviso(aviso)}</Stack>
+                      <Box sx={{ mt: 0.5 }}>{plazoLabel(aviso)}</Box>
+                    </Stack>
+                    <Stack spacing={0.5} alignItems="flex-end" sx={{ flexShrink: 0 }}>
+                      {aviso.link_evidencia && (
+                        <Button size="small" component="a" href={aviso.link_evidencia} target="_blank" rel="noopener">Ver evidencia</Button>
+                      )}
+                      {aviso.estado === "PRESENTADO" && !aviso.link_evidencia && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={subiendoId === aviso.id_aviso ? <CircularProgress size={14} /> : <Upload size={14} />}
+                          disabled={subiendoId === aviso.id_aviso}
+                          onClick={() => {
+                            if (sueltaRef.current) {
+                              sueltaRef.current.dataset.avisoId = aviso.id_aviso;
+                              sueltaRef.current.click();
+                            }
+                          }}
+                        >
+                          Subir
+                        </Button>
+                      )}
+                      {aviso.estado === "PENDIENTE" && (
+                        <Button size="small" variant="outlined" onClick={() => abrirDialog(aviso)}>Marcar</Button>
+                      )}
+                    </Stack>
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        ) : (
+          <Box>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Contraparte</TableCell>
+                    <TableCell>Proyecto</TableCell>
+                    <TableCell>Sociedad</TableCell>
+                    <TableCell align="right">Monto acumulado</TableCell>
+                    <TableCell>Estado</TableCell>
+                    <TableCell>Plazo / Presentado</TableCell>
+                    <TableCell align="right">Evidencia / Acciones</TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-            <TableFooter>
-              <TableRow>
-                <TablePagination
-                  colSpan={7}
-                  count={totalCount}
-                  page={page}
-                  rowsPerPage={pageSize}
-                  rowsPerPageOptions={[20, 50, 100]}
-                  labelRowsPerPage="Filas:"
-                  onPageChange={(_, p) => setPage(p)}
-                  onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
-                />
-              </TableRow>
-            </TableFooter>
-          </Table>
-        </TableContainer>
+                </TableHead>
+                <TableBody>
+                  {avisos.map((aviso) => (
+                    <TableRow key={aviso.id_aviso} sx={aviso.vencido ? { bgcolor: "error.light", opacity: 0.9 } : undefined}>
+                      <TableCell>
+                        <Typography variant="body2" component="a" href={`/pld/${aviso.kyc_id}`} sx={{ color: "primary.main", textDecoration: "none", "&:hover": { textDecoration: "underline" } }}>
+                          {aviso.nombre_contraparte}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{aviso.proyecto || "—"}</TableCell>
+                      <TableCell>{aviso.sociedad || "—"}</TableCell>
+                      <TableCell align="right">{MXN.format(Number(aviso.monto_acumulado))}</TableCell>
+                      <TableCell>{chipAviso(aviso)}</TableCell>
+                      <TableCell>{plazoLabel(aviso)}</TableCell>
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
+                          {aviso.link_evidencia && (
+                            <Button size="small" component="a" href={aviso.link_evidencia} target="_blank" rel="noopener">Ver evidencia</Button>
+                          )}
+                          {aviso.estado === "PRESENTADO" && !aviso.link_evidencia && (
+                            <Tooltip title="Subir comprobante de presentación">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={subiendoId === aviso.id_aviso ? <CircularProgress size={14} /> : <Upload size={14} />}
+                                disabled={subiendoId === aviso.id_aviso}
+                                onClick={() => {
+                                  if (sueltaRef.current) {
+                                    sueltaRef.current.dataset.avisoId = aviso.id_aviso;
+                                    sueltaRef.current.click();
+                                  }
+                                }}
+                              >
+                                Subir evidencia
+                              </Button>
+                            </Tooltip>
+                          )}
+                          {aviso.estado === "PENDIENTE" && (
+                            <Tooltip title="Marcar como presentado ante SICOAM">
+                              <Button size="small" variant="outlined" onClick={() => abrirDialog(aviso)}>Marcar presentado</Button>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TablePagination
+                      colSpan={7}
+                      count={totalCount}
+                      page={page}
+                      rowsPerPage={pageSize}
+                      rowsPerPageOptions={[20, 50, 100]}
+                      labelRowsPerPage="Filas:"
+                      onPageChange={(_, p) => setPage(p)}
+                      onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                    />
+                  </TableRow>
+                </TableFooter>
+              </Table>
+            </TableContainer>
+          </Box>
+        )}
+        {esMovil && (
+          <TablePagination
+            component="div"
+            count={totalCount}
+            page={page}
+            rowsPerPage={pageSize}
+            rowsPerPageOptions={[20, 50, 100]}
+            labelRowsPerPage="Filas:"
+            onPageChange={(_, p) => setPage(p)}
+            onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+          />
+        )}
       </Paper>
 
       {/* Dialog: marcar como presentado */}
@@ -328,6 +376,7 @@ export default function AvisosUifPage() {
         onClose={(_, reason) => { if (reason !== "backdropClick" && reason !== "escapeKeyDown") setDialogAviso(null); }}
         maxWidth="sm"
         fullWidth
+        fullScreen={esMovil}
       >
         <DialogTitle>Marcar aviso como presentado</DialogTitle>
         <DialogContent>
