@@ -629,7 +629,13 @@ class TesoreriaContratoViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet):
         # "Sin sociedad" (23/Sep/2026) - prefijo legible en vez de dejar el
         # id_contrato empezando en "-" (sociedad vacia).
         prefijo = sociedad or "SINSOC"
-        serializer.save(id_contrato=f"{prefijo}-{contraparte.id_contraparte}-{consecutivo:03d}")
+        # Locatarios: referencia_pago va al inicio del id_contrato para que
+        # sea legible sin abrir el contrato.
+        if contraparte.referencia_pago:
+            id_contrato = f"{contraparte.referencia_pago}-{prefijo}-{contraparte.id_contraparte}-{consecutivo:03d}"
+        else:
+            id_contrato = f"{prefijo}-{contraparte.id_contraparte}-{consecutivo:03d}"
+        serializer.save(id_contrato=id_contrato)
 
     @action(detail=True, methods=["post"])
     def enviar_recordatorio_documentos(self, request, pk=None):

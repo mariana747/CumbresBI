@@ -209,6 +209,11 @@ class TesoreriaContraparte(models.Model):
     # mismo criterio y misma fecha de reversion. Misma excepcion origen=ia.
     tipo_persona = models.CharField(max_length=20, choices=TIPO_PERSONA_CHOICES, blank=True, null=True)
     genero = models.CharField(max_length=20, choices=GENERO_CHOICES, blank=True, null=True)
+    # Campos de locatario — solo aplican cuando cliente=True
+    referencia_pago = models.CharField(max_length=20, blank=True, null=True, unique=True)
+    local = models.CharField(max_length=100, blank=True, null=True)
+    nombre_comercial = models.CharField(max_length=100, blank=True, null=True)
+
     cliente = models.BooleanField(default=False)
     proveedor = models.BooleanField(default=False)
     # Fusion de contrapartes duplicadas (02/Sep/2026, cierre real de la

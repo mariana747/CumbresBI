@@ -61,6 +61,7 @@ import {
   ShoppingCart,
   Truck,
   CreditCard,
+  Store,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -328,6 +329,7 @@ export function buildNavItems(session: SessionUser | null): NavItem[] {
           group: "CONFIGURACIÓN Y BANCOS",
         },
         { label: "Contrapartes", href: "/tesoreria/contrapartes", icon: Users, group: "CONFIGURACIÓN Y BANCOS" },
+        { label: "Locatarios", href: "/tesoreria/locatarios", icon: Store, group: "CONFIGURACIÓN Y BANCOS" },
         { label: "Contratos", href: "/tesoreria/contratos", icon: FilePenLine, group: "CONFIGURACIÓN Y BANCOS" },
         // Conciliacion bancaria (08/Sep/2026) - importar extracto + matching
         // automatico + reporte transaccion-por-transaccion, ver

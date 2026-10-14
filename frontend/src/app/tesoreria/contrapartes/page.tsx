@@ -103,6 +103,9 @@ const FORM_VACIO = {
   telefonoSms: "",
   cliente: false,
   proveedor: false,
+  referenciaPago: "",
+  local: "",
+  nombreComercial: "",
   comentarios: "",
   permiso: "",
   autorizadoPor: "",
@@ -371,6 +374,9 @@ function TesoreriaContrapartesPageContent() {
       telefonoSms: c.telefono_sms || "",
       cliente: c.cliente,
       proveedor: c.proveedor,
+      referenciaPago: c.referencia_pago || "",
+      local: c.local || "",
+      nombreComercial: c.nombre_comercial || "",
       comentarios: c.comentarios || "",
       permiso: c.permiso || "",
       autorizadoPor: c.autorizado_por || "",
@@ -421,6 +427,9 @@ function TesoreriaContrapartesPageContent() {
         telefonoSms: form.telefonoSms || null,
         cliente: form.cliente,
         proveedor: form.proveedor,
+        referenciaPago: form.referenciaPago || null,
+        local: form.local || null,
+        nombreComercial: form.nombreComercial || null,
         comentarios: form.comentarios || null,
         permiso: form.permiso || null,
         autorizadoPor: form.autorizadoPor || null,
@@ -1114,6 +1123,36 @@ function TesoreriaContrapartesPageContent() {
                 label="Proveedor"
               />
             </Stack>
+            {form.cliente && (
+              <>
+                <Typography variant="overline" color="text.secondary">
+                  Locatario
+                </Typography>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  <TextField
+                    size="small"
+                    label="Referencia de pago"
+                    value={form.referenciaPago}
+                    onChange={(e) => setForm({ ...form, referenciaPago: e.target.value })}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Local"
+                    value={form.local}
+                    onChange={(e) => setForm({ ...form, local: e.target.value })}
+                    fullWidth
+                  />
+                </Stack>
+                <TextField
+                  size="small"
+                  label="Nombre comercial"
+                  value={form.nombreComercial}
+                  onChange={(e) => setForm({ ...form, nombreComercial: e.target.value })}
+                  fullWidth
+                />
+              </>
+            )}
 
             <Divider />
             <Typography variant="overline" color="text.secondary">
