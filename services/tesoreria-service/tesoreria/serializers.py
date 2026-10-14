@@ -83,6 +83,9 @@ class TesoreriaContraparteSerializer(serializers.ModelSerializer):
             "origen",
             "cliente",
             "proveedor",
+            "referencia_pago",
+            "local",
+            "nombre_comercial",
             "comentarios",
             "permiso",
             "autorizado_por",
@@ -234,6 +237,9 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
     aplica a contratos nuevos, no se hizo backfill de los que ya existian."""
 
     contraparte_nombre = serializers.CharField(source="contraparte.razon_social", read_only=True)
+    contraparte_referencia_pago = serializers.CharField(source="contraparte.referencia_pago", read_only=True, default=None)
+    contraparte_local = serializers.CharField(source="contraparte.local", read_only=True, default=None)
+    contraparte_nombre_comercial = serializers.CharField(source="contraparte.nombre_comercial", read_only=True, default=None)
 
     class Meta:
         model = TesoreriaContrato
@@ -242,6 +248,9 @@ class TesoreriaContratoSerializer(serializers.ModelSerializer):
             "sociedad",
             "contraparte",
             "contraparte_nombre",
+            "contraparte_referencia_pago",
+            "contraparte_local",
+            "contraparte_nombre_comercial",
             "categoria",
             "concepto",
             "tipo",
