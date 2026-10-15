@@ -612,6 +612,8 @@ export default function ConciliacionFacturasPage() {
             )}
           </Stack>
 
+          {/* Tabla — oculta en celular */}
+          <Box sx={{ display: { xs: "none", sm: "block" } }}>
           <TableContainer>
             <Table size="small">
               <TableHead>
@@ -697,6 +699,75 @@ export default function ConciliacionFacturasPage() {
             labelRowsPerPage="Filas por página"
             labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
           />
+          </Box>
+
+          {/* Tarjetas — solo celular */}
+          <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+            {loading ? (
+              <Stack alignItems="center" sx={{ py: 3 }}>
+                <CircularProgress size={20} />
+              </Stack>
+            ) : filasVisibles.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                Sin pagos en este periodo.
+              </Typography>
+            ) : (
+              filasVisibles.map((f) => {
+                const cuadra = f.por_reconocer != null && Number(f.por_reconocer) === 0;
+                return (
+                  <Paper key={f.id_flujo} variant="outlined" sx={{ p: 2 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>
+                          {f.id_flujo}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                          {f.contraparte_nombre || f.contrato || "—"}
+                        </Typography>
+                      </Stack>
+                      <IconButton size="small" aria-label="Ver" onClick={() => abrirDetalle(f, tab)}>
+                        <Eye size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    </Stack>
+                    <Stack spacing={0.5} sx={{ mt: 1 }}>
+                      <Typography variant="body2"><strong>Fecha:</strong> {f.fecha_efectiva || "—"}</Typography>
+                      <Typography variant="body2"><strong>Concepto:</strong> {f.concepto || "—"}</Typography>
+                      <Typography variant="body2"><strong>Total:</strong> {numero(f.total_mxp)}</Typography>
+                      {tab === "ligado" && (
+                        <>
+                          <Typography variant="body2"><strong>Reconocido:</strong> {numero(f.reconocido)}</Typography>
+                          <Typography variant="body2" component="div">
+                            <strong>Por reconocer:</strong>{" "}
+                            <Typography
+                              component="span"
+                              variant="body2"
+                              color={f.por_reconocer == null ? "text.secondary" : cuadra ? "success.main" : "error.main"}
+                            >
+                              {numero(f.por_reconocer)}
+                            </Typography>
+                          </Typography>
+                        </>
+                      )}
+                    </Stack>
+                  </Paper>
+                );
+              })
+            )}
+            <TablePagination
+              component="div"
+              count={datos[TAB_A_BUCKET[tab]].count}
+              page={pagina}
+              onPageChange={(_, nuevaPagina) => setPagina(nuevaPagina)}
+              rowsPerPage={filasPorPagina}
+              onRowsPerPageChange={(e) => {
+                setFilasPorPagina(parseInt(e.target.value, 10));
+                setPagina(0);
+              }}
+              rowsPerPageOptions={[20, 50, 100]}
+              labelRowsPerPage="Filas"
+              labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+            />
+          </Stack>
         </Paper>
 
         {/* Detalle del pago - un solo dialogo con tabs propios (10/Sep/2026,
