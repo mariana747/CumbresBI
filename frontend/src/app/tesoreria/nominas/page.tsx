@@ -625,6 +625,7 @@ export default function TesoreriaNominasPage() {
             </Typography>
           </Stack>
         ) : (
+          <>
           {/* Tabla — oculta en celular */}
           <Box sx={{ display: { xs: "none", sm: "block" } }}>
           <TableContainer>
@@ -714,6 +715,7 @@ export default function TesoreriaNominasPage() {
               </Paper>
             ))}
           </Stack>
+          </>
         )}
       </Paper>
 
