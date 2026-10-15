@@ -199,18 +199,18 @@ def _calcular_corte(cuentas, fecha) -> dict:
 
     # Saldos de HOY: una sola query para todas las cuentas
     saldos_hoy = {
-        s.cuenta_id: s
+        s.cuenta: s
         for s in TesoreriaSaldo.objects.filter(cuenta__in=ids_cuentas, fecha=fecha)
     }
     # Saldo anterior más reciente por cuenta: una sola query con ventana en Python
     saldos_anteriores_qs = (
         TesoreriaSaldo.objects.filter(cuenta__in=ids_cuentas, fecha__lt=fecha)
-        .order_by("cuenta_id", "-fecha")
+        .order_by("cuenta", "-fecha")
     )
     saldos_anteriores: dict = {}
     for s in saldos_anteriores_qs:
-        if s.cuenta_id not in saldos_anteriores:
-            saldos_anteriores[s.cuenta_id] = s
+        if s.cuenta not in saldos_anteriores:
+            saldos_anteriores[s.cuenta] = s
 
     # Flujos del día: una sola query para todas las cuentas
     flujos_del_dia = (
