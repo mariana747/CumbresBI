@@ -448,6 +448,8 @@ export default function TesoreriaCreditoPage() {
               )}
 
               <Paper variant="outlined">
+                {/* Tabla — oculta en celular */}
+                <Box sx={{ display: { xs: "none", sm: "block" } }}>
                 <TableContainer>
                   <Table size="small">
                     <TableHead>
@@ -532,6 +534,51 @@ export default function TesoreriaCreditoPage() {
                   rowsPerPageOptions={[25, 50, 100]}
                   labelRowsPerPage="Por página"
                 />
+                </Box>
+
+                {/* Tarjetas — solo celular */}
+                <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+                  {loading ? (
+                    <Stack alignItems="center" sx={{ py: 3 }}><CircularProgress size={20} /></Stack>
+                  ) : flujos.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                      Sin movimientos registrados.
+                    </Typography>
+                  ) : flujos.map((f, idx) => {
+                    const monto = f.total_mxp ? parseFloat(f.total_mxp) : null;
+                    const esMinistrado = monto !== null && monto < 0;
+                    return (
+                      <Paper key={f.id_flujo} variant="outlined" sx={{ p: 2 }}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                          <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+                            <Chip size="small" label={esMinistrado ? "Ministración" : "Pago"}
+                              color={esMinistrado ? "success" : "error"} variant="outlined" sx={{ alignSelf: "flex-start" }} />
+                            <Typography variant="caption" color="text.secondary">{fmtFecha(f.fecha_efectiva)}</Typography>
+                          </Stack>
+                          <IconButton size="small" onClick={() => abrirDetalle(idx)}>
+                            <Eye size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </Stack>
+                        <Stack spacing={0.5} sx={{ mt: 1 }}>
+                          <Typography variant="body2"><strong>Concepto:</strong> {f.concepto || "—"}</Typography>
+                          <Typography variant="body2" color={esMinistrado ? "error.main" : "success.main"} fontWeight={500}>
+                            {fmtMXP(f.total_mxp)}
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
+                  <TablePagination
+                    component="div"
+                    count={totalFlujos}
+                    page={pagina}
+                    onPageChange={(_, p) => setPagina(p)}
+                    rowsPerPage={filasPorPagina}
+                    onRowsPerPageChange={(e) => { setFilasPorPagina(parseInt(e.target.value)); setPagina(0); }}
+                    rowsPerPageOptions={[25, 50, 100]}
+                    labelRowsPerPage="Filas"
+                  />
+                </Stack>
               </Paper>
             </>
           )}
