@@ -625,6 +625,9 @@ export default function TesoreriaNominasPage() {
             </Typography>
           </Stack>
         ) : (
+          <>
+          {/* Tabla — oculta en celular */}
+          <Box sx={{ display: { xs: "none", sm: "block" } }}>
           <TableContainer>
             <Table size="small">
               <TableHead>
@@ -678,6 +681,41 @@ export default function TesoreriaNominasPage() {
               </TableBody>
             </Table>
           </TableContainer>
+          </Box>
+
+          {/* Tarjetas — solo celular */}
+          <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+            {nominasFiltradas.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                Sin nóminas registradas.
+              </Typography>
+            ) : nominasFiltradas.map((n) => (
+              <Paper key={n.id_nomina} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: "var(--font-mono, monospace)" }}>{n.id_nomina}</Typography>
+                    <Typography variant="caption" color="text.secondary">{n.serie}</Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <IconButton size="small" aria-label="Ver" onClick={() => abrirDetalle(n, false)}>
+                      <Eye size={14} strokeWidth={1.5} />
+                    </IconButton>
+                    <IconButton size="small" onClick={(e) => { setMenuAnchor(e.currentTarget); setMenuNomina(n); }}>
+                      <MoreVertical size={14} strokeWidth={1.5} />
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2"><strong>Tipo:</strong> {TIPO_LABELS[n.tipo]}</Typography>
+                  <Typography variant="body2"><strong>Empresa:</strong> {n.sociedades.map(aliasSociedad).join(", ")}</Typography>
+                  <Typography variant="body2"><strong>Periodo:</strong> {formatoPeriodo(n.fecha_inicio, n.fecha_fin)}</Typography>
+                  <Chip size="small" label={n.status === "ACTIVO" ? "Activa" : "Cerrada"}
+                    color={n.status === "ACTIVO" ? "success" : "default"} variant="outlined" sx={{ alignSelf: "flex-start" }} />
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+          </>
         )}
       </Paper>
 

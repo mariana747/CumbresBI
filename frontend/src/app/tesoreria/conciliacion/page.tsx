@@ -644,6 +644,8 @@ export default function TesoreriaConciliacionPage() {
                   <Tab value="conciliados" label={`Conciliados (${movimientosPorEstado.conciliados.length})`} />
                   <Tab value="sin_conciliar" label={`Sin conciliar (${movimientosPorEstado.sin_conciliar.length})`} />
                 </Tabs>
+                {/* Tabla — oculta en celular */}
+                <Box sx={{ display: { xs: "none", sm: "block" } }}>
                 <TableContainer>
                   <Table size="small">
                     <TableHead>
@@ -709,6 +711,43 @@ export default function TesoreriaConciliacionPage() {
                     </TableBody>
                   </Table>
                 </TableContainer>
+                </Box>
+
+                {/* Tarjetas — solo celular */}
+                <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+                  {loading ? (
+                    <Stack alignItems="center" sx={{ py: 3 }}><CircularProgress size={20} /></Stack>
+                  ) : movimientosVisibles.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                      Sin movimientos {subTab === "sin_conciliar" ? "pendientes de conciliar" : "importados"}.
+                    </Typography>
+                  ) : movimientosVisibles.map((m) => (
+                    <Paper key={m.id} variant="outlined" sx={{ p: 2 }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                        <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                          <Typography variant="subtitle2">{m.fecha}</Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap>{m.descripcion || "—"}</Typography>
+                        </Stack>
+                        {!m.flujo && (
+                          <Button size="small" onClick={() => handleVerSugerencias(m)}
+                            disabled={cargandoSugerencias === m.id} sx={{ flexShrink: 0 }}>
+                            {cargandoSugerencias === m.id ? <CircularProgress size={14} /> : "Sugerencias"}
+                          </Button>
+                        )}
+                      </Stack>
+                      <Stack spacing={0.5} sx={{ mt: 1 }}>
+                        {m.cargo && <Typography variant="body2"><strong>Cargo:</strong> {formatMonto(m.cargo)}</Typography>}
+                        {m.abono && <Typography variant="body2"><strong>Abono:</strong> {formatMonto(m.abono)}</Typography>}
+                        {m.flujo ? (
+                          <Chip label={`${m.flujo} — ${m.flujo_concepto || ""}`} size="small" color="success"
+                            onDelete={() => handleDesvincular(m.id)} />
+                        ) : (
+                          <Chip label="Sin conciliar" size="small" variant="outlined" sx={{ alignSelf: "flex-start" }} />
+                        )}
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Stack>
               </Paper>
               )}
             </>
