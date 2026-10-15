@@ -80,6 +80,7 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
             "concepto": flujo.concepto,
             "total_mxp": flujo.total_mxp,
             "fecha_efectiva": flujo.fecha_efectiva,
+            "fecha_pago": flujo.fecha_pago,
             "factura": flujo.factura_id,
             "factura_folio": flujo.factura.comprobante_folio if flujo.factura_id else None,
             "complemento": flujo.complemento_id,
@@ -148,6 +149,7 @@ def calcular_conciliacion_nomina(queryset) -> dict:
             "concepto": flujo.concepto,
             "total_mxp": flujo.total_mxp,
             "fecha_efectiva": flujo.fecha_efectiva,
+            "fecha_pago": flujo.fecha_pago,
             "nomina": flujo.nomina_id,
         }
         if not flujo.nomina_id:
