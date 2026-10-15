@@ -55,6 +55,7 @@ import {
   Trash2,
   Undo2,
   Upload,
+  Settings2,
   X,
   X as CloseIcon,
 } from "lucide-react";
@@ -73,6 +74,8 @@ import SelectorArchivoLocalODrive from "@/components/SelectorArchivoLocalODrive"
 import { ToggleCard } from "@/components/ToggleCard";
 import { SessionUser, getSession } from "@/lib/auth";
 import { useExportarSheets } from "@/lib/useExportarSheets";
+import { useFiltrosVisibles, FiltroConfig } from "@/lib/useFiltrosVisibles";
+import FiltrosConfigDialog from "@/components/FiltrosConfigDialog";
 import {
   TESORERIA_FLUJO_CAMPOS_CONFIRMABLES,
   TesoreriaComplementoPago,
@@ -127,6 +130,7 @@ const FORM_VACIO = {
   cuenta: "",
   totalMxp: "",
   fechaEfectiva: new Date().toISOString().slice(0, 10),
+  fechaPago: "",
   concepto: "",
   reembolso: false,
   idEmpleadoReembolso: "",
@@ -232,6 +236,21 @@ function TesoreriaFlujosPageContent() {
   const [complementos, setComplementos] = useState<TesoreriaComplementoPago[]>([]);
   const [nominas, setNominas] = useState<TesoreriaNomina[]>([]);
   const [search, setSearch] = useState("");
+
+  // Filtros configurables por usuario (localStorage)
+  const FILTROS_FLUJOS: FiltroConfig[] = [
+    { key: "contrato", label: "Contrato" },
+    { key: "empresa", label: "Empresa" },
+    { key: "nomina", label: "Nómina" },
+    { key: "categoria", label: "Categoría de gasto" },
+    { key: "estado", label: "Estado" },
+    { key: "pagado", label: "Pago" },
+    { key: "fechaDesde", label: "Fecha desde" },
+    { key: "fechaHasta", label: "Fecha hasta" },
+  ];
+  const { visibles, setVisibles } = useFiltrosVisibles("filtros-flujos", FILTROS_FLUJOS);
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
+
   const [filtroContrato, setFiltroContrato] = useState("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroNomina, setFiltroNomina] = useState(searchParams.get("nomina") || "");
@@ -241,6 +260,7 @@ function TesoreriaFlujosPageContent() {
   // Filtro por Estado (23/Sep/2026, "agrega filtro para el estado") - mismos
   // valores que la columna Estado de la tabla.
   const [filtroEstado, setFiltroEstado] = useState<TesoreriaValidacionEstado | "">("");
+  const [filtroPagado, setFiltroPagado] = useState<"" | "true" | "false">("");
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   // Columna "Empresa" (25/Sep/2026) - contrato_sociedad ya viene resuelto
   // del backend (TesoreriaFlujoSerializer.contrato_sociedad, RFC plano vía
@@ -600,6 +620,7 @@ function TesoreriaFlujosPageContent() {
       fechaDesde: filtroFechaDesde || undefined,
       fechaHasta: filtroFechaHasta || undefined,
       validacionEstado: filtroEstado || undefined,
+      pagado: filtroPagado === "" ? undefined : filtroPagado === "true",
       page: pagina + 1,
       pageSize: filasPorPagina,
     })
@@ -624,6 +645,7 @@ function TesoreriaFlujosPageContent() {
     filtroFechaDesde,
     filtroFechaHasta,
     filtroEstado,
+    filtroPagado,
     pagina,
     filasPorPagina,
   ]);
@@ -634,7 +656,7 @@ function TesoreriaFlujosPageContent() {
   useEffect(() => {
     setPagina(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filtroContrato, filtroEmpresa, filtroNomina, filtroCategoriaGasto, filtroFechaDesde, filtroFechaHasta, filtroEstado]);
+  }, [search, filtroContrato, filtroEmpresa, filtroNomina, filtroCategoriaGasto, filtroFechaDesde, filtroFechaHasta, filtroEstado, filtroPagado]);
 
   // Redirigido desde Conciliación Bancaria tras "Crear Flujo" (11/Sep/2026,
   // "quiero que muestre lo importado y para mostrar y redirigir") - abre
@@ -663,6 +685,8 @@ function TesoreriaFlujosPageContent() {
     if (contratoFiltro) partes.push(contratoFiltro.id_contrato);
     if (filtroCategoriaGasto) partes.push(filtroCategoriaGasto);
     if (filtroEstado) partes.push(filtroEstado);
+    if (filtroPagado === "true") partes.push("Pagados");
+    if (filtroPagado === "false") partes.push("Sin pagar");
     if (filtroFechaDesde) partes.push(`desde ${filtroFechaDesde}`);
     if (filtroFechaHasta) partes.push(`hasta ${filtroFechaHasta}`);
     return partes.join(" — ");
@@ -684,6 +708,7 @@ function TesoreriaFlujosPageContent() {
       fechaDesde: filtroFechaDesde || undefined,
       fechaHasta: filtroFechaHasta || undefined,
       validacionEstado: filtroEstado || undefined,
+      pagado: filtroPagado === "" ? undefined : filtroPagado === "true",
       carpetaId,
       titulo: tituloExport,
     })
@@ -754,6 +779,7 @@ function TesoreriaFlujosPageContent() {
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
       fechaEfectiva: f.fecha_efectiva || "",
+      fechaPago: f.fecha_pago || "",
       concepto: f.concepto || "",
       reembolso: f.reembolso ?? false,
       idEmpleado: f.id_empleado || "",
@@ -846,6 +872,7 @@ function TesoreriaFlujosPageContent() {
           contrato: form.contrato || undefined,
           concepto: form.concepto || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
+          fechaPago: form.fechaPago,
           totalMxp: form.totalMxp || undefined,
           comentarios: form.comentarios || undefined,
           linkComprobanteBanco: form.linkComprobanteBanco || undefined,
@@ -1133,87 +1160,153 @@ function TesoreriaFlujosPageContent() {
             )}
           </Stack>
         }
+        configNode={
+          <Tooltip title="Personalizar filtros">
+            <IconButton size="small" onClick={() => setConfigDialogOpen(true)}>
+              <Settings2 size={14} strokeWidth={1.5} />
+            </IconButton>
+          </Tooltip>
+        }
       >
-        <Autocomplete
-          size="small"
-          sx={{ width: "100%" }}
-          options={sociedades}
-          value={sociedades.find((s) => s.rfc === filtroEmpresa) || null}
-          onChange={(_, seleccion) => {
-            setFiltroEmpresa(seleccion?.rfc || "");
-            setFiltroContrato("");
-            setContratoFiltro(null);
-          }}
-          getOptionLabel={(s) => s.alias_sociedad || s.razon_social || s.rfc}
-          isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
-          renderInput={(params) => <TextField {...params} label="Filtrar por empresa" />}
-        />
-        <Autocomplete
-          size="small"
-          sx={{ width: "100%" }}
-          options={Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]}
-          value={filtroCategoriaGasto || null}
-          onChange={(_, seleccion) => setFiltroCategoriaGasto(seleccion || "")}
-          getOptionLabel={(c) => CATEGORIA_GASTO_LABELS[c]}
-          renderInput={(params) => <TextField {...params} label="Categoría de gasto" />}
-        />
-        <Box sx={{ width: "100%" }}>
-          <ContratoSelector
-            label="Filtrar por contrato"
-            sociedad={filtroEmpresa || undefined}
-            value={contratoFiltro}
-            onChange={(seleccion) => {
-              setContratoFiltro(seleccion);
-              setFiltroContrato(seleccion?.id_contrato || "");
-            }}
-          />
-        </Box>
-        <Autocomplete
-          size="small"
-          sx={{ width: "100%" }}
-          options={nominas}
-          value={nominas.find((n) => n.id_nomina === filtroNomina) || null}
-          onChange={(_, seleccion) => setFiltroNomina(seleccion?.id_nomina || "")}
-          getOptionLabel={(n) => `${n.id_nomina} — ${n.serie}`}
-          isOptionEqualToValue={(a, b) => a.id_nomina === b.id_nomina}
-          renderInput={(params) => <TextField {...params} label="Filtrar por nómina" />}
-        />
-        <Autocomplete
-          size="small"
-          sx={{ width: "100%" }}
-          options={Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]}
-          value={filtroEstado || null}
-          onChange={(_, seleccion) => setFiltroEstado(seleccion || "")}
-          getOptionLabel={(e) => e.charAt(0) + e.slice(1).toLowerCase()}
-          renderInput={(params) => <TextField {...params} label="Estado" />}
-        />
-        <TextField
-          size="small"
-          type="date"
-          label="Fecha desde"
-          value={filtroFechaDesde}
-          onChange={(e) => {
-            const val = e.target.value;
-            setFiltroFechaDesde(val);
-            if (val && !filtroFechaHasta) {
-              const [anio, mes] = val.split("-").map(Number);
-              const ultimoDia = new Date(anio, mes, 0).getDate();
-              setFiltroFechaHasta(`${anio}-${String(mes).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`);
-            }
-          }}
-          InputLabelProps={{ shrink: true }}
-          fullWidth
-        />
-        <TextField
-          size="small"
-          type="date"
-          label="Fecha hasta"
-          value={filtroFechaHasta}
-          onChange={(e) => setFiltroFechaHasta(e.target.value)}
-          InputLabelProps={{ shrink: true }}
-          fullWidth
-        />
+        {visibles.map((key) => {
+          if (key === "empresa") return (
+            <Autocomplete
+              key="empresa"
+              size="small"
+              sx={{ width: "100%" }}
+              options={sociedades}
+              value={sociedades.find((s) => s.rfc === filtroEmpresa) || null}
+              onChange={(_, seleccion) => {
+                setFiltroEmpresa(seleccion?.rfc || "");
+                setFiltroContrato("");
+                setContratoFiltro(null);
+              }}
+              getOptionLabel={(s) => s.alias_sociedad || s.razon_social || s.rfc}
+              isOptionEqualToValue={(a, b) => a.rfc === b.rfc}
+              renderInput={(params) => <TextField {...params} label="Filtrar por empresa" />}
+            />
+          );
+          if (key === "categoria") return (
+            <Autocomplete
+              key="categoria"
+              size="small"
+              sx={{ width: "100%" }}
+              options={Object.keys(CATEGORIA_GASTO_LABELS) as TesoreriaCategoriaGasto[]}
+              value={filtroCategoriaGasto || null}
+              onChange={(_, seleccion) => setFiltroCategoriaGasto(seleccion || "")}
+              getOptionLabel={(c) => CATEGORIA_GASTO_LABELS[c]}
+              renderInput={(params) => <TextField {...params} label="Categoría de gasto" />}
+            />
+          );
+          if (key === "contrato") return (
+            <Box key="contrato" sx={{ width: "100%" }}>
+              <ContratoSelector
+                label="Filtrar por contrato"
+                sociedad={filtroEmpresa || undefined}
+                value={contratoFiltro}
+                onChange={(seleccion) => {
+                  setContratoFiltro(seleccion);
+                  setFiltroContrato(seleccion?.id_contrato || "");
+                }}
+              />
+            </Box>
+          );
+          if (key === "nomina") return (
+            <Autocomplete
+              key="nomina"
+              size="small"
+              sx={{ width: "100%" }}
+              options={nominas}
+              value={nominas.find((n) => n.id_nomina === filtroNomina) || null}
+              onChange={(_, seleccion) => setFiltroNomina(seleccion?.id_nomina || "")}
+              getOptionLabel={(n) => `${n.id_nomina} — ${n.serie}`}
+              isOptionEqualToValue={(a, b) => a.id_nomina === b.id_nomina}
+              renderInput={(params) => <TextField {...params} label="Filtrar por nómina" />}
+            />
+          );
+          if (key === "estado") return (
+            <Autocomplete
+              key="estado"
+              size="small"
+              sx={{ width: "100%" }}
+              options={Object.keys(VALIDACION_DESCRIPCION) as TesoreriaValidacionEstado[]}
+              value={filtroEstado || null}
+              onChange={(_, seleccion) => setFiltroEstado(seleccion || "")}
+              getOptionLabel={(e) => e.charAt(0) + e.slice(1).toLowerCase()}
+              renderInput={(params) => <TextField {...params} label="Estado" />}
+            />
+          );
+          if (key === "pagado") return (
+            <FormControl key="pagado" size="small" fullWidth>
+              <InputLabel>Pago</InputLabel>
+              <Select
+                label="Pago"
+                value={filtroPagado}
+                onChange={(e) => setFiltroPagado(e.target.value as "" | "true" | "false")}
+              >
+                <MenuItem value="">Todos</MenuItem>
+                <MenuItem value="true">Pagados</MenuItem>
+                <MenuItem value="false">Sin pagar</MenuItem>
+              </Select>
+            </FormControl>
+          );
+          if (key === "fechaDesde") return (
+            <TextField
+              key="fechaDesde"
+              size="small"
+              type="date"
+              label="Fecha desde"
+              value={filtroFechaDesde}
+              onChange={(e) => {
+                const val = e.target.value;
+                setFiltroFechaDesde(val);
+                if (val && !filtroFechaHasta) {
+                  const [anio, mes] = val.split("-").map(Number);
+                  const ultimoDia = new Date(anio, mes, 0).getDate();
+                  setFiltroFechaHasta(`${anio}-${String(mes).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`);
+                }
+              }}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+          );
+          if (key === "fechaHasta") return (
+            <TextField
+              key="fechaHasta"
+              size="small"
+              type="date"
+              label="Fecha hasta"
+              value={filtroFechaHasta}
+              onChange={(e) => setFiltroFechaHasta(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+          );
+          return null;
+        })}
       </FiltrosBar>
+
+      <FiltrosConfigDialog
+        open={configDialogOpen}
+        onClose={() => setConfigDialogOpen(false)}
+        todos={FILTROS_FLUJOS}
+        visibles={visibles}
+        onSave={(nuevosVisibles) => {
+          // Limpiar valores de filtros que se quitaron
+          const quitados = visibles.filter((k) => !nuevosVisibles.includes(k));
+          quitados.forEach((k) => {
+            if (k === "empresa") { setFiltroEmpresa(""); setFiltroContrato(""); setContratoFiltro(null); }
+            if (k === "contrato") { setFiltroContrato(""); setContratoFiltro(null); }
+            if (k === "nomina") setFiltroNomina("");
+            if (k === "categoria") setFiltroCategoriaGasto("");
+            if (k === "estado") setFiltroEstado("");
+            if (k === "pagado") setFiltroPagado("");
+            if (k === "fechaDesde") setFiltroFechaDesde("");
+            if (k === "fechaHasta") setFiltroFechaHasta("");
+          });
+          setVisibles(nuevosVisibles);
+        }}
+      />
 
       <Paper variant="outlined">
         {/* Tabla normal en pantallas >= sm; en celular (xs) se reemplaza por
@@ -1232,12 +1325,6 @@ function TesoreriaFlujosPageContent() {
                 nombreSociedadCuenta() mas abajo. */}
                 <TableCell>Sociedad</TableCell>
                 <TableCell>Descripción de Pago</TableCell>
-                <TableCell>
-                  <LabelTip
-                    text="Fecha Efectiva"
-                    tip="Fecha del movimiento según el contrato/factura, puede no coincidir con la fecha real de pago."
-                  />
-                </TableCell>
                 <TableCell>Concepto</TableCell>
 
                 <TableCell align="right">Total MXP</TableCell>
@@ -1267,6 +1354,7 @@ function TesoreriaFlujosPageContent() {
                     </Tooltip>
                   </Stack>
                 </TableCell>
+                <TableCell>Fecha pago</TableCell>
                 <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
@@ -1293,7 +1381,6 @@ function TesoreriaFlujosPageContent() {
                     <TableCell>{f.contrato_contraparte_nombre || "—"}</TableCell>
                     <TableCell>{nombreSociedadCuenta(f)}</TableCell>
                     <TableCell>{f.descripcion_pago || "—"}</TableCell>
-                    <TableCell>{f.fecha_efectiva || "—"}</TableCell>
                     <TableCell>{f.concepto || "—"}</TableCell>
                     <TableCell align="right">
                       {f.total_mxp
@@ -1316,6 +1403,7 @@ function TesoreriaFlujosPageContent() {
                         variant={f.pagado ? "filled" : "outlined"}
                       />
                     </TableCell>
+                    <TableCell>{f.fecha_pago || "—"}</TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                         <IconButton size="small" aria-label="Ver" onClick={() => abrirEdicion(f, true)}>
@@ -1384,7 +1472,7 @@ function TesoreriaFlujosPageContent() {
                     <strong>ID Contrato:</strong> {f.contrato || "—"}
                   </Typography>
                   <Typography variant="body2">
-                    <strong>Fecha efectiva:</strong> {f.fecha_efectiva || "—"}
+                    <strong>Fecha pago:</strong> {f.fecha_pago || "—"}
                   </Typography>
                   <Typography variant="body2">
                     <strong>Concepto:</strong> {f.concepto || "—"}
@@ -1758,20 +1846,15 @@ function TesoreriaFlujosPageContent() {
                     </Stack>
                   )}
                   <TextField size="small" label="Pagado" value={editing.pagado ? "Sí" : "No"} disabled fullWidth />
-                  {editing.pagado && (
-                    <TextField
-                      size="small"
-                      label={
-                        <LabelTip
-                          text="Fecha de pago"
-                          tip='Se llena sola al "Registrar pago", no es editable aquí.'
-                        />
-                      }
-                      value={editing.fecha_pago || "—"}
-                      disabled
-                      fullWidth
-                    />
-                  )}
+                  <TextField
+                    size="small"
+                    type="date"
+                    label="Fecha pago"
+                    value={form.fechaPago}
+                    onChange={(e) => setForm({ ...form, fechaPago: e.target.value })}
+                    InputLabelProps={{ shrink: true }}
+                    fullWidth
+                  />
                 </>
               ) : (
                 <Typography variant="caption" color="text.secondary">
