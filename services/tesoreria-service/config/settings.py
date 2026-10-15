@@ -191,6 +191,8 @@ DATABASES = {
         "HOST": _db_host,
         "PORT": _db_port,
         "OPTIONS": {"charset": "utf8mb4"},
+        "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
