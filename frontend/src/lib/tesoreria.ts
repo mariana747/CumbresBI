@@ -1342,6 +1342,7 @@ export async function listFlujos(params?: {
   fechaDesde?: string;
   fechaHasta?: string;
   validacionEstado?: TesoreriaValidacionEstado;
+  pagado?: boolean;
   cuenta?: string;
   page?: number;
   pageSize?: number;
@@ -1357,6 +1358,7 @@ export async function listFlujos(params?: {
   if (params?.fechaDesde) query.set("fecha_desde", params.fechaDesde);
   if (params?.fechaHasta) query.set("fecha_hasta", params.fechaHasta);
   if (params?.validacionEstado) query.set("validacion_estado", params.validacionEstado);
+  if (params?.pagado !== undefined) query.set("pagado", String(params.pagado));
   if (params?.cuenta) query.set("cuenta", params.cuenta);
   query.set("page", String(params?.page ?? 1));
   query.set("page_size", String(params?.pageSize ?? 50));
@@ -1517,6 +1519,7 @@ export async function exportarFlujosSheets(opciones?: {
   fechaDesde?: string;
   fechaHasta?: string;
   validacionEstado?: TesoreriaValidacionEstado;
+  pagado?: boolean;
   carpetaId?: string;
   titulo?: string;
 }): Promise<ExportarSheetsResultado> {
@@ -1529,6 +1532,7 @@ export async function exportarFlujosSheets(opciones?: {
   if (opciones?.fechaDesde) params.set("fecha_desde", opciones.fechaDesde);
   if (opciones?.fechaHasta) params.set("fecha_hasta", opciones.fechaHasta);
   if (opciones?.validacionEstado) params.set("validacion_estado", opciones.validacionEstado);
+  if (opciones?.pagado !== undefined) params.set("pagado", String(opciones.pagado));
   const response = await apiFetch(
     "TESORERIA",
     `${TESORERIA_API_BASE_URL}/api/flujos/exportar_sheets/?${params.toString()}`,
@@ -1701,6 +1705,7 @@ export async function updateFlujo(
     contrato: string;
     concepto: string;
     fechaEfectiva: string;
+    fechaPago: string;
     totalMxp: string;
     linkReferencia: string;
     comentarios: string;
@@ -1716,6 +1721,7 @@ export async function updateFlujo(
       ...(params.contrato !== undefined ? { contrato: params.contrato } : {}),
       concepto: params.concepto,
       fecha_efectiva: params.fechaEfectiva,
+      ...(params.fechaPago !== undefined ? { fecha_pago: params.fechaPago || null } : {}),
       total_mxp: params.totalMxp,
       link_referencia: params.linkReferencia,
       comentarios: params.comentarios,
@@ -2969,6 +2975,7 @@ export interface FacturaInput {
   linkPdf?: string;
   linkXml?: string;
   categoriaGasto?: TesoreriaCategoriaGasto | "";
+  idContraparte?: string;
   // NO incluye "estado" - es de solo lectura en el backend (ver
   // TesoreriaFacturaSerializer), se cambia unicamente via
   // marcarEstadoFactura(). Mandarlo aqui no truena, el backend lo ignora
@@ -3022,6 +3029,7 @@ function facturaBody(params: FacturaInput) {
     link_pdf: params.linkPdf || null,
     link_xml: params.linkXml || null,
     categoria_gasto: params.categoriaGasto || null,
+    id_contraparte: params.idContraparte || null,
   };
 }
 
@@ -3032,13 +3040,12 @@ function facturaBody(params: FacturaInput) {
 // formulario) - sin esto, ese camino nunca ligaria el archivo real.
 export async function createFactura(
   params: FacturaInput,
-  archivo?: DriveArchivo,
-  idTicketOrigen?: string
+  archivo?: DriveArchivo
 ): Promise<TesoreriaFactura> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...facturaBody(params), archivo, ticket_origen: idTicketOrigen || null }),
+    body: JSON.stringify({ ...facturaBody(params), archivo }),
   });
   if (!response.ok) {
     throw await friendlyApiError("TESORERIA", response);
