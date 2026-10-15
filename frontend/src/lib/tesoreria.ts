@@ -1950,6 +1950,7 @@ export interface SugerenciaCfdi {
   emisor_nombre?: string | null;
   fecha_timbrado: string | null;
   diferencia: string;
+  tipo_comprobante?: string | null;
   razon_busqueda?: string | null;
 }
 
