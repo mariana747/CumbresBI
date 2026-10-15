@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Alert,
   Box,
@@ -35,7 +36,7 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { Eye, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
+import { ChevronRight, Eye, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -86,6 +87,7 @@ export default function ViviendasTab({
   puedeEditar: boolean;
   actorId: string;
 }) {
+  const router = useRouter();
   const theme = useTheme();
   const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
@@ -349,17 +351,9 @@ export default function ViviendasTab({
                   <Typography variant="body2" color="text.secondary">
                     {v.modelo || "—"}
                   </Typography>
-                  <Stack direction="row" spacing={0.5}>
-                    <IconButton size="small" aria-label="Ver detalle" onClick={() => abrirVer(v)}>
-                      <Eye size={14} strokeWidth={1.5} />
-                    </IconButton>
-                    <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(v)} disabled={!puedeEditar}>
-                      <Pencil size={14} strokeWidth={1.5} />
-                    </IconButton>
-                    <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(v)} disabled={!puedeEditar}>
-                      <Trash2 size={14} strokeWidth={1.5} />
-                    </IconButton>
-                  </Stack>
+                  <IconButton size="small" aria-label="Abrir" onClick={() => router.push(`/ventas-vivienda/viviendas/${v.id_vivienda}`)}>
+                    <ChevronRight size={16} strokeWidth={1.5} />
+                  </IconButton>
                 </Stack>
               </CardContent>
             </Card>
@@ -408,14 +402,8 @@ export default function ViviendasTab({
                       />
                     </TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" aria-label="Ver detalle" onClick={() => abrirVer(v)}>
-                        <Eye size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(v)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(v)} disabled={!puedeEditar}>
-                        <Trash2 size={14} strokeWidth={1.5} />
+                      <IconButton size="small" aria-label="Abrir" onClick={() => router.push(`/ventas-vivienda/viviendas/${v.id_vivienda}`)}>
+                        <ChevronRight size={16} strokeWidth={1.5} />
                       </IconButton>
                     </TableCell>
                   </TableRow>

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
+  Autocomplete,
   Button,
   Card,
   CardContent,
@@ -36,13 +37,13 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { CheckSquare, ExternalLink, Eye, FileSpreadsheet, MoreVertical, Pencil, Plus, Trash2, Users, X as CloseIcon } from "lucide-react";
+import { ChevronRight, ExternalLink, Eye, FileSpreadsheet, MoreVertical, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import { downloadDriveFile, driveFileIdFromUrl } from "@/lib/drive";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import FiltrosBar from "@/components/FiltrosBar";
 import { descargarCsv } from "@/lib/descargarCsv";
 import ContraparteSelector from "@/components/ContraparteSelector";
-import { TesoreriaContraparte, getContraparte } from "@/lib/tesoreria";
+import { TesoreriaContraparte, TesoreriaContrato, getContraparte, listContratos } from "@/lib/tesoreria";
 import {
   ViviendaAsesor,
   ViviendaClienteExpediente,
@@ -712,6 +713,106 @@ const FORM_VACIO = {
   comentarios: "",
 };
 
+function SelectorVivienda({ value, onChange }: { value: ViviendaUnidad | null; onChange: (v: ViviendaUnidad | null) => void }) {
+  const [opciones, setOpciones] = useState<ViviendaUnidad[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [buscando, setBuscando] = useState(false);
+  useEffect(() => {
+    setBuscando(true);
+    const t = setTimeout(() => {
+      listViviendas({ search: inputValue || undefined })
+        .then(setOpciones)
+        .catch(() => setOpciones([]))
+        .finally(() => setBuscando(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [inputValue]);
+  return (
+    <Autocomplete
+      size="small"
+      options={opciones}
+      getOptionLabel={(o) => `${o.denominacion || o.num_oficial || o.id_vivienda}${o.proyecto_denominacion ? ` (${o.proyecto_denominacion})` : ""}`}
+      isOptionEqualToValue={(a, b) => a.id_vivienda === b.id_vivienda}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      inputValue={inputValue}
+      onInputChange={(_, v) => setInputValue(v)}
+      loading={buscando}
+      renderInput={(params) => (
+        <TextField {...params} label="Vivienda" InputProps={{ ...params.InputProps, endAdornment: <>{buscando && <CircularProgress size={14} />}{params.InputProps.endAdornment}</> }} />
+      )}
+      noOptionsText="Sin resultados"
+    />
+  );
+}
+
+function SelectorAsesor({ value, onChange }: { value: ViviendaAsesor | null; onChange: (a: ViviendaAsesor | null) => void }) {
+  const [opciones, setOpciones] = useState<ViviendaAsesor[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [buscando, setBuscando] = useState(false);
+  useEffect(() => {
+    setBuscando(true);
+    const t = setTimeout(() => {
+      listAsesores(inputValue || undefined)
+        .then(setOpciones)
+        .catch(() => setOpciones([]))
+        .finally(() => setBuscando(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [inputValue]);
+  return (
+    <Autocomplete
+      size="small"
+      options={opciones}
+      getOptionLabel={(o) => o.nombre}
+      isOptionEqualToValue={(a, b) => a.id_asesor === b.id_asesor}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      inputValue={inputValue}
+      onInputChange={(_, v) => setInputValue(v)}
+      loading={buscando}
+      renderInput={(params) => (
+        <TextField {...params} label="Asesor" InputProps={{ ...params.InputProps, endAdornment: <>{buscando && <CircularProgress size={14} />}{params.InputProps.endAdornment}</> }} />
+      )}
+      noOptionsText="Sin resultados"
+    />
+  );
+}
+
+function SelectorContrato({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const [opciones, setOpciones] = useState<TesoreriaContrato[]>([]);
+  const [inputValue, setInputValue] = useState(value);
+  const [buscando, setBuscando] = useState(false);
+  const selected = opciones.find((c) => c.id_contrato === value) ?? null;
+  useEffect(() => {
+    setBuscando(true);
+    const t = setTimeout(() => {
+      listContratos(inputValue || undefined, undefined, 1, 100)
+        .then((r) => setOpciones(r.results))
+        .catch(() => setOpciones([]))
+        .finally(() => setBuscando(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [inputValue]);
+  return (
+    <Autocomplete
+      size="small"
+      options={opciones}
+      getOptionLabel={(o) => `${o.id_contrato}${o.contraparte_nombre ? ` — ${o.contraparte_nombre}` : ""}`}
+      isOptionEqualToValue={(a, b) => a.id_contrato === b.id_contrato}
+      value={selected}
+      onChange={(_, v) => onChange(v?.id_contrato ?? "")}
+      inputValue={inputValue}
+      onInputChange={(_, v) => setInputValue(v)}
+      loading={buscando}
+      renderInput={(params) => (
+        <TextField {...params} label="Contrato (Tesorería)" InputProps={{ ...params.InputProps, endAdornment: <>{buscando && <CircularProgress size={14} />}{params.InputProps.endAdornment}</> }} />
+      )}
+      noOptionsText="Sin contratos"
+    />
+  );
+}
+
 export default function ExpedientesTab({
   puedeCrear,
   puedeEditar,
@@ -722,6 +823,7 @@ export default function ExpedientesTab({
   actorId: string;
 }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const theme = useTheme();
   const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [expedientes, setExpedientes] = useState<ViviendaExpediente[]>([]);
@@ -949,20 +1051,9 @@ export default function ExpedientesTab({
                     <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>
                       {e.id_contrato}
                     </Typography>
-                    <Stack direction="row" spacing={0.5}>
-                      <IconButton size="small" aria-label="Ver detalle" onClick={() => setViendo(e)}>
-                        <Eye size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Checklist" onClick={() => setItemsDe(e)}>
-                        <CheckSquare size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Clientes" onClick={() => setClientesDe(e)}>
-                        <Users size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(e)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                    </Stack>
+                    <IconButton size="small" aria-label="Abrir" onClick={() => router.push(`/ventas-vivienda/expedientes/${e.id_expediente}`)}>
+                      <ChevronRight size={16} strokeWidth={1.5} />
+                    </IconButton>
                   </Stack>
                 </CardContent>
               </Card>
@@ -1002,17 +1093,8 @@ export default function ExpedientesTab({
                         <Chip size="small" label={ESTADO_LABELS[e.estado]} color={ESTADO_COLORS[e.estado]} variant="outlined" />
                       </TableCell>
                       <TableCell align="right">
-                        <IconButton size="small" aria-label="Ver detalle" onClick={() => setViendo(e)}>
-                          <Eye size={14} strokeWidth={1.5} />
-                        </IconButton>
-                        <IconButton size="small" aria-label="Checklist" onClick={() => setItemsDe(e)}>
-                          <CheckSquare size={14} strokeWidth={1.5} />
-                        </IconButton>
-                        <IconButton size="small" aria-label="Clientes" onClick={() => setClientesDe(e)}>
-                          <Users size={14} strokeWidth={1.5} />
-                        </IconButton>
-                        <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(e)} disabled={!puedeEditar}>
-                          <Pencil size={14} strokeWidth={1.5} />
+                        <IconButton size="small" aria-label="Abrir" onClick={() => router.push(`/ventas-vivienda/expedientes/${e.id_expediente}`)}>
+                          <ChevronRight size={16} strokeWidth={1.5} />
                         </IconButton>
                       </TableCell>
                     </TableRow>
@@ -1051,43 +1133,17 @@ export default function ExpedientesTab({
           <Stack spacing={2}>
             {!editing && (
               <>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="vivienda-label">Vivienda</InputLabel>
-                  <Select
-                    labelId="vivienda-label"
-                    label="Vivienda"
-                    value={form.vivienda}
-                    onChange={(e) => setForm({ ...form, vivienda: e.target.value })}
-                  >
-                    {viviendas.map((v) => (
-                      <MenuItem key={v.id_vivienda} value={v.id_vivienda}>
-                        {v.denominacion || v.num_oficial || v.id_vivienda} ({v.proyecto_denominacion})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="asesor-label">Asesor</InputLabel>
-                  <Select
-                    labelId="asesor-label"
-                    label="Asesor"
-                    value={form.asesor}
-                    onChange={(e) => setForm({ ...form, asesor: e.target.value })}
-                  >
-                    {asesores.map((a) => (
-                      <MenuItem key={a.id_asesor} value={a.id_asesor}>
-                        {a.nombre}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <TextField
-                  size="small"
-                  label="ID de contrato (Tesorería)"
+                <SelectorVivienda
+                  value={viviendas.find((v) => v.id_vivienda === form.vivienda) ?? null}
+                  onChange={(v) => setForm({ ...form, vivienda: v?.id_vivienda ?? "" })}
+                />
+                <SelectorAsesor
+                  value={asesores.find((a) => a.id_asesor === form.asesor) ?? null}
+                  onChange={(a) => setForm({ ...form, asesor: a?.id_asesor ?? "" })}
+                />
+                <SelectorContrato
                   value={form.idContrato}
-                  onChange={(e) => setForm({ ...form, idContrato: e.target.value })}
-                  helperText="Formato sociedad-contraparte-consecutivo, generado en Tesorería"
-                  fullWidth
+                  onChange={(id) => setForm({ ...form, idContrato: id })}
                 />
               </>
             )}
