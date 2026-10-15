@@ -1414,11 +1414,10 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             queryset = queryset.filter(contrato__requiere_factura=(requiere_factura.lower() == "true"))
 
         tipo_comprobante = request.query_params.get("tipo_comprobante")
-        if tipo_comprobante:
-            queryset = queryset.filter(
-                Q(factura__comprobante_tipo_de_comprobante=tipo_comprobante)
-                | Q(complemento__tipo_de_comprobante=tipo_comprobante)
-            )
+        if tipo_comprobante == "I":
+            queryset = queryset.filter(total_mxp__gt=0)
+        elif tipo_comprobante == "E":
+            queryset = queryset.filter(total_mxp__lt=0)
 
         resultado = calcular_conciliacion_cfdi(queryset)
 
@@ -1465,11 +1464,10 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             queryset = queryset.filter(contrato__requiere_factura=(requiere_factura.lower() == "true"))
 
         tipo_comprobante = request.query_params.get("tipo_comprobante")
-        if tipo_comprobante:
-            queryset = queryset.filter(
-                Q(factura__comprobante_tipo_de_comprobante=tipo_comprobante)
-                | Q(complemento__tipo_de_comprobante=tipo_comprobante)
-            )
+        if tipo_comprobante == "I":
+            queryset = queryset.filter(total_mxp__gt=0)
+        elif tipo_comprobante == "E":
+            queryset = queryset.filter(total_mxp__lt=0)
 
         resultado = calcular_conciliacion_cfdi(queryset)
         response = HttpResponse(content_type="text/csv")
@@ -1516,11 +1514,10 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             queryset = queryset.filter(contrato__requiere_factura=(requiere_factura.lower() == "true"))
 
         tipo_comprobante = request.query_params.get("tipo_comprobante")
-        if tipo_comprobante:
-            queryset = queryset.filter(
-                Q(factura__comprobante_tipo_de_comprobante=tipo_comprobante)
-                | Q(complemento__tipo_de_comprobante=tipo_comprobante)
-            )
+        if tipo_comprobante == "I":
+            queryset = queryset.filter(total_mxp__gt=0)
+        elif tipo_comprobante == "E":
+            queryset = queryset.filter(total_mxp__lt=0)
 
         resultado = calcular_conciliacion_cfdi(queryset)
         encabezados = [

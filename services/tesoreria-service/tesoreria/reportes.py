@@ -447,7 +447,7 @@ def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=Non
     }
 
 
-def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dict:
+def sugerir_cfdi_para_flujo(flujo) -> dict:
     """IA/heuristica de conciliacion (10/Sep/2026, notas de reunion: "IA
     propone complementos para registros con factura PPD y sin comp.;
     facturas/complementos para registros sin CFDI") - "la IA propone, el
@@ -456,13 +456,14 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
     TesoreriaFlujoViewSet.vincular_factura, que exige una accion explicita
     del analista).
 
-    Heuristica: misma contraparte que el contrato del flujo + monto dentro
-    de `tolerancia` MXP, excluyendo comprobantes que ya tienen otro flujo
-    ligado (para no proponer dos veces el mismo). Solo tiene sentido pedir
-    candidatos para lo que el flujo todavia NO tiene (si ya tiene factura,
-    solo se buscan complementos; si ya tiene complemento, solo facturas)."""
+    Heuristica: misma contraparte (o mismo RFC emisor) que el flujo,
+    excluyendo comprobantes ya ligados a otro flujo. Ordenados por
+    diferencia de monto (mas cercano primero). El analista usa el campo
+    "Filtrar por monto" en pantalla para acotar si hay muchos candidatos.
+    Solo busca lo que el flujo todavia NO tiene (si ya tiene factura,
+    solo busca complementos; y viceversa)."""
     if not flujo.contrato_id or flujo.total_mxp is None:
-        return {"facturas": [], "complementos": []}
+        return {"facturas": [], "complementos": [], "sugerencia_ia": None}
 
     contraparte = flujo.contrato.contraparte
     rfc_contraparte = contraparte.rfc
@@ -491,7 +492,7 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
                     "diferencia": abs(f.comprobante_total - monto),
                 }
             )
-        candidatos_factura.sort(key=lambda c: c["fecha_timbrado"] or "", reverse=True)
+        candidatos_factura.sort(key=lambda c: c["diferencia"])
 
     ya_ligados_complemento = set(
         TesoreriaFlujo.objects.filter(complemento__isnull=False).values_list("complemento__timbre_uuid", flat=True)
@@ -515,9 +516,9 @@ def sugerir_cfdi_para_flujo(flujo, tolerancia: Decimal = Decimal("1.00")) -> dic
                     "diferencia": abs(c.total - monto),
                 }
             )
-        candidatos_complemento.sort(key=lambda c: c["fecha_timbrado"] or "", reverse=True)
+        candidatos_complemento.sort(key=lambda c: c["diferencia"])
 
-    return {"facturas": candidatos_factura, "complementos": candidatos_complemento}
+    return {"facturas": candidatos_factura, "complementos": candidatos_complemento, "sugerencia_ia": None}
 
 
 def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> list[dict]:
