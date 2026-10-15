@@ -1947,8 +1947,10 @@ export interface SugerenciaCfdi {
   total: string;
   metodo_pago?: string | null;
   emisor_rfc: string | null;
+  emisor_nombre?: string | null;
   fecha_timbrado: string | null;
   diferencia: string;
+  razon_busqueda?: string | null;
 }
 
 export interface SugerenciaCfdiIa {

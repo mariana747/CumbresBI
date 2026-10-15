@@ -821,30 +821,39 @@ export default function ConciliacionFacturasPage() {
                     </Stack>
                     {sugerencias === null && !cargandoSugerencias ? (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Presiona "Buscar sugerencias" para ver candidatos con el mismo RFC.
+                        Presiona "Buscar sugerencias" para ver candidatos (mismo proveedor, RFC o nombre similar).
                       </Typography>
                     ) : cargandoSugerencias ? null : sugerencias && (sugerencias.facturas.length > 0 || sugerencias.complementos.length > 0 || sugerencias.sugerencia_ia) ? (
                       <Stack spacing={1} sx={{ mb: 2 }}>
                         {[
                           ...sugerencias.facturas
                             .filter((s) => !filtroBusquedaMonto || String(s.total).includes(filtroBusquedaMonto))
-                            .sort((a, b) => (b.fecha_timbrado ?? "").localeCompare(a.fecha_timbrado ?? ""))
                             .map((s) => ({ ...s, _tipo: "factura" as const })),
                           ...sugerencias.complementos
                             .filter((s) => !filtroBusquedaMonto || String(s.total).includes(filtroBusquedaMonto))
-                            .sort((a, b) => (b.fecha_timbrado ?? "").localeCompare(a.fecha_timbrado ?? ""))
                             .map((s) => ({ ...s, _tipo: "complemento" as const })),
                         ].map((s) => {
                           const esComp = s._tipo === "complemento";
                           const elegida = timbreUuid === s.timbre_uuid && esComplemento === esComp;
+                          const razon = s.razon_busqueda;
+                          const emisorNombre = s.emisor_nombre;
+                          const razonColor =
+                            razon === "Proveedor registrado" ? "success" :
+                            razon === "RFC coincide" ? "primary" :
+                            razon === "Nombre similar" ? "warning" : "default";
                           return (
                             <Stack key={s.timbre_uuid + s._tipo} direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: elegida ? "primary.main" : "divider", borderRadius: 1, p: 1 }}>
                               <Box sx={{ flex: 1, minWidth: 0 }}>
-                                <Typography variant="body2" fontWeight="medium">
-                                  {esComp ? "REP" : "Factura"} {s.folio || "—"} — {numero(s.total)}
-                                </Typography>
+                                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.25 }}>
+                                  <Typography variant="body2" fontWeight="medium">
+                                    {esComp ? "REP" : "Factura"} {s.folio || "—"} — {numero(s.total)}
+                                  </Typography>
+                                  {razon && (
+                                    <Chip size="small" label={razon} color={razonColor as "success" | "primary" | "warning" | "default"} variant="outlined" sx={{ fontSize: "0.65rem", height: 18 }} />
+                                  )}
+                                </Stack>
                                 <Typography variant="caption" color="text.secondary" display="block">
-                                  RFC: {s.emisor_rfc || "—"} · {s.fecha_timbrado || "—"}
+                                  {emisorNombre || s.emisor_rfc || "—"}{s.emisor_rfc && emisorNombre ? ` · ${s.emisor_rfc}` : ""} · {s.fecha_timbrado || "—"}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.65rem" }}>
                                   {s.timbre_uuid}
@@ -889,7 +898,7 @@ export default function ConciliacionFacturasPage() {
                       </Stack>
                     ) : (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Sin coincidencias por RFC/monto — captúralo a mano abajo.
+                        Sin coincidencias por proveedor, RFC ni nombre — captúralo a mano abajo.
                       </Typography>
                     )}
 

@@ -447,26 +447,36 @@ def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=Non
     }
 
 
-def sugerir_cfdi_para_flujo(flujo) -> dict:
-    """IA/heuristica de conciliacion (10/Sep/2026, notas de reunion: "IA
-    propone complementos para registros con factura PPD y sin comp.;
-    facturas/complementos para registros sin CFDI") - "la IA propone, el
-    humano aprueba": esta funcion solo REGRESA candidatos, nunca liga nada
-    sola (el enlace real sigue pasando por
-    TesoreriaFlujoViewSet.vincular_factura, que exige una accion explicita
-    del analista).
+def _razon_busqueda_factura(f, contraparte_id, rfc_contraparte, nombre_contraparte):
+    """Etiqueta legible que explica por qué esta factura apareció como candidata."""
+    if f.contraparte_id == contraparte_id:
+        return ("Proveedor registrado", 1)
+    if rfc_contraparte and f.emisor_rfc == rfc_contraparte:
+        return ("RFC coincide", 2)
+    if nombre_contraparte and f.emisor_nombre and nombre_contraparte.lower() in f.emisor_nombre.lower():
+        return ("Nombre similar", 3)
+    return ("Sin proveedor asignado", 4)
 
-    Heuristica: misma contraparte (o mismo RFC emisor) que el flujo,
-    excluyendo comprobantes ya ligados a otro flujo. Ordenados por
-    diferencia de monto (mas cercano primero). El analista usa el campo
-    "Filtrar por monto" en pantalla para acotar si hay muchos candidatos.
-    Solo busca lo que el flujo todavia NO tiene (si ya tiene factura,
-    solo busca complementos; y viceversa)."""
+
+def sugerir_cfdi_para_flujo(flujo) -> dict:
+    """Candidatos de CFDI para un flujo.
+
+    Niveles de búsqueda (incluyendo facturas sin RFC registrado):
+    1. Misma contraparte registrada en catálogo.
+    2. Mismo RFC emisor (si la contraparte tiene RFC).
+    3. Nombre del emisor contiene la razón social de la contraparte.
+    4. Facturas sin contraparte asignada (subidas sin vincular a proveedor).
+
+    Cada candidato lleva `razon_busqueda` para que el analista sepa por qué
+    apareció. Ordenados primero por prioridad de búsqueda, luego por
+    diferencia de monto. Nunca liga nada solo — el enlace real pasa por
+    TesoreriaFlujoViewSet.vincular_factura."""
     if not flujo.contrato_id or flujo.total_mxp is None:
         return {"facturas": [], "complementos": [], "sugerencia_ia": None}
 
     contraparte = flujo.contrato.contraparte
     rfc_contraparte = contraparte.rfc
+    nombre_contraparte = contraparte.razon_social or ""
     monto = abs(flujo.total_mxp)
 
     ya_ligadas_factura = set(
@@ -477,9 +487,21 @@ def sugerir_cfdi_para_flujo(flujo) -> dict:
         filtro_facturas = Q(contraparte_id=contraparte.id_contraparte)
         if rfc_contraparte:
             filtro_facturas |= Q(emisor_rfc=rfc_contraparte)
+        if nombre_contraparte:
+            filtro_facturas |= Q(emisor_nombre__icontains=nombre_contraparte)
+        # Facturas sin contraparte asignada (sin RFC, subidas manualmente)
+        filtro_facturas |= Q(contraparte_id__isnull=True)
+
+        vistas = set()
         for f in TesoreriaFactura.objects.filter(filtro_facturas).distinct():
             if f.timbre_uuid in ya_ligadas_factura or f.comprobante_total is None:
                 continue
+            if f.timbre_uuid in vistas:
+                continue
+            vistas.add(f.timbre_uuid)
+            razon, prioridad = _razon_busqueda_factura(
+                f, contraparte.id_contraparte, rfc_contraparte, nombre_contraparte
+            )
             candidatos_factura.append(
                 {
                     "id": f.id,
@@ -488,11 +510,14 @@ def sugerir_cfdi_para_flujo(flujo) -> dict:
                     "total": f.comprobante_total,
                     "metodo_pago": f.comprobante_metodo_pago,
                     "emisor_rfc": f.emisor_rfc,
+                    "emisor_nombre": f.emisor_nombre,
                     "fecha_timbrado": f.timbre_fecha_timbrado.date().isoformat() if f.timbre_fecha_timbrado else None,
                     "diferencia": abs(f.comprobante_total - monto),
+                    "razon_busqueda": razon,
+                    "_prioridad": prioridad,
                 }
             )
-        candidatos_factura.sort(key=lambda c: c["diferencia"])
+        candidatos_factura.sort(key=lambda c: (c["_prioridad"], c["diferencia"]))
 
     ya_ligados_complemento = set(
         TesoreriaFlujo.objects.filter(complemento__isnull=False).values_list("complemento__timbre_uuid", flat=True)
@@ -502,9 +527,20 @@ def sugerir_cfdi_para_flujo(flujo) -> dict:
         filtro_complementos = Q(contraparte_id=contraparte.id_contraparte)
         if rfc_contraparte:
             filtro_complementos |= Q(emisor_rfc=rfc_contraparte)
+        if nombre_contraparte:
+            filtro_complementos |= Q(emisor_nombre__icontains=nombre_contraparte)
+        filtro_complementos |= Q(contraparte_id__isnull=True)
+
+        vistas_comp = set()
         for c in TesoreriaComplementoPago.objects.filter(filtro_complementos).distinct():
             if c.timbre_uuid in ya_ligados_complemento or c.total is None:
                 continue
+            if c.timbre_uuid in vistas_comp:
+                continue
+            vistas_comp.add(c.timbre_uuid)
+            razon, prioridad = _razon_busqueda_factura(
+                c, contraparte.id_contraparte, rfc_contraparte, nombre_contraparte
+            )
             candidatos_complemento.append(
                 {
                     "id": c.id,
@@ -512,11 +548,14 @@ def sugerir_cfdi_para_flujo(flujo) -> dict:
                     "folio": c.folio,
                     "total": c.total,
                     "emisor_rfc": c.emisor_rfc,
+                    "emisor_nombre": getattr(c, "emisor_nombre", None),
                     "fecha_timbrado": c.timbre_fecha_timbrado.date().isoformat() if c.timbre_fecha_timbrado else None,
                     "diferencia": abs(c.total - monto),
+                    "razon_busqueda": razon,
+                    "_prioridad": prioridad,
                 }
             )
-        candidatos_complemento.sort(key=lambda c: c["diferencia"])
+        candidatos_complemento.sort(key=lambda c: (c["_prioridad"], c["diferencia"]))
 
     return {"facturas": candidatos_factura, "complementos": candidatos_complemento, "sugerencia_ia": None}
 
