@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -72,7 +72,7 @@ function ultimoDiaDelMes(): string {
   return new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().slice(0, 10);
 }
 
-function numero(valor: string | null | undefined): string {
+function numero(valor: string | number | null | undefined): string {
   if (valor === null || valor === undefined) return "—";
   return Number(valor).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
@@ -90,6 +90,130 @@ const TAB_A_BUCKET: Record<TabPrincipal, keyof ConciliacionCfdiResponse> = {
 };
 
 type TabPrincipal = "ligado" | "sin_cfdi" | "no_requiere";
+
+interface SugerenciasTabsProps {
+  sugerencias: SugerenciasCfdiResponse;
+  filtroBusquedaMonto: string;
+  timbreUuid: string;
+  esComplemento: boolean;
+  onUsar: (uuid: string, esComp: boolean) => void;
+  numero: (v: string | number | null | undefined) => string;
+}
+
+const SugerenciasTabs = memo(function SugerenciasTabs({
+  sugerencias, filtroBusquedaMonto, timbreUuid, esComplemento, onUsar, numero,
+}: SugerenciasTabsProps) {
+  const todos = sugerencias.facturas.map((s) => ({ ...s, _tipo: "factura" as const }));
+  const etiquetas = Array.from(new Set(todos.map((s) => s.razon_busqueda || "Otros")));
+  if (sugerencias.sugerencia_ia) etiquetas.push("IA");
+
+  const [tabEtiqueta, setTabEtiqueta] = useState<string>(etiquetas[0] ?? "");
+  const [page, setPage] = useState(0);
+  const ROWS_PER_PAGE = 10;
+  const tabActual = etiquetas.includes(tabEtiqueta) ? tabEtiqueta : etiquetas[0] ?? "";
+
+  const itemsTab = tabActual === "IA" ? [] : todos.filter(
+    (s) => (s.razon_busqueda || "Otros") === tabActual &&
+    (!filtroBusquedaMonto || String(s.total).includes(filtroBusquedaMonto))
+  );
+  const itemsPagina = itemsTab.slice(page * ROWS_PER_PAGE, (page + 1) * ROWS_PER_PAGE);
+
+  return (
+    <>
+      <Tabs
+        value={tabActual}
+        onChange={(_, v) => { setTabEtiqueta(v); setPage(0); }}
+        sx={{ borderBottom: "1px solid", borderColor: "divider", mb: 1 }}
+        variant="scrollable"
+        scrollButtons="auto"
+      >
+        {etiquetas.map((et) => (
+          <Tab key={et} value={et} label={et} sx={{ fontSize: "0.75rem", minHeight: 36, py: 0.5 }} />
+        ))}
+      </Tabs>
+      {tabActual === "IA" && sugerencias.sugerencia_ia ? (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: "info.main", borderRadius: 1, p: 1, mt: 1 }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="body2">
+              {sugerencias.sugerencia_ia.tipo === "complemento" ? "Complemento" : "Factura"}{" "}
+              {sugerencias.sugerencia_ia.timbre_uuid_sugerido.slice(0, 8)}
+            </Typography>
+            {sugerencias.sugerencia_ia.razon && (
+              <Typography variant="caption" color="text.secondary">{sugerencias.sugerencia_ia.razon}</Typography>
+            )}
+          </Box>
+          <Button
+            size="small"
+            variant={timbreUuid === sugerencias.sugerencia_ia.timbre_uuid_sugerido ? "contained" : "outlined"}
+            onClick={() => onUsar(sugerencias.sugerencia_ia!.timbre_uuid_sugerido, sugerencias.sugerencia_ia!.tipo === "complemento")}
+          >
+            {timbreUuid === sugerencias.sugerencia_ia.timbre_uuid_sugerido ? "Elegida" : "Usar"}
+          </Button>
+        </Stack>
+      ) : itemsTab.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Sin resultados con ese filtro de monto.</Typography>
+      ) : (
+        <>
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Tipo</TableCell>
+                <TableCell>Folio</TableCell>
+                <TableCell>Ingreso/Egreso</TableCell>
+                <TableCell>Emisor</TableCell>
+                <TableCell>RFC</TableCell>
+                <TableCell>Fecha</TableCell>
+                <TableCell align="right">Total</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {itemsPagina.map((s) => {
+                const elegida = timbreUuid === s.timbre_uuid && !esComplemento;
+                const tipoLabel = s.tipo_comprobante === "I" ? "Ingreso" : s.tipo_comprobante === "E" ? "Egreso" : s.tipo_comprobante || "—";
+                return (
+                  <TableRow
+                    key={s.timbre_uuid + s._tipo}
+                    selected={elegida}
+                    hover
+                    sx={{ cursor: "pointer" }}
+                    onClick={() => onUsar(s.timbre_uuid, false)}
+                  >
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>Factura</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{s.folio || "—"}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{tipoLabel}</TableCell>
+                    <TableCell sx={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {s.emisor_nombre || "—"}
+                    </TableCell>
+                    <TableCell sx={{ fontFamily: "monospace", fontSize: "0.7rem", whiteSpace: "nowrap" }}>{s.emisor_rfc || "—"}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{s.fecha_timbrado || "—"}</TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{numero(s.total)}</TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                      <Button size="small" variant={elegida ? "contained" : "outlined"} onClick={(e) => { e.stopPropagation(); onUsar(s.timbre_uuid, false); }}>
+                        {elegida ? "Elegida" : "Usar"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          component="div"
+          count={itemsTab.length}
+          page={page}
+          onPageChange={(_, p) => setPage(p)}
+          rowsPerPage={ROWS_PER_PAGE}
+          rowsPerPageOptions={[ROWS_PER_PAGE]}
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
+        </>
+      )}
+    </>
+  );
+});
 type TabDetalle = "detalles" | "vincular" | "recordatorio";
 
 
@@ -156,6 +280,10 @@ export default function ConciliacionFacturasPage() {
 
   const [timbreUuid, setTimbreUuid] = useState("");
   const [esComplemento, setEsComplemento] = useState(false);
+  const handleUsarSugerencia = useCallback((uuid: string, esComp: boolean) => {
+    setTimbreUuid(uuid);
+    setEsComplemento(esComp);
+  }, []);
   const [vinculando, setVinculando] = useState(false);
   const [errorVincular, setErrorVincular] = useState<string | null>(null);
   const [sugerencias, setSugerencias] = useState<SugerenciasCfdiResponse | null>(null);
@@ -584,7 +712,8 @@ export default function ConciliacionFacturasPage() {
             setDetalle(null);
           }}
           fullWidth
-          maxWidth="sm"
+          maxWidth={false}
+          PaperProps={{ sx: { maxHeight: "88vh", width: "98vw" } }}
         >
           <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             Pago {detalle?.id_flujo}
@@ -602,11 +731,9 @@ export default function ConciliacionFacturasPage() {
               <Tab value="recordatorio" label="Recordatorio" />
             )}
           </Tabs>
-          <DialogContent dividers sx={{ py: 3, minHeight: 260 }}>
+          <DialogContent dividers sx={{ py: 1.5 }}>
             {detalle && detalleTab === "detalles" && (
               <Stack spacing={2}>
-                {/* Datos propios del pago - celdas tipo ficha, 2 columnas
-                (23/Sep/2026, "estos datos deben verse como tabla"). */}
                 <TableContainer component={Paper} variant="outlined">
                   <Table size="small">
                     <TableBody>
@@ -650,23 +777,19 @@ export default function ConciliacionFacturasPage() {
                   </Table>
                 </TableContainer>
 
-                {/* Fusionado desde la antigua pestaña "Referencias"
-                (10/Sep/2026, "quitar el tab de referencias porque ya esta
-                en detalles"). */}
                 {!detalle.factura && !detalle.complemento && !detalle.nomina && (
                   <Typography variant="body2" color="text.secondary">
                     Este pago todavía no tiene ningún CFDI ligado.
                   </Typography>
                 )}
+
                 <TableContainer component={Paper} variant="outlined">
                   <Table size="small">
                     <TableHead>
                       <TableRow>
                         <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Concepto</TableCell>
                         <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Detalles</TableCell>
-                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }} align="right">
-                          Acciones
-                        </TableCell>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }} align="right">Acciones</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -675,17 +798,9 @@ export default function ConciliacionFacturasPage() {
                           <TableCell sx={{ fontWeight: "bold" }}>Factura</TableCell>
                           <TableCell>Folio: {detalle.factura_folio || `#${detalle.factura}`}</TableCell>
                           <TableCell align="right">
-                            <Button
-                              size="small"
-                              startIcon={<Eye size={14} strokeWidth={1.5} />}
-                              onClick={() =>
-                                setPreviewDoc({
-                                  url: urlVerFacturaPdf(detalle.factura as number),
-                                  titulo: `Factura ${detalle.factura_folio || detalle.factura}`,
-                                })
-                              }
-                              sx={{ ml: 1 }}
-                            >
+                            <Button size="small" startIcon={<Eye size={14} strokeWidth={1.5} />}
+                              onClick={() => setPreviewDoc({ url: urlVerFacturaPdf(detalle.factura as number), titulo: `Factura ${detalle.factura_folio || detalle.factura}` })}
+                              sx={{ ml: 1 }}>
                               Ver PDF
                             </Button>
                           </TableCell>
@@ -720,12 +835,9 @@ export default function ConciliacionFacturasPage() {
                         <TableCell>ID: {detalle.contrato || "—"}</TableCell>
                         <TableCell align="right">
                           {detalle.contrato && (
-                            <Button
-                              size="small"
-                              startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                            <Button size="small" startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
                               onClick={() => setPanelReferencia({ tipo: "contrato", id: detalle.contrato as string })}
-                              sx={{ ml: 1 }}
-                            >
+                              sx={{ ml: 1 }}>
                               Ver contrato
                             </Button>
                           )}
@@ -736,12 +848,9 @@ export default function ConciliacionFacturasPage() {
                         <TableCell>Nombre: {detalle.contraparte_nombre || "—"}</TableCell>
                         <TableCell align="right">
                           {detalle.contraparte && (
-                            <Button
-                              size="small"
-                              startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
+                            <Button size="small" startIcon={<ExternalLink size={14} strokeWidth={1.5} />}
                               onClick={() => setPanelReferencia({ tipo: "proveedor", id: detalle.contraparte as string })}
-                              sx={{ ml: 1 }}
-                            >
+                              sx={{ ml: 1 }}>
                               Ver proveedor
                             </Button>
                           )}
@@ -800,7 +909,7 @@ export default function ConciliacionFacturasPage() {
                   </Stack>
                 ) : (
                   <>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+                    <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ mb: 1.5 }} flexWrap="wrap">
                       <TextField
                         size="small"
                         label="Filtrar por monto"
@@ -809,111 +918,45 @@ export default function ConciliacionFacturasPage() {
                         placeholder="ej. 12500"
                         sx={{ width: 160 }}
                       />
-                      <Box sx={{ flex: 1 }} />
+                      <TextField
+                        size="small"
+                        label="UUID del comprobante"
+                        value={timbreUuid}
+                        onChange={(e) => setTimbreUuid(e.target.value)}
+                        placeholder="00000000-0000-0000-0000-000000000000"
+                        sx={{ flex: 1, minWidth: 260 }}
+                      />
                       <Button
                         size="small"
                         variant="outlined"
                         disabled={cargandoSugerencias}
                         onClick={() => buscarSugerencias(detalle.id_flujo)}
+                        sx={{ alignSelf: "center" }}
                       >
                         {cargandoSugerencias ? <CircularProgress size={14} /> : "Buscar sugerencias"}
                       </Button>
                     </Stack>
                     {sugerencias === null && !cargandoSugerencias ? (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Presiona "Buscar sugerencias" para ver candidatos con el mismo RFC.
+                        Presiona "Buscar sugerencias" para ver candidatos (mismo proveedor, RFC o nombre similar).
                       </Typography>
                     ) : cargandoSugerencias ? null : sugerencias && (sugerencias.facturas.length > 0 || sugerencias.complementos.length > 0 || sugerencias.sugerencia_ia) ? (
-                      <Stack spacing={1} sx={{ mb: 2 }}>
-                        {[
-                          ...sugerencias.facturas
-                            .filter((s) => !filtroBusquedaMonto || String(s.total).includes(filtroBusquedaMonto))
-                            .sort((a, b) => (b.fecha_timbrado ?? "").localeCompare(a.fecha_timbrado ?? ""))
-                            .map((s) => ({ ...s, _tipo: "factura" as const })),
-                          ...sugerencias.complementos
-                            .filter((s) => !filtroBusquedaMonto || String(s.total).includes(filtroBusquedaMonto))
-                            .sort((a, b) => (b.fecha_timbrado ?? "").localeCompare(a.fecha_timbrado ?? ""))
-                            .map((s) => ({ ...s, _tipo: "complemento" as const })),
-                        ].map((s) => {
-                          const esComp = s._tipo === "complemento";
-                          const elegida = timbreUuid === s.timbre_uuid && esComplemento === esComp;
-                          return (
-                            <Stack key={s.timbre_uuid + s._tipo} direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: elegida ? "primary.main" : "divider", borderRadius: 1, p: 1 }}>
-                              <Box sx={{ flex: 1, minWidth: 0 }}>
-                                <Typography variant="body2" fontWeight="medium">
-                                  {esComp ? "REP" : "Factura"} {s.folio || "—"} — {numero(s.total)}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary" display="block">
-                                  RFC: {s.emisor_rfc || "—"} · {s.fecha_timbrado || "—"}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.65rem" }}>
-                                  {s.timbre_uuid}
-                                </Typography>
-                              </Box>
-                              <Button
-                                size="small"
-                                variant={elegida ? "contained" : "outlined"}
-                                onClick={() => { setTimbreUuid(s.timbre_uuid); setEsComplemento(esComp); }}
-                              >
-                                {elegida ? "Elegida" : "Usar"}
-                              </Button>
-                            </Stack>
-                          );
-                        })}
-                        {sugerencias.sugerencia_ia && sugerencias.facturas.length === 0 && sugerencias.complementos.length === 0 && (
-                          <Stack direction="row" spacing={1} alignItems="center" sx={{ border: 1, borderColor: "info.main", borderRadius: 1, p: 1 }}>
-                            <Box sx={{ flex: 1 }}>
-                              <Typography variant="body2">
-                                {sugerencias.sugerencia_ia.tipo === "complemento" ? "REP" : "Factura"}{" "}
-                                {sugerencias.sugerencia_ia.timbre_uuid_sugerido.slice(0, 8)}
-                              </Typography>
-                              {sugerencias.sugerencia_ia.razon && (
-                                <Typography variant="caption" color="text.secondary">
-                                  IA: {sugerencias.sugerencia_ia.razon}
-                                </Typography>
-                              )}
-                            </Box>
-                            <Chip size="small" label="Sugerido por IA" color="info" variant="outlined" />
-                            <Button
-                              size="small"
-                              variant={timbreUuid === sugerencias.sugerencia_ia.timbre_uuid_sugerido ? "contained" : "outlined"}
-                              onClick={() => {
-                                setTimbreUuid(sugerencias.sugerencia_ia!.timbre_uuid_sugerido);
-                                setEsComplemento(sugerencias.sugerencia_ia!.tipo === "complemento");
-                              }}
-                            >
-                              {timbreUuid === sugerencias.sugerencia_ia.timbre_uuid_sugerido ? "Elegida" : "Usar"}
-                            </Button>
-                          </Stack>
-                        )}
-                      </Stack>
+                      <Box sx={{ mb: 2 }}>
+                        <SugerenciasTabs
+                          sugerencias={sugerencias}
+                          filtroBusquedaMonto={filtroBusquedaMonto}
+                          timbreUuid={timbreUuid}
+                          esComplemento={esComplemento}
+                          onUsar={handleUsarSugerencia}
+                          numero={numero}
+                        />
+                      </Box>
                     ) : (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Sin coincidencias por RFC/monto — captúralo a mano abajo.
+                        Sin coincidencias por proveedor, RFC ni nombre — captúralo a mano abajo.
                       </Typography>
                     )}
 
-                    <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-                      <InputLabel id="tipo-cfdi-label">Tipo</InputLabel>
-                      <Select
-                        labelId="tipo-cfdi-label"
-                        label="Tipo"
-                        value={esComplemento ? "complemento" : "factura"}
-                        onChange={(e) => setEsComplemento(e.target.value === "complemento")}
-                      >
-                        <MenuItem value="factura">Factura</MenuItem>
-                        <MenuItem value="complemento">Complemento de pago (REP)</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <TextField
-                      size="small"
-                      fullWidth
-                      label="UUID del comprobante"
-                      value={timbreUuid}
-                      onChange={(e) => setTimbreUuid(e.target.value)}
-                      placeholder="00000000-0000-0000-0000-000000000000"
-                      helperText="Pega el UUID si no está en las sugerencias de arriba."
-                    />
                   </>
                 )}
               </>

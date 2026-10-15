@@ -195,16 +195,37 @@ def _calcular_corte(cuentas, fecha) -> dict:
     nomina_total_quincenal = Decimal("0")
     nomina_total_semanal = Decimal("0")
 
+    ids_cuentas = [c.id_cuenta_bancaria for c in cuentas]
+
+    # Saldos de HOY: una sola query para todas las cuentas
+    saldos_hoy = {
+        s.cuenta: s
+        for s in TesoreriaSaldo.objects.filter(cuenta__in=ids_cuentas, fecha=fecha)
+    }
+    # Saldo anterior más reciente por cuenta: una sola query con ventana en Python
+    saldos_anteriores_qs = (
+        TesoreriaSaldo.objects.filter(cuenta__in=ids_cuentas, fecha__lt=fecha)
+        .order_by("cuenta", "-fecha")
+    )
+    saldos_anteriores: dict = {}
+    for s in saldos_anteriores_qs:
+        if s.cuenta not in saldos_anteriores:
+            saldos_anteriores[s.cuenta] = s
+
+    # Flujos del día: una sola query para todas las cuentas
+    flujos_del_dia = (
+        TesoreriaFlujo.objects.filter(cuenta__in=ids_cuentas, fecha_efectiva=fecha)
+        .select_related("periodo_nomina", "contrato", "contrato__contraparte")
+        .order_by("id_flujo")
+    )
+    flujos_por_cuenta: dict[str, list] = {}
+    for f in flujos_del_dia:
+        flujos_por_cuenta.setdefault(f.cuenta_id, []).append(f)
+
     for cuenta in cuentas:
-        saldo_hoy_obj = TesoreriaSaldo.objects.filter(cuenta=cuenta.id_cuenta_bancaria, fecha=fecha).first()
-        saldo_anterior_obj = (
-            TesoreriaSaldo.objects.filter(cuenta=cuenta.id_cuenta_bancaria, fecha__lt=fecha).order_by("-fecha").first()
-        )
-        transacciones = (
-            TesoreriaFlujo.objects.filter(cuenta=cuenta, fecha_efectiva=fecha)
-            .select_related("periodo_nomina", "contrato", "contrato__contraparte")
-            .order_by("id_flujo")
-        )
+        saldo_hoy_obj = saldos_hoy.get(cuenta.id_cuenta_bancaria)
+        saldo_anterior_obj = saldos_anteriores.get(cuenta.id_cuenta_bancaria)
+        transacciones = flujos_por_cuenta.get(cuenta.id_cuenta_bancaria, [])
         suma_transacciones = sum((t.total_mxp or Decimal("0")) for t in transacciones)
         for t in transacciones:
             if t.periodo_nomina_id and t.periodo_nomina.tipo == TesoreriaNomina.TIPO_QUINCENAL:
@@ -447,26 +468,36 @@ def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=Non
     }
 
 
-def sugerir_cfdi_para_flujo(flujo) -> dict:
-    """IA/heuristica de conciliacion (10/Sep/2026, notas de reunion: "IA
-    propone complementos para registros con factura PPD y sin comp.;
-    facturas/complementos para registros sin CFDI") - "la IA propone, el
-    humano aprueba": esta funcion solo REGRESA candidatos, nunca liga nada
-    sola (el enlace real sigue pasando por
-    TesoreriaFlujoViewSet.vincular_factura, que exige una accion explicita
-    del analista).
+def _razon_busqueda_factura(f, contraparte_id, rfc_contraparte, nombre_contraparte):
+    """Etiqueta legible que explica por qué esta factura apareció como candidata."""
+    if f.contraparte_id == contraparte_id:
+        return ("Proveedor registrado", 1)
+    if rfc_contraparte and f.emisor_rfc == rfc_contraparte:
+        return ("RFC coincide", 2)
+    if nombre_contraparte and f.emisor_nombre and nombre_contraparte.lower() in f.emisor_nombre.lower():
+        return ("Nombre similar", 3)
+    return ("Sin proveedor asignado", 4)
 
-    Heuristica: misma contraparte (o mismo RFC emisor) que el flujo,
-    excluyendo comprobantes ya ligados a otro flujo. Ordenados por
-    diferencia de monto (mas cercano primero). El analista usa el campo
-    "Filtrar por monto" en pantalla para acotar si hay muchos candidatos.
-    Solo busca lo que el flujo todavia NO tiene (si ya tiene factura,
-    solo busca complementos; y viceversa)."""
+
+def sugerir_cfdi_para_flujo(flujo) -> dict:
+    """Candidatos de CFDI para un flujo.
+
+    Niveles de búsqueda (incluyendo facturas sin RFC registrado):
+    1. Misma contraparte registrada en catálogo.
+    2. Mismo RFC emisor (si la contraparte tiene RFC).
+    3. Nombre del emisor contiene la razón social de la contraparte.
+    4. Facturas sin contraparte asignada (subidas sin vincular a proveedor).
+
+    Cada candidato lleva `razon_busqueda` para que el analista sepa por qué
+    apareció. Ordenados primero por prioridad de búsqueda, luego por
+    diferencia de monto. Nunca liga nada solo — el enlace real pasa por
+    TesoreriaFlujoViewSet.vincular_factura."""
     if not flujo.contrato_id or flujo.total_mxp is None:
         return {"facturas": [], "complementos": [], "sugerencia_ia": None}
 
     contraparte = flujo.contrato.contraparte
     rfc_contraparte = contraparte.rfc
+    nombre_contraparte = contraparte.razon_social or ""
     monto = abs(flujo.total_mxp)
 
     ya_ligadas_factura = set(
@@ -477,9 +508,21 @@ def sugerir_cfdi_para_flujo(flujo) -> dict:
         filtro_facturas = Q(contraparte_id=contraparte.id_contraparte)
         if rfc_contraparte:
             filtro_facturas |= Q(emisor_rfc=rfc_contraparte)
+        if nombre_contraparte:
+            filtro_facturas |= Q(emisor_nombre__icontains=nombre_contraparte)
+        # Facturas sin contraparte asignada (sin RFC, subidas manualmente)
+        filtro_facturas |= Q(contraparte_id__isnull=True)
+
+        vistas = set()
         for f in TesoreriaFactura.objects.filter(filtro_facturas).distinct():
             if f.timbre_uuid in ya_ligadas_factura or f.comprobante_total is None:
                 continue
+            if f.timbre_uuid in vistas:
+                continue
+            vistas.add(f.timbre_uuid)
+            razon, prioridad = _razon_busqueda_factura(
+                f, contraparte.id_contraparte, rfc_contraparte, nombre_contraparte
+            )
             candidatos_factura.append(
                 {
                     "id": f.id,
@@ -488,37 +531,17 @@ def sugerir_cfdi_para_flujo(flujo) -> dict:
                     "total": f.comprobante_total,
                     "metodo_pago": f.comprobante_metodo_pago,
                     "emisor_rfc": f.emisor_rfc,
+                    "emisor_nombre": f.emisor_nombre,
                     "fecha_timbrado": f.timbre_fecha_timbrado.date().isoformat() if f.timbre_fecha_timbrado else None,
                     "diferencia": abs(f.comprobante_total - monto),
+                    "tipo_comprobante": f.comprobante_tipo_de_comprobante,
+                    "razon_busqueda": razon,
+                    "_prioridad": prioridad,
                 }
             )
-        candidatos_factura.sort(key=lambda c: c["diferencia"])
+        candidatos_factura.sort(key=lambda c: (c["_prioridad"], c["diferencia"]))
 
-    ya_ligados_complemento = set(
-        TesoreriaFlujo.objects.filter(complemento__isnull=False).values_list("complemento__timbre_uuid", flat=True)
-    )
-    candidatos_complemento = []
-    if not flujo.complemento_id:
-        filtro_complementos = Q(contraparte_id=contraparte.id_contraparte)
-        if rfc_contraparte:
-            filtro_complementos |= Q(emisor_rfc=rfc_contraparte)
-        for c in TesoreriaComplementoPago.objects.filter(filtro_complementos).distinct():
-            if c.timbre_uuid in ya_ligados_complemento or c.total is None:
-                continue
-            candidatos_complemento.append(
-                {
-                    "id": c.id,
-                    "timbre_uuid": c.timbre_uuid,
-                    "folio": c.folio,
-                    "total": c.total,
-                    "emisor_rfc": c.emisor_rfc,
-                    "fecha_timbrado": c.timbre_fecha_timbrado.date().isoformat() if c.timbre_fecha_timbrado else None,
-                    "diferencia": abs(c.total - monto),
-                }
-            )
-        candidatos_complemento.sort(key=lambda c: c["diferencia"])
-
-    return {"facturas": candidatos_factura, "complementos": candidatos_complemento, "sugerencia_ia": None}
+    return {"facturas": candidatos_factura, "complementos": [], "sugerencia_ia": None}
 
 
 def sugerir_cfdi_en_lote(queryset, tolerancia: Decimal = Decimal("1.00")) -> list[dict]:

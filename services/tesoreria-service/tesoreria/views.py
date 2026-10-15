@@ -268,7 +268,7 @@ class TesoreriaContraparteViewSet(_PermisosCatalogoTesoreriaMixin, ModelViewSet)
         # 404 antes de llegar a resolver_sobreviviente() - justo lo
         # contrario de lo que se busca. El catalogo (list()) filtra los
         # alias por separado, ver mas abajo.
-        queryset = TesoreriaContraparte.objects.all().order_by("razon_social")
+        queryset = TesoreriaContraparte.objects.prefetch_related("contratos").order_by("razon_social")
         if self.request.query_params.get("cliente") in ("1", "true", "True"):
             queryset = queryset.filter(cliente=True)
         if self.request.query_params.get("proveedor") in ("1", "true", "True"):
@@ -971,9 +971,14 @@ def _sugerir_facturas_para_flujo(contraparte, monto, fecha, limite=5):
         comprobante_total__gte=monto - TOLERANCIA_MONTO, comprobante_total__lte=monto + TOLERANCIA_MONTO
     )
 
+    ya_ligadas = set(
+        TesoreriaFlujo.objects.filter(
+            factura__timbre_uuid__in=candidatos.values("timbre_uuid")
+        ).values_list("factura__timbre_uuid", flat=True)
+    )
     sugerencias = []
     for factura in candidatos:
-        if factura.flujos.exists():
+        if factura.timbre_uuid in ya_ligadas:
             continue
         score = 0
         motivos = []
