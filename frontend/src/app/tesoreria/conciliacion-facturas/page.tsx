@@ -72,7 +72,7 @@ function ultimoDiaDelMes(): string {
   return new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().slice(0, 10);
 }
 
-function numero(valor: string | null | undefined): string {
+function numero(valor: string | number | null | undefined): string {
   if (valor === null || valor === undefined) return "—";
   return Number(valor).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
@@ -170,18 +170,17 @@ const SugerenciasTabs = memo(function SugerenciasTabs({
             </TableHead>
             <TableBody>
               {itemsPagina.map((s) => {
-                const esComp = s._tipo === "complemento";
-                const elegida = timbreUuid === s.timbre_uuid && esComplemento === esComp;
-                const tipoLabel = esComp ? "—" : s.tipo_comprobante === "I" ? "Ingreso" : s.tipo_comprobante === "E" ? "Egreso" : s.tipo_comprobante || "—";
+                const elegida = timbreUuid === s.timbre_uuid && !esComplemento;
+                const tipoLabel = s.tipo_comprobante === "I" ? "Ingreso" : s.tipo_comprobante === "E" ? "Egreso" : s.tipo_comprobante || "—";
                 return (
                   <TableRow
                     key={s.timbre_uuid + s._tipo}
                     selected={elegida}
                     hover
                     sx={{ cursor: "pointer" }}
-                    onClick={() => onUsar(s.timbre_uuid, esComp)}
+                    onClick={() => onUsar(s.timbre_uuid, false)}
                   >
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>{esComp ? "Complemento" : "Factura"}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>Factura</TableCell>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{s.folio || "—"}</TableCell>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{tipoLabel}</TableCell>
                     <TableCell sx={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -191,7 +190,7 @@ const SugerenciasTabs = memo(function SugerenciasTabs({
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{s.fecha_timbrado || "—"}</TableCell>
                     <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{numero(s.total)}</TableCell>
                     <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                      <Button size="small" variant={elegida ? "contained" : "outlined"} onClick={(e) => { e.stopPropagation(); onUsar(s.timbre_uuid, esComp); }}>
+                      <Button size="small" variant={elegida ? "contained" : "outlined"} onClick={(e) => { e.stopPropagation(); onUsar(s.timbre_uuid, false); }}>
                         {elegida ? "Elegida" : "Usar"}
                       </Button>
                     </TableCell>
