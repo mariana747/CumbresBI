@@ -5,6 +5,8 @@ import {
   Alert,
   Autocomplete,
   Button,
+  Card,
+  CardContent,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -22,6 +24,8 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import FiltrosBar from "@/components/FiltrosBar";
@@ -62,6 +66,8 @@ export default function ProyectosTab({
   puedeEditar: boolean;
   actorId: string;
 }) {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [proyectos, setProyectos] = useState<ViviendaProyecto[]>([]);
   const [sociedades, setSociedades] = useState<GeneralSociedad[]>([]);
   const [search, setSearch] = useState("");
@@ -206,55 +212,59 @@ export default function ProyectosTab({
       />
 
       <Paper variant="outlined">
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Denominación</TableCell>
-                <TableCell>Alias</TableCell>
-                <TableCell>Municipio / Estado</TableCell>
-                <TableCell>Propietario</TableCell>
-                <TableCell align="right">Acciones</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+        {loading ? (
+          <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress size={20} /></Stack>
+        ) : proyectos.length === 0 ? (
+          <Stack alignItems="center" sx={{ py: 3 }}>
+            <Typography variant="body2" color="text.secondary">Sin proyectos registrados.</Typography>
+          </Stack>
+        ) : esMovil ? (
+          <Stack spacing={1} sx={{ p: 1.5 }}>
+            {proyectos.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((p) => (
+              <Card key={p.id_proyecto} variant="outlined">
+                <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                    <Typography variant="body2" fontWeight={600}>{p.denominacion || "—"}{p.alias_proyecto ? ` (${p.alias_proyecto})` : ""}</Typography>
+                    <Stack direction="row">
+                      <IconButton size="small" onClick={() => abrirEdicion(p)} disabled={!puedeEditar}><Pencil size={14} strokeWidth={1.5} /></IconButton>
+                      <IconButton size="small" onClick={() => handleBorrar(p)} disabled={!puedeEditar}><Trash2 size={14} strokeWidth={1.5} /></IconButton>
+                    </Stack>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" display="block">{p.dom_municipio_alcaldia}, {p.dom_estado}</Typography>
+                  <Typography variant="caption" color="text.secondary">{nombreDePropietario(p.propietario)}</Typography>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                    <CircularProgress size={20} />
-                  </TableCell>
+                  <TableCell>Denominación</TableCell>
+                  <TableCell>Alias</TableCell>
+                  <TableCell>Municipio / Estado</TableCell>
+                  <TableCell>Propietario</TableCell>
+                  <TableCell align="right">Acciones</TableCell>
                 </TableRow>
-              ) : proyectos.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sin proyectos registrados.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                proyectos.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((p) => (
+              </TableHead>
+              <TableBody>
+                {proyectos.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((p) => (
                   <TableRow key={p.id_proyecto} hover>
                     <TableCell>{p.denominacion || "—"}</TableCell>
                     <TableCell>{p.alias_proyecto || "—"}</TableCell>
-                    <TableCell>
-                      {p.dom_municipio_alcaldia}, {p.dom_estado}
-                    </TableCell>
+                    <TableCell>{p.dom_municipio_alcaldia}, {p.dom_estado}</TableCell>
                     <TableCell>{nombreDePropietario(p.propietario)}</TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(p)} disabled={!puedeEditar}>
-                        <Pencil size={14} strokeWidth={1.5} />
-                      </IconButton>
-                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(p)} disabled={!puedeEditar}>
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </IconButton>
+                      <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(p)} disabled={!puedeEditar}><Pencil size={14} strokeWidth={1.5} /></IconButton>
+                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrar(p)} disabled={!puedeEditar}><Trash2 size={14} strokeWidth={1.5} /></IconButton>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
         <TablePagination
           component="div"
           count={proyectos.length}
@@ -268,7 +278,7 @@ export default function ProyectosTab({
         />
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editing ? `Editar ${editing.denominacion}` : "Nuevo Proyecto"}
           <IconButton onClick={() => setDialogOpen(false)} size="small" aria-label="Cerrar">

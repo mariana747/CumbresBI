@@ -1259,8 +1259,8 @@ export default function TesoreriaFacturasPage() {
                     <TableCell>{f.emisor_nombre || f.emisor_rfc || "—"}</TableCell>
                     <TableCell>{f.receptor_nombre || f.receptor_rfc || "—"}</TableCell>
                     <TableCell>{f.comprobante_fecha ? f.comprobante_fecha.slice(0, 10) : "—"}</TableCell>
-                    <TableCell align="right">{f.comprobante_iva || "—"}</TableCell>
-                    <TableCell align="right">{f.comprobante_total || "—"}</TableCell>
+                    <TableCell align="right">{f.comprobante_iva != null ? Number(f.comprobante_iva).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}</TableCell>
+                    <TableCell align="right">{f.comprobante_total != null ? Number(f.comprobante_total).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}</TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.5} flexWrap="wrap">
                         {f.estado && (
@@ -1362,7 +1362,7 @@ export default function TesoreriaFacturasPage() {
                     <strong>IVA:</strong> {f.comprobante_iva || "—"}
                   </Typography>
                   <Typography variant="body2">
-                    <strong>Total:</strong> {f.comprobante_total || "—"}
+                    <strong>Total:</strong> {f.comprobante_total != null ? Number(f.comprobante_total).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) : "—"}
                   </Typography>
                   {f.estado && (
                     <Stack direction="row" spacing={0.5} flexWrap="wrap">

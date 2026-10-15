@@ -988,6 +988,12 @@ export default function PldExpedienteDetallePage() {
 
       {error && <Alert severity="error">{error}</Alert>}
 
+      <Box sx={{ display: { xs: "block", sm: "none" }, mb: 2 }}>
+        <Alert severity="info">
+          Para una mejor experiencia con las pestañas y el detalle del expediente, abre esta pantalla en tablet o computadora.
+        </Alert>
+      </Box>
+
       {kyc && (
         <Grid container spacing={3}>
           {/* Columna izquierda: identidad + acciones */}

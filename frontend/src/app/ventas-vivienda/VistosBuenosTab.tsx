@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Divider,
@@ -19,6 +21,8 @@ import {
   TableRow,
   Tabs,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { FileSpreadsheet } from "lucide-react";
 import { ViviendaExpedienteItem, ViviendaExpedienteEstado, ViviendaItemStatus, listItemsByDenominacion } from "@/lib/vivienda";
@@ -74,6 +78,8 @@ export default function VistosBuenosTab({
   defaultTab?: TabStatus;
   nombreArchivo?: string;
 }) {
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
   const [items, setItems] = useState<ViviendaExpedienteItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,69 +157,54 @@ export default function VistosBuenosTab({
           <Divider />
         </>
       )}
-    <TableContainer>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>Vivienda</TableCell>
-            <TableCell>Expediente</TableCell>
-            <TableCell>Estado expediente</TableCell>
-            <TableCell>Visto bueno</TableCell>
-            <TableCell>Responsable</TableCell>
-            <TableCell>Fecha cierre</TableCell>
-            <TableCell>Comentarios</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {visibles.length === 0 && (
+    {visibles.length === 0 ? (
+      <Stack alignItems="center" sx={{ py: 3 }}><Typography variant="body2" color="text.secondary">Sin registros.</Typography></Stack>
+    ) : esMovil ? (
+      <Stack spacing={1} sx={{ p: 1.5 }}>
+        {visibles.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((item) => (
+          <Card key={item.id_item} variant="outlined">
+            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+              <Typography variant="body2" fontWeight={600}>{item.expediente_vivienda_denominacion ?? "—"}</Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                {item.expediente_estado && <Chip label={item.expediente_estado} size="small" color={EXPEDIENTE_ESTADO_COLORS[item.expediente_estado] ?? "default"} />}
+                <Chip label={ITEM_STATUS_LABELS[item.status]} size="small" color={ITEM_STATUS_COLORS[item.status]} />
+              </Stack>
+              {item.responsable && <Typography variant="caption" color="text.secondary" display="block">{item.responsable}</Typography>}
+              {item.fecha_cierre && <Typography variant="caption" color="text.secondary" display="block">{fmtFecha(item.fecha_cierre)}</Typography>}
+            </CardContent>
+          </Card>
+        ))}
+      </Stack>
+    ) : (
+      <TableContainer>
+        <Table size="small">
+          <TableHead>
             <TableRow>
-              <TableCell colSpan={7}>
-                <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-                  Sin registros.
-                </Typography>
-              </TableCell>
+              <TableCell>Vivienda</TableCell>
+              <TableCell>Expediente</TableCell>
+              <TableCell>Estado expediente</TableCell>
+              <TableCell>Visto bueno</TableCell>
+              <TableCell>Responsable</TableCell>
+              <TableCell>Fecha cierre</TableCell>
+              <TableCell>Comentarios</TableCell>
             </TableRow>
-          )}
-          {visibles.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((item) => (
-            <TableRow key={item.id_item} hover>
-              <TableCell>{item.expediente_vivienda_denominacion ?? "—"}</TableCell>
-              <TableCell>
-                <Typography variant="caption" fontFamily="monospace">
-                  {item.expediente.slice(0, 8).toUpperCase()}
-                </Typography>
-              </TableCell>
-              <TableCell>
-                {item.expediente_estado ? (
-                  <Chip
-                    label={item.expediente_estado}
-                    size="small"
-                    color={EXPEDIENTE_ESTADO_COLORS[item.expediente_estado] ?? "default"}
-                  />
-                ) : (
-                  "—"
-                )}
-              </TableCell>
-              <TableCell>
-                <Chip
-                  label={ITEM_STATUS_LABELS[item.status]}
-                  size="small"
-                  color={ITEM_STATUS_COLORS[item.status]}
-                />
-              </TableCell>
-              <TableCell>{item.responsable ?? "—"}</TableCell>
-              <TableCell>{fmtFecha(item.fecha_cierre)}</TableCell>
-              <TableCell>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography variant="body2" noWrap sx={{ maxWidth: 240 }}>
-                    {item.comentarios || "—"}
-                  </Typography>
-                </Stack>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+          </TableHead>
+          <TableBody>
+            {visibles.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((item) => (
+              <TableRow key={item.id_item} hover>
+                <TableCell>{item.expediente_vivienda_denominacion ?? "—"}</TableCell>
+                <TableCell><Typography variant="caption" fontFamily="monospace">{item.expediente.slice(0, 8).toUpperCase()}</Typography></TableCell>
+                <TableCell>{item.expediente_estado ? <Chip label={item.expediente_estado} size="small" color={EXPEDIENTE_ESTADO_COLORS[item.expediente_estado] ?? "default"} /> : "—"}</TableCell>
+                <TableCell><Chip label={ITEM_STATUS_LABELS[item.status]} size="small" color={ITEM_STATUS_COLORS[item.status]} /></TableCell>
+                <TableCell>{item.responsable ?? "—"}</TableCell>
+                <TableCell>{fmtFecha(item.fecha_cierre)}</TableCell>
+                <TableCell><Typography variant="body2" noWrap sx={{ maxWidth: 240 }}>{item.comentarios || "—"}</Typography></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    )}
     <TablePagination
       component="div"
       count={visibles.length}

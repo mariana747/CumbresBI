@@ -5,6 +5,8 @@ import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -25,6 +27,8 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { ListTree, Pencil, Plus, Trash2, X as CloseIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -65,6 +69,9 @@ export default function ObraCatalogoPage() {
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const theme = useTheme();
+  const esMovil = useMediaQuery(theme.breakpoints.down("sm"));
 
   useEffect(() => {
     getSession().then(setSession);
@@ -239,55 +246,86 @@ export default function ObraCatalogoPage() {
                 </Button>
               )}
             </Stack>
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>No.</TableCell>
-                    <TableCell>Nombre</TableCell>
-                    <TableCell align="center">Orden</TableCell>
-                    <TableCell align="right">Acciones</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {etapas.length === 0 ? (
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
                     <TableRow>
-                      <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Sin etapas registradas.
-                        </Typography>
-                      </TableCell>
+                      <TableCell>No.</TableCell>
+                      <TableCell>Nombre</TableCell>
+                      <TableCell align="center">Orden</TableCell>
+                      <TableCell align="right">Acciones</TableCell>
                     </TableRow>
-                  ) : (
-                    etapas.map((etapa) => (
-                      <TableRow key={etapa.id_etapa} hover>
-                        <TableCell>{etapa.numero}</TableCell>
-                        <TableCell>{etapa.nombre}</TableCell>
-                        <TableCell align="center">{etapa.orden}</TableCell>
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            aria-label="Editar"
-                            onClick={() => abrirEdicionEtapa(etapa)}
-                            disabled={!puedeEditar}
-                          >
-                            <Pencil size={14} strokeWidth={1.5} />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            aria-label="Borrar"
-                            onClick={() => handleBorrarEtapa(etapa)}
-                            disabled={!puedeEditar}
-                          >
-                            <Trash2 size={14} strokeWidth={1.5} />
-                          </IconButton>
+                  </TableHead>
+                  <TableBody>
+                    {etapas.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Sin etapas registradas.
+                          </Typography>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                    ) : (
+                      etapas.map((etapa) => (
+                        <TableRow key={etapa.id_etapa} hover>
+                          <TableCell>{etapa.numero}</TableCell>
+                          <TableCell>{etapa.nombre}</TableCell>
+                          <TableCell align="center">{etapa.orden}</TableCell>
+                          <TableCell align="right">
+                            <IconButton
+                              size="small"
+                              aria-label="Editar"
+                              onClick={() => abrirEdicionEtapa(etapa)}
+                              disabled={!puedeEditar}
+                            >
+                              <Pencil size={14} strokeWidth={1.5} />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              aria-label="Borrar"
+                              onClick={() => handleBorrarEtapa(etapa)}
+                              disabled={!puedeEditar}
+                            >
+                              <Trash2 size={14} strokeWidth={1.5} />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+
+            <Stack spacing={1.5} sx={{ display: { xs: "flex", sm: "none" }, p: 2 }}>
+              {etapas.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+                  Sin etapas registradas.
+                </Typography>
+              ) : (
+                etapas.map((etapa) => (
+                  <Card key={etapa.id_etapa} variant="outlined">
+                    <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                        <Stack spacing={0.25}>
+                          <Typography variant="body2" fontWeight={600}>{etapa.numero} — {etapa.nombre}</Typography>
+                          <Typography variant="caption" color="text.secondary">Orden: {etapa.orden}</Typography>
+                        </Stack>
+                        <Stack direction="row">
+                          <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicionEtapa(etapa)} disabled={!puedeEditar}>
+                            <Pencil size={14} strokeWidth={1.5} />
+                          </IconButton>
+                          <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarEtapa(etapa)} disabled={!puedeEditar}>
+                            <Trash2 size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </Stack>
           </Paper>
 
           <Paper variant="outlined">
@@ -411,7 +449,7 @@ export default function ObraCatalogoPage() {
         </Stack>
       )}
 
-      <Dialog open={etapaDialogOpen} onClose={() => setEtapaDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={etapaDialogOpen} onClose={() => setEtapaDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editandoEtapa ? `Editar Etapa ${editandoEtapa.numero}` : "Nueva Etapa"}
           <IconButton onClick={() => setEtapaDialogOpen(false)} size="small" aria-label="Cerrar">
@@ -457,7 +495,7 @@ export default function ObraCatalogoPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={conceptoDialogOpen} onClose={() => setConceptoDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={conceptoDialogOpen} onClose={() => setConceptoDialogOpen(false)} fullWidth maxWidth="sm" fullScreen={esMovil}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {editandoConcepto ? `Editar Concepto ${editandoConcepto.numero}` : "Nuevo Concepto"}
           <IconButton onClick={() => setConceptoDialogOpen(false)} size="small" aria-label="Cerrar">
