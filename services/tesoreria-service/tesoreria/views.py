@@ -1025,9 +1025,9 @@ def _aplicar_filtro_fecha_conciliacion(request, queryset):
     if desde_param or hasta_param:
         try:
             if desde_param:
-                queryset = queryset.filter(fecha_efectiva__gte=datetime.date.fromisoformat(desde_param))
+                queryset = queryset.filter(fecha_pago__gte=datetime.date.fromisoformat(desde_param))
             if hasta_param:
-                queryset = queryset.filter(fecha_efectiva__lte=datetime.date.fromisoformat(hasta_param))
+                queryset = queryset.filter(fecha_pago__lte=datetime.date.fromisoformat(hasta_param))
         except ValueError:
             raise ValidationError({"desde": ["Formato esperado: YYYY-MM-DD."]})
     else:
@@ -1036,7 +1036,7 @@ def _aplicar_filtro_fecha_conciliacion(request, queryset):
             fecha_fin = fecha_inicio.replace(year=fecha_inicio.year + 1, month=1)
         else:
             fecha_fin = fecha_inicio.replace(month=fecha_inicio.month + 1)
-        queryset = queryset.filter(fecha_efectiva__gte=fecha_inicio, fecha_efectiva__lt=fecha_fin)
+        queryset = queryset.filter(fecha_pago__gte=fecha_inicio, fecha_pago__lt=fecha_fin)
     return queryset
 
 
@@ -1085,8 +1085,9 @@ def _nombre_comprobante_flujo(flujo, nombre_original: str) -> str:
         return re.sub(r"[^\w\s\-]", "", s or "").strip()
 
     fecha = ""
-    if flujo.fecha_efectiva:
-        fecha = flujo.fecha_efectiva.strftime("%Y%m%d")
+    fecha_ref = flujo.fecha_pago or flujo.fecha_efectiva
+    if fecha_ref:
+        fecha = fecha_ref.strftime("%Y%m%d")
 
     id_corto = (flujo.id_flujo or "")[:8]
 
@@ -1152,7 +1153,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
     # nada de contrato/cuenta/autorizacion/pagado (eso lo deciden
     # aprobar()/registrar_pago(), no una extraccion).
     CAMPOS_CONFIRMABLES = {
-        "fecha_efectiva",
+        "fecha_pago",
         "concepto",
         "total_mxp",
         "link_referencia",
@@ -1184,7 +1185,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             # periodo_nomina.serie, faltaba aqui (mismo hallazgo N+1 que
             # Facturas, ver TesoreriaFacturaViewSet.list()).
             .select_related("contrato", "contrato__contraparte", "cuenta", "cuenta__banco", "periodo_nomina")
-            .order_by("-fecha_efectiva", "-created_at")
+            .order_by("-fecha_pago", "-created_at")
         )
         contrato_id = self.request.query_params.get("contrato")
         if contrato_id:
@@ -1227,10 +1228,15 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         # TesoreriaFacturaViewSet.get_queryset).
         fecha_desde = self.request.query_params.get("fecha_desde")
         if fecha_desde:
-            queryset = queryset.filter(fecha_efectiva__gte=fecha_desde)
+            queryset = queryset.filter(fecha_pago__gte=fecha_desde)
         fecha_hasta = self.request.query_params.get("fecha_hasta")
         if fecha_hasta:
-            queryset = queryset.filter(fecha_efectiva__lte=fecha_hasta)
+            queryset = queryset.filter(fecha_pago__lte=fecha_hasta)
+        pagado = self.request.query_params.get("pagado")
+        if pagado == "true":
+            queryset = queryset.filter(pagado=True)
+        elif pagado == "false":
+            queryset = queryset.filter(pagado=False)
         # ?validacion_estado= (23/Sep/2026, "agrega filtro para el estado")
         # - mismos valores que la columna Estado de la tabla (PENDIENTE/
         # APROBADA/RECHAZADA, ver TesoreriaValidacionEstado en el frontend).
@@ -1287,13 +1293,13 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             .filter(concepto_q)
         )
         qs = (
-            base_qs.filter(fecha_efectiva__gte=fecha_desde)
+            base_qs.filter(fecha_pago__gte=fecha_desde)
             .values("contrato__proyecto", "contrato__sociedad")
             .annotate(acumulado=Sum("total_mxp"), flujos_count=Count("id_flujo"))
             .order_by("-acumulado")
         )
         # Si no hay flujos en la ventana de 6 meses (datos historicos sin
-        # fecha_efectiva reciente), mostrar acumulado historico completo.
+        # fecha_pago reciente), mostrar acumulado historico completo.
         ventana_6m = True
         if not qs.exists():
             qs = (
@@ -1330,7 +1336,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         response["Content-Disposition"] = 'attachment; filename="flujos.csv"'
         writer = csv.writer(response)
         writer.writerow(
-            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría", "Link comprobante"]
+            ["ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP", "Fecha de pago", "Pagado", "Categoría", "Link comprobante"]
         )
         for f in queryset:
             writer.writerow(
@@ -1340,7 +1346,6 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                     _label_cuenta(f.cuenta) if f.cuenta_id else "",
                     f.concepto or "",
                     f.total_mxp or "",
-                    f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
                     f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
                     "Sí" if f.pagado else "No",
                     f.categoria_gasto or "",
@@ -1359,7 +1364,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         encabezados = [
             "ID Flujo", "Contrato", "Cuenta", "Concepto", "Total MXP",
-            "Fecha efectiva", "Fecha de pago", "Pagado", "Categoría", "Link comprobante",
+            "Fecha de pago", "Pagado", "Categoría", "Link comprobante",
         ]
         filas = [
             [
@@ -1368,7 +1373,6 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 _label_cuenta(f.cuenta) if f.cuenta_id else "",
                 f.concepto or "",
                 str(f.total_mxp) if f.total_mxp is not None else "",
-                f.fecha_efectiva.strftime("%Y-%m-%d") if f.fecha_efectiva else "",
                 f.fecha_pago.strftime("%Y-%m-%d") if f.fecha_pago else "",
                 "Sí" if f.pagado else "No",
                 f.categoria_gasto or "",
@@ -1495,7 +1499,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                         fila["contrato"] or "",
                         fila["contraparte_nombre"] or "",
                         fila["concepto"] or "",
-                        fila["fecha_efectiva"] or "",
+                        str(fila["fecha_pago"] or ""),
                         fila["total_mxp"] or "",
                         fila["factura_folio"] or "",
                         fila["complemento_folio"] or "",
@@ -1526,7 +1530,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
 
         resultado = calcular_conciliacion_cfdi(queryset)
         encabezados = [
-            "Clasificación", "ID Flujo", "Contrato", "Proveedor", "Concepto", "Fecha efectiva",
+            "Clasificación", "ID Flujo", "Contrato", "Proveedor", "Concepto", "Fecha pago",
             "Total del pago", "Factura", "Complemento", "Importe", "IVA", "Total factura",
             "Reconocido", "Por reconocer",
         ]
@@ -1538,7 +1542,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 fila["contrato"] or "",
                 fila["contraparte_nombre"] or "",
                 fila["concepto"] or "",
-                str(fila["fecha_efectiva"]) if fila["fecha_efectiva"] else "",
+                str(fila["fecha_pago"] or ""),
                 str(fila["total_mxp"]) if fila["total_mxp"] is not None else "",
                 fila["factura_folio"] or "",
                 fila["complemento_folio"] or "",
@@ -1618,7 +1622,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         if (
             instance.total_mxp is not None
             and instance.cuenta_id
-            and instance.fecha_efectiva
+            and instance.fecha_pago
         ):
             try:
                 cuenta = instance.cuenta
@@ -1627,7 +1631,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                     _actualizar_disponible_ministrar(
                         cuenta_credito=cuenta,
                         delta=-delta_original,
-                        fecha=instance.fecha_efectiva.isoformat(),
+                        fecha=instance.fecha_pago.isoformat(),
                         actor=getattr(self.request.effective_scope, "identity_user_id", "") or "",
                     )
             except Exception:
@@ -1970,7 +1974,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
         if cuenta_cheques.tipo == TesoreriaCuenta.TIPO_CREDITO:
             return Response({"detail": "'cuenta_cheques' no puede ser otra cuenta de crédito."}, status=400)
 
-        fecha_efectiva = request.data.get("fecha_efectiva") or None
+        fecha_pago_credito = request.data.get("fecha_pago") or None
         concepto_base = request.data.get("concepto") or (
             f"Ministración crédito {cuenta_credito.alias or cuenta_credito.id_cuenta_bancaria}"
             if tipo == "ministracion"
@@ -1987,7 +1991,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             cuenta=cuenta_cheques,
             concepto=concepto_base,
             total_mxp=monto_cheques,
-            fecha_efectiva=fecha_efectiva,
+            fecha_pago=fecha_pago_credito,
             created_by=actor,
         )
         flujo_credito = TesoreriaFlujo.objects.create(
@@ -1996,17 +2000,17 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             cuenta=cuenta_credito,
             concepto=concepto_base,
             total_mxp=monto_credito,
-            fecha_efectiva=fecha_efectiva,
+            fecha_pago=fecha_pago_credito,
             created_by=actor,
         )
 
         # Actualizar disponible_ministrar en TesoreriaSaldo (fecha de hoy o
-        # fecha_efectiva si se provee) - ministracion resta del disponible
+        # fecha_pago si se provee) - ministracion resta del disponible
         # (se uso credito), pago suma (se devolvio capacidad).
         _actualizar_disponible_ministrar(
             cuenta_credito=cuenta_credito,
             delta=(-monto if tipo == "ministracion" else monto),
-            fecha=fecha_efectiva or timezone.localdate().isoformat(),
+            fecha=fecha_pago_credito or timezone.localdate().isoformat(),
             actor=actor,
         )
 
@@ -2172,7 +2176,7 @@ class TesoreriaFlujoViewSet(ModelViewSet):
                 flujo.contrato.contraparte if flujo.contrato_id else None
             )
             fecha_para_sugerir = None
-            fecha_raw = datos_validos.get("fecha_efectiva") or flujo.fecha_efectiva
+            fecha_raw = datos_validos.get("fecha_pago") or flujo.fecha_pago
             if fecha_raw:
                 fecha_para_sugerir = fecha_raw if isinstance(fecha_raw, datetime.date) else parse_date(str(fecha_raw))
             sugerencias_factura = _sugerir_facturas_para_flujo(
@@ -4402,7 +4406,7 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5, skip_ia=False):
 
     sugerencias = []
     for flujo in candidatos:
-        fecha_flujo = flujo.fecha_pago or flujo.fecha_efectiva
+        fecha_flujo = flujo.fecha_pago
         score = 0
         motivos = []
         if abs(flujo.total_mxp) == abs(monto):
@@ -4443,7 +4447,7 @@ def _sugerir_flujos_para_movimiento(movimiento, limite=5, skip_ia=False):
             TesoreriaFlujo.objects.filter(cuenta=movimiento.cuenta, total_mxp__isnull=False)
             .exclude(movimientos_bancarios__isnull=False)
             .select_related("contrato", "contrato__contraparte")
-            .order_by("-fecha_efectiva")[:MAX_CANDIDATOS_SIN_MATCH]
+            .order_by("-fecha_pago")[:MAX_CANDIDATOS_SIN_MATCH]
         )
         candidatos_ia = [
             {
@@ -4923,7 +4927,7 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
             cuenta=movimiento.cuenta,
             concepto=movimiento.descripcion,
             total_mxp=(movimiento.abono or Decimal("0")) - (movimiento.cargo or Decimal("0")),
-            fecha_efectiva=movimiento.fecha,
+            fecha_pago=movimiento.fecha,
             link_referencia=movimiento.referencia,
             created_by=(request.data.get("actor_user_id") or "")[:100],
         )
@@ -4997,7 +5001,7 @@ class TesoreriaMovimientoBancarioViewSet(_PermisosCatalogoTesoreriaMixin, ModelV
             filas.append(
                 [
                     "Sin conciliar (interno)",
-                    str(fila["fecha_pago"] or fila["fecha_efectiva"] or ""),
+                    str(fila["fecha_pago"] or ""),
                     fila["concepto"] or "", "", "", fila["id_flujo"], "", str(fila["total_mxp"]), "", "",
                     "Sí" if fila["pagado"] else "No",
                 ]
