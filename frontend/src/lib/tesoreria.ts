@@ -1384,6 +1384,7 @@ export interface ConciliacionCfdiFila {
   concepto: string | null;
   total_mxp: string | null;
   fecha_efectiva: string | null;
+  fecha_pago: string | null;
   factura: number | null;
   factura_folio: string | null;
   complemento: number | null;
@@ -2211,6 +2212,7 @@ export interface ConciliacionNominaFila {
   concepto: string | null;
   total_mxp: string | null;
   fecha_efectiva: string | null;
+  fecha_pago: string | null;
   nomina: number | null;
   reconocido?: string | null;
   por_reconocer?: string | null;

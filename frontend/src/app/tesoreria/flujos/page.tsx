@@ -829,6 +829,7 @@ function TesoreriaFlujosPageContent() {
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
       fechaEfectiva: new Date().toISOString().slice(0, 10),
+      fechaPago: f.fecha_pago || "",
       concepto: f.concepto || "",
       reembolso: f.reembolso ?? false,
       idEmpleado: f.id_empleado || "",
