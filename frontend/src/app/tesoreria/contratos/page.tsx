@@ -403,9 +403,10 @@ function TesoreriaContratosPageContent() {
         let flujos = res.results;
         if (historialFiltroPagado === "si") flujos = flujos.filter((f) => f.pagado);
         if (historialFiltroPagado === "no") flujos = flujos.filter((f) => !f.pagado);
+        // fecha_efectiva: fallback para flujos anteriores a la migración
         flujos.sort((a, b) => {
-          const fa = a.fecha_efectiva ?? a.created_at;
-          const fb = b.fecha_efectiva ?? b.created_at;
+          const fa = a.fecha_pago ?? a.fecha_efectiva ?? a.created_at;
+          const fb = b.fecha_pago ?? b.fecha_efectiva ?? a.created_at;
           return fb.localeCompare(fa);
         });
         setHistorialFlujos(flujos);
@@ -1579,8 +1580,9 @@ function TesoreriaContratosPageContent() {
                             {flujo.id_flujo}
                           </TableCell>
                           <TableCell>
-                            {flujo.fecha_efectiva
-                              ? new Date(flujo.fecha_efectiva).toLocaleDateString("es-MX")
+                            {/* fecha_efectiva: fallback para flujos anteriores a la migración */}
+                            {flujo.fecha_pago || flujo.fecha_efectiva
+                              ? new Date((flujo.fecha_pago || flujo.fecha_efectiva)!).toLocaleDateString("es-MX")
                               : "—"}
                           </TableCell>
                           <TableCell sx={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

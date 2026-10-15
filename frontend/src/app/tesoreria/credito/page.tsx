@@ -269,7 +269,7 @@ export default function TesoreriaCreditoPage() {
     const f = flujos[menuIdx];
     setEditFlujo(f);
     setEditConcepto(f.concepto || "");
-    setEditFecha(f.fecha_efectiva || "");
+    setEditFecha(f.fecha_pago || "");
     setEditMonto(f.total_mxp ? Math.abs(parseFloat(f.total_mxp)).toString() : "");
     setEditError(null);
     setEditOpen(true);
@@ -482,7 +482,7 @@ export default function TesoreriaCreditoPage() {
                           const esMinistrado = monto !== null && monto < 0;
                           return (
                             <TableRow key={f.id_flujo} hover>
-                              <TableCell>{fmtFecha(f.fecha_efectiva)}</TableCell>
+                              <TableCell>{fmtFecha(f.fecha_pago)}</TableCell>
                               <TableCell>
                                 <Chip
                                   size="small"
@@ -553,7 +553,7 @@ export default function TesoreriaCreditoPage() {
                           <Stack spacing={0.5} sx={{ minWidth: 0 }}>
                             <Chip size="small" label={esMinistrado ? "Ministración" : "Pago"}
                               color={esMinistrado ? "success" : "error"} variant="outlined" sx={{ alignSelf: "flex-start" }} />
-                            <Typography variant="caption" color="text.secondary">{fmtFecha(f.fecha_efectiva)}</Typography>
+                            <Typography variant="caption" color="text.secondary">{fmtFecha(f.fecha_pago)}</Typography>
                           </Stack>
                           <IconButton size="small" onClick={() => abrirDetalle(idx)}>
                             <Eye size={14} strokeWidth={1.5} />
@@ -699,7 +699,7 @@ export default function TesoreriaCreditoPage() {
               <TableBody>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 500, width: 160, color: "text.secondary" }}>Fecha</TableCell>
-                  <TableCell>{fmtFecha(detalleF.fecha_efectiva)}</TableCell>
+                  <TableCell>{fmtFecha(detalleF.fecha_pago)}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 500, color: "text.secondary" }}>Tipo</TableCell>
@@ -856,7 +856,7 @@ export default function TesoreriaCreditoPage() {
           <Stack spacing={1.5} mt={1}>
             {borrarError && <Alert severity="error">{borrarError}</Alert>}
             <Typography variant="body2">
-              ¿Eliminar el movimiento del {fmtFecha(borrarFlujo?.fecha_efectiva)}{" "}
+              ¿Eliminar el movimiento del {fmtFecha(borrarFlujo?.fecha_pago)}{" "}
               por <strong>{fmtMXP(borrarFlujo?.total_mxp)}</strong>?
             </Typography>
             <Alert severity="warning" sx={{ fontSize: 12 }}>

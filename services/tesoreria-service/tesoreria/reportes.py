@@ -16,7 +16,6 @@ Regla de negocio (finanzas.md, citado):
 from decimal import Decimal
 
 from django.db.models import Q
-from django.db.models.functions import Coalesce
 
 from .models import (
     TesoreriaComplementoPago,
@@ -81,6 +80,7 @@ def calcular_conciliacion_cfdi(queryset) -> dict:
             "concepto": flujo.concepto,
             "total_mxp": flujo.total_mxp,
             "fecha_efectiva": flujo.fecha_efectiva,
+            "fecha_pago": flujo.fecha_pago,
             "factura": flujo.factura_id,
             "factura_folio": flujo.factura.comprobante_folio if flujo.factura_id else None,
             "complemento": flujo.complemento_id,
@@ -149,6 +149,7 @@ def calcular_conciliacion_nomina(queryset) -> dict:
             "concepto": flujo.concepto,
             "total_mxp": flujo.total_mxp,
             "fecha_efectiva": flujo.fecha_efectiva,
+            "fecha_pago": flujo.fecha_pago,
             "nomina": flujo.nomina_id,
         }
         if not flujo.nomina_id:
@@ -214,7 +215,7 @@ def _calcular_corte(cuentas, fecha) -> dict:
 
     # Flujos del día: una sola query para todas las cuentas
     flujos_del_dia = (
-        TesoreriaFlujo.objects.filter(cuenta__in=ids_cuentas, fecha_efectiva=fecha)
+        TesoreriaFlujo.objects.filter(cuenta__in=ids_cuentas, fecha_pago=fecha)
         .select_related("periodo_nomina", "contrato", "contrato__contraparte")
         .order_by("id_flujo")
     )
@@ -431,14 +432,11 @@ def calcular_reporte_conciliacion(cuenta_id, corte_edc_id=None, fecha_inicio=Non
     sin_conciliar_interno = []
     total_interno_sin_conciliar = Decimal("0")
     if rango_inicio and rango_fin:
-        # Coalesce fecha_pago/fecha_efectiva - un flujo capturado pero
-        # todavia no pagado solo tiene fecha_efectiva.
         flujos_qs = (
             TesoreriaFlujo.objects.filter(cuenta_id=cuenta_id, total_mxp__isnull=False)
             .exclude(id_flujo__in=ids_flujos_conciliados)
-            .annotate(fecha_comparacion=Coalesce("fecha_pago", "fecha_efectiva"))
-            .filter(fecha_comparacion__gte=rango_inicio, fecha_comparacion__lte=rango_fin)
-            .order_by("fecha_comparacion")
+            .filter(fecha_pago__gte=rango_inicio, fecha_pago__lte=rango_fin)
+            .order_by("fecha_pago")
         )
         for flujo in flujos_qs:
             total_interno_sin_conciliar += flujo.total_mxp or Decimal("0")

@@ -996,6 +996,7 @@ export default function TesoreriaConciliacionPage() {
                                 <TableRow key={f.id_flujo}>
                                   <TableCell>{f.id_flujo}</TableCell>
                                   <TableCell>{f.concepto || "—"}</TableCell>
+                                  {/* fecha_efectiva: fallback para flujos anteriores a la migración */}
                                   <TableCell>{f.fecha_pago || f.fecha_efectiva || "—"}</TableCell>
                                   <TableCell align="right">{formatMonto(f.total_mxp)}</TableCell>
                                   <TableCell>{f.pagado ? "Sí" : "No"}</TableCell>
@@ -1204,6 +1205,7 @@ export default function TesoreriaConciliacionPage() {
                                         <Typography variant="caption">{p.mov_fecha}</Typography>
                                       </TableCell>
                                       <TableCell sx={{ py: 0.25, px: 1, border: 0 }}>
+                                        {/* fecha_efectiva: fallback para flujos anteriores a la migración */}
                                         <Chip label={p.fecha_pago || p.fecha_efectiva || "—"} size="small" color="success" variant="outlined" sx={{ height: 18, fontSize: 11 }} />
                                       </TableCell>
                                     </TableRow>
@@ -1326,6 +1328,7 @@ export default function TesoreriaConciliacionPage() {
                           </TableCell>
                           <TableCell align="right">${formatMonto(s.total_mxp ?? null)}</TableCell>
                           <TableCell>
+                            {/* fecha_efectiva: fallback para flujos anteriores a la migración */}
                             <Typography variant="body2">{s.fecha_pago || s.fecha_efectiva || "—"}</Typography>
                           </TableCell>
                           <TableCell align="right">

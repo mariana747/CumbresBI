@@ -23,6 +23,8 @@ interface FiltrosBarProps {
   actions?: ReactNode;
   /** Sin Paper/margen propio: para vivir pegado a la tabla dentro de un Paper compartido */
   flush?: boolean;
+  /** Nodo que se renderiza junto al label "Filtrar por:" — para el engrane de configuracion */
+  configNode?: ReactNode;
 }
 
 export default function FiltrosBar({
@@ -38,6 +40,7 @@ export default function FiltrosBar({
   actions,
   flush = false,
   hideSearch = false,
+  configNode,
 }: FiltrosBarProps) {
   // Boton de enviar por correo
   const botonEnviarMasivo = puedeEditar && onEnviarMasivo && seleccionadas > 0 && (
@@ -106,9 +109,12 @@ export default function FiltrosBar({
           (laptop), cada uno con su propio salto de linea. El grid reparte
           celdas de ancho parejo, todas alineadas. */}
           <Box sx={{ p: 2, pt: 1.5 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Filtrar por:
-            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Filtrar por:
+              </Typography>
+              {configNode}
+            </Stack>
             <Box
               sx={{
                 display: "grid",

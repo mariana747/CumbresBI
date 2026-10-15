@@ -899,7 +899,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
     def test_no_requiere_factura(self):
         contrato = self._contrato(False, "001")
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-CONC-1", contrato=contrato, cuenta=self.cuenta, total_mxp="500.00", fecha_efectiva=self.hoy
+            id_flujo="FLJ-CONC-1", contrato=contrato, cuenta=self.cuenta, total_mxp="500.00", fecha_pago=self.hoy
         )
         response = self._conciliacion()
         self.assertEqual(response.status_code, 200)
@@ -910,7 +910,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
     def test_requiere_factura_sin_ligar(self):
         contrato = self._contrato(True, "002")
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-CONC-2", contrato=contrato, cuenta=self.cuenta, total_mxp="500.00", fecha_efectiva=self.hoy
+            id_flujo="FLJ-CONC-2", contrato=contrato, cuenta=self.cuenta, total_mxp="500.00", fecha_pago=self.hoy
         )
         response = self._conciliacion()
         self.assertEqual(response.data["sin_cfdi"]["count"], 1)
@@ -928,7 +928,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="1160.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             factura=factura,
         )
         response = self._conciliacion()
@@ -952,7 +952,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="-1000.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             factura=factura,
         )
         response = self._conciliacion()
@@ -977,7 +977,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="1160.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             factura=factura,
         )
         response = self._conciliacion()
@@ -1001,7 +1001,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="580.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             factura=factura,
             complemento=complemento,
         )
@@ -1017,7 +1017,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy.replace(year=self.hoy.year - 1),
+            fecha_pago=self.hoy.replace(year=self.hoy.year - 1),
         )
         response = self._conciliacion()
         self.assertEqual(response.data["sin_cfdi"]["count"], 0)
@@ -1026,10 +1026,10 @@ class TesoreriaConciliacionCfdiTests(TestCase):
         contrato_si = self._contrato(True, "006")
         contrato_no = self._contrato(False, "007")
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-CONC-6", contrato=contrato_si, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+            id_flujo="FLJ-CONC-6", contrato=contrato_si, cuenta=self.cuenta, total_mxp="100.00", fecha_pago=self.hoy
         )
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-CONC-7", contrato=contrato_no, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+            id_flujo="FLJ-CONC-7", contrato=contrato_no, cuenta=self.cuenta, total_mxp="100.00", fecha_pago=self.hoy
         )
         response = self._conciliacion(requiere_factura="true", tab="sin_cfdi")
         ids = [f["id_flujo"] for f in response.data["sin_cfdi"]["results"]]
@@ -1039,14 +1039,14 @@ class TesoreriaConciliacionCfdiTests(TestCase):
     def test_filtro_por_una_sola_fecha(self):
         contrato = self._contrato(True, "008")
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-CONC-8", contrato=contrato, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+            id_flujo="FLJ-CONC-8", contrato=contrato, cuenta=self.cuenta, total_mxp="100.00", fecha_pago=self.hoy
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-CONC-9",
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy - timedelta(days=1),
+            fecha_pago=self.hoy - timedelta(days=1),
         )
         response = self._conciliacion(desde=self.hoy.isoformat(), hasta=self.hoy.isoformat(), tab="sin_cfdi")
         ids = [f["id_flujo"] for f in response.data["sin_cfdi"]["results"]]
@@ -1060,14 +1060,14 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy.replace(month=1, day=1),
+            fecha_pago=self.hoy.replace(month=1, day=1),
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-CONC-11",
             contrato=contrato,
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy.replace(year=self.hoy.year - 1),
+            fecha_pago=self.hoy.replace(year=self.hoy.year - 1),
         )
         response = self._conciliacion(
             desde=self.hoy.replace(month=1, day=1).isoformat(),
@@ -1087,14 +1087,14 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=self._contrato(False, "013"),
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-CONC-13",
             contrato=self._contrato(True, "014"),
             cuenta=self.cuenta,
             total_mxp="200.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
         )
         response = self._conciliacion_csv()
         self.assertEqual(response.status_code, 200)
@@ -1111,7 +1111,7 @@ class TesoreriaConciliacionCfdiTests(TestCase):
             contrato=self._contrato(False, "015"),
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
         )
         response = self._conciliacion_csv(requiere_factura="false")
         contenido = response.content.decode("utf-8")
@@ -1149,7 +1149,7 @@ class TesoreriaConciliacionNominaTests(TestCase):
             contrato=self.contrato_nomina,
             cuenta=self.cuenta,
             total_mxp="1000.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             periodo_nomina=self.nomina,
         )
         response = self._conciliacion()
@@ -1164,7 +1164,7 @@ class TesoreriaConciliacionNominaTests(TestCase):
             contrato=self.contrato_nomina,
             cuenta=self.cuenta,
             total_mxp="1000.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             periodo_nomina=self.nomina,
             nomina=recibo,
         )
@@ -1181,7 +1181,7 @@ class TesoreriaConciliacionNominaTests(TestCase):
             contrato=self.contrato_nomina,
             cuenta=self.cuenta,
             total_mxp="1000.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             periodo_nomina=self.nomina,
             nomina=recibo,
         )
@@ -1200,7 +1200,7 @@ class TesoreriaConciliacionNominaTests(TestCase):
             tipo=TesoreriaContrato.TIPO_INTERNO,
         )
         TesoreriaFlujo.objects.create(
-            id_flujo="FLJ-NONOM-1", contrato=contrato, cuenta=self.cuenta, total_mxp="100.00", fecha_efectiva=self.hoy
+            id_flujo="FLJ-NONOM-1", contrato=contrato, cuenta=self.cuenta, total_mxp="100.00", fecha_pago=self.hoy
         )
         response = self._conciliacion()
         self.assertEqual(len(response.data["con_recibo"]), 0)
@@ -1216,7 +1216,7 @@ class TesoreriaConciliacionNominaTests(TestCase):
             contrato=self.contrato_nomina,
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             periodo_nomina=self.nomina,
         )
         TesoreriaFlujo.objects.create(
@@ -1224,7 +1224,7 @@ class TesoreriaConciliacionNominaTests(TestCase):
             contrato=self.contrato_nomina,
             cuenta=self.cuenta,
             total_mxp="100.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
             periodo_nomina=otra_nomina,
         )
         response = self._conciliacion(nomina=self.nomina.id_nomina)
@@ -1408,7 +1408,7 @@ class TesoreriaSugerenciasCfdiLoteTests(TestCase):
             contrato=self.contrato,
             cuenta=self.cuenta,
             total_mxp="2000.00",
-            fecha_efectiva=self.hoy,
+            fecha_pago=self.hoy,
         )
         self.factura = TesoreriaFactura.objects.create(
             timbre_uuid="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -2419,7 +2419,7 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaSaldo.objects.create(id="s2", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10500.00")
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-000001", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="500.00",
+            fecha_pago="2026-08-25", total_mxp="500.00",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         fila = reporte["sociedades"][0]["cuentas"][0]
@@ -2433,7 +2433,7 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaSaldo.objects.create(id="s4", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10800.00")
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-000002", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="500.00",
+            fecha_pago="2026-08-25", total_mxp="500.00",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         fila = reporte["sociedades"][0]["cuentas"][0]
@@ -2463,15 +2463,15 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaNominaSociedad.objects.create(nomina=nomina_s, sociedad=RFC_TIZARA)
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-NOM-Q1", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="1000.00", periodo_nomina=nomina_q,
+            fecha_pago="2026-08-25", total_mxp="1000.00", periodo_nomina=nomina_q,
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-NOM-S1", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="300.00", periodo_nomina=nomina_s,
+            fecha_pago="2026-08-25", total_mxp="300.00", periodo_nomina=nomina_s,
         )
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-NORMAL", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="200.00",
+            fecha_pago="2026-08-25", total_mxp="200.00",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         transacciones = {t["id_flujo"]: t["nomina_tipo"] for t in reporte["sociedades"][0]["cuentas"][0]["transacciones"]}
@@ -2490,7 +2490,7 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaSaldo.objects.create(id="s10", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10500.00")
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-000003", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="500.00", descripcion_pago="PARA IMPUESTOS",
+            fecha_pago="2026-08-25", total_mxp="500.00", descripcion_pago="PARA IMPUESTOS",
         )
         reporte = calcular_reporte_diario([RFC_TIZARA], "2026-08-25")
         fila_hoy = reporte["sociedades"][0]["cuentas"][0]
@@ -2575,7 +2575,7 @@ class ReporteDiarioSaldosTests(TestCase):
         TesoreriaSaldo.objects.create(id="s11", fecha="2026-08-25", cuenta=self.cuenta.id_cuenta_bancaria, saldo="10800.00")
         TesoreriaFlujo.objects.create(
             id_flujo="FLJ-000003", contrato=self.contrato, cuenta=self.cuenta,
-            fecha_efectiva="2026-08-25", total_mxp="500.00",
+            fecha_pago="2026-08-25", total_mxp="500.00",
         )
         request = self.factory.post(
             "/api/saldos/enviar_reporte/",
