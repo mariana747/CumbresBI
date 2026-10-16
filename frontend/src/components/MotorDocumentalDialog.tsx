@@ -124,6 +124,34 @@ const LABELS_CAMPOS: Record<string, string> = {
   contraparte_nombre: "Contraparte",
   factura: "Factura vinculada",
   complemento: "Complemento de pago vinculado",
+  // CFDI - Facturas
+  timbre_uuid: "UUID de timbrado",
+  comprobante_version: "Versión CFDI",
+  comprobante_serie: "Serie",
+  comprobante_folio: "Folio",
+  comprobante_fecha: "Fecha de emisión",
+  comprobante_no_certificado: "No. de certificado",
+  comprobante_sub_total: "Subtotal",
+  comprobante_iva: "IVA",
+  comprobante_moneda: "Moneda",
+  comprobante_exportacion: "Exportación",
+  comprobante_tipo_cambio: "Tipo de cambio",
+  comprobante_forma_pago: "Forma de pago",
+  comprobante_metodo_pago: "Método de pago",
+  comprobante_total: "Total",
+  comprobante_lugar_expedicion: "Lugar de expedición",
+  emisor_rfc: "RFC emisor",
+  emisor_nombre: "Nombre emisor",
+  emisor_regimen_fiscal: "Régimen fiscal emisor",
+  receptor_rfc: "RFC receptor",
+  receptor_nombre: "Nombre receptor",
+  receptor_domicilio_fiscal_receptor: "Domicilio fiscal receptor",
+  receptor_regimen_fiscal_receptor: "Régimen fiscal receptor",
+  receptor_uso_cfdi: "Uso CFDI",
+  timbre_version: "Versión timbre",
+  timbre_fecha_timbrado: "Fecha de timbrado",
+  timbre_rfc_prov_certif: "RFC proveedor certificación",
+  timbre_no_certificado_sat: "No. certificado SAT",
 };
 
 // Lógica pura de la edición manual (30/Ago/2026) - separada del componente
@@ -203,6 +231,10 @@ export interface MotorDocumentalContexto {
   // "Ver archivos en Drive" se queda disponible por si el analista de
   // todos modos quiere elegir otro archivo de la misma carpeta.
   archivoConocido?: DriveArchivo;
+  // PDF/archivo local ya en memoria (sin pasar por Drive) — Motor Documental
+  // lo manda directo a Gemini como bytes multipart. Solo se usa en Facturas
+  // nuevas: el archivo se sube a Drive al confirmar la factura.
+  archivoDirecto?: File;
   camposConfirmables: readonly string[];
   // Comparacion "documento vs. lo que ya declaro el usuario" (07/Sep/2026,
   // Reembolsos - mismo mecanismo de PLD/kycActual, generalizado). Llaves =
@@ -364,6 +396,21 @@ export default function MotorDocumentalDialog({
     setDriveFiles([contexto.archivoConocido]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, contexto?.archivoConocido]);
+
+  // URL de objeto para preview local — se crea una vez y se revoca al cerrar.
+  const [localObjectUrl, setLocalObjectUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || !contexto?.archivoDirecto) {
+      setLocalObjectUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+      return;
+    }
+    const url = URL.createObjectURL(contexto.archivoDirecto);
+    setLocalObjectUrl(url);
+    setDriveFiles([{ file_id: "__local__", nombre: contexto.archivoDirecto.name, mime_type: contexto.archivoDirecto.type }]);
+    setSeleccionados(new Set(["__local__"]));
+    return () => URL.revokeObjectURL(url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, contexto?.archivoDirecto]);
 
   const [documents, setDocuments] = useState<DocumentResult[]>([]);
 
@@ -608,7 +655,8 @@ export default function MotorDocumentalDialog({
 
     try {
       if (contexto) {
-        await contexto.onConfirmar(campos, doc.archivo);
+        const archivoReal = doc.archivo.file_id === "__local__" ? undefined : doc.archivo;
+        await contexto.onConfirmar(campos, archivoReal);
       } else {
         await confirmarExtraccionKyc(kycSeleccionado, campos, actorUserId);
       }
@@ -649,10 +697,11 @@ export default function MotorDocumentalDialog({
       await Promise.all(
         iniciales.map(async (doc, index) => {
           try {
+            const esLocal = doc.archivo.file_id === "__local__" && !!contexto?.archivoDirecto;
             const { analysisId, status } = await analyzeDocument({
-              driveFileId: doc.archivo.file_id,
-              carpeta,
-              permKey,
+              ...(esLocal
+                ? { file: contexto!.archivoDirecto }
+                : { driveFileId: doc.archivo.file_id, carpeta, permKey }),
               nombreArchivo: doc.archivo.nombre,
               mimeType: doc.archivo.mime_type ?? undefined,
               expectedDocumentType: doc.expectedDocumentType,
@@ -718,14 +767,14 @@ export default function MotorDocumentalDialog({
   return (
     // maxWidth "md" (antes "sm") - hace lugar al panel lateral con el
     // documento original junto a los datos extraidos.
-    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth={false} PaperProps={{ sx: { width: 1200, maxWidth: "98vw", height: 628, maxHeight: "95vh" } }}>
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         Motor Documental
         <IconButton onClick={() => onClose()} size="small" aria-label="Cerrar">
           <CloseIcon size={18} strokeWidth={1.5} />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers>
+      <DialogContent dividers sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Análisis de documentos con IA — los archivos viven en Google Drive
           (el analista los sube ahí directamente); aquí solo se eligen y se
@@ -956,11 +1005,11 @@ export default function MotorDocumentalDialog({
                       <Typography variant="body2">
                         Confianza: <strong>{(doc.result.confidence * 100).toFixed(0)}%</strong>
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Prompt usado: {doc.result.internal_prompt_key_used}
-                        {doc.result.matched_by_filename === false &&
-                          " (clasificación genérica, no confiable)"}
-                      </Typography>
+                      {doc.result.matched_by_filename === false && (
+                        <Typography variant="body2" color="warning.main">
+                          Clasificación genérica — revisar manualmente
+                        </Typography>
+                      )}
 
                       {doc.result.validation_errors.length > 0 && (
                         <Alert severity="error">{doc.result.validation_errors.join(" · ")}</Alert>
@@ -1068,7 +1117,7 @@ export default function MotorDocumentalDialog({
                             onClick={() => handleConfirmarExtraccion(index)}
                             sx={{ alignSelf: "flex-start" }}
                           >
-                            Confirmar y guardar en el expediente
+                            CONFIRMAR Y GUARDAR
                           </Button>
                         </Stack>
                       )}
@@ -1092,9 +1141,13 @@ export default function MotorDocumentalDialog({
                     >
                       <Box
                         component="iframe"
-                        src={`https://drive.google.com/file/d/${doc.archivo.file_id}/preview`}
+                        src={
+                          doc.archivo.file_id === "__local__" && localObjectUrl
+                            ? localObjectUrl
+                            : `https://drive.google.com/file/d/${doc.archivo.file_id}/preview`
+                        }
                         title={`Documento original: ${doc.archivo.nombre}`}
-                        sx={{ width: "100%", height: 420, border: 0, display: "block" }}
+                        sx={{ width: "100%", height: "100%", minHeight: 400, border: 0, display: "block" }}
                       />
                     </Box>
                     </Stack>

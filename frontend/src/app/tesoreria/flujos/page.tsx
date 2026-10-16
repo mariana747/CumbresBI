@@ -1749,6 +1749,20 @@ function TesoreriaFlujosPageContent() {
               />
               <TextField
                 size="small"
+                type="date"
+                label={
+                  <LabelTip
+                    text="Fecha de pago"
+                    tip="Fecha en que se realizó o realizará el pago real."
+                  />
+                }
+                value={form.fechaPago}
+                onChange={(e) => setForm({ ...form, fechaPago: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+              <TextField
+                size="small"
                 label="Concepto"
                 value={form.concepto}
                 onChange={(e) => setForm({ ...form, concepto: e.target.value })}
@@ -1854,15 +1868,6 @@ function TesoreriaFlujosPageContent() {
                     </Stack>
                   )}
                   <TextField size="small" label="Pagado" value={editing.pagado ? "Sí" : "No"} disabled fullWidth />
-                  <TextField
-                    size="small"
-                    type="date"
-                    label="Fecha pago"
-                    value={form.fechaPago}
-                    onChange={(e) => setForm({ ...form, fechaPago: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                    fullWidth
-                  />
                 </>
               ) : (
                 <Typography variant="caption" color="text.secondary">
