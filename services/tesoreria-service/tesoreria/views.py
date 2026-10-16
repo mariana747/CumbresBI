@@ -1719,7 +1719,8 @@ class TesoreriaFlujoViewSet(ModelViewSet):
             )
         flujo.pagado = True
         fecha_pago_raw = request.data.get("fecha_pago")
-        flujo.fecha_pago = parse_date(fecha_pago_raw) if fecha_pago_raw else timezone.localdate()
+        if fecha_pago_raw:
+            flujo.fecha_pago = parse_date(fecha_pago_raw)
         flujo.descripcion_pago = request.data.get("descripcion_pago", flujo.descripcion_pago)
         flujo.link_comprobante_banco = request.data.get(
             "link_comprobante_banco", flujo.link_comprobante_banco
