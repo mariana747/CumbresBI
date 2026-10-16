@@ -910,8 +910,13 @@ function TesoreriaFlujosPageContent() {
         });
       }
       setDialogOpen(false);
-      if (!editing) setPagina(0);
-      refresh();
+      if (editing) {
+        refresh();
+      } else if (pagina === 0) {
+        refresh();
+      } else {
+        setPagina(0);
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
