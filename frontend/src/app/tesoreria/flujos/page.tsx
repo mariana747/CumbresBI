@@ -130,7 +130,7 @@ const FORM_VACIO = {
   cuenta: "",
   totalMxp: "",
   fechaEfectiva: new Date().toISOString().slice(0, 10),
-  fechaPago: "",
+  fechaPago: new Date().toISOString().slice(0, 10),
   concepto: "",
   reembolso: false,
   idEmpleadoReembolso: "",
