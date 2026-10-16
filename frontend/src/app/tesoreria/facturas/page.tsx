@@ -878,11 +878,11 @@ export default function TesoreriaFacturasPage() {
       if (esPdf) {
         setArchivoPdfNueva(drive);
         setForm((prev) => ({ ...prev, linkPdf: drive.web_view_link ?? prev.linkPdf }));
+        setMotorAbierto(true);
       } else {
         setArchivoXmlNueva(drive);
         setForm((prev) => ({ ...prev, linkXml: drive.web_view_link ?? prev.linkXml }));
       }
-      setMotorAbierto(true);
     } catch (err) {
       setErrorSubidaPrevio(err instanceof Error ? err.message : "Error al subir");
     } finally {
