@@ -96,6 +96,7 @@ import {
   subirFacturaPrevio,
   urlVerFacturaPdf,
   urlVerFacturaXml,
+  deleteFactura,
 } from "@/lib/tesoreria";
 
 const FORM_VACIO = {
@@ -547,6 +548,9 @@ export default function TesoreriaFacturasPage() {
   const [contraparteBandeja, setContraparteBandeja] = useState<TesoreriaContraparte | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [borrandoFactura, setBorrandoFactura] = useState<TesoreriaFactura | null>(null);
+  const [borrandoError, setBorrandoError] = useState<string | null>(null);
+  const [borrandoLoading, setBorrandoLoading] = useState(false);
   const [motorAbierto, setMotorAbierto] = useState(false);
   const [cambiandoEstado, setCambiandoEstado] = useState(false);
   const [estadoError, setEstadoError] = useState<string | null>(null);
@@ -727,6 +731,8 @@ export default function TesoreriaFacturasPage() {
     setArchivoPdfNueva(undefined);
     setArchivoXmlNueva(undefined);
     setArchivoNuevaFactura(undefined);
+    setArchivoLocalPdf(null);
+    setArchivoLocalXml(null);
     setMotorEjecutadoNuevaFactura(false);
     setErrorSubidaPrevio(null);
     setTabFactura("Documentos");
@@ -862,6 +868,9 @@ export default function TesoreriaFacturasPage() {
   const [archivoXmlNueva, setArchivoXmlNueva] = useState<DriveArchivo | undefined>(undefined);
   // El Motor Documental recibe el último archivo subido
   const [archivoNuevaFactura, setArchivoNuevaFactura] = useState<DriveArchivo | undefined>(undefined);
+  // Archivos locales pendientes de subir a Drive al confirmar la factura
+  const [archivoLocalPdf, setArchivoLocalPdf] = useState<File | null>(null);
+  const [archivoLocalXml, setArchivoLocalXml] = useState<File | null>(null);
   // Bloquea los campos del CFDI hasta que el Motor Documental ya corrio
   const [motorEjecutadoNuevaFactura, setMotorEjecutadoNuevaFactura] = useState(false);
   const [subiendoPdfNueva, setSubiendoPdfNueva] = useState(false);
@@ -873,15 +882,14 @@ export default function TesoreriaFacturasPage() {
     if (esPdf) setSubiendoPdfNueva(true); else setSubiendoXmlNueva(true);
     setErrorSubidaPrevio(null);
     try {
-      const drive = await subirFacturaPrevio(archivo);
-      setArchivoNuevaFactura(drive);
       if (esPdf) {
-        setArchivoPdfNueva(drive);
-        setForm((prev) => ({ ...prev, linkPdf: drive.web_view_link ?? prev.linkPdf }));
+        // PDF va directo a Gemini (sin subir a Drive todavía).
+        // Drive upload ocurre al guardar la factura con el nombre compuesto.
+        setArchivoLocalPdf(archivo);
         setMotorAbierto(true);
       } else {
-        setArchivoXmlNueva(drive);
-        setForm((prev) => ({ ...prev, linkXml: drive.web_view_link ?? prev.linkXml }));
+        // XML también espera hasta guardar — mismo criterio que PDF.
+        setArchivoLocalXml(archivo);
       }
     } catch (err) {
       setErrorSubidaPrevio(err instanceof Error ? err.message : "Error al subir");
@@ -916,6 +924,26 @@ export default function TesoreriaFacturasPage() {
     }
   }
 
+  function handleBorrarFactura(f: TesoreriaFactura) {
+    setBorrandoFactura(f);
+    setBorrandoError(null);
+  }
+
+  async function confirmarBorrarFactura() {
+    if (!borrandoFactura) return;
+    setBorrandoLoading(true);
+    setBorrandoError(null);
+    try {
+      await deleteFactura(borrandoFactura.id);
+      setBorrandoFactura(null);
+      refresh();
+    } catch (err) {
+      setBorrandoError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setBorrandoLoading(false);
+    }
+  }
+
   async function handleGuardar() {
     if (!editing && !form.timbreUuid) {
       setFormError("El UUID de timbrado es obligatorio.");
@@ -927,10 +955,21 @@ export default function TesoreriaFacturasPage() {
       if (editing) {
         await updateFactura(editing.id, form);
       } else {
-        await createFactura(
+        const nueva = await createFactura(
           { ...form, idContraparte: contraparteBandeja?.id_contraparte },
           archivoNuevaFactura
         );
+        // id_contraparte para la carpeta de Drive: prioridad → lo que el backend
+        // ya ligó (nueva.contraparte), fallback → lo que el usuario seleccionó
+        const cpId = (nueva.contraparte as string | null) ?? contraparteBandeja?.id_contraparte;
+        if (archivoLocalPdf) {
+          try { await subirPdfFactura(nueva.id, archivoLocalPdf, cpId ?? undefined); } catch { /* sube manual después */ }
+          setArchivoLocalPdf(null);
+        }
+        if (archivoLocalXml) {
+          try { await subirXmlFactura(nueva.id, archivoLocalXml, cpId ?? undefined); } catch { /* sube manual después */ }
+          setArchivoLocalXml(null);
+        }
         setArchivoNuevaFactura(undefined);
         setContraparteBandeja(null);
       }
@@ -1285,6 +1324,11 @@ export default function TesoreriaFacturasPage() {
                             <Pencil size={14} strokeWidth={1.5} />
                           </IconButton>
                         )}
+                        {puedeEditar && (
+                          <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarFactura(f)}>
+                            <Trash2 size={14} strokeWidth={1.5} />
+                          </IconButton>
+                        )}
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -1345,6 +1389,11 @@ export default function TesoreriaFacturasPage() {
                     {puedeEditar && (
                       <IconButton size="small" aria-label="Editar" onClick={() => abrirEdicion(f)}>
                         <Pencil size={14} strokeWidth={1.5} />
+                      </IconButton>
+                    )}
+                    {puedeEditar && (
+                      <IconButton size="small" aria-label="Borrar" onClick={() => handleBorrarFactura(f)}>
+                        <Trash2 size={14} strokeWidth={1.5} />
                       </IconButton>
                     )}
                   </Stack>
@@ -1829,8 +1878,22 @@ export default function TesoreriaFacturasPage() {
                         )}
                         {!editing && (
                           <>
-                            {archivoPdfNueva && (
-                              <Chip size="small" color="success" label="Subido" />
+                            {archivoLocalPdf && (
+                              <>
+                                <Chip size="small" color="success" label="Cargado" />
+                                <IconButton
+                                  size="small"
+                                  title="Vista previa"
+                                  onClick={() =>
+                                    setPreviewDoc({
+                                      url: URL.createObjectURL(archivoLocalPdf),
+                                      titulo: archivoLocalPdf.name,
+                                    })
+                                  }
+                                >
+                                  <Eye size={16} strokeWidth={1.5} />
+                                </IconButton>
+                              </>
                             )}
                             <input
                               id="input-subir-pdf-nueva"
@@ -1850,7 +1913,7 @@ export default function TesoreriaFacturasPage() {
                               disabled={subiendoPdfNueva}
                               startIcon={subiendoPdfNueva ? <CircularProgress size={12} /> : undefined}
                             >
-                              {subiendoPdfNueva ? "Subiendo…" : archivoPdfNueva ? "Reemplazar" : "Subir PDF"}
+                              {subiendoPdfNueva ? "Subiendo…" : archivoLocalPdf ? "Reemplazar" : "Subir PDF"}
                             </Button>
                           </>
                         )}
@@ -1937,8 +2000,8 @@ export default function TesoreriaFacturasPage() {
                         )}
                         {!editing && (
                           <>
-                            {archivoXmlNueva && (
-                              <Chip size="small" color="success" label="Subido" />
+                            {archivoLocalXml && (
+                              <Chip size="small" color="success" label="Cargado" />
                             )}
                             <input
                               id="input-subir-xml-nueva"
@@ -1958,7 +2021,7 @@ export default function TesoreriaFacturasPage() {
                               disabled={subiendoXmlNueva}
                               startIcon={subiendoXmlNueva ? <CircularProgress size={12} /> : undefined}
                             >
-                              {subiendoXmlNueva ? "Subiendo…" : archivoXmlNueva ? "Reemplazar" : "Subir XML"}
+                              {subiendoXmlNueva ? "Subiendo…" : archivoLocalXml ? "Reemplazar" : "Subir XML"}
                             </Button>
                           </>
                         )}
@@ -2333,6 +2396,7 @@ export default function TesoreriaFacturasPage() {
                 camposConfirmables: TESORERIA_CAMPOS_CONFIRMABLES_NUEVA,
                 onConfirmar: handleAutorellenarNuevaFactura,
                 archivoConocido: archivoNuevaFactura,
+                archivoDirecto: archivoLocalPdf ?? undefined,
               }
         }
       />
@@ -2345,6 +2409,36 @@ export default function TesoreriaFacturasPage() {
         probablementeImagen={previewDoc?.probablementeImagen}
       />
       <PanelReferenciaCruzada referencia={panelReferencia} onClose={() => setPanelReferencia(null)} />
+
+      <Dialog
+        open={!!borrandoFactura}
+        onClose={() => (borrandoLoading ? undefined : setBorrandoFactura(null))}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Borrar factura</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>¿Borrar esta factura? Esta acción no se puede deshacer.</Typography>
+          {borrandoFactura && (
+            <Box sx={{ mt: 1, p: 1.5, bgcolor: "action.hover", borderRadius: 1 }}>
+              <Typography variant="body2"><strong>Emisor:</strong> {borrandoFactura.emisor_nombre || borrandoFactura.emisor_rfc || "—"}</Typography>
+              <Typography variant="body2"><strong>Folio:</strong> {[borrandoFactura.comprobante_serie, borrandoFactura.comprobante_folio].filter(Boolean).join("") || "—"}</Typography>
+              <Typography variant="body2"><strong>Fecha:</strong> {borrandoFactura.comprobante_fecha || "—"}</Typography>
+              <Typography variant="body2"><strong>Total:</strong> {borrandoFactura.comprobante_total ? `$${borrandoFactura.comprobante_total}` : "—"}</Typography>
+              <Typography variant="body2"><strong>UUID:</strong> {borrandoFactura.timbre_uuid || "—"}</Typography>
+            </Box>
+          )}
+          {borrandoError && (
+            <Alert severity="error" sx={{ mt: 2 }}>{borrandoError}</Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBorrandoFactura(null)} disabled={borrandoLoading}>Cancelar</Button>
+          <Button onClick={confirmarBorrarFactura} color="error" variant="contained" disabled={borrandoLoading}>
+            {borrandoLoading ? "Borrando…" : "Borrar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AppShell>
   );
 }
