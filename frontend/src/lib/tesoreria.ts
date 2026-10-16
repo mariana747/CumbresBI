@@ -1675,7 +1675,7 @@ export async function createFlujo(params: {
       contrato: params.contrato,
       cuenta: params.cuenta,
       periodo_nomina: params.periodoNomina || null,
-      total_mxp: params.totalMxp || null,
+      ...(params.totalMxp ? { total_mxp: params.totalMxp } : {}),
       fecha_efectiva: params.fechaEfectiva || null,
       fecha_pago: params.fechaPago || null,
       concepto: params.concepto || null,
