@@ -11,7 +11,7 @@ export default function PrivacidadPage() {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       <PublicNavbar />
-      <Container maxWidth="md" sx={{ flex: 1, py: 6 }}>
+      <Container maxWidth={false} sx={{ flex: 1, py: 6, maxWidth: 1140 }}>
         <Paper sx={{ p: 4 }}>
           <Stack spacing={3}>
             <Box>
@@ -19,7 +19,7 @@ export default function PrivacidadPage() {
                 Política de Privacidad y Aviso de Privacidad Integral — CumbresBI
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Última actualización: 25 de septiembre de 2026
+                Última actualización: 16 de octubre de 2026
               </Typography>
             </Box>
 
@@ -138,7 +138,7 @@ export default function PrivacidadPage() {
                 personales ni la información de Google de sus usuarios con terceros ajenos a la
                 organización.
               </Typography>
-              <Typography variant="body1">
+              <Typography variant="body1" paragraph>
                 4.2. <strong>Uso de Datos de Google API:</strong> El acceso, uso, almacenamiento y
                 transferencia de cualquier información recibida a través de las APIs de Google se
                 adhiere estrictamente a la{" "}
@@ -146,6 +146,21 @@ export default function PrivacidadPage() {
                 Services User Data Policy), incluyendo los requisitos de uso limitado (
                 <em>Limited Use</em>). Dicha información no se utiliza para entrenamiento de modelos
                 de inteligencia artificial ni para fines publicitarios.
+              </Typography>
+              <Typography variant="body1">
+                4.3. <strong>Retención y Eliminación de Datos de Google:</strong> El{" "}
+                <em>refresh_token</em> de Google obtenido durante la autorización OAuth se almacena
+                de forma cifrada en los servidores de CumbresBI únicamente mientras el usuario
+                mantenga una cuenta activa en la plataforma. El usuario puede revocar el acceso en
+                cualquier momento directamente desde su cuenta de Google (
+                <Link href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">
+                  myaccount.google.com &gt; Seguridad &gt; Acceso de terceros
+                </Link>
+                ), lo cual invalida el token automáticamente. Adicionalmente, al solicitar la
+                eliminación de su cuenta en CumbresBI (vía{" "}
+                <Link href="mailto:desarrollo@cypcumbres.com">desarrollo@cypcumbres.com</Link>),
+                todos los tokens de Google asociados serán eliminados de forma permanente en un
+                plazo máximo de 30 días hábiles.
               </Typography>
             </Box>
 

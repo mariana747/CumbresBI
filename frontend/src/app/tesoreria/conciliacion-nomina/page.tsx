@@ -224,7 +224,7 @@ export default function ConciliacionNominaPage() {
                   <TableCell>Nómina</TableCell>
                   <TableCell>Empleado</TableCell>
                   <TableCell>Concepto</TableCell>
-                  <TableCell>Fecha efectiva</TableCell>
+                  <TableCell>Fecha pago</TableCell>
                   <TableCell align="right">Total del pago</TableCell>
                   {tab === "con_recibo" && (
                     <>
@@ -259,7 +259,7 @@ export default function ConciliacionNominaPage() {
                         <TableCell>{f.periodo_nomina_serie || "—"}</TableCell>
                         <TableCell>{f.id_empleado || "—"}</TableCell>
                         <TableCell>{f.concepto || "—"}</TableCell>
-                        <TableCell>{f.fecha_efectiva || "—"}</TableCell>
+                        <TableCell>{f.fecha_pago || "—"}</TableCell>
                         <TableCell align="right">{numero(f.total_mxp)}</TableCell>
                         {tab === "con_recibo" && (
                           <>
@@ -312,7 +312,7 @@ export default function ConciliacionNominaPage() {
                   </Stack>
                   <Stack spacing={0.5} sx={{ mt: 1 }}>
                     <Typography variant="body2"><strong>Empleado:</strong> {f.id_empleado || "—"}</Typography>
-                    <Typography variant="body2"><strong>Fecha:</strong> {f.fecha_efectiva || "—"}</Typography>
+                    <Typography variant="body2"><strong>Fecha pago:</strong> {f.fecha_pago || "—"}</Typography>
                     <Typography variant="body2"><strong>Total:</strong> {numero(f.total_mxp)}</Typography>
                     {tab === "con_recibo" && (
                       <>
@@ -360,7 +360,7 @@ export default function ConciliacionNominaPage() {
                   <strong>Concepto:</strong> {detalle.concepto || "—"}
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Fecha efectiva:</strong> {detalle.fecha_efectiva || "—"}
+                  <strong>Fecha pago:</strong> {detalle.fecha_pago || "—"}
                 </Typography>
                 <Typography variant="body2">
                   <strong>Total del pago:</strong> {numero(detalle.total_mxp)}

@@ -32,7 +32,7 @@ def sugerir_cfdi_por_ia(
     concepto: str | None,
     contraparte_nombre: str | None,
     monto,
-    fecha_efectiva,
+    fecha_pago,
     candidatos_factura: list[dict],
     candidatos_complemento: list[dict],
 ) -> dict | None:
@@ -56,7 +56,7 @@ def sugerir_cfdi_por_ia(
             f"Concepto: {concepto or '(sin concepto)'}\n"
             f"Contraparte: {contraparte_nombre or '(desconocida)'}\n"
             f"Monto: {monto}\n"
-            f"Fecha efectiva: {fecha_efectiva or '(sin fecha)'}"
+            f"Fecha de pago: {fecha_pago or '(sin fecha)'}"
         )
         contenido = (
             _PROMPT

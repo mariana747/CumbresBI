@@ -55,6 +55,7 @@ import AppShell from "@/components/AppShell";
 import DocumentoPreviewDialog from "@/components/DocumentoPreviewDialog";
 import PanelReferenciaCruzada, { ReferenciaCruzada } from "@/components/PanelReferenciaCruzada";
 import FiltrosBar from "@/components/FiltrosBar";
+import ContraparteSelector from "@/components/ContraparteSelector";
 import MotorDocumentalDialog from "@/components/MotorDocumentalDialog";
 import { SessionUser, getSession } from "@/lib/auth";
 import { useExportarSheets } from "@/lib/useExportarSheets";
@@ -85,15 +86,14 @@ import {
   marcarEstadoFactura,
   updateFactura,
   listContrapartes,
-  listTicketsProveedor,
   vincularFlujoAFactura,
   TesoreriaContraparte,
-  TesoreriaTicketProveedor,
   exportarFacturasSheets,
   descargarFacturasCsv,
   sincronizarDriveFactura,
   subirPdfFactura,
   subirXmlFactura,
+  subirFacturaPrevio,
   urlVerFacturaPdf,
   urlVerFacturaXml,
 } from "@/lib/tesoreria";
@@ -167,7 +167,7 @@ const ESTADO_DESCRIPCION: Record<TesoreriaFacturaEstado, string> = {
 };
 
 // Pestañas del formulario de factura
-const TABS_FACTURA = ["Comprobante", "Montos", "Emisor y Receptor", "Timbrado", "Documentos", "Proceso"] as const;
+const TABS_FACTURA = ["Documentos", "Comprobante", "Montos", "Emisor y Receptor", "Timbrado", "Proceso"] as const;
 type TabFactura = (typeof TABS_FACTURA)[number];
 
 // snake_case -> camelCase
@@ -542,18 +542,9 @@ export default function TesoreriaFacturasPage() {
     }
   }
   const [form, setForm] = useState(FORM_VACIO);
-  // Proveedor a revisar en "Nueva Factura" > Motor Documental
   const [proveedores, setProveedores] = useState<TesoreriaContraparte[]>([]);
-  const [proveedorBandeja, setProveedorBandeja] = useState("");
-  // Ticket exacto que disparo "Revisar"
-  const [idTicketBandeja, setIdTicketBandeja] = useState("");
- 
-
-
-  // Tickets de proveedor
-  const [ticketsProveedor, setTicketsProveedor] = useState<TesoreriaTicketProveedor[]>([]);
-  // Tickets ya capturados, ocultos localmente
-  const [ticketsOcultos, setTicketsOcultos] = useState<Set<string>>(new Set());
+  // Contraparte seleccionada/auto-ligada en el alta nueva
+  const [contraparteBandeja, setContraparteBandeja] = useState<TesoreriaContraparte | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [motorAbierto, setMotorAbierto] = useState(false);
@@ -720,13 +711,6 @@ export default function TesoreriaFacturasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filtroReceptor, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroEstado, filtroCategoriaGasto, filtroVinculada]);
 
-  function refrescarTicketsProveedor() {
-    listTicketsProveedor()
-      .then(setTicketsProveedor)
-      .catch(() => undefined);
-  }
-  useEffect(refrescarTicketsProveedor, []);
-
   const puedeCrear = session?.perm_keys.includes("facturacion-cfdi.crear") ?? false;
   const puedeEditar = session?.perm_keys.includes("facturacion-cfdi.editar") ?? false;
   // Permiso de aprobacion
@@ -739,34 +723,15 @@ export default function TesoreriaFacturasPage() {
     setEditing(null);
     setForm(FORM_VACIO);
     setFormError(null);
-    setProveedorBandeja("");
-    setIdTicketBandeja("");
+    setContraparteBandeja(null);
+    setArchivoPdfNueva(undefined);
+    setArchivoXmlNueva(undefined);
     setArchivoNuevaFactura(undefined);
     setMotorEjecutadoNuevaFactura(false);
-    setTabFactura("Comprobante");
+    setErrorSubidaPrevio(null);
+    setTabFactura("Documentos");
     setDialogOpen(true);
   }
-
-  // Clasificacion de un ticket de proveedor - ya no se muestra en esta
-  // pantalla (10/Sep/2026, "no quiero que se muestre el estado de estas en
-  // facturas, para eso esta Admin"), solo se usa para filtrar el selector
-  // de "Nueva Factura" a los tickets recibidos y sin capturar todavia.
-  function estadoTicketFactura(t: TesoreriaTicketProveedor) {
-    const recibida = t.uses_count >= t.max_uses;
-    // Ya se creo la factura desde este ticket - no importa si el link
-    // despues se reboco o vencio, su ciclo de vida ya termino.
-    const capturada = facturas.some((f) => f.ticket_origen === t.id_ticket);
-    return { recibida, capturada };
-  }
-
-  // Tickets ya recibidos (el proveedor subio su archivo) pero sin factura
-  // capturada todavia (10/Sep/2026, "no quiero que se muestre el estado de
-  // estas en Facturas, para eso esta Admin") - ya no hay tabla/pestana de
-  // tickets en esta pantalla, solo un selector chico dentro de "Nueva
-  // Factura" para elegir de cual ticket viene (ver abrirRevisionTicket).
-  const ticketsParaCapturar = ticketsProveedor.filter(
-    (t) => !ticketsOcultos.has(t.id_ticket) && estadoTicketFactura(t).recibida && !estadoTicketFactura(t).capturada
-  );
 
   // Extraido de abrirEdicion
   function formDesdeFactura(f: TesoreriaFactura): typeof FORM_VACIO {
@@ -892,10 +857,38 @@ export default function TesoreriaFacturasPage() {
     }
   }
 
-  // Archivo real analizado antes de que la factura exista
+  // Archivos subidos antes de que la factura exista (separados por tipo)
+  const [archivoPdfNueva, setArchivoPdfNueva] = useState<DriveArchivo | undefined>(undefined);
+  const [archivoXmlNueva, setArchivoXmlNueva] = useState<DriveArchivo | undefined>(undefined);
+  // El Motor Documental recibe el último archivo subido
   const [archivoNuevaFactura, setArchivoNuevaFactura] = useState<DriveArchivo | undefined>(undefined);
   // Bloquea los campos del CFDI hasta que el Motor Documental ya corrio
   const [motorEjecutadoNuevaFactura, setMotorEjecutadoNuevaFactura] = useState(false);
+  const [subiendoPdfNueva, setSubiendoPdfNueva] = useState(false);
+  const [subiendoXmlNueva, setSubiendoXmlNueva] = useState(false);
+  const [errorSubidaPrevio, setErrorSubidaPrevio] = useState<string | null>(null);
+
+  async function handleSubirPrevio(archivo: File, tipo: "pdf" | "xml") {
+    const esPdf = tipo === "pdf";
+    if (esPdf) setSubiendoPdfNueva(true); else setSubiendoXmlNueva(true);
+    setErrorSubidaPrevio(null);
+    try {
+      const drive = await subirFacturaPrevio(archivo);
+      setArchivoNuevaFactura(drive);
+      if (esPdf) {
+        setArchivoPdfNueva(drive);
+        setForm((prev) => ({ ...prev, linkPdf: drive.web_view_link ?? prev.linkPdf }));
+      } else {
+        setArchivoXmlNueva(drive);
+        setForm((prev) => ({ ...prev, linkXml: drive.web_view_link ?? prev.linkXml }));
+      }
+      setMotorAbierto(true);
+    } catch (err) {
+      setErrorSubidaPrevio(err instanceof Error ? err.message : "Error al subir");
+    } finally {
+      if (esPdf) setSubiendoPdfNueva(false); else setSubiendoXmlNueva(false);
+    }
+  }
   const [tabFactura, setTabFactura] = useState<TabFactura>("Comprobante");
 
   // Prellena `form` cuando el analista sube el escaneo antes de crear la factura
@@ -912,6 +905,15 @@ export default function TesoreriaFacturasPage() {
       }
       return siguiente;
     });
+    // Auto-ligar contraparte por RFC del emisor extraido por la IA
+    const rfcEmisor = typeof campos["emisor_rfc"] === "string" ? campos["emisor_rfc"] : null;
+    if (rfcEmisor) {
+      listContrapartes(rfcEmisor, "proveedor", undefined, undefined, 1)
+        .then((res) => {
+          if (res.results.length > 0) setContraparteBandeja(res.results[0]);
+        })
+        .catch(() => undefined);
+    }
   }
 
   async function handleGuardar() {
@@ -925,13 +927,12 @@ export default function TesoreriaFacturasPage() {
       if (editing) {
         await updateFactura(editing.id, form);
       } else {
-        await createFactura(form, archivoNuevaFactura, idTicketBandeja || undefined);
+        await createFactura(
+          { ...form, idContraparte: contraparteBandeja?.id_contraparte },
+          archivoNuevaFactura
+        );
         setArchivoNuevaFactura(undefined);
-        if (idTicketBandeja) {
-          setTicketsOcultos((prev) => new Set(prev).add(idTicketBandeja));
-        }
-        setProveedorBandeja("");
-        setIdTicketBandeja("");
+        setContraparteBandeja(null);
       }
       setDialogOpen(false);
       refresh();
@@ -1411,59 +1412,20 @@ export default function TesoreriaFacturasPage() {
           {/* 07/Sep/2026, "hay que darle mas espaciado" - spacing 2 -> 3
               entre grupos de campos, mas padding vertical del dialogo. */}
           <Stack spacing={3}>
-            {(editing ? puedeEditar && !modoSoloLectura : puedeCrear) && (
-              <>
-                <Stack direction="row" spacing={2} alignItems="center">
-                  {/* Selector de ticket (10/Sep/2026, "va seguir mediante
-                      tickets para tesoreria para facturas pero no quiero que
-                      se muestre el estado de estas en facturas") - antes se
-                      elegia con "Revisar" en la tabla de tickets (ya
-                      removida de esta pantalla, ver Admin > Invitaciones
-                      para el ciclo de vida del ticket); ahora se elige aqui
-                      mismo, solo entre los ya recibidos y sin factura. */}
-                  {!editing && (
-                    <FormControl size="small" sx={{ minWidth: 280 }}>
-                      <InputLabel id="ticket-origen-label">Proveedor (factura subida por ticket)</InputLabel>
-                      <Select
-                        labelId="ticket-origen-label"
-                        label="Proveedor (factura subida por ticket)"
-                        value={idTicketBandeja}
-                        onChange={(e) => {
-                          const idTicket = e.target.value;
-                          const ticket = ticketsParaCapturar.find((t) => t.id_ticket === idTicket);
-                          setIdTicketBandeja(idTicket);
-                          setProveedorBandeja(ticket?.contraparte || "");
-                        }}
-                      >
-                        <MenuItem value="">
-                          <em>Ninguno (bandeja general)</em>
-                        </MenuItem>
-                        {ticketsParaCapturar.map((t) => (
-                          <MenuItem key={t.id_ticket} value={t.id_ticket}>
-                            {t.contraparte_nombre} — {new Date(t.issued_at).toLocaleDateString("es-MX")}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  )}
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<FileSearch size={16} strokeWidth={1.5} />}
-                    onClick={() => setMotorAbierto(true)}
-                  >
-                    Motor Documental
-                  </Button>
-                </Stack>
-              </>
+            {editing && puedeEditar && !modoSoloLectura && (
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<FileSearch size={16} strokeWidth={1.5} />}
+                  onClick={() => setMotorAbierto(true)}
+                >
+                  Motor Documental
+                </Button>
+              </Stack>
             )}
 
-            {!editing && !motorEjecutadoNuevaFactura && puedeCrear && (
-              <Alert severity="info" sx={{ mb: 1 }}>
-                Usa el Motor Documental para llenar la factura — la edición manual se habilita después,
-                solo para revisar/corregir lo que la IA extrajo.
-              </Alert>
-            )}
+
             <Tabs
               value={tabFactura}
               onChange={(_, v) => setTabFactura(v)}
@@ -1804,6 +1766,23 @@ export default function TesoreriaFacturasPage() {
                 (unico control editable aqui) se deshabilita a mano. */}
             {tabFactura === "Documentos" && (
               <Stack spacing={1.5}>
+                {!editing && (
+                  <>
+                    <Box sx={{ minWidth: 280 }}>
+                      <ContraparteSelector
+                        value={contraparteBandeja}
+                        onChange={setContraparteBandeja}
+                        label="Proveedor"
+                        tipo="proveedor"
+                      />
+                    </Box>
+                    {errorSubidaPrevio && (
+                      <Alert severity="error" onClose={() => setErrorSubidaPrevio(null)}>
+                        {errorSubidaPrevio}
+                      </Alert>
+                    )}
+                  </>
+                )}
                 <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
                   <Typography variant="caption" color="text.secondary">
                     Los documentos se traen directo de Drive - no se aceptan links pegados a mano.
@@ -1848,6 +1827,33 @@ export default function TesoreriaFacturasPage() {
                             <Eye size={16} strokeWidth={1.5} />
                           </IconButton>
                         )}
+                        {!editing && (
+                          <>
+                            {archivoPdfNueva && (
+                              <Chip size="small" color="success" label="Subido" />
+                            )}
+                            <input
+                              id="input-subir-pdf-nueva"
+                              type="file"
+                              accept=".pdf,application/pdf"
+                              style={{ display: "none" }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleSubirPrevio(f, "pdf");
+                                e.target.value = "";
+                              }}
+                            />
+                            <Button
+                              size="small"
+                              component="label"
+                              htmlFor="input-subir-pdf-nueva"
+                              disabled={subiendoPdfNueva}
+                              startIcon={subiendoPdfNueva ? <CircularProgress size={12} /> : undefined}
+                            >
+                              {subiendoPdfNueva ? "Subiendo…" : archivoPdfNueva ? "Reemplazar" : "Subir PDF"}
+                            </Button>
+                          </>
+                        )}
                         {editing && !modoSoloLectura && (
                           <>
                             <input
@@ -1872,11 +1878,13 @@ export default function TesoreriaFacturasPage() {
                             </Button>
                           </>
                         )}
-                        <Chip
-                          size="small"
-                          color={editing?.drive_file_id_pdf ? "success" : "default"}
-                          label={editing?.drive_file_id_pdf ? "En Drive" : "Sin archivo"}
-                        />
+                        {editing && (
+                          <Chip
+                            size="small"
+                            color={editing.drive_file_id_pdf ? "success" : "default"}
+                            label={editing.drive_file_id_pdf ? "En Drive" : "Sin archivo"}
+                          />
+                        )}
                       </Stack>
                     </Stack>
                     {errorSubidaPdf && (
@@ -1884,7 +1892,7 @@ export default function TesoreriaFacturasPage() {
                         {errorSubidaPdf}
                       </Alert>
                     )}
-                    {!modoSoloLectura && (
+                    {editing && !modoSoloLectura && (
                       <TextField
                         label="Link PDF (alternativo)"
                         size="small"
@@ -1892,7 +1900,7 @@ export default function TesoreriaFacturasPage() {
                         value={form.linkPdf}
                         onChange={(e) => setForm({ ...form, linkPdf: e.target.value })}
                         placeholder="https://drive.google.com/..."
-                        helperText={editing?.drive_file_id_pdf ? "Ya hay un archivo en Drive; el link solo se usa si no hay archivo subido." : undefined}
+                        helperText={editing.drive_file_id_pdf ? "Ya hay un archivo en Drive; el link solo se usa si no hay archivo subido." : undefined}
                       />
                     )}
                     {modoSoloLectura && editing?.link_pdf && !editing?.drive_file_id_pdf && (
@@ -1927,6 +1935,33 @@ export default function TesoreriaFacturasPage() {
                             <Eye size={16} strokeWidth={1.5} />
                           </IconButton>
                         )}
+                        {!editing && (
+                          <>
+                            {archivoXmlNueva && (
+                              <Chip size="small" color="success" label="Subido" />
+                            )}
+                            <input
+                              id="input-subir-xml-nueva"
+                              type="file"
+                              accept=".xml,text/xml,application/xml"
+                              style={{ display: "none" }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleSubirPrevio(f, "xml");
+                                e.target.value = "";
+                              }}
+                            />
+                            <Button
+                              size="small"
+                              component="label"
+                              htmlFor="input-subir-xml-nueva"
+                              disabled={subiendoXmlNueva}
+                              startIcon={subiendoXmlNueva ? <CircularProgress size={12} /> : undefined}
+                            >
+                              {subiendoXmlNueva ? "Subiendo…" : archivoXmlNueva ? "Reemplazar" : "Subir XML"}
+                            </Button>
+                          </>
+                        )}
                         {editing && !modoSoloLectura && (
                           <>
                             <input
@@ -1951,11 +1986,13 @@ export default function TesoreriaFacturasPage() {
                             </Button>
                           </>
                         )}
-                        <Chip
-                          size="small"
-                          color={editing?.drive_file_id_xml ? "success" : "default"}
-                          label={editing?.drive_file_id_xml ? "En Drive" : "Sin archivo"}
-                        />
+                        {editing && (
+                          <Chip
+                            size="small"
+                            color={editing.drive_file_id_xml ? "success" : "default"}
+                            label={editing.drive_file_id_xml ? "En Drive" : "Sin archivo"}
+                          />
+                        )}
                       </Stack>
                     </Stack>
                     {errorSubidaXml && (
@@ -1963,7 +2000,7 @@ export default function TesoreriaFacturasPage() {
                         {errorSubidaXml}
                       </Alert>
                     )}
-                    {!modoSoloLectura && (
+                    {editing && !modoSoloLectura && (
                       <TextField
                         label="Link XML (alternativo)"
                         size="small"
@@ -1971,7 +2008,7 @@ export default function TesoreriaFacturasPage() {
                         value={form.linkXml}
                         onChange={(e) => setForm({ ...form, linkXml: e.target.value })}
                         placeholder="https://drive.google.com/..."
-                        helperText={editing?.drive_file_id_xml ? "Ya hay un archivo en Drive; el link solo se usa si no hay archivo subido." : undefined}
+                        helperText={editing.drive_file_id_xml ? "Ya hay un archivo en Drive; el link solo se usa si no hay archivo subido." : undefined}
                       />
                     )}
                     {modoSoloLectura && editing?.link_xml && !editing?.drive_file_id_xml && (
@@ -1981,6 +2018,17 @@ export default function TesoreriaFacturasPage() {
                     )}
                   </Stack>
                 </Paper>
+                {!editing && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<FileSearch size={16} strokeWidth={1.5} />}
+                    onClick={() => setMotorAbierto(true)}
+                    sx={{ alignSelf: "flex-start" }}
+                  >
+                    Motor Documental
+                  </Button>
+                )}
               </Stack>
             )}
             {tabFactura === "Proceso" && editing && (
@@ -2271,34 +2319,20 @@ export default function TesoreriaFacturasPage() {
                 onConfirmar: handleConfirmarExtraccionFactura,
               }
             : {
-                // Caso de uso real (24/Ago/2026, renombrada y subdividida
-                // por proveedor 27/Ago/2026): la factura todavia no existe -
-                // el analista sube el escaneo directo a esta carpeta antes
-                // de darla de alta; el mismo lugar donde el ticket público
-                // de proveedores (TesoreriaTicketProveedorViewSet.
-                // subir_factura) deja el PDF real que sube el proveedor,
-                // ya subdividido por proveedorBandeja (id_contraparte) y,
-                // dentro de esa, por id_ticket (08/Sep/2026 - cada
-                // solicitud/ticket es su propia subcarpeta, para que una
-                // contraparte con varias unidades de negocio -ej. IZEL
-                // Acuario vs IZEL Restaurante- nunca mezcle los archivos de
-                // una solicitud con los de otra) - sin elegir proveedor, cae
-                // a la bandeja general (raiz de FacturasProveedores, solo
-                // staging manual del analista).
+                // Arturo sube el XML/PDF directo; sin proveedor elegido
+                // cae a la bandeja general (raiz de FacturasProveedores).
                 // No hay id de factura que mandar a confirmar_extraccion,
-                // por eso onConfirmar solo prellena `form` en vez de llamar
-                // al backend.
+                // por eso onConfirmar solo prellena `form`.
                 etiqueta: "una factura nueva",
                 servicioSolicitante: "tesoreria-service",
-                carpeta: proveedorBandeja
-                  ? `Tesoreria/Facturas/FacturasProveedores/${proveedorBandeja}${
-                      idTicketBandeja ? `/${idTicketBandeja}` : ""
-                    }`
+                carpeta: contraparteBandeja
+                  ? `Tesoreria/Facturas/FacturasProveedores/${contraparteBandeja.id_contraparte}`
                   : "Tesoreria/Facturas/FacturasProveedores",
                 permKey: "facturacion-cfdi.crear",
                 expectedDocumentType: "tesoreria.cfdi_factura",
                 camposConfirmables: TESORERIA_CAMPOS_CONFIRMABLES_NUEVA,
                 onConfirmar: handleAutorellenarNuevaFactura,
+                archivoConocido: archivoNuevaFactura,
               }
         }
       />

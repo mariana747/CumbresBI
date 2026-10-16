@@ -622,7 +622,7 @@ export default function ConciliacionFacturasPage() {
                   <TableCell>Contrato</TableCell>
                   <TableCell>Proveedor</TableCell>
                   <TableCell>Concepto</TableCell>
-                  <TableCell>Fecha efectiva</TableCell>
+                  <TableCell>Fecha pago</TableCell>
                   <TableCell align="right">Total del pago</TableCell>
                   {tab === "ligado" && (
                     <>
@@ -657,7 +657,7 @@ export default function ConciliacionFacturasPage() {
                         <TableCell>{f.contrato || "—"}</TableCell>
                         <TableCell>{f.contraparte_nombre || "—"}</TableCell>
                         <TableCell>{f.concepto || "—"}</TableCell>
-                        <TableCell>{f.fecha_efectiva || "—"}</TableCell>
+                        <TableCell>{f.fecha_pago || "—"}</TableCell>
                         <TableCell align="right">{numero(f.total_mxp)}</TableCell>
                         {tab === "ligado" && (
                           <>
@@ -730,7 +730,7 @@ export default function ConciliacionFacturasPage() {
                       </IconButton>
                     </Stack>
                     <Stack spacing={0.5} sx={{ mt: 1 }}>
-                      <Typography variant="body2"><strong>Fecha:</strong> {f.fecha_efectiva || "—"}</Typography>
+                      <Typography variant="body2"><strong>Fecha pago:</strong> {f.fecha_pago || "—"}</Typography>
                       <Typography variant="body2"><strong>Concepto:</strong> {f.concepto || "—"}</Typography>
                       <Typography variant="body2"><strong>Total:</strong> {numero(f.total_mxp)}</Typography>
                       {tab === "ligado" && (
@@ -813,8 +813,8 @@ export default function ConciliacionFacturasPage() {
                         <TableCell colSpan={3}>{detalle.concepto || "—"}</TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Fecha efectiva:</TableCell>
-                        <TableCell>{detalle.fecha_efectiva || "—"}</TableCell>
+                        <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Fecha pago:</TableCell>
+                        <TableCell>{detalle.fecha_pago || "—"}</TableCell>
                         {detalle.factura || detalle.complemento ? (
                           <>
                             <TableCell sx={{ bgcolor: "action.hover", fontWeight: "bold" }}>Reconocido:</TableCell>

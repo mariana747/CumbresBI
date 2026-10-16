@@ -481,7 +481,6 @@ class TesoreriaFlujoSerializer(serializers.ModelSerializer):
             "autorizado_por",
             "fecha_autorizacion",
             "pagado",
-            "fecha_pago",
             "factura",
             "complemento",
             "nomina",
