@@ -1808,7 +1808,7 @@ export async function rechazarFlujo(idFlujo: string): Promise<TesoreriaFlujo> {
 
 export async function registrarPagoFlujo(
   idFlujo: string,
-  params?: { descripcionPago?: string; linkComprobanteBanco?: string }
+  params?: { descripcionPago?: string; linkComprobanteBanco?: string; fechaPago?: string }
 ): Promise<TesoreriaFlujo> {
   // Bug real encontrado en prueba end-to-end (01/Sep/2026): antes se mandaban
   // ambas claves siempre, aunque fuera con valor null. El backend hace
@@ -1820,6 +1820,7 @@ export async function registrarPagoFlujo(
   const body: Record<string, string> = {};
   if (params?.descripcionPago) body.descripcion_pago = params.descripcionPago;
   if (params?.linkComprobanteBanco) body.link_comprobante_banco = params.linkComprobanteBanco;
+  if (params?.fechaPago) body.fecha_pago = params.fechaPago;
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/${idFlujo}/registrar_pago/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

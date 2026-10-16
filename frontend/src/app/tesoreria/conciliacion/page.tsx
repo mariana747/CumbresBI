@@ -406,7 +406,7 @@ export default function TesoreriaConciliacionPage() {
       }
       if (tieneComprobante) {
         await aprobarFlujo(flujo.id_flujo);
-        await registrarPagoFlujo(flujo.id_flujo);
+        await registrarPagoFlujo(flujo.id_flujo, { fechaPago: sugerenciasDialog.movimiento.fecha });
       }
       setSugerenciasDialog(null);
       refreshMovimientos();
