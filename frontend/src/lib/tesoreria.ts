@@ -1666,6 +1666,7 @@ export async function createFlujo(params: {
   comentarios?: string;
   linkComprobanteBanco?: string;
   categoriaGasto?: TesoreriaCategoriaGasto;
+  fechaPago?: string;
 }): Promise<TesoreriaFlujo> {
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/flujos/`, {
     method: "POST",
@@ -1676,6 +1677,7 @@ export async function createFlujo(params: {
       periodo_nomina: params.periodoNomina || null,
       total_mxp: params.totalMxp || null,
       fecha_efectiva: params.fechaEfectiva || null,
+      fecha_pago: params.fechaPago || null,
       concepto: params.concepto || null,
       reembolso: params.reembolso ?? false,
       id_empleado: params.idEmpleado || null,

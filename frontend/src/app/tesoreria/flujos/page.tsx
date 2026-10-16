@@ -829,7 +829,7 @@ function TesoreriaFlujosPageContent() {
       cuenta: f.cuenta,
       totalMxp: f.total_mxp || "",
       fechaEfectiva: new Date().toISOString().slice(0, 10),
-      fechaPago: f.fecha_pago || "",
+      fechaPago: new Date().toISOString().slice(0, 10),
       concepto: f.concepto || "",
       reembolso: f.reembolso ?? false,
       idEmpleado: f.id_empleado || "",
@@ -890,6 +890,7 @@ function TesoreriaFlujosPageContent() {
           cuenta: form.cuenta,
           totalMxp: form.totalMxp || undefined,
           fechaEfectiva: form.fechaEfectiva || undefined,
+          fechaPago: form.fechaPago || undefined,
           concepto: form.concepto || undefined,
           reembolso: form.reembolso,
           idEmpleado: form.idEmpleado || undefined,
@@ -909,6 +910,7 @@ function TesoreriaFlujosPageContent() {
         });
       }
       setDialogOpen(false);
+      if (!editing) setPagina(0);
       refresh();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Error desconocido");
