@@ -3590,6 +3590,38 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             link_fallback=factura.link_xml,
         )
 
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def subir_previo(self, request):
+        """Sube un PDF o XML antes de que la factura exista, para que el
+        Motor Documental pueda analizarlo. La factura se crea después de
+        que el analista revisa los datos extraídos. El archivo queda en
+        Tesoreria/Facturas/sin_confirmar/ hasta que confirmar_extraccion
+        lo vincula formalmente a la factura creada."""
+        archivo = request.FILES.get("file")
+        if not archivo:
+            return Response({"detail": "Campo 'file' requerido"}, status=400)
+        headers, cookies = forward_auth_headers(request)
+        carpeta = "Tesoreria/Facturas/sin_confirmar"
+        try:
+            upstream = requests.post(
+                f"{settings.DRIVE_SERVICE_URL}/api/upload/",
+                params={"perm": "facturacion-cfdi.crear"},
+                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                data={"carpeta": carpeta},
+                headers=headers,
+                cookies=cookies,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logger.warning("drive-service no respondio al subir factura previa", exc_info=True)
+            return Response({"detail": "El servicio de Drive no respondió. Intenta de nuevo."}, status=502)
+        if upstream.status_code != 201:
+            return Response(
+                upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
+                status=upstream.status_code,
+            )
+        return Response(upstream.json(), status=201)
+
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir_pdf(self, request, pk=None):
         """Sube el PDF de la factura directo a Drive sin pasar por el

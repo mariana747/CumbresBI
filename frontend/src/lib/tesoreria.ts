@@ -3055,6 +3055,19 @@ export async function createFactura(
   return response.json();
 }
 
+export async function subirFacturaPrevio(archivo: File): Promise<DriveArchivo> {
+  const formData = new FormData();
+  formData.append("file", archivo);
+  const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/subir_previo/`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await friendlyApiError("TESORERIA", response);
+  }
+  return response.json();
+}
+
 export async function subirPdfFactura(id: number, archivo: File): Promise<TesoreriaFactura> {
   const formData = new FormData();
   formData.append("file", archivo);
