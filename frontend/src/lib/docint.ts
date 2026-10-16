@@ -31,10 +31,13 @@ export interface AnalysisStatusResponse {
 // El analista sube el archivo el mismo en drive.google.com; aqui solo se
 // manda la referencia (driveFileId/carpeta) + el perm_key que drive-service
 // va a exigir para dejarlo leer esa carpeta.
+// Alternativa: pasar `file` (File/Blob) en vez de driveFileId/carpeta/permKey
+// para enviar bytes directos a Gemini sin subir a Drive (usado en Facturas).
 export interface AnalyzeDocumentParams {
-  driveFileId: string;
-  carpeta: string;
-  permKey: string;
+  driveFileId?: string;
+  carpeta?: string;
+  permKey?: string;
+  file?: File | Blob;
   nombreArchivo: string;
   mimeType?: string;
   expectedDocumentType: string;
@@ -84,6 +87,7 @@ const KEYWORD_TO_DOCUMENT_TYPE: Record<string, string> = {
 };
 
 function normalizeFilename(filename: string): string {
+  if (!filename) return "";
   const withoutExt = filename.includes(".") ? filename.slice(0, filename.lastIndexOf(".")) : filename;
   return withoutExt
     .normalize("NFKD")
@@ -107,6 +111,7 @@ export async function analyzeDocument({
   driveFileId,
   carpeta,
   permKey,
+  file,
   nombreArchivo,
   mimeType,
   expectedDocumentType,
@@ -114,21 +119,37 @@ export async function analyzeDocument({
   servicioSolicitante,
   metadata,
 }: AnalyzeDocumentParams): Promise<{ analysisId: string; status: AnalysisStatus }> {
-  const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      drive_file_id: driveFileId,
-      carpeta,
-      perm_key: permKey,
-      nombre_archivo: nombreArchivo,
-      mime_type: mimeType,
-      expected_document_type: expectedDocumentType,
-      internal_prompt_key: internalPromptKey,
-      servicio_solicitante: servicioSolicitante,
-      metadata: metadata ? JSON.stringify(metadata) : undefined,
-    }),
-  });
+  let fetchOptions: RequestInit;
+
+  if (file) {
+    const form = new FormData();
+    form.append("file", file, nombreArchivo);
+    form.append("nombre_archivo", nombreArchivo);
+    if (mimeType) form.append("mime_type", mimeType);
+    form.append("expected_document_type", expectedDocumentType);
+    if (internalPromptKey) form.append("internal_prompt_key", internalPromptKey);
+    form.append("servicio_solicitante", servicioSolicitante);
+    if (metadata) form.append("metadata", JSON.stringify(metadata));
+    fetchOptions = { method: "POST", body: form };
+  } else {
+    fetchOptions = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        drive_file_id: driveFileId,
+        carpeta,
+        perm_key: permKey,
+        nombre_archivo: nombreArchivo,
+        mime_type: mimeType,
+        expected_document_type: expectedDocumentType,
+        internal_prompt_key: internalPromptKey,
+        servicio_solicitante: servicioSolicitante,
+        metadata: metadata ? JSON.stringify(metadata) : undefined,
+      }),
+    };
+  }
+
+  const response = await apiFetch("DOCINT", `${DOCINT_API_BASE_URL}/analyze`, fetchOptions);
 
   if (!response.ok) {
     throw await friendlyApiError("DOCINT", response);

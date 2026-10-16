@@ -2948,6 +2948,35 @@ class _ArchivoEnMemoria:
         return self._contenido
 
 
+def _componer_nombre_factura(factura):
+    """Nombre compuesto para el PDF de una factura de proveedor:
+    {sociedad}_{proveedor}_{fecha}_{uuid}_{monto}_mxn.pdf
+    Seguro contra campos nulos — usa 'desconocido' como fallback.
+    """
+    import re
+
+    def _slug(texto):
+        if not texto:
+            return "desconocido"
+        return re.sub(r"[^a-zA-Z0-9]", "_", texto).strip("_")[:40]
+
+    sociedad = _slug(factura.receptor_rfc or "")
+    proveedor = _slug(
+        (factura.contraparte.razon_social if factura.contraparte_id else None)
+        or factura.emisor_nombre
+        or ""
+    )
+    fecha = ""
+    if factura.comprobante_fecha:
+        try:
+            fecha = factura.comprobante_fecha.strftime("%Y%m%d")
+        except Exception:
+            pass
+    uuid = (factura.timbre_uuid or str(factura.pk) or "sin_uuid").replace("-", "")[:12]
+    monto = str(factura.comprobante_total or "0").replace(".", "_")
+    return f"{sociedad}_{proveedor}_{fecha}_{uuid}_{monto}_mxn.pdf"
+
+
 def _subir_a_drive(request, archivo, carpeta):
     """Helper compartido: sube un archivo a drive-service bajo `carpeta`.
     Regresa (resultado_dict, None) si funciono, o (None, Response) con el
@@ -3622,24 +3651,40 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
                 upstream.json() if upstream.content else {"detail": "Error al subir a Drive"},
                 status=upstream.status_code,
             )
-        return Response(upstream.json(), status=201)
+        data = upstream.json()
+        data.setdefault("nombre", archivo.name)
+        return Response(data, status=201)
 
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir_pdf(self, request, pk=None):
-        """Sube el PDF de la factura directo a Drive sin pasar por el
-        Motor Documental. Mismo patron que
-        TesoreriaFlujoViewSet.subir_comprobante."""
+        """Sube el PDF de la factura a Drive.
+
+        Flujo nuevo (factura recien creada desde Motor Documental): sube a
+        Tesoreria/Facturas/FacturasProveedores/{id_contraparte}/ con nombre
+        compuesto {sociedad}_{proveedor}_{fecha}_{uuid}_{monto}_mxn.pdf.
+        Flujo legacy (factura existente sin contraparte o con timbre_uuid ya
+        fijo): carpeta Tesoreria/Facturas/{timbre_uuid}.
+        """
         factura = self.get_object()
         archivo = request.FILES.get("file")
         if not archivo:
             return Response({"detail": "Campo 'file' requerido"}, status=400)
         headers, cookies = forward_auth_headers(request)
-        carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+
+        cp_id = factura.contraparte_id or request.data.get("id_contraparte")
+        if cp_id:
+            nombre_base = _componer_nombre_factura(factura).removesuffix(".pdf")
+            carpeta = f"Tesoreria/Facturas/FacturasProveedores/{cp_id}/{nombre_base}"
+            nombre_archivo = "factura.pdf"
+        else:
+            carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+            nombre_archivo = archivo.name
+
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
                 params={"perm": "tesoreria.editar"},
-                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                files={"file": (nombre_archivo, archivo.read(), archivo.content_type)},
                 data={"carpeta": carpeta},
                 headers=headers,
                 cookies=cookies,
@@ -3663,25 +3708,35 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             "tesoreria_facturas",
             factura.timbre_uuid,
             actor_user_id=request.data.get("actor_user_id"),
-            valores_nuevos={"nombre_archivo": archivo.name},
+            valores_nuevos={"nombre_archivo": nombre_archivo},
         )
         return Response(self.get_serializer(factura).data)
 
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser])
     def subir_xml(self, request, pk=None):
-        """Sube el XML (comprobante fiscal) de la factura directo a
-        Drive sin pasar por el Motor Documental."""
+        """Sube el XML (comprobante fiscal) de la factura directo a Drive.
+        Mismo criterio que subir_pdf: carpeta FacturasProveedores y nombre
+        compuesto cuando la factura tiene contraparte."""
         factura = self.get_object()
         archivo = request.FILES.get("file")
         if not archivo:
             return Response({"detail": "Campo 'file' requerido"}, status=400)
         headers, cookies = forward_auth_headers(request)
-        carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+
+        cp_id = factura.contraparte_id or request.data.get("id_contraparte")
+        if cp_id:
+            nombre_base = _componer_nombre_factura(factura).removesuffix(".pdf")
+            carpeta = f"Tesoreria/Facturas/FacturasProveedores/{cp_id}/{nombre_base}"
+            nombre_archivo = "factura.xml"
+        else:
+            carpeta = f"Tesoreria/Facturas/{factura.timbre_uuid or factura.pk}"
+            nombre_archivo = archivo.name
+
         try:
             upstream = requests.post(
                 f"{settings.DRIVE_SERVICE_URL}/api/upload/",
                 params={"perm": "tesoreria.editar"},
-                files={"file": (archivo.name, archivo.read(), archivo.content_type)},
+                files={"file": (nombre_archivo, archivo.read(), archivo.content_type)},
                 data={"carpeta": carpeta},
                 headers=headers,
                 cookies=cookies,
@@ -3705,7 +3760,7 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
             "tesoreria_facturas",
             factura.timbre_uuid,
             actor_user_id=request.data.get("actor_user_id"),
-            valores_nuevos={"nombre_archivo": archivo.name},
+            valores_nuevos={"nombre_archivo": nombre_archivo},
         )
         return Response(self.get_serializer(factura).data)
 
@@ -3770,6 +3825,17 @@ class TesoreriaFacturaViewSet(_PermisosFacturacionCfdiMixin, ModelViewSet):
     def perform_create(self, serializer):
         instance = serializer.save()
         _vincular_contraparte_por_rfc(instance)
+        # Fallback: si el RFC no matcheo (proveedor nuevo o sin RFC), pero el
+        # frontend mando id_contraparte explícito, usarlo directamente.
+        if not instance.contraparte_id:
+            id_cp = self.request.data.get("id_contraparte")
+            if id_cp:
+                try:
+                    cp = TesoreriaContraparte.objects.get(id_contraparte=id_cp)
+                    instance.contraparte = cp
+                    instance.save(update_fields=["contraparte"])
+                except TesoreriaContraparte.DoesNotExist:
+                    pass
         # Mismo "archivo" opcional que confirmar_extraccion (07/Sep/2026) -
         # cubre el caso real donde la factura NO existia todavia cuando el
         # Motor Documental analizo el PDF (handleAutorellenarNuevaFactura

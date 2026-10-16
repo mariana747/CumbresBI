@@ -4,6 +4,8 @@ el modo sincrono actual (Fase 1) como el endpoint interno
 POST /analyze/<id>/procesar que Cloud Tasks invocara mas adelante (Fase 2+),
 sin duplicar el codigo que llama al provider."""
 
+import logging
+
 from django.conf import settings
 
 from .audit_utils import emitir_evento_auditoria
@@ -11,6 +13,8 @@ from .contracts import DocumentAnalysisRequest, DriveFileRef
 from .models import AnalysisJob, AnalysisRequestLog
 from .providers import get_provider
 from .storage import fetch_staging
+
+logger = logging.getLogger(__name__)
 
 
 def ejecutar_analisis(job: AnalysisJob) -> AnalysisJob:
@@ -111,6 +115,7 @@ def ejecutar_con_reintentos(job: AnalysisJob) -> bool:
         ejecutar_analisis(job)
         return True
     except Exception as exc:  # noqa: BLE001 - fallo de infraestructura al analizar
+        logger.error("Error en analisis job=%s intento=%s: %s", job.id, job.intentos, exc, exc_info=True)
         job.refresh_from_db(fields=["intentos"])
         if job.intentos < job.max_intentos:
             job.status = AnalysisJob.PENDIENTE

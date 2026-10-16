@@ -3071,9 +3071,10 @@ export async function subirFacturaPrevio(archivo: File): Promise<DriveArchivo> {
   return response.json();
 }
 
-export async function subirPdfFactura(id: number, archivo: File): Promise<TesoreriaFactura> {
+export async function subirPdfFactura(id: number, archivo: File, contraparteId?: string): Promise<TesoreriaFactura> {
   const formData = new FormData();
   formData.append("file", archivo);
+  if (contraparteId) formData.append("id_contraparte", contraparteId);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/subir_pdf/`, {
     method: "POST",
     body: formData,
@@ -3084,9 +3085,10 @@ export async function subirPdfFactura(id: number, archivo: File): Promise<Tesore
   return response.json();
 }
 
-export async function subirXmlFactura(id: number, archivo: File): Promise<TesoreriaFactura> {
+export async function subirXmlFactura(id: number, archivo: File, contraparteId?: string): Promise<TesoreriaFactura> {
   const formData = new FormData();
   formData.append("file", archivo);
+  if (contraparteId) formData.append("id_contraparte", contraparteId);
   const response = await apiFetch("TESORERIA", `${TESORERIA_API_BASE_URL}/api/facturas/${id}/subir_xml/`, {
     method: "POST",
     body: formData,
